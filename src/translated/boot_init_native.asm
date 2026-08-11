@@ -2,6 +2,7 @@
 ; Native 68030 replacement for Z80 boot init routine
 ; Z80 address range: 0x0000-0x0004
 ; Replacement contract: docs/analysis/boot_init_analysis.md
+; Purpose: Boot initialization - clear interrupt enable at $7D84 and jump to main init at $0266
 ; ------------------------------------------------------------
 
         section .text
