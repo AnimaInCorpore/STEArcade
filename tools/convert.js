@@ -111,7 +111,9 @@ function disassemble(data, start = 0, maxBytes = 256) {
         advance = 1;
       }
     } else {
-      // unknown opcode
+      // unknown opcode - emit visible diagnostic stub
+      z80Text = `db $${opcode.toString(16).padStart(2,'0')}`;
+      m68kText = `bra.s Z80_ILLEGAL_${pc.toString(16).padStart(4,'0')}`;
       advance = 1;
     }
     
@@ -141,7 +143,12 @@ const asmLines = [
   '',
   '        section .text',
   '',
-  ...disassemble(rom, 0, rom.length)
+  ...disassemble(rom, 0, rom.length),
+  '',
+  '; ---- Diagnostic stubs for unimplemented opcodes ----',
+  'Z80_ILLEGAL:',
+  '        rts',
+  ''
 ];
 
 fs.writeFileSync(outputPath, asmLines.join('\n'));
