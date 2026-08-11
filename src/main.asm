@@ -28,3 +28,13 @@ _start:
         ; include "translated/*.asm"
 
 ; End of file
+        include "translated/routine_06B8_native.asm"
+        include "translated/routine_07DA_native.asm"
+        include "translated/routine_0938_native.asm"
+        include "translated/routine_0C2B_native.asm"
+        include "translated/routine_0C92_native.asm"
+        include "translated/routine_0CC6_native.asm"
+        include "translated/routine_0D5F_native.asm"
+        include "translated/routine_0DA7_native.asm"
+        include "translated/routine_0E19_native.asm"
+        include "translated/routine_0E62_native.asm"
