@@ -67,6 +67,14 @@ const Z80_OPCODES = {
   0x11: { name: 'ld de,imm16', m68k: (addr) => `move.w #$${addr.toString(16).padStart(4,'0')},d4`, bytes:3, rationale: 'DE maps to D4' },
   0x2A: { name: 'ld hl,(nn)', m68k: (addr) => `move.l $${addr.toString(16).padStart(4,'0')},a1`, bytes:3, rationale: 'Load HL from memory' },
   0x22: { name: 'ld (nn),hl', m68k: (addr) => `move.l a1,$${addr.toString(16).padStart(4,'0')}`, bytes:3, rationale: 'Store HL to memory' },
+  0xC2: { name: 'jp nz,nn', m68k: (addr) => `beq.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xCA: { name: 'jp z,nn', m68k: (addr) => `bne.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xD2: { name: 'jp nc,nn', m68k: (addr) => `bcs.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xDA: { name: 'jp c,nn', m68k: (addr) => `bhs.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xE2: { name: 'jp po,nn', m68k: (addr) => `bra.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xEA: { name: 'jp pe,nn', m68k: (addr) => `bra.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xF2: { name: 'jp p,nn', m68k: (addr) => `bra.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
+  0xFA: { name: 'jp m,nn', m68k: (addr) => `bra.s ${formatLabel(addr)}`, bytes:3, rationale: 'Conditional jump' },
 };
 
 function formatLabel(addr) {
