@@ -18,6 +18,7 @@ _start:
         ; Translated code will be included here
         include "translated/boot_init_native.asm"
         include "translated/init_0266_native.asm"
+        include "translated/routine_0450_native.asm"
         ; include "translated/*.asm"
 
 ; End of file
