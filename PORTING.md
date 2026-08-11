@@ -17,7 +17,7 @@ with native 68030 code; it does not need to translate every Z80 instruction one-
   - [x] Make the ROM extraction and build pipeline reproducible
   - [x] Define routine replacement contracts and validation format
 - [ ] 2. Structural AOT Pass
-  - [ ] Reachability-based disassembly with labels and code/data separation
+  - [x] Reachability-based disassembly with labels and code/data separation
   - [ ] Buildable control-flow skeleton for the CPU code
   - [ ] Explicit diagnostics for unknown opcodes and unresolved indirect control flow
   - [ ] Flag liveness annotations and boundary materialization hooks

@@ -141,7 +141,7 @@ const asmLines = [
   '',
   '        section .text',
   '',
-  ...disassemble(rom, 0, 512)
+  ...disassemble(rom, 0, rom.length)
 ];
 
 fs.writeFileSync(outputPath, asmLines.join('\n'));
