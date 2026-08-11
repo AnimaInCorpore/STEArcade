@@ -18,8 +18,8 @@ with native 68030 code; it does not need to translate every Z80 instruction one-
   - [x] Define routine replacement contracts and validation format
 - [ ] 2. Structural AOT Pass
   - [x] Reachability-based disassembly with labels and code/data separation
-  - [ ] Buildable control-flow skeleton for the CPU code
-  - [ ] Explicit diagnostics for unknown opcodes and unresolved indirect control flow
+  - [x] Buildable control-flow skeleton for the CPU code
+  - [x] Explicit diagnostics for unknown opcodes and unresolved indirect control flow
   - [ ] Flag liveness annotations and boundary materialization hooks
 - [ ] 3. Native Routine Replacement
   - [ ] Identify routines with clear purpose and stable call boundaries
