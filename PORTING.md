@@ -25,6 +25,7 @@ with native 68030 code; it does not need to translate every Z80 instruction one-
   - [x] Identify routines with clear purpose and stable call boundaries
   - [x] Implement replacements with documented inputs, outputs, side effects, flags, and timing
   - [x] Differential-test replacements against MAME/reference traces
+  - [x] Native skeleton for init routine 0x0266
 - [ ] 4. Hardware Interfacing (Videl & I/O)
 - [ ] 5. Incremental Integration & Testing
   - [ ] Milestone A: Buildable boot path and independently validated title-screen renderer
