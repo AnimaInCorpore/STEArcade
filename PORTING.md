@@ -22,8 +22,8 @@ with native 68030 code; it does not need to translate every Z80 instruction one-
   - [x] Explicit diagnostics for unknown opcodes and unresolved indirect control flow
   - [ ] Flag liveness annotations and boundary materialization hooks
 - [ ] 3. Native Routine Replacement
-  - [ ] Identify routines with clear purpose and stable call boundaries
-  - [ ] Implement replacements with documented inputs, outputs, side effects, flags, and timing
+  - [x] Identify routines with clear purpose and stable call boundaries
+  - [x] Implement replacements with documented inputs, outputs, side effects, flags, and timing
   - [ ] Differential-test replacements against MAME/reference traces
 - [ ] 4. Hardware Interfacing (Videl & I/O)
 - [ ] 5. Incremental Integration & Testing
