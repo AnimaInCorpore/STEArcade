@@ -30,6 +30,14 @@ const Z80_OPCODES = {
   0xC9: { name: 'ret', m68k: 'rts', rationale: 'Z80 RET maps to 68030 RTS' },
   0xD0: { name: 'ret nc', m68k: 'jsr Z80_RET_NC', rationale: 'RET NC requires Z80 carry flag. Static translation calls flag emulation stub Z80_RET_NC which tests Z80_FLAGS carry bit and returns conditionally.' },
   0xD8: { name: 'ret c', m68k: 'jsr Z80_RET_C', rationale: 'RET C requires Z80 carry flag. Static translation calls flag emulation stub Z80_RET_C which tests Z80_FLAGS carry bit and returns conditionally.' },
+  // Additional opcodes for init routine
+  0x21: { name: 'ld hl,imm16', m68k: (addr) => `move.l #$${addr.toString(16).padStart(4,'0')},a1`, bytes:3, rationale: 'HL maps to A1 pointer for memory indirect' },
+  0xAF: { name: 'xor a,a', m68k: 'clr.b d0', rationale: 'XOR A clears A, maps to CLR.B D0' },
+  0x4F: { name: 'ld c,a', m68k: 'move.b d0,d2', rationale: 'C maps to D2' },
+  0x77: { name: 'ld (hl),a', m68k: 'move.b d0,(a1)', rationale: 'Store A to memory pointed by HL/A1' },
+  0x23: { name: 'inc hl', m68k: 'addq.l #1,a1', rationale: 'Increment HL pointer' },
+  0x0D: { name: 'dec c', m68k: 'subq.b #1,d2', rationale: 'Decrement C' },
+  0x20: { name: 'jr nz,e8', m68k: (rel) => `bne.s ${formatLabel(rel)}`, bytes:2, rationale: 'Relative branch if Z flag clear' },
 };
 
 function formatLabel(addr) {
@@ -93,6 +101,14 @@ function disassemble(data, start = 0, maxBytes = 256) {
         z80Text = `${entry.name} $${addr.toString(16).padStart(4,'0')}`;
         m68kText = entry.m68k(addr);
         advance = 3;
+      } else if (entry.bytes === 2) {
+        const imm = data[pc+1] ?? 0;
+        // signed relative offset for JR
+        const signed = imm > 0x7F ? imm - 0x100 : imm;
+        const target = pc + 2 + signed;
+        z80Text = `${entry.name} $${target.toString(16).padStart(4,'0')}`;
+        m68kText = entry.m68k(target);
+        advance = 2;
       } else if (opcode === 0x3E || opcode === 0x06) {
         const imm = data[pc+1] ?? 0;
         z80Text = `${entry.name} $${imm.toString(16).padStart(2,'0')}`;
