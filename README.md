@@ -23,9 +23,9 @@ The original arcade game Donkey Kong is being ported/adapted for the Atari Falco
 
 ## Development Rules
 
-**Very important:** All source code in `src/` must document the Z80 emulation/simulation:
-- The original Z80 source / instruction must be kept as a comment immediately behind the corresponding Atari 68000 assembly.
-- For each instruction or routine, add a note explaining *why* that particular 68000 instruction/routine was chosen to emulate/simulate the Z80 part appropriately.
+**Very important:** This project uses Ahead-Of-Time static translation, not runtime emulation.
+- The original Z80 source / instruction must be kept as a comment immediately behind the corresponding Atari 68030 assembly.
+- For each instruction or routine, add a note explaining *why* that particular 68030 instruction/routine was chosen for the translation.
 
 This ensures traceability between the original arcade Z80 code and the Falcon030 implementation.
 
