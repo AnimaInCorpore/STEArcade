@@ -4,7 +4,8 @@
   "description": "Z80 to MC68000 converter tools for Donkey Kong Falcon030 port",
   "main": "convert.js",
   "scripts": {
-    "convert": "node convert.js"
+    "convert": "node convert.js",
+    "make-rom": "node make_cpu_rom.js"
   },
   "engines": {
     "node": ">=18"
