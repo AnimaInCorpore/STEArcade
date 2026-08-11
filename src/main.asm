@@ -23,6 +23,7 @@ _start:
         include "translated/routine_04e1_native.asm"
         include "translated/routine_051c_native.asm"
         include "translated/routine_0578_native.asm"
+        include "translated/routine_0583_native.asm"
         ; include "translated/*.asm"
 
 ; End of file
