@@ -40,3 +40,6 @@ Why native replacement is safe: control-flow boundaries, no hidden flag dependen
 
 ## Open Issues
 - Unknown semantics, timing uncertainties, indirect jumps
+
+## Source Comment Rule
+When generating translated source, add a comment block at the routine entry describing the routine purpose if it can be determined from disassembly, MAME analysis, or contract. Keep Z80 source/disassembly references close to replacement for traceability.

@@ -1,6 +1,10 @@
 ; Replacement contract for Z80 0x0266 init routine
 ; See docs/analysis/routine_0266_contract.md
 ;
+; Purpose: Early hardware initialization - clear work RAM regions $6000/$7000/$7400,
+;          set video I/O registers $7D82/$7D83/$7D86/$7D87, enable interrupts $7D84,
+;          and initialize RAM pointers $60B0/$60B1.
+;
 ; Inputs: none
 ; Outputs:
 ;   RAM $6000-$60FF cleared
