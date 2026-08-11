@@ -28,6 +28,7 @@ with native 68030 code; it does not need to translate every Z80 instruction one-
   - [x] Native skeleton for init routine 0x0266
   - [x] Source comment rule: routine purpose comments in translated source
   - [x] Analysis and contract for routine 0x0450
+  - [x] Native implementation skeleton for routine 0x0450
 - [ ] 4. Hardware Interfacing (Videl & I/O)
 - [ ] 5. Incremental Integration & Testing
   - [ ] Milestone A: Buildable boot path and independently validated title-screen renderer
