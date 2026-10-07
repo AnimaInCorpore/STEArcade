@@ -4,8 +4,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen, assets
 
 STE = gen.STE
-VLINK = r"C:/Arbeit/F030Arcade/third_party/vlink/vlink.exe"
-VASM = r"C:\Arbeit\F030Arcade\third_party\vasm\vasmm68k_mot.exe"
+# Toolchain: VASM / VLINK env vars win; otherwise the Windows checkout, else a macOS build from f030dsp3d.
+_HOME = os.path.expanduser("~/Work/f030dsp3d/tools")
+VLINK = os.environ.get("VLINK") or (r"C:/Arbeit/F030Arcade/third_party/vlink/vlink.exe" if os.name == "nt" else os.path.join(_HOME, "vlink", "vlink"))
+VASM = os.environ.get("VASM") or (r"C:\Arbeit\F030Arcade\third_party\vasm\vasmm68k_mot.exe" if os.name == "nt" else os.path.join(_HOME, "vasm", "vasmm68k_mot"))
 
 
 def main():
@@ -13,6 +15,8 @@ def main():
     ap.add_argument("--frames", type=int, default=0)
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--sim", action="store_true")
+    ap.add_argument("--nosprites", action="store_true")
+    ap.add_argument("--dumpat", type=int, default=0)
     ap.add_argument("--out", default=os.path.join(STE, "run", "DKONG.PRG"))
     a = ap.parse_args()
     text, rep, em = gen.generate()
@@ -29,6 +33,10 @@ def main():
         cmd.insert(1, "-DDEBUG=1")
     if a.sim:
         cmd.insert(1, "-DSIM=1")
+    if a.dumpat:
+        cmd.insert(1, "-DDUMPAT=%d" % a.dumpat)
+    if a.nosprites:
+        cmd.insert(1, "-DNOSPRITES=1")
     r = subprocess.run(cmd, cwd=os.path.join(STE, "rt"), capture_output=True, text=True)
     sys.stdout.write(r.stdout + r.stderr)
     if r.returncode:

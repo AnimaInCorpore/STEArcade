@@ -39,6 +39,7 @@ D6BIT = {H: 5, N: 6}
 IYADDR = 0x7FF0
 FSHADOW = 0x7FF2
 IO_READ_REDIRECT = {0x7C00: 0x7E00, 0x7C80: 0x7E80, 0x7D00: 0x7F00, 0x7D80: 0x7F80}
+DMA_TRIGGER = 0x7D85
 NMI_TOKEN = 0x4001
 TABLE_ENTRIES = 0x4002
 
@@ -382,6 +383,13 @@ class Emitter:
                 self.e(l)
             for l in self.write8(dst, sea):
                 self.e(l)
+            if dst == ("ind16", DMA_TRIGGER) and src == ("r8", "a"):
+                # 8257 start bit: the sprite DMA runs now (dkong.py do_dma)
+                skip = self.new_label()
+                self.e("btst #0,d0")
+                self.e("beq %s" % skip)
+                self.e("bsr z80_dma")
+                self.lines.append(skip + ":")
             return
         if kd == "r16" and ks == "imm":
             self.set16(dst[1], src[1])

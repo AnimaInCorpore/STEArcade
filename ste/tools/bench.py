@@ -27,6 +27,9 @@ VLINK = ROOT.parent.parent / "Arbeit" / "F030Arcade" / "third_party" / "vlink" /
 if not VASM.exists():
     VASM = Path(r"C:\Arbeit\F030Arcade\third_party\vasm\vasmm68k_mot.exe")
     VLINK = Path(r"C:\Arbeit\F030Arcade\third_party\vlink\vlink.exe")
+if not VASM.exists():       # macOS / Linux: same defaults as build.py
+    VASM = Path(os.environ.get("VASM") or os.path.expanduser("~/Work/f030dsp3d/tools/vasm/vasmm68k_mot"))
+    VLINK = Path(os.environ.get("VLINK") or os.path.expanduser("~/Work/f030dsp3d/tools/vlink/vlink"))
 
 CODE = 0x10000
 TABLE = 0x20000

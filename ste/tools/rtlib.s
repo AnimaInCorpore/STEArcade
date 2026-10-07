@@ -1,6 +1,21 @@
 ; Runtime helpers shared by the translated code and the bench.
 ; Conventions: see z80x.py (d0=A, d6=flags image, d5/d7 scratch)
 
+; 8257 sprite DMA ($7D85 bit 0 written): $6900 -> $7000, $180 bytes (what dkong.py's do_dma
+; does).  a6 = Z80 block.  Keeps every register of the translated program.
+z80_dma:
+	movem.l	d1-d4/a1-a2,-(sp)
+	lea	$6900(a6),a1
+	lea	$7000(a6),a2
+	moveq	#$180/16-1,d1
+.copy:
+	movem.l	(a1)+,d2-d5
+	movem.l	d2-d5,(a2)
+	lea	16(a2),a2
+	dbf	d1,.copy
+	movem.l	(sp)+,d1-d4/a1-a2
+	rts
+
 ; DAA: d0 = A, d6 bit0=C bit5=H bit6=N  ->  A, S Z C H updated, N kept
 z80_daa:
 	moveq	#0,d7

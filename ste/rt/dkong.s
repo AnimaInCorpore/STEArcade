@@ -20,9 +20,48 @@ GAME_X = 24				; byte offset of the game area in a line (3 chunks)
 VISIBLE_ROWS = 28			; arcade tile rows 2..29
 KEY_ESC = $01
 
+; Timer A fires TA_DATA * 20.3 us after the VBL, in the middle of scanline 31; its handler
+; waits for the next scanline start and removes the top border from there.  (97 was
+; right when the timers started ~400 cycles after the VBL; they start right away now.)
+
+	ifnd TA_DATA
+TA_DATA = 98
+	endc
+	ifnd TA_NOPS
+TA_NOPS = 84
+	endc
+
 	ifnd FRAMES
 FRAMES = 0				; quit after n frames (0 = never), for measurements
 	endc
+
+; Timer A removes the top border, Timer B the bottom one (both counted from the VBL).
+
+arm_border_timers	macro
+	clr.b	$fffffa1b.w
+	move.b	#199+29,$fffffa21.w	; Timer B data
+	move.b	#8,$fffffa1b.w		; Timer B control
+
+	move.b	#TA_DATA,$fffffa1f.w	; Timer A data
+	move.b	#4,$fffffa19.w		; Timer A control
+
+	st	border_a		; cleared by the timer handlers
+	st	border_b
+	endm
+
+; Border removal needs the VBL and both timer interrupts on time, and a Blitter pass in HOG
+; mode takes the bus away for up to two scanlines.  No pass starts while Timer A is pending
+; or Timer B is a few lines from firing (a record is up to four passes) (its data register counts the lines down).
+
+wait_borders	macro
+.a\@:	tst.b	border_a
+	bne.s	.a\@
+	cmp.b	#5,$fffffa21.w
+	bhi.s	.d\@
+	tst.b	border_b
+	bne.s	.a\@
+.d\@:
+	endm
 
 stage	macro
 	ifd DEBUG
@@ -54,7 +93,9 @@ start:
 	stage	$0ff
 	bsr	init_video
 	bsr	init_render
-	stage	$f0f
+	ifd DEBUG
+	move	dk_palette,$ffff8240.w	; stage colours off again
+	endc
 
 	; Start the Z80 main thread.
 
@@ -327,7 +368,14 @@ hbl:
 ; on the stack and restored at the end.
 
 vbl:
-	tst.b	vbl_busy		; a VBL inside a long frame (Timer A lowers the IPL)
+	; The timers start first, so that a VBL inside a long frame (vbl_skip) and a normal
+	; one reach Timer A with the same delay.
+	arm_border_timers
+
+	ifd DEBUG
+	addq	#1,cnt_vbl
+	endc
+	tst.b	vbl_busy
 	bne	vbl_skip
 	st	vbl_busy
 	movem.l	d0-d7/a0-a6,-(sp)
@@ -346,17 +394,16 @@ vbl:
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
 
-	clr.b	$fffffa1b.w
-	move.b	#199+29,$fffffa21.w	; Timer B data
-	move.b	#8,$fffffa1b.w		; Timer B control
-
-	move.b	#97,$fffffa1f.w		; Timer A data
-	move.b	#4,$fffffa19.w		; Timer A control
-
 	addq.l	#1,frame_counter
 
 	tst.b	quit_flag
 	bne	quit
+
+	; The rest of the frame runs below the VBL level: a frame that takes longer than
+	; one VBL is interrupted by the next one, which only restarts the border timers
+	; (vbl_skip), so the borders go on being removed at the right lines.
+
+	move	#$2300,sr
 
 	lea	z80_block,a6
 
@@ -371,6 +418,10 @@ vbl:
 
 	; Z80 NMI.
 
+	ifd DUMPAT
+	tst.b	freeze_flag		; test: the game stands still after the dump
+	bne	vbl_render
+	endc
 	btst	#0,$7d84(a6)
 	beq.s	vbl_render
 
@@ -387,9 +438,18 @@ vbl_render:
 	move	frame_counter+2,(a0)
 	move	cnt_timer_a,256(a0)
 	move	cnt_timer_b,512(a0)
-	move	cnt_acia,768(a0)
+	move	cnt_vbl,768(a0)
+	move	cnt_skip,1024(a0)
 	endc
 	bsr	render_frame
+
+	ifd DUMPAT
+	cmp.l	#DUMPAT,frame_counter
+	bne.s	.no_dump
+	bsr	dump_state
+	st	freeze_flag
+.no_dump:
+	endc
 
 	if FRAMES
 	move.l	frame_counter,d0
@@ -399,9 +459,15 @@ vbl_render:
 .go_on:
 	endc
 
+	move	#$2400,sr		; no VBL between the flag and the rte
 	clr.b	vbl_busy
 	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+
 vbl_skip:
+	ifd DEBUG
+	addq	#1,cnt_skip
+	endc
 	rte
 
 ; Top border removal (Timer A), see balls64.s of the fast Blitter objects demo.
@@ -414,7 +480,7 @@ timer_a:
 
 	clr.b	$fffffa19.w		; Stop Timer A
 
-	rept 84
+	rept TA_NOPS
 	nop
 	endr
 
@@ -426,6 +492,7 @@ timer_a:
 
 	move.b	#2,$ffff820a.w
 
+	clr.b	border_a
 	rte
 
 ; Bottom border removal (Timer B)
@@ -465,6 +532,7 @@ timer_b:
 
 	movem.l	(sp)+,d0/a0
 
+	clr.b	border_b
 	rte
 
 ; ------------------------------------------------------------------------------
@@ -696,6 +764,38 @@ crash_name:
 	dc.b	"CRASH.TXT",0
 	even
 
+	ifd DUMPAT
+
+; Test aid: write the Z80 memory $6000-$7FFF to DUMP.BIN (tools compare the screen with
+; the reference renderer drawing the same state).
+
+dump_state:
+	clr	-(sp)			; Fcreate
+	pea	dump_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+
+	pea	z80_block+$6000		; Fwrite
+	move.l	#$2000,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+
+	move	d6,-(sp)		; Fclose
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+
+dump_name:
+	dc.b	"DUMP.BIN",0
+	even
+
+	endc
+
 ; ------------------------------------------------------------------------------
 ; Fatal errors of the translated code
 ; ------------------------------------------------------------------------------
@@ -715,6 +815,7 @@ z80_unsupported:
 	bra	quit
 
 	include "render.s"
+	include "sprites.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated Z80 program (also defines the dispatch table in the data section).
@@ -775,6 +876,9 @@ old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
 vbl_busy:	ds.b	1
+border_a:	ds.b	1
+border_b:	ds.b	1
+freeze_flag:	ds.b	1
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
 in2_kbd:	ds.b	1
@@ -787,6 +891,8 @@ frame_counter:	ds.l	1
 cnt_timer_a:	ds.w	1
 cnt_timer_b:	ds.w	1
 cnt_acia:	ds.w	1
+cnt_vbl:	ds.w	1
+cnt_skip:	ds.w	1
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16

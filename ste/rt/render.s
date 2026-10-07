@@ -26,6 +26,7 @@ init_render:
 	move	#-1,old_bank
 	clr	bank16
 	st	force_scan
+	bsr	init_sprites
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -50,8 +51,14 @@ render_frame:
 	st	force_scan
 
 .same_bank:
+	ifnd NOSPRITES
+	addq	#1,mark_stamp		; the cells marked in this frame
+	endc
 	bsr	scan_tiles
 	bsr	draw_dirty_tiles
+	ifnd NOSPRITES
+	bsr	draw_sprites
+	endc
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -176,6 +183,18 @@ draw_dirty_tiles:
 	move.l	a2,-(sp)
 	bsr	draw_tile
 	move.l	(sp)+,a2
+
+	ifnd NOSPRITES
+	move	d0,d1			; sprites on this tile have to be drawn again
+	add	d1,d1
+	lea	tile_mark_cell,a1
+	move	(a1,d1.w),d1
+	bmi.s	.no_mark
+	lea	tile_marks,a1
+	move	mark_stamp,(a1,d1.w)
+.no_mark:
+	endc
+
 	dbf	d7,.loop
 
 .nothing:
