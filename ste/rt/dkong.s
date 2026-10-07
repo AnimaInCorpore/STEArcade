@@ -60,6 +60,7 @@ start:
 
 	lea	z80_dispatch,a4
 	lea	z80_block,a6
+	move.b	#$80,$7f80(a6)		; DSW0 before the first VBL
 	lea	$6c00(a6),a5
 	moveq	#0,d0
 	moveq	#0,d1
@@ -200,12 +201,14 @@ init_hardware:
 
 	; IKBD: joystick event reporting, mouse off.
 
+	ifnd SIM
 .w1:	btst	#1,$fffffc00.w
 	beq.s	.w1
 	move.b	#$14,$fffffc02.w
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	endc
 
 	rts
 
@@ -239,9 +242,11 @@ restore_hardware:
 	move.l	old_timer_b,$120.w
 	move.l	old_timer_a,$134.w
 
+	ifnd SIM
 .w1:	btst	#1,$fffffc00.w		; IKBD: mouse relative again
 	beq.s	.w1
 	move.b	#$08,$fffffc02.w
+	endc
 
 	move	#$2300,sr
 	rts
@@ -322,6 +327,9 @@ hbl:
 ; on the stack and restored at the end.
 
 vbl:
+	tst.b	vbl_busy		; a VBL inside a long frame (Timer A lowers the IPL)
+	bne	vbl_skip
+	st	vbl_busy
 	movem.l	d0-d7/a0-a6,-(sp)
 
 	; Screens: the one drawn during this frame is shown from the next one on
@@ -374,6 +382,13 @@ vbl:
 z80_nmi_ret:
 vbl_render:
 	lea	z80_block,a6
+	ifd DEBUG
+	move.l	draw_screen_address,a0
+	move	frame_counter+2,(a0)
+	move	cnt_timer_a,256(a0)
+	move	cnt_timer_b,512(a0)
+	move	cnt_acia,768(a0)
+	endc
 	bsr	render_frame
 
 	if FRAMES
@@ -384,12 +399,15 @@ vbl_render:
 .go_on:
 	endc
 
+	clr.b	vbl_busy
 	movem.l	(sp)+,d0-d7/a0-a6
+vbl_skip:
 	rte
 
 ; Top border removal (Timer A), see balls64.s of the fast Blitter objects demo.
 
 timer_a:
+	addq	#1,cnt_timer_a
 	move	#$2100,sr		; Enable HBL
 	stop	#$2100			; Wait for HBL
 	move	#$2700,sr		; Stop all interrupts
@@ -413,6 +431,7 @@ timer_a:
 ; Bottom border removal (Timer B)
 
 timer_b:
+	addq	#1,cnt_timer_b
 	movem.l	d0/a0,-(sp)
 
 	lea	$fffffa21.w,a0
@@ -456,6 +475,7 @@ timer_b:
 ; IN2: bit2 start 1, bit3 start 2, bit7 coin
 
 acia_isr:
+	addq	#1,cnt_acia
 	movem.l	d0-d2/a0,-(sp)
 
 .again:
@@ -754,6 +774,7 @@ old_fa1f:	ds.b	1
 old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
+vbl_busy:	ds.b	1
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
 in2_kbd:	ds.b	1
@@ -763,6 +784,9 @@ joy1_state:	ds.b	1
 	even
 
 frame_counter:	ds.l	1
+cnt_timer_a:	ds.w	1
+cnt_timer_b:	ds.w	1
+cnt_acia:	ds.w	1
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16

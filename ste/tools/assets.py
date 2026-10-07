@@ -93,7 +93,7 @@ def build():
         data = bytearray()
         for code in range(256):
             tile = gfx.tiles[code]                  # raw [y][x] 2 bit
-            disp = tile.T[::-1]                     # displayed [v][u]
+            disp = tile.T[::-1][::-1, ::-1]         # displayed [v][u] (cabinet flip bit = 1)
             idx = lut[disp]                         # [8][8] palette indices
             for v in range(8):
                 row = idx[v]
@@ -126,7 +126,7 @@ def build():
         col, row = idx & 31, idx >> 5
         cc.append(colcodes[col + 32 * (row >> 2)])
         if 2 <= row <= 29:
-            tc, tr = row - 2, 31 - col
+            tc, tr = 29 - row, col
             off.append(tr * 8 * 256 + 24 + (tc >> 1) * 8 + (tc & 1))
         else:
             off.append(-1)

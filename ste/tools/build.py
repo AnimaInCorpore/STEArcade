@@ -12,6 +12,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--frames", type=int, default=0)
     ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--sim", action="store_true")
     ap.add_argument("--out", default=os.path.join(STE, "run", "DKONG.PRG"))
     a = ap.parse_args()
     text, rep, em = gen.generate()
@@ -26,6 +27,8 @@ def main():
         cmd.insert(1, "-DFRAMES=%d" % a.frames)
     if a.debug:
         cmd.insert(1, "-DDEBUG=1")
+    if a.sim:
+        cmd.insert(1, "-DSIM=1")
     r = subprocess.run(cmd, cwd=os.path.join(STE, "rt"), capture_output=True, text=True)
     sys.stdout.write(r.stdout + r.stderr)
     if r.returncode:
