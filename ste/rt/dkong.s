@@ -56,7 +56,7 @@ arm_border_timers	macro
 wait_borders	macro
 .a\@:	tst.b	border_a
 	bne.s	.a\@
-	cmp.b	#5,$fffffa21.w
+	cmp.b	#6,$fffffa21.w
 	bhi.s	.d\@
 	tst.b	border_b
 	bne.s	.a\@

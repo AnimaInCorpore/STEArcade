@@ -26,30 +26,31 @@ Tests: `tools/fullrun.py 3000` (whole program, lock-step against the Z80 referen
 
 ## Sprites (`rt/sprites.s`)
 
-Blitter, one OR pass per screen plane that has bits set, 16 skew routines with both
-endmasks, the skew and the word count as constants (like `stefastbobs2/main.s`).  Every
-sprite line is 16 pixels wide, i.e. the first width class of that demo's reordered ball:
-one source word per line and plane, no pad; for skew 1-15 the Blitter's NFSR lets the
-second destination word reuse it (both endmasks keep what gets shifted in out), skew 0 is a
-one word wide blit.  Source streams are 7 pen-value masks per (code, flip y) of 16 words
-(`tools/assets.py build_sprites`), flip x is a negative source Y increment.  No pass clears
-the sprite's pixels first, so an opaque pixel is ORed into what is below it: where a sprite
-overlaps another sprite or a girder the colour index is the OR of both (and black pixels
-of a sprite do not hide anything).  In the exact-state comparison that is 120-330
-of 57344 pixels (0.2-0.6 %), all at sprite/sprite overlaps.  Not implemented: the
-16-sprites-per-scanline limit and the wrap-around of the arcade hardware.  Sprites are
-not clipped at the left/right edge of the game area (they spill into the black margin).
+Blitter, like the bob routines of `stefastbobs2/main.s`: one blit per sprite line writes the
+four planes of the line (Y count 4, source = destination), and the endmasks are the mask:
+END1/END3 hold the outline of the line (holes included) shifted to the two screen words, so
+the opaque pixels replace what is below and the rest stays.  No clearing pass, no colour
+mixing: the screen equals the reference renderer pixel for pixel (frozen at frames 650, 800,
+1000, 1200 and 1380: 0 of 57344 pixels differ).  The masks of every (shape, flip y, skew) are
+a table (`dk_spr_masks`, 256 KB), the line words come from colour data baked per colour quad
+(`dk_spr_data`, 608 KB: 19 distinct mappings of the pen values to the planes) that the
+Blitter's source address walks through, `NFSR` lets the second destination word reuse the
+one source word of a plane (a sprite of skew 0 is one word wide), flip x draws the lines
+upwards.  A mask table entry costs the same to write as an immediate in an unrolled routine
+would; unrolled code per (shape, flips, skew) would be megabytes.  END2 is unused: lines of up to
+32 pixels (three words, 48 mask bits, skew up to 15) would use it.  The program needs about
+2 MB of RAM now (the data is 0.9 MB).  Not implemented: the 16-sprites-per-scanline limit and
+the wrap-around of the arcade hardware.  Sprites are not clipped at the left/right edge of the
+game area (they spill into the black margin).
+
 Each draw screen remembers per sprite slot what it got there (list entry, colour bank,
 rectangle).  A frame restores the background only under sprites that changed or are gone,
 and draws a sprite that is unchanged only if its rectangle touches an 8x8 cell that was
-redrawn (tile) or restored (the old rectangle of another sprite) in this frame; the cells
-carry the frame number in `tile_marks`, so nothing has to be cleared.  Redrawing an
-unchanged sprite over its own pixels is harmless because the passes OR.  Checked against the
-reference renderer by freezing the game at frames 650 / 800 / 1000 / 1200 / 1380: the
-screen the incremental drawing leaves is the one a full redraw gave (110-210 pixels off, the
-OR overlaps above).
-Measured (debug counters, 1800 VBLs): 1465 full frames without sprite drawing, 1323 with
-every sprite restored and drawn every frame, 1448 with unchanged sprites skipped.
+redrawn (tile), restored (the old rectangle of another sprite) or drawn (a sprite earlier in
+the list, since later ones go on top) in this frame; the cells carry the frame number in
+`tile_marks`, so nothing has to be cleared.
+Measured (debug counters, 1800 VBLs): 1465 full frames without sprite drawing, 1409 with
+this renderer (1448 with the earlier OR passes, which were not exact).
 
 `z80_dma` (tools/rtlib.s) is the 8257 sprite DMA, hooked on the `ld ($7D85),a` stores.
 
