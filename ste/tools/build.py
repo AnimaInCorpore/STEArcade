@@ -16,6 +16,7 @@ def main():
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("--nosprites", action="store_true")
+    ap.add_argument("-D", dest="defines", action="append", default=[], help="extra assembler define NAME=VALUE")
     ap.add_argument("--dumpat", type=int, default=0)
     ap.add_argument("--out", default=os.path.join(STE, "run", "DKONG.PRG"))
     a = ap.parse_args()
@@ -35,6 +36,8 @@ def main():
         cmd.insert(1, "-DSIM=1")
     if a.dumpat:
         cmd.insert(1, "-DDUMPAT=%d" % a.dumpat)
+    for d in a.defines:
+        cmd.insert(1, "-D" + d)
     if a.nosprites:
         cmd.insert(1, "-DNOSPRITES=1")
     r = subprocess.run(cmd, cwd=os.path.join(STE, "rt"), capture_output=True, text=True)

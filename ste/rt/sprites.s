@@ -145,23 +145,36 @@ rect_cells:
 
 ; ------------------------------------------------------------------------------
 ; The four plane blits of one sprite line.  d1 = Y count (4 planes), d2 = start (BUSY |
-; HOG); a0 = masks, a1 = END1, a2 = control, a3 = destination address, a5 = Y count,
-; d3 = address of the line, d4 = step to the next one.  Everything that stays the same
-; from line to line (X count, skew, increments, the source address that walks on through
-; the colour data) was written before.
+; HOG); a0 = masks, a1 = END1, a6 = END3, a2 = control, a3 = destination address (low word),
+; a5 = Y count, d3 / d4 = see below.  Everything that stays the same from line to line
+; (X count, skew, increments, the source address that walks on through the colour data)
+; was written before.  The blitter registers are written through preloaded pointers.
+;
+; Fast: the destination register ends a line 8 bytes after its first word, so d4 (248, or
+; -264 for flip x) takes it to the next line, added to the low word of the register.  That
+; wraps at a 64 KB boundary, which the lines of a sprite on the bottom edge cross, so
+; those use the slow macro: d3 = address of the line, d4 = +-256, the whole address.
 
 sprite_first_line	macro
 	move	(a0)+,(a1)		; END1
-	move	(a0)+,4(a1)		; END3
+	move	(a0)+,(a6)		; END3
 	move	d1,(a5)
 	move.b	d2,(a2)
 	endm
 
 sprite_line	macro
 	move	(a0)+,(a1)
-	move	(a0)+,4(a1)
+	move	(a0)+,(a6)
+	add	d4,(a3)
+	move	d1,(a5)
+	move.b	d2,(a2)
+	endm
+
+sprite_slow_line	macro
+	move	(a0)+,(a1)
+	move	(a0)+,(a6)
 	add.l	d4,d3
-	move.l	d3,(a3)
+	move.l	d3,-2(a3)
 	move	d1,(a5)
 	move.b	d2,(a2)
 	endm
@@ -248,7 +261,7 @@ draw_sprites:
 	move.l	a3,a4
 	lea	BLT_END1.w,a1
 	lea	BLT_CTRL.w,a2
-	lea	BLT_DST_ADDR.w,a3
+	lea	BLT_DST_ADDR+2.w,a3
 	lea	BLT_COUNT+2.w,a5
 	moveq	#127,d7
 
@@ -300,13 +313,25 @@ sprite_loop:
 	move	bank16,10(a4)
 
 	move.l	draw_screen_address,d3
-	add.l	d4,d3			; address of the first line
-	move.l	#256,d4			; step to the next line
+	add.l	d4,d3			; address of the top line
+	cmp	#$f000,d3		; the lines would cross a 64 KB boundary (low word wraps)
+	bhs.s	.slow_lines
+
+	move	#248,d4			; step from the end of one line's blits to the next line
 	tst.b	d2
-	bpl.s	.no_flip_x
+	bpl.s	.lines_set
 	add.l	#15*256,d3		; flip x: from the last line upwards
+	move	#-264,d4
+	bra.s	.lines_set
+
+.slow_lines:
+	bset	#31,d0			; (the skew is in the low word)
+	move.l	#256,d4
+	tst.b	d2
+	bpl.s	.lines_set
+	add.l	#15*256,d3
 	move.l	#-256,d4
-.no_flip_x:
+.lines_set:
 
 	; Masks: v = code * 2 + flip y, (v * 16 + skew) * 64.
 
@@ -338,7 +363,7 @@ sprite_loop:
 	add.l	d6,d1
 	add.l	#dk_spr_data,d1
 	move.l	d1,BLT_SRC_ADDR.w
-	move.l	d3,(a3)
+	move.l	d3,BLT_DST_ADDR.w
 
 	tst	d0
 	beq.s	.skew0
@@ -354,7 +379,12 @@ sprite_loop:
 .go:
 	moveq	#4,d1			; Y count: the four planes
 	moveq	#-64,d2			; BUSY | HOG
+
+	lea	BLT_END3.w,a6		; (the cell routines trash a6)
 	wait_borders
+
+	tst.l	d0
+	bmi	.slow_blits
 
 	sprite_first_line
 	sprite_line
@@ -372,7 +402,27 @@ sprite_loop:
 	sprite_line
 	sprite_line
 	sprite_line
+	bra	.blits_done
 
+.slow_blits:
+	sprite_first_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+
+.blits_done:
 	move.l	4(a4),d0		; sprites later in the list that touch it are drawn again
 	move	8(a4),d1
 	bsr	mark_rect

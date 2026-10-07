@@ -36,7 +36,12 @@ a table (`dk_spr_masks`, 256 KB), the line words come from colour data baked per
 (`dk_spr_data`, 608 KB: 19 distinct mappings of the pen values to the planes) that the
 Blitter's source address walks through, `NFSR` lets the second destination word reuse the
 one source word of a plane (a sprite of skew 0 is one word wide), flip x draws the lines
-upwards.  A mask table entry costs the same to write as an immediate in an unrolled routine
+upwards.  The blitter registers of the line loop are written through preloaded pointers
+(END1, END3, control, Y count, and the low word of the destination address, which is
+advanced with `add d4,(a3)` as in the demo; sprites whose lines cross a 64 KB boundary of the
+screen, i.e. on the bottom edge, use full address writes instead).  That saves about 12
+cycles per sprite line; frame counts shift by +-20 per 1800 VBLs with a few cycles of
+padding, so it does not show in them.  A mask table entry costs the same to write as an immediate in an unrolled routine
 would; unrolled code per (shape, flips, skew) would be megabytes.  END2 is unused: lines of up to
 32 pixels (three words, 48 mask bits, skew up to 15) would use it.  The program needs about
 2 MB of RAM now (the data is 0.9 MB).  Not implemented: the 16-sprites-per-scanline limit and
@@ -71,3 +76,4 @@ not removed) for none.
 * `--dumpat N`: at frame N write Z80 memory `$6000-$7FFF` to `DUMP.BIN` and freeze the game;
   the screen can then be compared with `dkong.py render_raw()` of the same memory.
 * `--nosprites`: no sprite drawing (frame-rate comparison).
+* `-D NAME=VALUE`: any assembler define.
