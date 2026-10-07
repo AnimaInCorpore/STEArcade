@@ -4,36 +4,36 @@
 
         include "../lib/z80_flags.asm"
 
-        section .text
+        section text
 
 L_0000:
-        move.b #0x00,d0                | ; ld a,imm8 $00
-        // why: Z80 A maps to 68030 D0, immediate byte move preserves value. 68030 move.b #imm,Dn is single-cycle.
+        move.b #$00,d0                 ; Z80: ld a,imm8 $00
+        ; why: structural reference only; Z80 flags/state are not mapped here.
 
-        move.b d0,$7d84                | ; ld (nn),a $7d84
-        // why: Z80 memory-mapped I/O write. 68030 byte store to absolute address mirrors Z80 (nn),A. $7D84 is interrupt enable register per MAME map.
+        move.b d0,$7d84                ; Z80: ld (nn),a $7d84
+        ; why: reference memory-map access; production code must use the virtual I/O boundary.
 
-        jbra L_0266                    | ; jp imm16 $0266
-        // why: Unconditional branch. 68030 jbra is direct equivalent to Z80 JP nn, no condition check.
+        bra   L_0266                   ; Z80: jp imm16 $0266
+        ; why: unconditional structural branch.
 
 ; --- Routine at 0x0006 ---
 L_0006:
-        move.b $6007,d0                | ; ld a,(nn) $6007
-        // why: Load byte from RAM $6007 into D0/A. 68030 absolute byte load matches Z80 LD A,(nn).
+        move.b $6007,d0                ; Z80: ld a,(nn) $6007
+        ; why: reference memory access; no Falcon address mapping is implied.
 
-        ror.b d0                       | ; rrca
-        // why: RRCA rotates A right through carry. Using 68030 ROR.B on D0 approximates rotation; full carry flag emulation deferred to AOT phase 2.
+        ror.b #1,d0                    ; Z80: rrca
+        ; why: structural rotate only; Z80 flag materialization remains unresolved.
 
-        jsr Z80_RET_NC                 | ; ret nc
-        // why: RET NC requires Z80 carry flag. Static translation calls flag emulation stub Z80_RET_NC which tests Z80_FLAGS carry bit and returns conditionally.
+        jsr Z80_RET_NC                 ; Z80: ret nc
+        ; why: draft flag boundary; helper is not a complete Z80 return implementation.
 
-        addq.l #1,a7                   | ; inc sp
-        // why: Z80 SP maps to 68030 A7. addq.l #1 is single-cycle increment, matches Z80 INC SP timing.
+        addq.l #1,a7                   ; Z80: inc sp
+        ; why: draft only; native A7 is not the emulated Z80 stack.
 
-        addq.l #1,a7                   | ; inc sp
-        // why: Same as above, second increment.
+        addq.l #1,a7                   ; Z80: inc sp
+        ; why: draft only; native A7 is not the emulated Z80 stack.
 
-        rts                            | ; ret
-        // why: Z80 RET maps directly to 68030 RTS.
+        rts                            ; Z80: ret
+        ; why: draft only; Z80 return semantics require the virtual stack.
 
 ; End of initial translated routines

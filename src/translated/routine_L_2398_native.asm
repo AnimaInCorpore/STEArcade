@@ -3,7 +3,7 @@
 ;
 ; Purpose: TBD
 
-        .section .text
+        section text
 L_L_2398_native:
         nop
         rts

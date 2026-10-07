@@ -8,11 +8,11 @@
 ; Inputs: memory $6227, $6393, $63B7
 ; Outputs: video RAM $690B/$6908, I/O side effects TBD
 
-        .section .text
+        section text
 L_0450_native:
         ; LD A,(6227) ; RRCA ; JP NC,$0478
         move.b  $6227,d0
-        ror.b   d0
+        ror.b   #1,d0
         ; carry flag not modeled, branch approximated as unconditional for now
         ; TODO: materialize carry flag for accurate JP NC
 

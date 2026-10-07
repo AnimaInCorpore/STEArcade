@@ -18,12 +18,12 @@
 ;   I/O $7D87 = $00
 ;   I/O $7D84 = $01
 
-        .section .text
+        section text
 L_0266_native:
         ; Clear $6000-$60FF
         move.l  #$6000,a1
         moveq   #0,d0
-        move.w  #0xFF,d7
+        move.w  #$FF,d7
 .clear6000:
         move.b  d0,(a1)+
         dbra    d7,.clear6000
@@ -31,7 +31,7 @@ L_0266_native:
         ; Clear $7000-$70FF
         move.l  #$7000,a1
         moveq   #0,d0
-        move.w  #0xFF,d7
+        move.w  #$FF,d7
 .clear7000:
         move.b  d0,(a1)+
         dbra    d7,.clear7000
@@ -39,7 +39,7 @@ L_0266_native:
         ; Clear $7400-$74FF
         move.l  #$7400,a1
         moveq   #0,d0
-        move.w  #0xFF,d7
+        move.w  #$FF,d7
 .clear7400:
         move.b  d0,(a1)+
         dbra    d7,.clear7400
@@ -55,4 +55,4 @@ L_0266_native:
         move.b  #0,$7D87
         move.b  #1,$7D84
 
-        jbra    L_03DE   ; continue to next init stage
+        bra     L_03DE   ; draft continuation; target remains unresolved until the boundary is confirmed

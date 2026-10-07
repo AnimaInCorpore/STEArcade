@@ -1,0 +1,6 @@
+# derived from the ROMs / reproducible: rebuild with tools/build.py
+build/
+run/
+*.pkl
+*.png
+__pycache__/

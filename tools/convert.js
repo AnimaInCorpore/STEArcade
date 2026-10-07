@@ -3,30 +3,25 @@
  * Z80 → MC68000 converter skeleton for Donkey Kong Falcon030 port
  * Reuses mapping tables from C:\Arbeit\jsz80test\main.js
  * 
- * Usage: node tools/convert.js assets/roms/dkong.zip <output.asm>
+ * Usage: node tools/convert.js assets/roms/extracted/cpu.rom <output.asm>
  */
 
 const fs = require('fs');
-const path = require('path');
-
 // --- Usable parts from jsz80test/main.js ---
 
 const Z80Reg8Names = ["b","c","d","e","h","l","(hl)","a"];
 const Z80Reg16Names = ["bc","de","hl","sp"];
-const M68kDataRegisterNames = ["d1","d2","d3","d4","h","l","(a1)","d0"];
-const M68kAddressRegisterNames = ["a2","a3","a1","a0"];
-const M68kConditionCodeNames = ["ne","eq","cc","cs","po","pe","p","m"];
 
 // Minimal opcode table – expand as needed
 const Z80_OPCODES = {
   0x00: { name: 'nop', m68k: 'nop', rationale: '68030 nop is single-cycle, matches Z80 NOP timing' },
-  0x3E: { name: 'ld a,imm8', m68k: (imm) => `move.b #0x${imm.toString(16).padStart(2,'0')},d0`, rationale: 'Z80 A maps to 68030 D0, immediate byte move preserves value' },
-  0x06: { name: 'ld b,imm8', m68k: (imm) => `move.b #0x${imm.toString(16).padStart(2,'0')},d1`, rationale: 'Z80 B maps to 68030 D1 per jsz80test mapping' },
+  0x3E: { name: 'ld a,imm8', m68k: (imm) => `move.b #$${imm.toString(16).padStart(2,'0')},d0`, rationale: 'Z80 A maps to 68030 D0, immediate byte move preserves value' },
+  0x06: { name: 'ld b,imm8', m68k: (imm) => `move.b #$${imm.toString(16).padStart(2,'0')},d1`, rationale: 'Z80 B maps to 68030 D1 per jsz80test mapping' },
   0x32: { name: 'ld (nn),a', m68k: (addr) => `move.b d0,$${addr.toString(16).padStart(4,'0')}`, bytes:3, rationale: 'Byte store from D0 to absolute address; Z80 memory-mapped I/O handled as absolute' },
   0x3A: { name: 'ld a,(nn)', m68k: (addr) => `move.b $${addr.toString(16).padStart(4,'0')},d0`, bytes:3, rationale: 'Byte load into D0 mirrors Z80 A, 68030 can do absolute byte load' },
-  0x0F: { name: 'rrca', m68k: 'ror.b d0', rationale: 'RRCA rotates A right through carry; 68030 ROR.B on D0 emulates rotate, carry handling deferred for AOT' },
+  0x0F: { name: 'rrca', m68k: 'ror.b #1,d0', rationale: 'Structural rotate only; Z80 flag materialization remains a boundary obligation' },
   0x33: { name: 'inc sp', m68k: 'addq.l #1,a7', rationale: 'Z80 SP maps to 68030 A7, addq.l #1 is single-cycle increment' },
-  0xC3: { name: 'jp imm16', m68k: (addr) => `jbra ${formatLabel(addr)}`, rationale: 'Unconditional branch to absolute label, 68030 jbra is direct equivalent' },
+  0xC3: { name: 'jp imm16', m68k: (addr) => `bra ${formatLabel(addr)}`, rationale: 'Unconditional branch to an address label' },
   0xC9: { name: 'ret', m68k: 'rts', rationale: 'Z80 RET maps to 68030 RTS' },
   0xD0: { name: 'ret nc', m68k: 'jsr Z80_RET_NC', rationale: 'RET NC requires Z80 carry flag. Static translation calls flag emulation stub Z80_RET_NC which tests Z80_FLAGS carry bit and returns conditionally.' },
   0xD8: { name: 'ret c', m68k: 'jsr Z80_RET_C', rationale: 'RET C requires Z80 carry flag. Static translation calls flag emulation stub Z80_RET_C which tests Z80_FLAGS carry bit and returns conditionally.' },
@@ -38,7 +33,7 @@ const Z80_OPCODES = {
   0x23: { name: 'inc hl', m68k: 'addq.l #1,a1', rationale: 'Increment HL pointer' },
   0x0D: { name: 'dec c', m68k: 'subq.b #1,d2', rationale: 'Decrement C' },
   0x20: { name: 'jr nz,e8', m68k: (rel) => `bne.s ${formatLabel(rel)}`, bytes:2, rationale: 'Relative branch if Z flag clear' },
-  0x10: { name: 'djnz e8', m68k: (rel) => `dbne.s ${formatLabel(rel)}`, bytes:2, rationale: 'Decrement B and jump if not zero' },
+  0x10: { name: 'djnz e8', m68k: (rel) => `dbne d1,${formatLabel(rel)}`, bytes:2, rationale: 'Assembler-valid structural placeholder; exact Z80 B-width semantics require validation' },
   0x18: { name: 'jr e8', m68k: (rel) => `bra.s ${formatLabel(rel)}`, bytes:2, rationale: 'Relative jump' },
   0x28: { name: 'jr z,e8', m68k: (rel) => `beq.s ${formatLabel(rel)}`, bytes:2, rationale: 'Relative jump if Z' },
   0x30: { name: 'jr nc,e8', m68k: (rel) => `bhs.s ${formatLabel(rel)}`, bytes:2, rationale: 'Relative jump if NC' },
@@ -78,12 +73,15 @@ const Z80_OPCODES = {
 };
 
 function formatLabel(addr) {
-  return `L_${addr.toString(16).padStart(4,'0')}`;
+  return `L_${addr.toString(16).padStart(4,'0').toUpperCase()}`;
 }
 
-// Simple ZIP handling – expects a raw binary ROM file for now
+// The converter consumes the validated raw CPU image. Archive extraction belongs to the ROM step.
 function readRom(filePath) {
   const data = fs.readFileSync(filePath);
+  if (data.length >= 2 && data[0] === 0x50 && data[1] === 0x4B) {
+    throw new Error('ZIP input is not a CPU image; extract and concatenate the selected ROM set first');
+  }
   return new Uint8Array(data);
 }
 
@@ -125,7 +123,7 @@ function disassemble(data, start = 0, maxBytes = 256) {
     const opcode = data[pc];
     const entry = Z80_OPCODES[opcode];
     let z80Text = `db $${opcode.toString(16).padStart(2,'0')}`;
-    let m68kText = '/* TODO */';
+    let m68kText = 'illegal';
     let rationale = '';
     let advance = 1;
     
@@ -164,17 +162,17 @@ function disassemble(data, start = 0, maxBytes = 256) {
         advance = 1;
       }
     } else {
-      // unknown opcode - emit visible diagnostic stub
+      // Unknown opcode - stop visibly at the original address instead of creating an unresolved label.
       z80Text = `db $${opcode.toString(16).padStart(2,'0')}`;
-      m68kText = `bra.s Z80_ILLEGAL_${pc.toString(16).padStart(4,'0')}`;
+      m68kText = 'illegal';
       advance = 1;
     }
     
     pc += advance;
     
     // Keep Z80 source as comment behind 68000 code per project rule
-    const rationaleComment = rationale ? `  // why: ${rationale}` : '';
-    const line = `        ${m68kText.padEnd(30)} | ; ${z80Text}${rationaleComment}`;
+    const rationaleComment = rationale ? `why: ${rationale}` : '';
+    const line = `        ${m68kText.padEnd(30)}; Z80: ${z80Text}${rationaleComment ? `; ${rationaleComment}` : ''}`;
     lines.push(line);
   }
   return lines;
@@ -194,17 +192,12 @@ const asmLines = [
   '; Generated by tools/convert.js',
   '; Rule: Z80 source kept as comment behind 68000 code',
   '',
-  '        section .text',
+  '        section text',
   '',
   ...disassemble(rom, 0, rom.length),
-  '',
-  '; ---- Diagnostic stubs for unimplemented opcodes ----',
-  'Z80_ILLEGAL:',
-  '        rts',
   ''
 ];
 
 fs.writeFileSync(outputPath, asmLines.join('\n'));
 console.log(`Wrote ${outputPath} with ${asmLines.length} lines`);
-console.log('Note: This is a skeleton using the mapping tables from jsz80test/main.js.');
-console.log('Expand Z80_OPCODES with full tables from main.js for production use.');
+console.log('Note: This is a structural draft. Unknown opcodes are emitted as ILLEGAL and must be resolved before execution.');

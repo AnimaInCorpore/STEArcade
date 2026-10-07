@@ -5,7 +5,7 @@
 ; Purpose: Boot initialization - clear interrupt enable at $7D84 and jump to main init at $0266
 ; ------------------------------------------------------------
 
-        section .text
+        section text
 
 ; ---- Contract ----
 ; Inputs: none
@@ -22,7 +22,7 @@ L_0000_native:
         ; Z80: 32 84 7D   LD ($7D84),A
         move.b  d0,$7D84
         ; Z80: C3 66 02   JP $0266
-        jbra    L_0266
+        bra     L_0266_native
 
 ; The original Z80 bytes are retained for traceability:
 ; 0000: 3E 00 32 84 7D C3 66 02

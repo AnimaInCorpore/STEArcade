@@ -29,9 +29,9 @@ function testNativeAsmExists() {
   const content = fs.readFileSync(nativeAsmPath, 'utf8');
   const hasLabel = content.includes('L_0000_native:');
   const hasWrite = content.includes('move.b  d0,$7D84');
-  const hasJump = content.includes('jbra    L_0266');
+  const hasJump = content.includes('bra     L_0266_native');
   const ok = hasLabel && hasWrite && hasJump;
-  console.log(`[Native asm] label ${hasLabel}, write ${hasWrite}, jump ${hasJump} => ${ok ? 'PASS' : 'FAIL'}`);
+  console.log(`[Native asm smoke] label ${hasLabel}, write ${hasWrite}, jump ${hasJump} => ${ok ? 'PASS' : 'FAIL'}`);
   return ok;
 }
 
@@ -62,7 +62,7 @@ const results = [
 ];
 
 if (results.every(Boolean)) {
-  console.log('\nAll boot init differential checks PASSED');
+  console.log('\nAll boot init smoke checks PASSED');
   process.exit(0);
 } else {
   console.log('\nSome checks FAILED');

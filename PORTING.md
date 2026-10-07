@@ -1,119 +1,168 @@
 # Donkey Kong Porting Plan - Atari Falcon030
 
 ## Goal
-Convert the arcade Donkey Kong to run on Atari Falcon030 hardware, preserving observable gameplay,
-graphics, input behavior, and timing. The implementation may replace well-understood Z80 routines
-with native 68030 code; it does not need to translate every Z80 instruction one-for-one.
 
-## Priorities
-- **High:** Gameplay logic and graphics display
-- **Low:** Sound - deferred until core gameplay/graphics are stable
+Port the selected Donkey Kong arcade CPU/video behavior to the Atari Falcon030 while preserving
+observable gameplay, graphics, input behavior, interrupts, and bounded frame timing. The project
+uses selective ahead-of-time recompilation: well-understood Z80 routines may be replaced by native
+68030 code, but every replacement must preserve its documented observable contract.
 
-## Progress
-- [ ] 1. Analysis & Tooling
-  - [x] Initial memory map, I/O, interrupt, and MAME source review
-  - [x] Initial Node.js and Falcon assembler scaffolding
-  - [x] Select and document the exact CPU ROM set and concatenation layout
-  - [x] Make the ROM extraction and build pipeline reproducible
-  - [x] Define routine replacement contracts and validation format
-- [ ] 2. Structural AOT Pass
-  - [x] Reachability-based disassembly with labels and code/data separation
-  - [x] Buildable control-flow skeleton for the CPU code
-  - [x] Explicit diagnostics for unknown opcodes and unresolved indirect control flow
-  - [ ] Flag liveness annotations and boundary materialization hooks
-- [ ] 3. Native Routine Replacement
-  - [x] Identify routines with clear purpose and stable call boundaries
-  - [x] Implement replacements with documented inputs, outputs, side effects, flags, and timing
-  - [x] Differential-test replacements against MAME/reference traces
-  - [x] Native skeleton for init routine 0x0266
-  - [x] Source comment rule: routine purpose comments in translated source
-  - [x] Analysis and contract for routine 0x0450
-  - [x] Native implementation skeleton for routine 0x0450
-- [ ] 4. Hardware Interfacing (Videl & I/O)
-- [ ] 5. Incremental Integration & Testing
-  - [ ] Milestone A: Buildable boot path and independently validated title-screen renderer
-  - [ ] Milestone B: Attract mode execution with vblank/interrupt timing against MAME
-  - [ ] Milestone C: Playable physics and input latency tuning
-- [ ] 6. Sound - Deferred low priority, with register-write stubs retained from the start
+Sound remains deferred until the CPU, video, input, and interrupt path is stable. Sound-register
+writes must still be retained as logged or no-op effects from the beginning.
 
-## Source Material
-- ROM: `assets/roms/dkong.zip`
-- Reference docs: `docs/M68000PRM.pdf`, `docs/z80.pdf`
-- MAME sources: `C:\Arbeit\F030Arcade\third_party\jsm68kdisassembler\third_party\mame`
-- When the implementation is ambiguous, consult the Z80 and M68000 manuals together with the
-  corresponding MAME driver/source. Use them to resolve instruction semantics, flags, memory and
-  I/O behavior, video timing/orientation, interrupts, and sound-register effects rather than
-  guessing. Record important conclusions in `docs/analysis/` or the relevant replacement contract.
+## Current status
 
-## Architecture
-- Original: Z80 CPU + custom video/audio hardware
-- Target: Motorola 68030 @16MHz + Falcon Videl video + Blitter + DSP 56001
-- Strategy: selective ahead-of-time recompilation
-  - Use the initial translation to recover control flow, routine boundaries, data references, and
-    hardware accesses.
-  - Replace complete routines with native 68030 implementations when their purpose and observable
-    contract are understood.
-  - Retain precise Z80 semantics only where translated code or a routine boundary can observe them.
-  - Keep a virtual Z80 state model for compatibility; do not assume the 68030 CCR is the Z80 `F`
-    register.
-- Notes:
-  - Use 68020/030-specific instructions only after the behavioral contract is correct.
-  - MAME declares Donkey Kong as `ROT270`. The raw visible raster is 256×224, but the final logical
-    display is portrait-oriented after rotation; validate the 224×256 presentation before choosing
-    a Falcon framebuffer layout.
-  - DSP 56001 remains available for later offload of graphics/audio work; sound is deferred for now.
-  - Final output is an Atari `.PRG` with a real GEMDOS header, assembled and linked as part of the
-    build pipeline.
+The repository is at the analysis/foundation stage. The ROM set and initial routine notes exist,
+but the native source is not yet a buildable or validated Falcon program.
 
-## Phases
+The following rules govern progress:
 
-### 1. Analysis & Tooling
-- [x] Review Z80 memory map, I/O ports, interrupts, and MAME video behavior
-- [x] Select one exact Donkey Kong CPU ROM set and document its load/concatenation map
-- [x] Make the ROM extraction and build pipeline reproducible
-- [x] Define replacement contract format and differential-test input/output snapshots
-- [ ] Confirm the MAME `ROT270` orientation against a captured reference frame
-- [ ] Finalize target assembler and make a minimal GEMDOS `.PRG` build pass
+- Do not mark an item complete because a source file or skeleton exists.
+- A completed item needs a reproducible command, an artifact or trace, and a checkable result.
+- Draft native routines and `NOP/RTS` stubs must not be reachable from the boot path.
+- The boot path must assemble without warnings, have no undefined symbols, and produce a valid
+  GEMDOS `.PRG` before routine replacement work is counted as integrated.
 
-### 2. Structural AOT Pass (Node.js)
-- **Decision: Use AOT structural translation plus native routine replacement, not strict one-to-one translation.**
-- Build `tools/convert.js` to produce a buildable control-flow skeleton with source addresses,
-  labels, and diagnostics.
-- Separate code from data and resolve direct branches, calls, returns, restarts, and indirect-flow
-  sites before optimizing.
-- Keep original Z80 ranges and disassembly references at routine level; attach rationale and
-  unresolved-issue markers to generated code.
-- Do not silently emit `NOP` for unknown instructions or leave unresolved labels in the output.
-- Reuse mapping tables from `C:\Arbeit\jsz80test` only as input to the structural translator, not
-  as the runtime register/flag model.
+## Phases and gates
 
-### 3. Native Routine Replacement
-- Identify routines whose purpose is clear from disassembly, MAME behavior, and call sites.
-- Document each replacement contract: inputs, outputs, clobbers, Z80-visible RAM writes, I/O,
-  flags, interrupt assumptions, and timing budget.
-- Use native M68k condition codes internally when Z80 `F` is not part of the contract.
-- Preserve or materialize only the Z80 flags consumed by translated code or exposed at a boundary.
-- Differential-test replacement routines from identical initial state and inputs before removing the
-  original translated path.
+### 0. Toolchain and build gate
 
-### 4. Hardware Interfacing (Videl & I/O)
-- Implement Videl routines for Falcon-specific resolutions, VGA/RGB compatibility
-- Map Donkey Kong video RAM and graphics ROM formats to a Falcon renderer using the Blitter where
-  useful; do not assume the arcade layout is already a linear framebuffer
-- Map arcade I/O ports to Falcon IKBD/Joystick
-- Implement the confirmed portrait orientation and cocktail/flip-screen behavior
-- Preserve sound-register writes as logged/no-op handlers while sound is deferred
+- [ ] Select and pin the target assembler dialect; use syntax accepted by the installed VASM/RMAC
+  toolchain.
+- [ ] Remove duplicate entry symbols and establish one source of truth for generated includes.
+- [ ] Add a reproducible build directory and fail the build on assembler warnings, unresolved
+  symbols, or unsupported instructions.
+- [ ] Emit a real Atari GEMDOS `.PRG` header and verify the text/data/bss offsets and entry point.
+- [ ] Add a minimal build smoke test that assembles `src/main.asm` from a clean checkout.
 
-### 5. Incremental Integration & Testing
-- **Milestone A:** Buildable structural path and independently validated title-screen renderer
-- **Milestone B:** Attract mode execution, verifying game state and vblank/interrupt timing against MAME
-- **Milestone C:** Playable physics, input latency, and frame-budget tuning
-- Maintain traces/screenshots for each milestone and iterate on performance hotspots using the 68030
-  instruction cache only after behavior is stable
+**Gate:** the minimal program assembles reproducibly and the output has a valid GEMDOS header.
+
+### 1. ROM input and provenance
+
+- [x] Select and document the TKG-04 CPU ROM set, load addresses, and concatenation order.
+- [ ] Make archive extraction reproducible; verify every input file against recorded CRC32/SHA1
+  values.
+- [ ] Make the converter accept a validated raw CPU ROM image, or explicitly extract the archive;
+  reject ZIP/container bytes as CPU input.
+- [ ] Record the ROM manifest and tool versions used to generate every translated artifact.
+
+**Gate:** one command produces the exact 16 KiB CPU image from the archive and a manifest verifies it.
+
+### 2. Falcon-side Z80 runtime boundary
+
+- [ ] Define a real virtual Z80 state: AF, BC, DE, HL, IX, IY, SP, PC, interrupt state, and shadow
+  `F`; keep the native 68030 stack separate from the emulated Z80 stack.
+- [ ] Define the Falcon-side memory layout for Z80 ROM, RAM, sprite RAM, video RAM, and state.
+- [ ] Implement Z80 memory and I/O read/write interfaces for the documented `$6000-$7D87` map.
+  Native routines must call these interfaces or use an explicitly mapped virtual address space;
+  direct writes to `$7Dxx` are not Falcon hardware access.
+- [ ] Define interrupt and vblank scheduling, including enable/disable behavior and the frame clock.
+- [ ] Document Z80/Falcon endianness and 8/16-bit register representation.
+- [ ] Add unit tests for memory mapping, I/O side effects, stack operations, and interrupt state.
+
+**Gate:** a small boot state can be initialized, read/written, and interrupted deterministically
+without depending on Falcon addresses that have not been mapped.
+
+### 3. Structural AOT translation
+
+- [ ] Replace the current linear byte scan with reachability-based CFG construction from declared
+  entry points, restart vectors, interrupt vectors, and known call targets.
+- [ ] Decode the complete Z80 instruction space needed by the selected ROM, including CB/ED/DD/FD
+  prefixes and documented undocumented-opcode behavior where it is observable.
+- [ ] Separate code, embedded tables, graphics/data references, and unreachable bytes.
+- [ ] Generate one consistent symbol format from Z80 addresses and emit source/disassembly maps.
+- [ ] Make all unknown opcodes and unresolved indirect control flow fail visibly with address,
+  context, and a required resolution status. Never emit an unresolved label or a fake NOP path.
+- [ ] Treat generated translation as a discovery/reference artifact until it passes semantic tests;
+  it is not automatically executable native code.
+
+**Gate:** the generated structural artifact assembles, has no unresolved labels, and reports all
+remaining semantic or indirect-flow gaps explicitly.
+
+### 4. Reference and differential validation
+
+- [ ] Establish a reference runner using MAME traces or an equivalent verified Z80 execution model.
+- [ ] Define snapshots containing registers, flags, PC/SP, relevant RAM, I/O writes, interrupt
+  state, and a timing/cycle budget.
+- [ ] Build a harness that executes the reference and native routine from identical snapshots and
+  compares observable results.
+- [ ] Keep ROM-byte and source-text checks as smoke tests only; do not call them differential tests.
+- [ ] Store deterministic fixtures and traces under `docs/analysis/` or a dedicated test directory.
+
+**Gate:** at least one routine has an automated state comparison against the reference, including
+  the flags and stack effects that its callers can observe.
+
+### 5. Native routine replacement
+
+- [ ] Identify a routine only after confirming its complete boundary, callers, return convention,
+  memory/I/O effects, interrupt assumptions, flags, and timing budget.
+- [ ] Complete the contract and disassembly before creating a native implementation. `Purpose: TBD`,
+  estimated ranges, and `NOP/RTS` files are drafts, not replacements.
+- [ ] Implement the 0x0266 initialization routine against the virtual memory/I/O boundary and
+  confirm the exact cleared ranges and continuation address.
+- [ ] Complete the 0x0450 disassembly before implementing its conditional branches, calls, rotates,
+  and loop bounds. Its current carry approximation and unknown-byte TODOs are not behaviorally safe.
+- [ ] Implement only the Z80 flags that are live at each translated or native boundary. Keep H,
+  P/V, N, undocumented X/Y, and DAA behavior explicit where observable.
+- [ ] Replace direct Z80 `CALL`/`RET` assumptions with an explicit convention; do not map Z80 `SP`
+  to the native stack without a proven compatibility layer.
+- [ ] Differential-test each replacement before removing or bypassing the reference path.
+
+**Gate:** every integrated replacement has a complete contract, a passing differential fixture,
+and no unresolved TODO in its observable path.
+
+### 6. Video, input, and Falcon hardware
+
+- [ ] Implement the Falcon framebuffer and renderer interface separately from the Z80 virtual video
+  RAM model.
+- [ ] Decode the arcade graphics ROM layout and map sprite/background data correctly.
+- [ ] Validate the MAME `ROT270` behavior against a captured reference frame before choosing the
+  Falcon framebuffer orientation; support cocktail/flip-screen behavior.
+- [ ] Map arcade controls to Falcon IKBD/joystick input and measure input latency.
+- [ ] Implement vblank-driven presentation and verify the frame budget on a 16 MHz 68030.
+
+### 7. Incremental integration milestones
+
+- [ ] **Milestone A:** clean-build GEMDOS program, deterministic virtual Z80 boot, and independently
+  validated title-screen renderer with a reference screenshot.
+- [ ] **Milestone B:** attract mode with verified interrupt/vblank timing and state traces against
+  MAME.
+- [ ] **Milestone C:** playable physics, input latency, collision behavior, and frame-budget tuning.
+- [ ] **Milestone D:** sound-register logging/no-op behavior is stable; only then evaluate DSP or
+  native sound implementation.
+
+## Architecture decisions
+
+- Original system: Z80 main CPU plus custom video, input, DMA, and audio hardware.
+- Target: Motorola 68030 at 16 MHz, Falcon Videl, Blitter, and optional DSP 56001.
+- Strategy: selective AOT recompilation with a virtual Z80 state and explicit Falcon-side hardware
+  interfaces.
+- The 68030 CCR is not the Z80 `F` register. Use native condition codes internally only when the
+  replacement contract does not expose Z80 flags.
+- Preserve original Z80 address ranges and disassembly references in contracts and source comments.
+- Use 68020/030-specific instructions only after behavioral correctness and the frame budget are
+  measured.
+- The raw arcade raster is 256x224; Donkey Kong is declared `ROT270` in MAME, so validate the
+  final 224x256 presentation before selecting a framebuffer layout.
+
+## Source material
+
+- ROM archive: `assets/roms/dkong.zip`
+- ROM map and hashes: `docs/analysis/rom_info.md`
+- Memory/I/O map: `docs/analysis/memory_map.md`
+- Z80 manual: `docs/z80.pdf`
+- Motorola manual: `docs/M68000PRM.pdf`
+- MAME source: `C:\Arbeit\F030Arcade\third_party\jsm68kdisassembler\third_party\mame`
+
+When behavior is ambiguous, consult the Z80 and M68000 manuals together with the corresponding
+MAME driver/source. Record conclusions in `docs/analysis/` or the relevant replacement contract.
 
 ## Deliverables
-- `src/` assembly source with routine-level Z80 references, replacement contracts, and rationale
-- Node.js structural AOT toolchain `tools/convert.js`
-- Build script for Falcon030 producing a valid `.PRG`
-- Differential-test fixtures or traces for translated/replaced routines
-- README updates with status
+
+- `src/` assembly with valid Falcon toolchain syntax and routine-level Z80 references.
+- A reproducible ROM extraction, manifest, and structural AOT toolchain.
+- Falcon-side virtual Z80 state, memory/I/O, interrupt, and vblank interfaces.
+- A build script that produces and verifies a valid GEMDOS `.PRG`.
+- Differential fixtures/traces for translated and replaced routines.
+- Reference screenshots and milestone results.
+- README status kept aligned with this plan.

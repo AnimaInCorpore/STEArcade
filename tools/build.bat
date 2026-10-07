@@ -1,11 +1,24 @@
 @echo off
-REM Donkey Kong Falcon030 Build Script
-REM Requires VASM or RMAC assembler
+setlocal
+REM Donkey Kong Falcon030 assembly smoke build
+REM This currently produces a raw 68000 binary, not a final GEMDOS PRG.
 
-echo Building Donkey Kong Falcon030 port...
+set "ASM=C:\msys64\ucrt64\bin\vasmm68k_mot.exe"
+if not exist "%ASM%" (
+    echo ERROR: VASM not found at %ASM%
+    exit /b 1
+)
 
-REM Assemble main
-C:\msys64\ucrt64\bin\vasmm68k_mot.exe -Fbin -o build/dkong.prg src/main.asm
+if not exist build mkdir build
 
-REM TODO: Add GEMDOS header, link translated modules
-echo Build complete.
+echo Building clean Falcon assembly stub...
+
+"%ASM%" -Fbin -o build\dkong.raw src\main.asm
+if errorlevel 1 (
+    echo Build failed.
+    exit /b 1
+)
+
+echo Wrote build\dkong.raw
+echo NOTE: GEMDOS header and validated routine linking are still pending.
+exit /b 0

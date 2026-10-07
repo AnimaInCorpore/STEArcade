@@ -6,7 +6,7 @@
 ; Inputs: TBD
 ; Outputs: TBD
 
-        .section .text
+        section text
 L_04ac_native:
         ; TODO: implement native replacement
         nop

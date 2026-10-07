@@ -3,7 +3,7 @@
 ;
 ; Purpose: TBD from disassembly analysis
 
-        .section .text
+        section text
 L_04e1_native:
         nop
         rts

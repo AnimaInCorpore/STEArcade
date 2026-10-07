@@ -5,6 +5,10 @@ This project aims to convert the arcade game **Donkey Kong** to the Atari Falcon
 ## Overview
 
 The original arcade game Donkey Kong is being ported/adapted for the Atari Falcon030 platform.
+The implementation strategy is selective ahead-of-time recompilation: an initial translation
+recovers the Z80 control-flow structure, while routines whose purpose is understood may be
+rewritten as native 68030 code. The objective is to preserve observable game behavior, not to
+produce a one-for-one instruction translation.
 
 ## Files
 
@@ -23,11 +27,27 @@ The original arcade game Donkey Kong is being ported/adapted for the Atari Falco
 
 ## Development Rules
 
-**Very important:** This project uses Ahead-Of-Time static translation, not runtime emulation.
-- The original Z80 source / instruction must be kept as a comment immediately behind the corresponding Atari 68030 assembly.
-- For each instruction or routine, add a note explaining *why* that particular 68030 instruction/routine was chosen for the translation.
+**Very important:** This project uses ahead-of-time recompilation and native routine replacement,
+not a general-purpose runtime Z80 emulator.
 
-This ensures traceability between the original arcade Z80 code and the Falcon030 implementation.
+- The first pass should produce a buildable structural translation with labels, control flow, and
+  explicit markers for unresolved semantics.
+- Unknown instructions must not silently become `NOP`s. They should produce a visible TODO,
+  diagnostic stub, or other deliberate failure path.
+- One-to-one instruction correspondence is not required. For a native replacement, retain the
+  original Z80 address range, routine purpose, and a contract describing inputs, outputs, memory
+  side effects, flags, timing, and hardware effects.
+- Keep Z80 source or disassembly references close enough to the replacement to preserve
+  traceability, and explain why the native routine is behaviorally equivalent.
+- Treat Z80 flags as virtual state. Emulate or materialize only flags that are observable by a
+  translated instruction, a caller, or a hardware/state boundary. Native replacement routines may
+  use normal 68030 condition codes internally when their contract does not expose Z80 `F`.
+- When behavior, timing, memory mapping, video, sound, or hardware effects are unclear, consult
+  the reference manuals in `docs/` and the corresponding MAME driver/source before making an
+  assumption. Record the relevant conclusion in the analysis notes or replacement contract.
+
+This keeps the generated code auditable without forcing effort into Z80 instructions that will be
+replaced at routine level.
 
 ## Resources
 
@@ -36,7 +56,10 @@ MAME emulator sources are available at:
 
 ## Status
 
-Initial project setup.
+The repository is currently at the analysis and runtime-foundation stage. The selected ROM set and
+initial routine contracts exist, but the Falcon source does not yet pass a clean assembler build,
+and the native routine files are drafts rather than validated replacements. See `PORTING.md` for
+the gated implementation plan and current checklist.
 
 Project plan, priorities and progress are tracked in `PORTING.md`.
-See the Progress checklist there to mark completed work.
+See the gated checklist there before marking work complete.
