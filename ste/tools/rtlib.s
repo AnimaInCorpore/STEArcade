@@ -16,6 +16,31 @@ z80_dma:
 	movem.l	(sp)+,d1-d4/a1-a2
 	rts
 
+; The dispatch table the translated code uses is in byte swapped pc order (a return
+; address read from the Z80 stack as a word): a0 = z80_dispatch (TABLE_ENTRIES longs in
+; pc order), a1 = the table to fill (65536 longs), d0 = TABLE_ENTRIES.
+z80_init_dispatch:
+	move.l	a1,a2
+	move.l	#z80_badpc,d1
+	move	#65536/8-1,d2
+.fill:
+	rept 8
+	move.l	d1,(a2)+
+	endr
+	dbf	d2,.fill
+
+	moveq	#0,d1			; pc
+.scatter:
+	move	d1,d2
+	ror	#8,d2
+	and.l	#$ffff,d2
+	lsl.l	#2,d2
+	move.l	(a0)+,(a1,d2.l)
+	addq	#1,d1
+	cmp	d0,d1
+	blo.s	.scatter
+	rts
+
 ; DAA: d0 = A, d6 bit0=C bit5=H bit6=N  ->  A, S Z C H updated, N kept
 z80_daa:
 	moveq	#0,d7

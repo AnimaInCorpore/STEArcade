@@ -115,8 +115,9 @@ def flow_uses(ins):
     return 0
 
 
-def compute_liveness(code, extra_succ=None):
-    """live_in / live_out per pc (bitmask of tracked flags)."""
+def compute_liveness(code, ccr_users=()):
+    """live_in / live_out per pc (bitmask of tracked flags).  ccr_users: conditional jumps
+    that read the 68k condition codes instead of d6 (Emitter.analyze), no use of d6."""
     succs = {}
     for pc, ins in code.items():
         nxt = pc + ins.length
@@ -137,6 +138,8 @@ def compute_liveness(code, extra_succ=None):
     defs = {}
     for pc, ins in code.items():
         u, d = uses_defs(ins)
+        if pc in ccr_users:
+            u = 0
         uses[pc] = u | flow_uses(ins)
         defs[pc] = d
     live_in = {pc: 0 for pc in code}
@@ -161,12 +164,67 @@ def compute_liveness(code, extra_succ=None):
 
 
 # --------------------------------------------------------------------------
+# Flags in the condition codes
+#
+# A flag producing instruction leaves S Z C of its result in the CCR; a conditional
+# jump right behind it can branch on that instead of reloading the CCR from d6 (12
+# cycles), if nothing in between destroyed the bit.  Emitter.analyze works out, per
+# instruction, which Z80 flags the CCR holds at its start (a forward must-analysis over
+# the code: the intersection over the predecessors, nothing at the entries, the return
+# points and the targets of computed jumps).  The jumps that can read the CCR then no
+# longer count as uses of d6, so a producer whose flags are only read that way stores
+# nothing.  Stores can only become fewer by this, and a load of the CCR counts for
+# nothing, so the analysis of the first emission holds for the final one.
+# --------------------------------------------------------------------------
+
+BCC = {"bra", "bcc", "bcs", "beq", "bne", "bpl", "bmi", "bhi", "bls", "bhs", "blo", "bge", "blt",
+       "bgt", "ble", "bvc", "bvs"}
+KILL_NONE = {"lea", "pea", "exg", "movem", "jmp", "rts", "nop", "movep", "dbf", "dbra", "movea",
+             "adda", "suba"} | BCC
+KILL_Z = {"btst", "bset", "bclr", "bchg"}
+AN_DST = {"move", "add", "sub", "addq", "subq"}
+
+
+def ccr_kill(line):
+    """The Z80 flags (of S Z C) whose copy in the CCR a 68k instruction destroys.  Nearly
+    everything sets N Z and clears C (a move too); only address register operations, the
+    bit instructions (Z) and the control flow leave them alone."""
+    s = line.strip()
+    if not s or s.endswith(":") or s.startswith(";"):
+        return 0
+    mn, _, ops = s.partition(" ")
+    mn = mn.split(".")[0].lower()
+    ops = ops.split(";")[0].strip()
+    if mn in KILL_NONE:
+        return 0
+    if mn in AN_DST and "," in ops:
+        dst = ops.rsplit(",", 1)[1].strip().lower()
+        if dst == "ccr":
+            return 0            # a load from d6 (counts for nothing, kills nothing)
+        if dst in ("a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "sp"):
+            return 0
+    if mn == "move" and ops.startswith("sr,"):
+        return 0
+    if mn in KILL_Z:
+        return Z
+    return CCRF
+
+
+# --------------------------------------------------------------------------
 # emitter
 # --------------------------------------------------------------------------
 
 REG16 = {"bc": "d1", "de": "d2", "hl": "d3", "ix": "d4"}
-HALF = {"b": ("d1", True), "c": ("d1", False), "d": ("d2", True), "e": ("d2", False),
+# BC is kept byte-swapped (B in the low byte, C in the high one): B is the register the
+# program works with (djnz, ld b,(hl), ...), the pair is rare.  That is also the order of
+# the bytes on the Z80 stack, so push/pop bc are plain word moves.
+HALF = {"b": ("d1", False), "c": ("d1", True), "d": ("d2", True), "e": ("d2", False),
         "h": ("d3", True), "l": ("d3", False)}
+SWAPPED = {"bc"}
+
+
+def swap16(v):
+    return ((v & 0xFF) << 8) | ((v >> 8) & 0xFF)
 
 
 def hx(v, w=4):
@@ -188,6 +246,80 @@ class Emitter:
         self.lo = 0          # live-out of the instruction being emitted
         self.cur = None
         self.hooks = set()   # test builds: pcs that first call z80_hook (d7 = pc)
+        # a3 holds A' only if the program uses ex af,af'; otherwise it is free for the
+        # computed jumps
+        self.a3_free = not any(ins.mn == "ex af,af'" for ins in code.values())
+        self.after_label = {}   # pc -> label to put after its code (inc sp pairs)
+        self.ccr_in = {}        # pc -> Z80 flags the CCR holds at the instruction (analyze)
+        self.ccr_users = set()  # conditional jumps that branch on the CCR, no load from d6
+        self.transfer = None    # collecting (keep, gen) per pc during analyze
+        self.core_at = None     # where the current instruction's flag op ended, what it provided
+        self.core_provided = 0
+
+    # ---- CCR validity ----------------------------------------------------
+    def analyze(self, joins):
+        """Compute ccr_in / ccr_users; joins: pcs where nothing is known about the CCR."""
+        saved = (self.lines, self.uid, self.refs, self.unsupported, self.after_label)
+        self.lines, self.refs, self.unsupported, self.after_label = [], set(), [], {}
+        self.transfer = {}
+        for pc in sorted(self.code):
+            self.emit_ins(pc)
+        transfer = self.transfer
+        self.transfer = None
+        self.lines, self.uid, self.refs, self.unsupported, self.after_label = saved
+
+        preds = {pc: [] for pc in self.code}
+        for pc, ins in self.code.items():
+            nxt = pc + ins.length
+            fl = ins.flow
+            if fl == "seq" or fl == "cret":
+                s = [nxt]
+            elif fl in ("jmp", "call", "rst"):
+                s = [ins.target]            # a callee gets the caller's flags
+            elif fl in ("jcc", "ccall"):
+                s = [ins.target, nxt]
+            else:
+                s = []
+            for t in s:
+                if t in preds:
+                    preds[t].append(pc)
+        ccr_in = {pc: 0 for pc in self.code}
+        order = sorted(self.code)
+        changed = True
+        while changed:
+            changed = False
+            for pc in order:
+                if pc in joins or not preds[pc]:
+                    continue
+                v = CCRF
+                for p in preds[pc]:
+                    keep, gen = transfer[p]
+                    v &= (ccr_in[p] & keep) | gen
+                if v != ccr_in[pc]:
+                    ccr_in[pc] = v
+                    changed = True
+        self.ccr_in = ccr_in
+        self.ccr_users = set()
+        for pc, ins in self.code.items():
+            if ins.flow in ("jcc", "ccall", "cret") and ins.ops and ins.ops[0][0] == "cc":
+                need = CC_USES.get(ins.ops[0][1])
+                if need and need & ~ccr_in[pc] == 0 and pc not in self.hooks:
+                    self.ccr_users.add(pc)
+
+    def record_transfer(self, pc, start):
+        """(keep, gen) of the instruction's code: CCR flags valid after = (before & keep) | gen."""
+        lines = self.lines[start:]
+        _, defs = uses_defs(self.code[pc])
+        if self.core_at is None:
+            keep = CCRF & ~(defs & CCRF)
+            for l in lines:
+                keep &= ~ccr_kill(l)
+            self.transfer[pc] = (keep, 0)
+            return
+        gen = self.core_provided & CCRF
+        for l in self.lines[self.core_at:]:
+            gen &= ~ccr_kill(l)
+        self.transfer[pc] = (0, gen)
 
     # ---- small helpers -------------------------------------------------
     def new_label(self):
@@ -232,7 +364,7 @@ class Emitter:
             if b == "de":
                 return [], "(a6,d2.w)"
             if b == "bc":
-                return [], "(a6,d1.w)"
+                return ["move.w d1,d7", "ror.w #8,d7"], "(a6,d7.w)"
             if b == "ix":
                 return [], "%d(a6,d4.w)" % d
             if b == "iy":
@@ -273,6 +405,8 @@ class Emitter:
         lo = self.lo
         need = provided & lo
         keep = lo & ~need
+        self.core_at = len(self.lines)
+        self.core_provided = provided
         if need:
             m = 0
             for f in (S, Z, C):
@@ -310,6 +444,8 @@ class Emitter:
         self.e("move d7,ccr")
 
     def load_cc(self, cc):
+        if self.cur.pc in self.ccr_users:
+            return                      # the CCR still holds the flag
         self.e("move d6,ccr")
 
     # ---- instruction dispatch --------------------------------------------
@@ -335,6 +471,8 @@ class Emitter:
                 self.e("jmp z80_hook")
                 self.lines.append("Z%04X_r:" % pc)
         start = len(self.lines)
+        self.core_at = None
+        self.core_provided = 0
         try:
             fn = getattr(self, "x_" + ins.mn.replace(" ", "_").replace(",", "_").replace("'", "p"), None)
             if fn is None:
@@ -345,7 +483,13 @@ class Emitter:
             self.unsupported.append((pc, ins.text, str(ex)))
             self.e("move.w #%s,d7" % hx(pc))
             self.e("jmp z80_unsupported")
+            if self.transfer is not None:
+                self.transfer[pc] = (0, 0)
             return
+        if self.transfer is not None:
+            self.record_transfer(pc, start)
+        if pc in self.after_label:
+            self.lines.append(self.after_label[pc] + ":")
 
     # ---- simple instructions ------------------------------------------------
     def x_nop(self, ins):
@@ -401,12 +545,13 @@ class Emitter:
             self.store16(src[1], dst[1])
             return
         if kd == "r16" and dst[1] == "sp" and ks == "r16":
-            self.e("lea (a6,%s.w),a5" % self.reg16(src[1], 7))
+            self.e("lea (a6,%s.w),a5" % self.nat16(src[1], 7))
             return
         raise Unsupported("ld %r,%r" % (dst, src))
 
     def reg16(self, name, scratch):
-        """data register holding a 16-bit register (loading IY into d<scratch> if needed)."""
+        """data register holding a 16-bit register (loading IY into d<scratch> if needed);
+        a swapped pair comes as it is kept."""
         if name in REG16:
             return REG16[name]
         if name == "iy":
@@ -414,8 +559,19 @@ class Emitter:
             return "d%d" % scratch
         raise Unsupported("reg16 %s" % name)
 
+    def nat16(self, name, scratch):
+        """data register holding the natural value of a 16-bit register (a swapped pair is
+        rotated into d<scratch>)."""
+        if name in SWAPPED:
+            self.e("move.w %s,d%d" % (REG16[name], scratch))
+            self.e("ror.w #8,d%d" % scratch)
+            return "d%d" % scratch
+        return self.reg16(name, scratch)
+
     def set16(self, name, v):
         v &= 0xFFFF
+        if name in SWAPPED:
+            v = swap16(v)
         if name in REG16:
             r = REG16[name]
             if v < 128:
@@ -436,9 +592,19 @@ class Emitter:
         hi = self.mem(addr, 1)
         if name in REG16:
             r = REG16[name]
-            self.e("move.b %s,%s" % (hi, r))
-            self.e("lsl.w #8,%s" % r)
-            self.e("move.b %s,%s" % (lo, r))
+            if addr % 2 == 0:
+                # the little-endian pair read as a 68k word is the swapped value
+                self.e("move.w %s,%s" % (lo, r))
+                if name not in SWAPPED:
+                    self.e("ror.w #8,%s" % r)
+            elif name in SWAPPED:
+                self.e("move.b %s,%s" % (lo, r))
+                self.e("lsl.w #8,%s" % r)
+                self.e("move.b %s,%s" % (hi, r))
+            else:
+                self.e("move.b %s,%s" % (hi, r))
+                self.e("lsl.w #8,%s" % r)
+                self.e("move.b %s,%s" % (lo, r))
         elif name == "sp":
             self.e("move.b %s,d7" % hi)
             self.e("lsl.w #8,d7")
@@ -461,6 +627,17 @@ class Emitter:
             r = "d7"
         else:
             r = self.reg16(name, 7)
+        if addr % 2 == 0:
+            if name in SWAPPED:
+                self.e("move.w %s,%s" % (r, lo))
+            else:
+                if r != "d7":
+                    self.e("move.w %s,d7" % r)
+                self.e("ror.w #8,d7")
+                self.e("move.w d7,%s" % lo)
+            return
+        if name in SWAPPED:
+            lo, hi = hi, lo
         self.e("move.b %s,%s" % (r, lo))
         if r != "d7":
             self.e("move.w %s,d7" % r)
@@ -479,10 +656,30 @@ class Emitter:
         isinc = op == "addq"
         if dst[0] == "r16":
             n = dst[1]
-            if n in REG16:
+            if n in SWAPPED:
+                # the low half is the high byte; a carry out of the word means it wrapped
+                r = REG16[n]
+                l = self.new_label()
+                self.e("%s.w #$0100,%s" % ("add" if isinc else "sub", r))
+                self.e("bcc.s %s" % l)
+                self.e("%s.b #1,%s" % (op, r))
+                self.lines.append(l + ":")
+            elif n in REG16:
                 self.e("%s.w #1,%s" % (op, REG16[n]))
             elif n == "sp":
-                self.e("%s.l #1,a5" % op)
+                nxt = self.code.get(ins.pc + ins.length)
+                if ins.pc in self.after_label:
+                    self.e("%s.l #1,a5" % op)       # the second of a pair, reached by a jump
+                elif isinc and nxt is not None and nxt.mn == "inc" and nxt.ops[0] == ("r16", "sp"):
+                    # inc sp twice (dropping a return address): the stack is word aligned
+                    # before and after, not in between, and the NMI pushes a word, so it must
+                    # not interrupt there: both at once, stepping over the second one.
+                    l = self.new_label()
+                    self.after_label[nxt.pc] = l
+                    self.e("addq.l #2,a5")
+                    self.e("bra.s %s" % l)
+                else:
+                    self.e("%s.l #1,a5" % op)
             elif n == "iy":
                 self.e("%s.w #1,%s(a6)" % (op, hx(IYADDR)))
             else:
@@ -610,7 +807,7 @@ class Emitter:
                 self.e("sub.l a6,d5")
                 sreg = "d5"
             elif sn in REG16:
-                sreg = REG16[sn]
+                sreg = self.nat16(sn, 5)
             else:
                 raise Unsupported("%s hl,%s" % (op, sn))
             self.ctoc(setz=True)
@@ -675,7 +872,9 @@ class Emitter:
             self.e("move.w %s(a6),d5" % hx(IYADDR))
             sreg = "d5"
         else:
-            sreg = REG16[sn]
+            sreg = self.nat16(sn, 5)
+        if dn in SWAPPED:
+            raise Unsupported("add %s,rr" % dn)
         if dn == "iy":
             if sreg == "d5":
                 raise Unsupported("add iy,sp/iy")
@@ -799,11 +998,16 @@ class Emitter:
             self.e("move.b d0,-(a5)")
             self.e("move.b d7,-(a5)")
             return
-        r = self.reg16(n, 5)
-        self.e("move.w %s,d7" % r)
-        self.e("lsr.w #8,d7")
-        self.e("move.b d7,-(a5)")
-        self.e("move.b %s,-(a5)" % r)
+        # the Z80 stack is always word aligned here (ld sp,nn even, 16-bit pushes and pops);
+        # a word on it, read big-endian, is the swapped value
+        if n in SWAPPED:
+            self.e("move.w %s,-(a5)" % REG16[n])
+            return
+        r = self.reg16(n, 7)
+        if r != "d7":
+            self.e("move.w %s,d7" % r)
+        self.e("ror.w #8,d7")
+        self.e("move.w d7,-(a5)")
 
     def x_pop(self, ins):
         n = ins.ops[0][1]
@@ -817,10 +1021,9 @@ class Emitter:
             self.e("or.b d7,d6")
             return
         r = "d5" if n == "iy" else REG16[n]
-        self.e("move.b (a5)+,d7")
-        self.e("move.b (a5)+,%s" % r)
-        self.e("lsl.w #8,%s" % r)
-        self.e("move.b d7,%s" % r)
+        self.e("move.w (a5)+,%s" % r)
+        if n not in SWAPPED:
+            self.e("ror.w #8,%s" % r)
         if n == "iy":
             self.e("move.w d5,%s(a6)" % hx(IYADDR))
 
@@ -845,26 +1048,33 @@ class Emitter:
     # ---- block ops --------------------------------------------------------------------------
     def x_ldir(self, ins):
         l = self.new_label()
+        self.e("move.w d1,d7")
+        self.e("ror.w #8,d7")              # the count, BC is 0 afterwards
         self.lines.append(l + ":")
         self.e("move.b (a6,d3.w),(a6,d2.w)")
         self.e("addq.w #1,d3")
         self.e("addq.w #1,d2")
-        self.e("subq.w #1,d1")
+        self.e("subq.w #1,d7")
         self.e("bne.s %s" % l)
+        self.e("moveq #0,d1")
         self.flags(0, const_clear=H | N)
 
     def x_cpir(self, ins):
         loop = self.new_label()
         end = self.new_label()
+        self.e("move.w d1,d5")
+        self.e("ror.w #8,d5")              # the count
         self.lines.append(loop + ":")
         self.e("cmp.b (a6,d3.w),d0")
         self.e("move sr,d7")
         self.e("addq.w #1,d3")
-        self.e("subq.w #1,d1")
+        self.e("subq.w #1,d5")
         self.e("beq.s %s" % end)
         self.e("btst #2,d7")
         self.e("beq.s %s" % loop)
         self.lines.append(end + ":")
+        self.e("ror.w #8,d5")
+        self.e("move.w d5,d1")
         # flags of the last comparison are in d7 (CCR format); C is unchanged
         lo = self.lo
         if lo & (S | Z):
@@ -881,24 +1091,26 @@ class Emitter:
     def jmp_to(self, pc):
         self.e("jmp %s" % self.label_of(pc))
 
+    # The return address goes on the Z80 stack as a word, which read back is the byte
+    # swapped pc; a4 is the dispatch table in that order (z80_init_dispatch), 65536 entries.
+
     def push_ret(self, pc):
-        self.e("move.b #%s,-(a5)" % hx((pc >> 8) & 0xFF, 2))
-        self.e("move.b #%s,-(a5)" % hx(pc & 0xFF, 2))
+        self.e("move.w #%s,-(a5)" % hx(swap16(pc)))
 
     def dispatch_ret(self):
         self.e("moveq #0,d7")
-        self.e("move.b 1(a5),d7")
-        self.e("lsl.w #8,d7")
-        self.e("move.b (a5),d7")
-        self.e("addq.l #2,a5")
+        self.e("move.w (a5)+,d7")
         self.dispatch_d7()
 
     def dispatch_d7(self):
-        self.e("cmp.l #%d,d7" % TABLE_ENTRIES)
-        self.e("bhs z80_badjump")
+        """jump to the code of the swapped Z80 pc in d7 (upper word clear)."""
         self.e("lsl.l #2,d7")
-        self.e("move.l 0(a4,d7.l),-(a7)")
-        self.e("rts")
+        if self.a3_free:
+            self.e("move.l 0(a4,d7.l),a3")
+            self.e("jmp (a3)")
+        else:
+            self.e("move.l 0(a4,d7.l),-(a7)")
+            self.e("rts")
 
     def x_jp(self, ins):
         ops = ins.ops
@@ -906,6 +1118,8 @@ class Emitter:
             r = ops[0][1]
             self.e("moveq #0,d7")
             self.e("move.w %s,d7" % self.reg16(r, 5))
+            if r not in SWAPPED:
+                self.e("ror.w #8,d7")
             self.dispatch_d7()
             return
         if ops[0][0] == "addr":
@@ -914,7 +1128,7 @@ class Emitter:
         cc, tgt = ops[0][1], ops[1][1]
         if cc not in CC_68K:
             raise Unsupported("jp %s" % cc)
-        self.e("move d6,ccr")
+        self.load_cc(cc)
         self.e("b%s %s" % (CC_68K[cc], self.label_of(tgt)))
 
     def x_jr(self, ins):
@@ -923,14 +1137,12 @@ class Emitter:
             self.jmp_to(ops[0][1])
             return
         cc, tgt = ops[0][1], ops[1][1]
-        self.e("move d6,ccr")
+        self.load_cc(cc)
         self.e("b%s %s" % (CC_68K[cc], self.label_of(tgt)))
 
     def x_djnz(self, ins):
         tgt = ins.ops[0][1]
-        self.e("sub.w #$0100,d1")
-        self.e("move.w d1,d7")
-        self.e("lsr.w #8,d7")
+        self.e("subq.b #1,d1")
         self.e("bne %s" % self.label_of(tgt))
 
     def x_call(self, ins):
@@ -942,7 +1154,7 @@ class Emitter:
             return
         cc, tgt = ops[0][1], ops[1][1]
         skip = self.new_label()
-        self.e("move d6,ccr")
+        self.load_cc(cc)
         self.e("b%s %s" % (CC_68K_INV[cc], skip))
         self.push_ret(nxt)
         self.jmp_to(tgt)
@@ -953,7 +1165,7 @@ class Emitter:
         if ops:
             cc = ops[0][1]
             skip = self.new_label()
-            self.e("move d6,ccr")
+            self.load_cc(cc)
             self.e("b%s %s" % (CC_68K_INV[cc], skip))
             self.dispatch_ret()
             self.lines.append(skip + ":")

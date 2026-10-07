@@ -8,7 +8,7 @@ idle-loop head ($02BD) on both sides, so RAM and registers must match exactly.
 import argparse, os, random, re, subprocess, sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gen, bench
+import gen, bench, z80x
 from dkong import DKong
 from machine68k import CPUType, Machine, Register as R
 
@@ -16,6 +16,7 @@ STE = Path(gen.STE)
 BUILD = STE / "build"
 CODE = 0x10000
 BLOCK = 0x40000
+DISPATCH = 0x80000      # the swapped dispatch table, 256 KB
 STACK = 0x0F000
 VASM = str(bench.VASM)
 VLINK = str(bench.VLINK)
@@ -61,13 +62,23 @@ class Lock:
         self.mem.w_block(BLOCK, rom)
         self.ref = DKong()
         self.stops = {self.sym[k]: k for k in ("z80_hook", "z80_badpc", "z80_badjump", "z80_unsupported", "z80_nmi_ret")}
+        # the swapped dispatch table (256 KB), built by the runtime's routine
+        w = self.cpu.w_reg
+        w(R.A0, self.sym["z80_dispatch"])
+        w(R.A1, DISPATCH)
+        w(R.D0, gen.TABLE_ENTRIES)
+        w(R.A7, STACK - 4)
+        self.mem.w32(STACK - 4, self.sym["z80_hook"])
+        self.cpu.w_sr(0x2700)
+        self.cpu.w_pc(self.sym["z80_init_dispatch"])
+        assert self.run68() == "z80_hook"
         self.reset68()
 
     def reset68(self):
         w = self.cpu.w_reg
         for r in (R.D0, R.D1, R.D2, R.D3, R.D4, R.D5, R.D6, R.D7, R.A0, R.A1, R.A2, R.A3):
             w(r, 0)
-        w(R.A4, self.sym["z80_dispatch"])
+        w(R.A4, DISPATCH)
         w(R.A5, BLOCK + 0x6C00)
         w(R.A6, BLOCK)
         w(R.A7, STACK)
@@ -105,7 +116,7 @@ class Lock:
 
     def regs68(self):
         r = self.cpu.r_reg
-        return {"a": r(R.D0) & 0xFF, "bc": r(R.D1) & 0xFFFF, "de": r(R.D2) & 0xFFFF, "hl": r(R.D3) & 0xFFFF,
+        return {"a": r(R.D0) & 0xFF, "bc": z80x.swap16(r(R.D1)), "de": r(R.D2) & 0xFFFF, "hl": r(R.D3) & 0xFFFF,
                 "ix": r(R.D4) & 0xFFFF, "iy": self.mem.r16(BLOCK + 0x7FF0),
                 "sp": (r(R.A5) - BLOCK) & 0xFFFF}
 
@@ -211,6 +222,9 @@ def fine_trace(L, max_instr=200000, stop_pc=0x2BD):
         pc = c.pc
         ins = decode(bytes(L.ref.mem[:0x4000]), pc) if pc < 0x4000 else None
         c.step()
+        if ins and ins.mn in ("ldir", "lddr", "cpir", "cpdr"):
+            while c.pc == pc:               # the reference repeats the instruction
+                c.step()
         # run the 68k to the next instruction label
         steps = 0
         while True:
@@ -223,6 +237,8 @@ def fine_trace(L, max_instr=200000, stop_pc=0x2BD):
                 print("68k runaway after", ins.text if ins else pc)
                 return False
         if p in L.stops:
+            if L.stops[p] == "z80_nmi_ret" and c.pc == stop_pc:
+                return True                 # the NMI returned on both sides
             print("68k stopped at", L.stops[p], "after", ins.text if ins else hex(pc))
             return False
         if labs[p] != c.pc:

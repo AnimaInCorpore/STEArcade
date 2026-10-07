@@ -52,7 +52,19 @@ render_frame:
 
 .same_bank:
 	ifnd NOSPRITES
-	addq	#1,mark_stamp		; the cells marked in this frame
+	lea	tile_marks,a0		; no cell is marked yet in this frame
+	moveq	#0,d0
+	moveq	#0,d1
+	moveq	#0,d2
+	moveq	#0,d3
+	moveq	#0,d4
+	moveq	#0,d5
+	moveq	#0,d6
+	moveq	#0,d7
+	rept MARK_SIZE/32
+	movem.l	d0-d7,(a0)
+	lea	32(a0),a0
+	endr
 	endc
 	bsr	scan_tiles
 	bsr	draw_dirty_tiles
@@ -78,26 +90,61 @@ scan_tiles:
 	move.l	bg_address,a3
 	lea	tile_off,a2
 
-	moveq	#0,d6			; byte index of the current long
-	move	#255,d7
-
 	tst.b	force_scan
 	bne.s	.forced
 
+	; The tiles of the 28 visible rows ($7440 - $77BF), eight longs per turn.
+
+	lea	$40(a0),a0
+	lea	$40(a1),a1
+	move	#224/8-1,d7
+
 .scan:
 	cmpm.l	(a0)+,(a1)+
-	bne.s	.diff
-
-.next_long:
-	addq	#4,d6
-	dbf	d7,.scan
+	bne.s	.diff0
+.c1:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff1
+.c2:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff2
+.c3:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff3
+.c4:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff4
+.c5:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff5
+.c6:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff6
+.c7:	cmpm.l	(a0)+,(a1)+
+	bne.s	.diff7
+.c8:	dbf	d7,.scan
 	bra.s	.finished
+
+.diff0:	bsr.s	.diff
+	bra.s	.c1
+.diff1:	bsr.s	.diff
+	bra.s	.c2
+.diff2:	bsr.s	.diff
+	bra.s	.c3
+.diff3:	bsr.s	.diff
+	bra.s	.c4
+.diff4:	bsr.s	.diff
+	bra.s	.c5
+.diff5:	bsr.s	.diff
+	bra.s	.c6
+.diff6:	bsr.s	.diff
+	bra.s	.c7
+.diff7:	bsr.s	.diff
+	bra.s	.c8
+
+; The long before a0 / a1 differs: queue its changed bytes.
 
 .diff:
 	subq.l	#4,a0
 	subq.l	#4,a1
+	move.l	a0,d0
+	sub.l	a6,d0
+	sub	#$7400,d0		; index of the first byte
 	moveq	#3,d3
-	move	d6,d0			; index of the first byte
 
 .byte:
 	move.b	(a0)+,d1
@@ -110,7 +157,7 @@ scan_tiles:
 	addq.l	#1,a1
 	addq	#1,d0
 	dbf	d3,.byte
-	bra.s	.next_long
+	rts
 
 .forced:
 	clr.b	force_scan
@@ -187,12 +234,12 @@ draw_dirty_tiles:
 	ifnd NOSPRITES
 	move	d0,d1			; sprites on this tile have to be drawn again
 	add	d1,d1
-	lea	tile_mark_cell,a1
+	lea	tile_mark_byte,a1
 	move	(a1,d1.w),d1
-	bmi.s	.no_mark
+	lea	tile_mark_bit,a1
+	move.b	(a1,d0.w),d2
 	lea	tile_marks,a1
-	move	mark_stamp,(a1,d1.w)
-.no_mark:
+	bset	d2,(a1,d1.w)
 	endc
 
 	dbf	d7,.loop

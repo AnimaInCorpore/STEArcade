@@ -92,9 +92,12 @@ def build_sprites(gfx, quads):
     Index: ((v * 16 + skew) * 16 + line) * 4.
     data: the 4 plane words of every line for a colour quad (the pixels of the line whose
     pen sets that plane), the source of the blits.  Index: ((v * Q + quad) * 16 + line) * 8.
+    spans: per v the first line that is not empty and the number of lines up to the last
+    one (0 for a blank shape), so the renderer leaves the empty lines out.
     """
     masks = bytearray()
     data = bytearray()
+    spans = []
     lines = {}
     for code in range(128):
         shape = gfx.sprites[code]
@@ -108,6 +111,8 @@ def build_sprites(gfx, quads):
         for flipy in range(2):
             rows = lines[(code, flipy)]
             outline = [sum(1 << (15 - du) for du in range(16) if pens[du]) for pens in rows]
+            drawn = [i for i, m in enumerate(outline) if m]
+            spans.append((drawn[0], drawn[-1] - drawn[0] + 1) if drawn else (0, 0))
             for skew in range(16):
                 for m in outline:
                     if skew == 0:
@@ -127,7 +132,7 @@ def build_sprites(gfx, quads):
                             if pv and (q[plane] >> (pv - 1)) & 1:
                                 word |= 1 << (15 - du)
                         data += word.to_bytes(2, "big")
-    return bytes(masks), bytes(data)
+    return bytes(masks), bytes(data), spans
 
 
 def build():
@@ -169,7 +174,7 @@ def build():
     os.makedirs(BUILD, exist_ok=True)
     open(os.path.join(BUILD, "dk_tiles.bin"), "wb").write(b"".join(blocks))
     quads, quad_of = sprite_quads(penmap)
-    spr_masks, spr_data = build_sprites(gfx, quads)
+    spr_masks, spr_data, spans = build_sprites(gfx, quads)
     open(os.path.join(BUILD, "dk_spr_masks.bin"), "wb").write(spr_masks)
     open(os.path.join(BUILD, "dk_spr_data.bin"), "wb").write(spr_data)
     colcodes = bytes(c & 0x0F for c in gfx.colcodes)
@@ -187,6 +192,9 @@ def build():
     lines.append("dk_spr_quad:\t\t; combo (bank*16+colour code) -> byte offset of its colour quad in a sprite's data")
     for i in range(0, 64, 16):
         lines.append("\tdc.w " + ",".join(str(quad_of[c] * 128) for c in range(i, i + 16)))
+    lines.append("dk_spr_span:\t\t; (code, flip y) -> first line that is not empty, number of lines (0: blank)")
+    for i in range(0, 256, 8):
+        lines.append("\tdc.b " + ",".join("%d,%d" % s for s in spans[i:i + 8]))
     lines.append("\tcnop 0,2")
     lines.append("dk_tile_combo:\t\t; combo (bank*16+colour code) -> offset of its 8 KiB block in dk_tiles")
     for i in range(0, 64, 8):
@@ -205,13 +213,21 @@ def build():
     for i in range(0, 1024, 16):
         lines.append("\tdc.b " + ",".join(str(x) for x in cc[i:i + 16]))
     lines.append("\tcnop 0,2")
-    lines.append("tile_mark_cell:\t\t; tile -> byte offset of its cell in tile_marks (40 per row, tile column + 4), -1: not shown")
-    cells = []
+    # tile -> its cell bit in tile_marks (8 bytes per display row, bit 7 of byte 0 is cell
+    # column 0 = tile column -4); tiles that are not shown get a bit of the spare last row
+    mark_byte, mark_bit = [], []
     for idx in range(1024):
         col, row = idx & 31, idx >> 5
-        cells.append(((col * 40 + (29 - row) + 4) * 2) if 2 <= row <= 29 else -1)
+        cc = (29 - row) + 4 if 2 <= row <= 29 else 0
+        mark_byte.append((col * 8 + (cc >> 3)) if 2 <= row <= 29 else 35 * 8)
+        mark_bit.append(7 - (cc & 7))
+    lines.append("tile_mark_byte:\t\t; tile -> byte offset of its cell in tile_marks")
     for i in range(0, 1024, 16):
-        lines.append("\tdc.w " + ",".join(str(x) for x in cells[i:i + 16]))
+        lines.append("\tdc.w " + ",".join(str(x) for x in mark_byte[i:i + 16]))
+    lines.append("tile_mark_bit:\t\t; tile -> bit of its cell in that byte")
+    for i in range(0, 1024, 16):
+        lines.append("\tdc.b " + ",".join(str(x) for x in mark_bit[i:i + 16]))
+    lines.append("\tcnop 0,2")
     lines.append("tile_off:")
     for i in range(0, 1024, 8):
         lines.append("\tdc.l " + ",".join(("$%X" % x) if x >= 0 else "-1" for x in off[i:i + 8]))

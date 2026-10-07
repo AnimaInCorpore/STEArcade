@@ -18,6 +18,8 @@ NFSR = %01000000
 STRIDE = 256				; bytes per line, 512 pixel virtual screen
 GAME_X = 24				; byte offset of the game area in a line (3 chunks)
 VISIBLE_ROWS = 28			; arcade tile rows 2..29
+MARK_ROWS = 36				; 8 pixel rows of tile_marks (sprites.s): 32 shown, sprites may hang over
+MARK_SIZE = MARK_ROWS*8
 KEY_ESC = $01
 
 ; Timer A fires TA_DATA * 20.3 us after the VBL, in the middle of scanline 31; its handler
@@ -96,10 +98,18 @@ start:
 	ifd DEBUG
 	move	dk_palette,$ffff8240.w	; stage colours off again
 	endc
+	ifd TIMES
+	move.l	#frame_times,frame_times_ptr
+	endc
 
 	; Start the Z80 main thread.
 
-	lea	z80_dispatch,a4
+	lea	z80_dispatch,a0		; the dispatch table in the order the code uses it
+	lea	z80_dispatch_sw,a1
+	move	#TABLE_ENTRIES,d0
+	bsr	z80_init_dispatch
+
+	lea	z80_dispatch_sw,a4
 	lea	z80_block,a6
 	move.b	#$80,$7f80(a6)		; DSW0 before the first VBL
 	lea	$6c00(a6),a5
@@ -293,6 +303,9 @@ restore_hardware:
 	rts
 
 quit:
+	ifd TIMES
+	bsr	dump_times
+	endc
 	bsr	restore_hardware
 
 	move.l	old_ssp,-(sp)		; Super off
@@ -380,6 +393,12 @@ vbl:
 	st	vbl_busy
 	movem.l	d0-d7/a0-a6,-(sp)
 
+	ifd TIMES
+	clr.b	$fffffa1d.w		; Timer D counts the frame: 256 ticks of 81 us from here
+	clr.b	$fffffa25.w
+	move.b	#7,$fffffa1d.w
+	endc
+
 	; Screens: the one drawn during this frame is shown from the next one on
 	; (the STE takes the new address at the next VBL).
 
@@ -432,6 +451,9 @@ vbl:
 
 z80_nmi_ret:
 vbl_render:
+	ifd TIMES
+	move.b	$fffffa25.w,frame_nmi_end
+	endc
 	lea	z80_block,a6
 	ifd DEBUG
 	move.l	draw_screen_address,a0
@@ -442,6 +464,18 @@ vbl_render:
 	move	cnt_skip,1024(a0)
 	endc
 	bsr	render_frame
+
+	ifd TIMES
+	move.l	frame_times_ptr,a0	; Timer D when the NMI and the frame ended, skipped VBLs
+	move.b	frame_nmi_end,(a0)+
+	move.b	$fffffa25.w,(a0)+
+	move.b	cnt_skip+1,(a0)+
+	move.b	old_bank+1,(a0)+	; palette bank (a change redraws every tile)
+	cmp.l	#frame_times_end,a0
+	bhs.s	.times_full
+	move.l	a0,frame_times_ptr
+.times_full:
+	endc
 
 	ifd DUMPAT
 	cmp.l	#DUMPAT,frame_counter
@@ -455,7 +489,7 @@ vbl_render:
 	move.l	frame_counter,d0
 	cmp.l	#FRAMES,d0
 	blt.s	.go_on
-	bsr	quit
+	st	quit_flag		; the next VBL quits (as the Escape key does)
 .go_on:
 	endc
 
@@ -770,15 +804,59 @@ crash_name:
 ; the reference renderer drawing the same state).
 
 dump_state:
-	clr	-(sp)			; Fcreate
+	pea	z80_block+$6000
+	move.l	#$2000,-(sp)
 	pea	dump_name
+	bsr.s	write_file
+	lea	12(sp),sp
+	rts
+
+dump_name:
+	dc.b	"DUMP.BIN",0
+	even
+
+	endc
+
+	ifd TIMES
+
+; Measurement: the frame records to TIMES.BIN (tools/frametimes.py).
+
+dump_times:
+	move.l	frame_times_ptr,d0
+	sub.l	#frame_times,d0
+	pea	frame_times
+	move.l	d0,-(sp)
+	pea	times_name
+	bsr.s	write_file
+	lea	12(sp),sp
+	rts
+
+times_name:
+	dc.b	"TIMES.BIN",0
+	even
+
+	endc
+
+	ifd DUMPAT
+WRITE_FILE = 1
+	endc
+	ifd TIMES
+WRITE_FILE = 1
+	endc
+	ifd WRITE_FILE
+
+; write_file: 4(sp) name, 8(sp) length, 12(sp) data (GEMDOS)
+
+write_file:
+	clr	-(sp)			; Fcreate
+	move.l	4+2(sp),-(sp)
 	move	#$3c,-(sp)
 	trap	#1
 	addq	#8,sp
 	move	d0,d6
 
-	pea	z80_block+$6000		; Fwrite
-	move.l	#$2000,-(sp)
+	move.l	12(sp),-(sp)		; Fwrite
+	move.l	8+4(sp),-(sp)
 	move	d6,-(sp)
 	move	#$40,-(sp)
 	trap	#1
@@ -789,10 +867,6 @@ dump_state:
 	trap	#1
 	addq	#4,sp
 	rts
-
-dump_name:
-	dc.b	"DUMP.BIN",0
-	even
 
 	endc
 
@@ -903,7 +977,18 @@ scr_address:	ds.l	2
 draw_screen_address:	ds.l	1
 display_screen_address:	ds.l	1
 
+	ifd TIMES
+frame_nmi_end:	ds.b	1
+	even
+frame_times_ptr:	ds.l	1
+frame_times:	ds.b	4*4096
+frame_times_end:
+	endc
+
 z80_block:	ds.b	$8000
+
+	cnop 0,4
+z80_dispatch_sw:	ds.l	65536	; byte swapped Z80 pc -> 68k address (z80_init_dispatch)
 
 	ds.b	1024
 own_stack_top:
