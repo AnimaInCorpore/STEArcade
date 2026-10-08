@@ -64,12 +64,23 @@ runtime's schedule, identical RAM).  Coverage for the translator: `ref/bb_cover.
 
 ## Status (2026-10-08)
 
-Game logic: identical to the reference (RAM compared every frame over 760 frames of boot, attract, coin, play).
-Display: exact, but slow: a frame costs 0.16-0.9 M cycles to draw (gameplay ~0.9 M: the changed tile entries'
-diff 83k, the shifted sprite tiles ~2.7k cycles each, the slot scans), against 0.16 M per VBL, of which the
-game's interrupts take ~0.1 M.  So the screen updates a few times a second while the game itself runs at full
-speed.  Ideas, in order: a write barrier instead of the video RAM diff (106 store sites), a leaner shifted
-tile (or the Blitter as the other ports do), table driven `obj_slots`, the `ldir` of the object table
-(`$04B6`, 17k cycles) as a block move, skipping the rows of the big strips that have no dirty cell.
-Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes,
-per-band palettes (the screen has 22-26 distinct colours, the STE shows 16).
+Works: boots in the F030Arcade Hatari straight into the attract mode (the boot self-tests are skipped), every
+screen of it is drawn correctly (title, the instruction pages, the demo play), the picture is centred with the
+borders removed.  Game logic: identical to the reference (RAM compared every frame, 760 frames of boot, attract,
+coin, play); renderer: the reference's bitmap through the colour table, pixel for pixel, on consecutive frames.
+
+Slow.  The game's interrupts cost 0.1-1.1 M cycles per VBL (a frame is 0.16 M; the main CPU executes 4-10k
+translated instructions per frame, the MCU 40k cycles, the demo play phases are the worst) and drawing a frame
+0.16-0.9 M (gameplay ~0.9 M).  So the plain 8 MHz STE neither keeps the arcade's 60 Hz nor updates the picture
+more than a few times a second: while a frame is being drawn, every other VBL skips the game's interrupts
+(`render_age`), so the game slows down and the display keeps coming.  Not playable at that speed; the port needs
+a faster 68000 (the Falcon's 16 MHz 030) or the work below.
+
+Next, in order: a write barrier instead of the video RAM diff (83k a frame; 106 store sites), the shifted
+tiles (2.7k cycles each: bake the sprites as composites or use the Blitter as the other ports do), table driven
+`obj_slots`, skipping the rows of the big strips without a dirty cell, cheaper translated code (the Z80 handler
+is 40-70% of the logic, the `ld a,r` / `ex af,af'` / `exx` register shuffles are in the hot paths).
+Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, a keyboard
+check of coin / start in Hatari (the scancodes: `5` coin 1, `1` start 1, `6` coin 2, `2` start 2, arrows, space
+= jump, alt = bubble), per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
+per bank weight are kept, the rest map to the nearest).
