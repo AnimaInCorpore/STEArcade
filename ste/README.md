@@ -158,6 +158,35 @@ prints 0 differing pixels for all four frames now.  Notes:
   shows as whole tile colour sets wrong, a position mismatch as a one pixel outline around every sprite.
 * Checked and fine for Donkey Kong: tile colour codes, video RAM layout, sprite x (`x + $F8`), flip x/y, the
   8257 sprite DMA (the game programs `$6900` -> `$7000`, `$180` bytes, exactly what `z80_dma` copies).
+* **No key press**: MAME shows its startup screens (game info, "ROMs not correct" warning) and waits for a key
+  unless `-seconds_to_run` is below 300 (`ui.cpp`: the startup screens are off for `-str` < 300).  The scripts use
+  `-seconds_to_run 250` (about 15000 frames with `-nothrottle`, enough for every check here).  The warning itself
+  stays in the log; Galaga's comes from the blank MCU ROMs below, Bubble Bobble's from the PAL dumps nobody has.
+* **The MAME source in `F030Arcade/third_party/mame` is older than the binary** (Galaga's blue channel differs:
+  the source says 0x47/0x97, MAME 0.289 produces 0x51/0xAE).  The installed `mame` is the truth.
+
+Results, 2026-10-08 (all with 0 differing pixels now, `ref/mame_cmp_dkong.py`, `ref/mame_cmp_galaga.py`,
+`ref/mame_cmp_bublbobl.py`):
+
+* **Donkey Kong**: sprite position and palette, see above.
+* **Galaga** (found by the check): (1) `decode_gfx` made the first plane the *least* significant bit, MAME the
+  most significant one: pixel values 1 and 2 of every character and sprite were swapped (the enemies were orange
+  instead of teal, the ship blue instead of red, the NAMCO logo white instead of red); text only looked right because
+  most character colour tables are symmetric in pens 1 and 2.  (2) Blue was 0x47/0x97 (maximum 222), MAME 0x51/0xAE
+  (maximum 255; the star palette's blue likewise 0, 0x51, 0xAE, 0xFF).  Both are in `tools/galaga.py`, so
+  `galaga_assets.py` (the STE graphics and palette) picks them up on the next `tools/galaga_build.py`.  The
+  starfield is not verified (MAME's starfield was off in the frozen frames).  MAME can not run Galaga from the ROM set:
+  the Namco 51xx/54xx MCU ROMs are missing, a blank 1 KB stand-in (`namco51.zip`, `namco54.zip`, wrong checksum,
+  MAME warns and runs) ends in the test screen, so `ref/mame_dump.lua` with `INJECT=` writes the reference's RAM
+  image into MAME's RAM and freezes it with write taps (MAME's Lua has no CPU halt; `set_input_line` is not exposed),
+  and MAME draws it: that tests the renderer, not the game.
+* **Bubble Bobble**: nothing to fix.  Palette (RGBx444, `v * 17`), tile decode, object/column layout, flip and the
+  background pen 255 match MAME at frames 700, 1500 and 2500 (about 77 objects each).  MAME runs the set itself.
+
+Lesson for new ports: do this check *before* building the port's graphics, and re-check whenever the reference
+renderer changes.  A plane order or a colour weight that is wrong in the reference is wrong in the port, and
+"port equals reference" tests can not see it.
+
 * Known MAME behaviours the port does not have: the 16 sprites per scanline limit (later sprites of a line vanish)
   and the wrap around of sprites at the arcade's 256 pixel edge (MAME draws them again at x - 256 / y - 256).  Neither
   is visible in normal play.

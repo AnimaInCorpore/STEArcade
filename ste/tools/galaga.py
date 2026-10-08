@@ -40,7 +40,8 @@ def load(name):
 
 
 def decode_gfx(data, width, height, planes, xoffs, yoffs, size):
-    """MAME gfx layout decode: bit offsets count from the MSB of each byte."""
+    """MAME gfx layout decode: bit offsets count from the MSB of each byte, the first plane is the
+    most significant bit of the pixel (until 2026-10-08 it was the least: pens 1 and 2 swapped)."""
     n = len(data) // size
     out = np.zeros((n, height, width), np.uint8)
     for i in range(n):
@@ -51,7 +52,7 @@ def decode_gfx(data, width, height, planes, xoffs, yoffs, size):
                 for p, po in enumerate(planes):
                     off = base + po + xoffs[x] + yoffs[y]
                     bit = (data[off >> 3] >> (7 - (off & 7))) & 1
-                    v |= bit << p
+                    v |= bit << (len(planes) - 1 - p)     # the first plane is the most significant (MAME)
                 out[i, y, x] = v
     return out
 
@@ -72,11 +73,14 @@ class Gfx:
             c = prom[i]
             r = 0x21 * (c & 1) + 0x47 * ((c >> 1) & 1) + 0x97 * ((c >> 2) & 1)
             g = 0x21 * ((c >> 3) & 1) + 0x47 * ((c >> 4) & 1) + 0x97 * ((c >> 5) & 1)
-            b = 0x47 * ((c >> 6) & 1) + 0x97 * ((c >> 7) & 1)
+            # blue has two resistors only; MAME's colours reach 255 (0x51 + 0xAE), not 0xDE (checked against a
+            # MAME snapshot, ref/mame_cmp_galaga.py; the old source of galaga_v.cpp says 0x47 + 0x97)
+            b = 0x51 * ((c >> 6) & 1) + 0xAE * ((c >> 7) & 1)
             self.palette.append((r, g, b))
         for i in range(64):              # the stars
             m = (0x00, 0x47, 0x97, 0xde)
-            self.palette.append((m[i & 3], m[(i >> 2) & 3], m[(i >> 4) & 3]))
+            mb = (0x00, 0x51, 0xAE, 0xFF)
+            self.palette.append((m[i & 3], m[(i >> 2) & 3], mb[(i >> 4) & 3]))
         self.char_lut = [(v & 0x0f) | 0x10 for v in load("prom-4.2n")]     # colour*4+pen -> palette
         self.sprite_lut = [v & 0x0f for v in load("prom-3.1c")]
         self.rgb = np.array(self.palette + [(0, 0, 0)], np.uint8)        # index 96: black fill

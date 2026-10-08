@@ -26,7 +26,7 @@ for f in frames:
     out = tempfile.mkdtemp()
     env = dict(os.environ, FRAME=str(f), OUT=out, START="0x6000", END="0x7fff")
     subprocess.run(["mame", "dkong", "-window", "-rompath", ROMS, "-sound", "none", "-nothrottle",
-                    "-seconds_to_run", "600", "-skip_gameinfo", "-autoboot_script",
+                    "-seconds_to_run", "250", "-skip_gameinfo", "-autoboot_script",
                     os.path.join(HERE, "mame_dump.lua"), "-snapshot_directory", out, "-snapname", "shot"],
                    env=env, cwd=out, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ref = np.array(Image.open(os.path.join(out, "shot.png")).convert("RGB"))
