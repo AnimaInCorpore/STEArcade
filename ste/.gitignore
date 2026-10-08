@@ -4,3 +4,4 @@ run/
 *.pkl
 *.png
 __pycache__/
+venv/
