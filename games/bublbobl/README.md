@@ -135,6 +135,53 @@ that changed it (+22-24% in the frame after), 3-9 M cycles each, and 10-16 of th
 per-bank redraw remove the changes that were only a shifted slot order; when a scene really loads a new palette (13 banks
 change colour) the frame still costs ~6.5 M cycles.
 
+**Can it reach 50 fps on a plain STE?  No.**  The game's own work per game frame (translated Z80 + MCU + the runtime glue) is
+75k cycles in the attract mode and 89-107k in the play, of the 160k a VBL has: 56-67% before anything is drawn.  A picture
+costs ~1.8 M cycles in the play (~0.4 M in the attract mode), so drawing one every VBL would have to fit in 53-71k:
+25-35 times less.  Nothing measured comes close: the renderer changes above took ~10%, the Blitter (below) would take
+another 7.5% at best, a micro-optimising pass perhaps 20-30%.  Full speed needs a CPU several times faster (the Falcon's
+16 MHz 030 with its caches is the obvious candidate: it has no Blitter, which this renderer does not use anyway, but the
+STE-specific parts, the border removal and the palette writes, would need checking) or a different division of work.  That is an
+estimate from simulator cycles; nothing has run on such a machine, and the STE Blitter would not be there to help.
+
+**Colour cycling deferred** (`-D NOCYCLE=1`, `rf_palette`): a palette change of fewer than 16 entries (the arcade flashes 1-3
+entries, 14 at most in the first 1500 frames) is ignored, so the picture keeps the colours it had.  Real schedule,
+`tools/profile.py`: attract 0.79 / 13.8 -> **0.86 / 17.8** (game frames per VBL / pictures a second), play 0.57 / 1.8 -> **0.60 / 2.5**
+and 0.63 / 3.3 -> **0.65 / 3.7**; the 8 M cycle spikes of the play disappear (max 2.0 M); the colour error against the arcade
+rises to ~5 of 255 (7% of the pixels not in their colour), as the flashing is lost.  So the palette work is worth 5-9% of the
+speed and 30-40% of the picture rate, and it is the one place where exactness is traded for speed: not on by default.
+
+**Blitter experiment** (`ref/blit_bench.py`, `tools/blit_project.py`; the engine's Blitter model with 4 cycles a bus word, partial
+masks read the destination, register set-up estimated; Blitter and CPU results are **pixel-identical** in every case).  One
+8 x 8 tile, cycles with set-up (CPU = `draw_tile`'s own loop, Blitter = one blit per row, Y count 4 = the four planes, the
+row's opaque pixels as end masks):
+
+| case | CPU | Blitter |
+|---|---|---|
+| aligned, with transparent pixels | 836-876 | 904 (no gain) |
+| aligned, opaque | 516 | 904 (worse) |
+| shifted, left cell even (one destination word) | 2494 | 904 (2.8x) |
+| shifted, left cell odd (two words, `NFSR`) | 2494 | 1256 (2.0x) |
+| clear / copy 1 group (2 cells) / 8 groups (16 cells) | 544 / 4352, 1056 / 8448 | 276 / 1172, 404 / 2196 (2-3.9x) |
+
+Applied to real frames (exact counters of the `--sim` build): in the play a frame has 244 aligned tiles (all with transparent
+pixels) and 79 shifted ones (40 even, 40 odd), 198 cells cleared in 51 whole-group runs (+49 lone cells), 39 copied; the
+Blitter would save 113k cycles on the shifted tiles (6.3% of a 1.82 M frame), 13.6k on the clears (0.7%) and 8k on the copies
+(0.5%): **7.5%**; in the coin / start window 4.8%, in the attract mode 1.7%.  The aligned tiles, the bulk, gain nothing: an 8 x 8
+tile is too small to pay the blit set-up.  Caveats: the long run blits (up to 2.2 k cycles) hog the bus and would delay the border
+timers (see the Blitter notes in `docs/porting-guide.md`), so they would have to be split, which costs part of the gain; the
+numbers are simulated bus cycles, not Hatari frame times.  A Blitter renderer for this game would pay for a background layer
+composited by rectangle copies and for sprite-like objects, i.e. a different renderer, not a different inner loop.
+
+**The whole-object rule** (`docs/architecture.md` / `docs/porting-guide.md`, "Whole-object drawing (all ports)": a wider virtual
+screen with hidden margins, objects drawn whole, no clipping routines or runtime edge masks): the renderer already draws whole
+tiles and has the 16-byte margins left and right and the guard rows above and below (`YPAD`); what it does is cull a tile that is
+entirely outside (`draw_tile`, allowed by the rule) and erase the overhang of the partly outside tiles each frame (`rf_cleanup`,
+25k cycles = 1.1% of a play frame), because the margins are **visible** black bands of the 320 pixel screen: the 256 pixel
+game area leaves 32 pixels each side, so the "hidden" space of the rule does not exist here and a tile spilling over the edge
+would show.  Keeping `rf_cleanup` is the exact choice (the arcade clips); dropping it would be the 1942 choice (spill into the
+margins, a visible deviation) and would save 1.1%.
+
 Next, in order: the steady cost of the play, i.e. the per-cell work (the aligned tile: ~300 cycles of set-up before
 its first row, `get_tile`'s hash, the clearing of a cell an opaque tile overwrites anyway, `rf_redraw`'s object loop),
 fewer dirty cells (an object marks all its tiles, old and new), table driven `obj_slots`; the scene change (draw the

@@ -931,10 +931,16 @@ draw_tile:
 	btst	#0,d5
 	beq.s	.left_even
 	addq.w	#1,d4
+	ifd SIM
+	addq.l	#1,sim_cnt_lodd
+	endc
 	lea	(a3,d4.w),a3		; the left cell's byte
 	lea	7(a3),a4		; the right cell: the next group's first byte
 	bra.s	.u_go
 .left_even:
+	ifd SIM
+	addq.l	#1,sim_cnt_leven
+	endc
 	lea	(a3,d4.w),a3
 	lea	1(a3),a4
 .u_go:
@@ -994,6 +1000,9 @@ draw_tile:
 	tst.l	4(a0)
 	bne.s	.opaque
 .arow:
+	ifd SIM
+	addq.l	#1,sim_cnt_arows
+	endc
 	move.l	(a1)+,d0
 	move.l	(a1)+,d5
 	movep.l	0(a3),d7
@@ -1004,6 +1013,9 @@ draw_tile:
 	dbf	d1,.arow
 	rts
 .opaque:
+	ifd SIM
+	addq.l	#1,sim_cnt_orows
+	endc
 	move.l	(a1)+,d0
 	addq.l	#4,a1
 	movep.l	d0,0(a3)
@@ -1147,6 +1159,7 @@ rf_palette:
 .cmp:	cmpm.l	(a0)+,(a1)+
 	bne.s	.changed
 	dbf	d0,.cmp
+.pal_same:
 	lea	bank_seen_b,a0		; the palette is the same: a bank that came into use needs a slot
 	lea	bank_known_b,a1
 	moveq	#16-1,d0
@@ -1160,6 +1173,21 @@ rf_palette:
 	dbf	d0,.nb
 	rts
 .changed:
+	ifd NOCYCLE
+	; colour cycling is deferred (-D NOCYCLE=1): fewer than 16 entries changed is an animation (the arcade flashes
+	; a few entries; at most 14 at once in the first 1500 frames): ignored, the shadow stays as it is
+	lea	S_PAL,a0
+	lea	pal_shadow,a1
+	moveq	#0,d3
+	move.w	#256-1,d0
+.cc:	move.w	(a0)+,d1
+	cmp.w	(a1)+,d1
+	beq.s	.ccn
+	addq.w	#1,d3
+.ccn:	dbf	d0,.cc
+	cmp.w	#16,d3
+	blo	.pal_same
+	endc
 	; entries that change are volatile (flashing colours keep a slot of their own, so that the
 	; colour mapping does not change with them)
 	lea	S_PAL,a0
@@ -1828,6 +1856,12 @@ bb_tiles:	incbin "bb_tiles.bin"
 	include "bb_tables.s"
 	even
 	section bss,bss
+	ifd SIM
+sim_cnt_arows:	ds.l	1		; (tools/blit_project.py) rows drawn by the aligned / opaque / shifted paths
+sim_cnt_orows:	ds.l	1
+sim_cnt_leven:	ds.l	1
+sim_cnt_lodd:	ds.l	1
+	endc
 tcache:		ds.b	TC_SIZE*TC_ENTRY
 pal_shadow:	ds.b	512
 snap_vram:	ds.b	$1D00
