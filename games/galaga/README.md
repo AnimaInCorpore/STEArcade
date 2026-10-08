@@ -1,0 +1,166 @@
+# Galaga, Atari STE
+
+Second port (started 2026-10-08), the first with several CPUs: three Z80s translated into one 68000 program, the
+Blitter sprite renderer of Donkey Kong extended to double-size sprites and a starfield.  Paths in this file are
+relative to `games/galaga/`; the shared pieces are described in `docs/architecture.md` and the method in
+`docs/porting-guide.md`.
+
+* `src/` the runtime and renderer (`galaga.s`, `galaga_render.s`, `galaga_sprites.s`, `galaga_stars.s`)
+* `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `build.py`
+* `ref/` analysis scripts and the MAME comparison; the coverage pickles go to `build/galaga/`
+
+Build and run from the repository root: `python port.py build galaga`, `python port.py run galaga shot@30`.
+
+State: the attract mode runs at the game's
+full speed (frame counter = VBL counter, no skipped interrupts) with everything drawn
+(tiles, the formation, explosions, the starfield, the high score table); the display
+drops frames: 25-28 fps in the title phases, 8-15 fps with the full formation.  Build
+`python port.py build galaga [--debug] [--full-selftest]` -> `run/galaga/GALAGA.PRG` (needs the six ROM
+files of the `galaga` set extracted to `assets/roms/extracted/galaga/`).  The main CPU's boot
+RAM test (about 600 of the 850 frames to the attract mode) is patched out of the translation
+(`machine.skip_ram_test`, the bank checksum byte compensates; `--full-selftest` keeps it).
+`python port.py run galaga shot@30` (`tools/hatari.sh`) runs the port in the F030Arcade Hatari and grabs
+screenshots at the given times (`/tmp/hrun`); the display starts at buffer line `CROP_TOP` = 24.
+
+Reference: `tools/machine.py` models the arcade from MAME's galaga.cpp: three Z80s at
+3.072 MHz with the shared map (ROM per CPU at 0-3FFF, switches/latches/06XX at 6800-7100,
+RAM 8000-9BFF with the sprite table at the end of each 1 KB, video latch A000), IRQ to
+CPU1/CPU2 at the vertical blank when enabled, NMI to CPU3 at lines 64 and 192, the 06XX's
+NMI clock to CPU1 during transfers, the 51XX simulated the way old MAME did (coins,
+credits, start buttons, joysticks with the fire edge; the MCU ROM is not in the set), the
+05XX starfield (LFSR period walked once per frame), the renderer (tiles 36x28 through
+tilemap_scan, 64 sprites with the double sizes, stars under them, characters over them,
+rotated 90).  It boots to the attract mode in 1500 frames at ~45 frames/s; coin, start and
+play work (`ref/galaga1.py`).  Probes: `ref/galaga2.py` (the sound CPU can be stopped
+after its boot: screens identical over 2400 frames; it only posts its test result $9101
+and clears $9A00-$9AFF), `ref/galaga3.py` (sprites changed per frame mean 4.9, 90% 13,
+tiles 1.5; every I/O access is a static address except the NMI handler's `ldi` through
+hl' and the video latch through hl), `ref/galaga4.py` (13 colours plus black are drawn,
+so the STE palette has two entries for the stars), `ref/galaga5.py` (the port's schedule,
+below, against the interleaved reference: same game, stars one scroll step apart),
+`ref/cover.py` (coverage pickles for the translation, `build/galaga/`).
+
+Schedule of the port (`run_frame_port` in tools/machine.py is the model): the main CPU's program
+is the foreground thread (its main loop idles at $038D on a flag the IRQ sets); at each
+VBL the main CPU's IRQ handler and then the sub CPU's run to completion (the sub CPU's
+main loop only idles once booted, so it needs no thread); the 06XX NMIs run at the control
+write as often as the program keeps the clock going (a read puts the chip's byte into
+the $7000 cell before the handler's `ldi`, a write takes it out afterwards); the boot
+handshake (CPU1 spins on the self-test results at $3589/$359C, CPU2 at $057F/$0596) runs
+by yields at those spin loops (`z80_hook`), the sound CPU's part natively.
+
+Memory: one block [sub ROM 32K | shared RAM 32K | main ROM 32K]: the main CPU's code
+uses the signed model (a6 = its ROM, the RAM below), the sub CPU's the long model (a6 =
+its ROM, the RAM above); the register cells $6800-$7FFF are per CPU.  The dispatch
+tables are 2 x 256 KB.
+
+Video: 224 x 288 rotated, the screen buffers hold 384 lines (DISP_TOP = 32 lines of slack
+above, the STE shows 277 of the 288 from `CROP_TOP` on - which lines to lose is open).
+Characters: 8 x 8 cells per colour quad (18 quads, 72 KB), pen 0 transparent and black
+in the background; a cell a sprite was drawn in gets its character back masked
+(chars_over).  Sprites: as Donkey Kong's renderer with the 64 entries gathered into 8
+bytes and split into up to four 16 x 16 parts (double sizes), 16 colour quads (512 KB),
+masks 256 KB.  Stars: single pixels in colours 14/15 plotted where the draw screen is
+black after the sprites (nothing of the game is black), the previous frame's cleared
+first.  Palette: black, 13 game colours, 2 greys.
+
+Budget (reference statistics): both CPUs idle most of the time (about 2100 translated
+instructions of work per frame), 5-13 sprites change per frame, 100 stars a frame.
+
+### Findings (2026-10-08)
+
+- The VBL runs the game's interrupts every frame and then draws with the VBL enabled
+  (`vbl_render`, SR $2300): a VBL that interrupts the renderer runs the two IRQ handlers
+  (the main CPU's with its registers saved in `main_ctx`) and skips the drawing, so the
+  game keeps its pace and the display drops frames.  The first version drew inside the
+  VBL with the VBL masked, which halved the game speed as soon as drawing took longer
+  than a frame (the VBL counter ran twice as fast as the game's frame counter - the
+  counters of the `--debug` build, top left, show it); rendering in the main CPU's idle
+  loops instead (hooks at $038D/$0373) stalled, since the main loop does not pass those
+  pcs in every phase.
+- Translator: the IRQ handler's register state after its run is dropped (it restores
+  the Z80 registers itself; an in-flight `ldir` keeps its counter in d5/d7, writing the
+  registers back corrupted it).  Hooks push their resume label (`pea`) - vasm makes
+  `jmp` pc-relative, so a fixed "+10" resume was wrong.  The 06XX data port is the whole
+  $7000-$70FF (the NMI handler's `ldi` pointer walks through it).  `ei`/`di` keep
+  `g1_iff`/`g2_iff`: an IRQ is only taken when the program enabled it (the NMI
+  disables until its retn).  Discovery: Galaga's jump tables are
+  `ld hl,T; rst $08 | $10 | add a,l; ld a|e,(hl); inc hl; ld h|d,(hl); .. jp (hl)` (or
+  `call $003B`, a `jp (hl)` trampoline) - `Config(hl_tables=True)` finds them by walking
+  back from every `jp (hl)` (`discover.hl_jump_tables`); coverage alone missed $179C and
+  the task table at $0096 (both crashed with `z80_badpc`).
+- Renderer: the sprite records keep the entry's flags at `S_FLAGS` (reading them from
+  offset 4 took `S_RECT`'s $FF bytes: every part looked flipped, double and parked at
+  x-high 3 - no sprite ever drew).  The video latch cells hold the byte the program
+  wrote, the latch is its bit 0.  Stars are plotted in their own colour (list entries
+  offset, bit, colour; the erase compares the pixel's colour), 15 colours.  Per
+  mark bit `ga_mark_cell` gives the display cell (chars_over walks set bits only); the
+  stars' positions are kept per set, sorted, with the STE colour, so a frame scans the
+  two sets that are on (`star_frame`).  Per entry and screen `slot_any` says whether a
+  part is on the screen (the part loops are skipped otherwise).
+- Profile (`--debug`, VBL 8000-8300, full formation, 160256 cycles per VBL): main CPU
+  code 55k cycles per VBL, sub CPU code 45k (its IRQ computes the enemy paths), I/O
+  chips 4k, so the renderer gets a third of the CPU; a render of that phase costs about
+  200k cycles (draw_part 63k for ~30 sprites, draw_stars + erase_stars 54k for ~113
+  stars, draw_sprites 32k, entry_loop 17k, scan_cells 13k, chars_over 11k, star_frame
+  11k) - 1 render per 4 VBLs.  The translated code runs at ~9 cycles per 68000
+  instruction: the costly idioms are the 8-bit halves of the pointer pairs (`ld d,(hl)`
+  = move + lsl.w #8 + andi + or = 48 cycles) and `ld h,n` (andi + ori).  50 fps in the
+  heavy phases needs both a cheaper renderer and faster translated code.
+- Hatari recipes: the dump addresses are map address + text base ($188e4) - and they
+  move with every build; `b ($addr).l ! ($addr).l` watchpoints are slow (minutes);
+  Hatari's `profile save` writes the per-address lines to stdout and only the header to
+  the file (`profagg.py` wants the stdout copy as `<dir>/hatari.out` and the header as
+  `<dir>.prof`); an AVI of a 9000 VBL run takes 5 minutes (PNG), the same run without
+  one 70 s.
+
+### Findings (2026-10-08, later)
+
+- Sources: MAME's Galaga video code is in the F030Arcade checkout,
+  `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/namco/galaga_v.cpp`
+  (also `galaga.cpp`, `namco/galaga_a.cpp`; commit 5913928b159).  Sprite flags there: bit 0
+  flip x, bit 1 flip y, bit 2 double width, bit 3 double height; x = spriteram_2[offs+1] - 40
+  + 0x100 * (spriteram_3[offs+1] & 3), y = 256 - spriteram_2[offs] + 1.  Check against it
+  before trusting `tools/machine.py` or the renderer.
+- Hatari: use the F030Arcade build (`tools/hatari.sh galaga shot@N`: runs the port,
+  screenshots through `--cmd-fifo` + `hatari-debug screenshot` into `/tmp/hrun`; `PRG=` picks
+  another program).  Debugger commands go through the same FIFO (`hatari-debug m $addr 8`
+  prints memory to Hatari's stdout) - that is how the `--debug` counters are read:
+  `cnt_vbl`, `cnt_skip`, `cnt_render` (words, map address + $188e4).
+- Bugs found by looking at the screen: (1) the sprite rectangle's line offset was a word
+  shift, lines from 256 on (the ship at the bottom) wrapped to the top; (2) flip x was
+  tested as bit 7 of the flags (Donkey Kong's attribute), Galaga's is bit 0: enemies on a
+  curve were never mirrored along the screen's vertical axis (flip y is in the data
+  variants and worked); (3) the dirty cell lists (2048 cells per draw screen) overflowed into
+  `star_count` when the program rewrote the screen for several frames before a screen was
+  drawn (bus error in `erase_stars`): a full list now sets `list_full` and the draw screen
+  redraws every cell.
+- Boot: the main CPU's RAM test is skipped (`--full-selftest` keeps it), the grid screen
+  and the handshake wait ($3719 loops, ~200 frames) remain.
+- Frame rate (VBLs vs renders from the debug counters, 10 s steps from 20 s, the attract
+  mode with its demo play): with the starfield 25 fps in the title phases and 7-14 fps with
+  the formation (14.3 average); `-D NOSTARS=1` (no erase_stars/draw_stars): 48-49 fps in the
+  title phases, 9-22 with the formation (23.8 average).  So the stars cost half of a light
+  frame but the heavy phases are bound by the sprites and the translated code (the game's
+  two IRQ handlers take ~63% of every VBL, the renderer gets the rest).
+- Render throttle (`src/galaga_stars.s`, `-D NOTHROTTLE=1` switches it off): every render is
+  timed with MFP Timer D (81 us ticks, restarted at each VBL; a frame is 246 ticks, Timer
+  C's control bits stay).  A render that took longer than a frame thins the starfield one
+  step (every 2nd star, every 4th, none: `star_level`; the filter is the star's period
+  index, so a star is always shown or always hidden), 8 renders in a row under half a
+  frame bring a step back.  Measured as above: 43 fps in the title phases (25 with all
+  stars, 48 without), 9-21 with the formation, 22.3 average (14.3 / 23.8).
+  The renderer is already sliced: it runs in the VBL handler with the VBL enabled, the
+  next VBL's IRQ handlers preempt it and it resumes, its sprite entries are copied
+  (`spr_entries`) when `draw_sprites` starts, the finished screen is flipped at the next
+  VBL (`frame_ready`).  A scanline budget in the style of F030Arcade's `ffight` would
+  chunk the same work differently, not make it cheaper.
+- Zero-fill restore (`-D NOZEROFILL=1` switches it off): `cell_content` is a bitmap in
+  `tile_marks`' layout, a bit per background cell whose character has an opaque pixel
+  (`scan_cells` keeps it with `ga_char_blank`).  Restoring the background under a changed
+  sprite part first tests the part's cells against it; when all are blank the rectangle is
+  cleared with HOP 1 / OP 0 (no source read, no source address) instead of copied from the
+  background.  Measured as above: 22.6 fps against 22.2 over the demo (15.4 against 13.8 in
+  the first formation phase, the others within noise) - about 2% of the render, less than
+  the 5-10k cycles a frame estimated.  Planes cannot be skipped in the sprite blit itself:
+  it overwrites the destination, and all 16 sprite colour quads use plane 3.

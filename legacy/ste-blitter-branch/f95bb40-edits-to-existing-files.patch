@@ -1,0 +1,284 @@
+diff --git a/ste/rt/dkong.s b/ste/rt/dkong.s
+index 620f60f..1ba4227 100644
+--- a/ste/rt/dkong.s
++++ b/ste/rt/dkong.s
+@@ -724,6 +724,8 @@ z80_unsupported:
+ 	section text,code
+ 	include "../tools/rtlib.s"
+ 
++	include "../build/dk_sprites.s"
++
+ ; ------------------------------------------------------------------------------
+ 	section data,data
+ ; ------------------------------------------------------------------------------
+@@ -799,7 +801,7 @@ display_screen_address:	ds.l	1
+ 
+ z80_block:	ds.b	$8000
+ 
+-	ds.b	1024
++	ds.b	4096
+ own_stack_top:
+ 
+ 	cnop 0,4
+diff --git a/ste/rt/render.s b/ste/rt/render.s
+index 17a5c6b..1c81fc1 100644
+--- a/ste/rt/render.s
++++ b/ste/rt/render.s
+@@ -26,12 +26,22 @@ init_render:
+ 	move	#-1,old_bank
+ 	clr	bank16
+ 	st	force_scan
++	st	spr_invalid
++	st	spr_invalid+1
++	move	#-1,spr_cache_bank
++	lea	spr_prev_rect,a0
++	move	#95,d0
++	moveq	#-1,d1
++.hide:
++	move.l	d1,(a0)+
++	dbf	d0,.hide
+ 	rts
+ 
+ ; ------------------------------------------------------------------------------
+ ; a6 = Z80 block
+ 
+ render_frame:
++	clr.b	cells_ready
+ 	moveq	#0,d0
+ 	move.b	$7d86(a6),d0
+ 	and	#1,d0
+@@ -48,10 +58,13 @@ render_frame:
+ 	lsl	#4,d0
+ 	move	d0,bank16
+ 	st	force_scan
++	st	spr_invalid
++	st	spr_invalid+1
+ 
+ .same_bank:
+ 	bsr	scan_tiles
+ 	bsr	draw_dirty_tiles
++	bsr	render_sprites
+ 	rts
+ 
+ ; ------------------------------------------------------------------------------
+@@ -107,15 +120,24 @@ scan_tiles:
+ 
+ .forced:
+ 	clr.b	force_scan
++	lea	tile_blank,a6
+ 	moveq	#0,d0
+-	move	#1023,d3
++	move	#1023,d4
+ 
+ .force_one:
++	moveq	#0,d1
+ 	move.b	(a0)+,d1
++	moveq	#0,d2
++	move.b	(a1),d2
+ 	move.b	d1,(a1)+
++	move.b	(a6,d2.w),d5
++	and.b	(a6,d1.w),d5		; blank before and after: nothing to redraw
++	bne.s	.force_skip
+ 	bsr.s	.queue
++
++.force_skip:
+ 	addq	#1,d0
+-	dbf	d3,.force_one
++	dbf	d4,.force_one
+ 
+ .finished:
+ 	sub.l	#dirty_lists,a4
+@@ -155,13 +177,16 @@ scan_tiles:
+ ; Draw the queued tiles into the current draw screen.
+ 
+ draw_dirty_tiles:
++	clr	tiles_drawn
+ 	move	draw_index,d0
+ 	move	d0,d1
+ 	add	d1,d1
+ 	lea	list_count,a1
+ 	move	(a1,d1.w),d7
+ 	beq.s	.nothing
++	bsr	ensure_cells
+ 	clr	(a1,d1.w)
++	move	d7,tiles_drawn
+ 
+ 	lea	dirty_lists,a2
+ 	moveq	#12,d1
+@@ -172,8 +197,9 @@ draw_dirty_tiles:
+ 
+ .loop:
+ 	move	(a2)+,d0
+-	move.l	draw_screen_address,a0
+ 	move.l	a2,-(sp)
++	bsr	mark_tile
++	move.l	draw_screen_address,a0	; mark_tile clobbers a0
+ 	bsr	draw_tile
+ 	move.l	(sp)+,a2
+ 	dbf	d7,.loop
+@@ -181,6 +207,9 @@ draw_dirty_tiles:
+ .nothing:
+ 	rts
+ 
++
++	include "sprites.s"
++
+ ; ------------------------------------------------------------------------------
+ ; draw_tile: d0.w = tile index (visible), a0 = screen base
+ ; trashes d1-d3, a1-a3
+@@ -235,6 +264,24 @@ list_count:	ds.w	2
+ old_bank:	ds.w	1
+ bank16:		ds.w	1
+ force_scan:	ds.b	1
++	even
++tiles_drawn:	ds.w	1
++spr_inv_cur:	ds.b	1
++	even
++cells:		ds.b	512
++cells_ready:	ds.b	1
++spr_decode_invalid:	ds.b	1
++spr_cache_bank:	ds.w	1
++spr_cache_entry:	ds.l	96
++spr_new_rect:	ds.w	96
++spr_new_routine:	ds.l	96
++spr_new_src:	ds.l	96
++spr_redraw:	ds.b	96
++spr_prev_rect:	ds.w	96*2
++spr_invalid:	ds.b	2
++	even
++spr_prev:	ds.b	384*2
++
+ 	even
+ dirty_lists:	ds.w	2048*2
+ 	section text,code
+diff --git a/ste/tools/assets.py b/ste/tools/assets.py
+index 61b3783..9f3b4bc 100644
+--- a/ste/tools/assets.py
++++ b/ste/tools/assets.py
+@@ -119,6 +119,10 @@ def build():
+     lines.append("dk_tile_combo:\t\t; combo (bank*16+colour code) -> offset of its 8 KiB block in dk_tiles")
+     for i in range(0, 64, 8):
+         lines.append("\tdc.l " + ",".join("%d" % (combo_block[c] * 8192) for c in range(i, i + 8)))
++    lines.append("tile_blank:")
++    blank = [1 if not gfx.tiles[c].any() else 0 for c in range(256)]
++    for i in range(0, 256, 16):
++        lines.append("	dc.b " + ",".join(str(x) for x in blank[i:i + 16]))
+     lines.append("tile_cc:")
+     cc = []
+     off = []
+diff --git a/ste/tools/build.py b/ste/tools/build.py
+index 7477010..0c89b37 100644
+--- a/ste/tools/build.py
++++ b/ste/tools/build.py
+@@ -1,7 +1,7 @@
+ """Build DKONG.PRG:  python build.py [--frames N]  ->  ste/run/DKONG.PRG (+ ROM files)"""
+ import argparse, os, shutil, subprocess, sys
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+-import gen, assets
++import gen, assets, sprites
+ 
+ STE = gen.STE
+ VLINK = r"C:/Arbeit/F030Arcade/third_party/vlink/vlink.exe"
+@@ -13,6 +13,7 @@ def main():
+     ap.add_argument("--frames", type=int, default=0)
+     ap.add_argument("--debug", action="store_true")
+     ap.add_argument("--sim", action="store_true")
++    ap.add_argument("--sprites", action="store_true", help="regenerate the sprite routines")
+     ap.add_argument("--out", default=os.path.join(STE, "run", "DKONG.PRG"))
+     a = ap.parse_args()
+     text, rep, em = gen.generate()
+@@ -20,6 +21,13 @@ def main():
+     open(os.path.join(STE, "build", "dk_code.s"), "w").write(text)
+     print("translated:", rep["instructions"], "instructions, unsupported:", len(rep["unsupported"]))
+     assets.build()
++    sprite_source = os.path.join(STE, 'build', 'dk_sprites.s')
++    sprite_generator = os.path.join(STE, 'tools', 'sprites.py')
++    sprite_observed = os.path.join(STE, 'tools', 'sprite_observed.json')
++    if (not os.path.exists(sprite_source) or a.sprites or
++            max(os.path.getmtime(sprite_generator), os.path.getmtime(sprite_observed)) >
++            os.path.getmtime(sprite_source)):
++        print('sprites:', sprites.build(verify=True))
+     os.makedirs(os.path.dirname(a.out), exist_ok=True)
+     obj = os.path.join(STE, "build", "dkong.o")
+     cmd = [VASM, "-Fvobj", "-quiet", "-nowarn=2047", "-I", os.path.join(STE, "build"), "-o", obj, "dkong.s"]
+diff --git a/ste/tools/dkong.py b/ste/tools/dkong.py
+index dd60e25..ff554ac 100644
+--- a/ste/tools/dkong.py
++++ b/ste/tools/dkong.py
+@@ -177,7 +177,7 @@ class DKong:
+             flipx = attr & 0x80
+             flipy = code_b & 0x80
+             sx = (x + 0xF8) & 0xFF
+-            top = (246 - y) & 0xFF
++            top = (247 - y) & 0xFF
+             s = g.sprites[code]
+             if flipx: s = s[:, ::-1]
+             if flipy: s = s[::-1, :]
+diff --git a/ste/tools/sim.py b/ste/tools/sim.py
+index 35dc611..90201c9 100644
+--- a/ste/tools/sim.py
++++ b/ste/tools/sim.py
+@@ -23,6 +23,21 @@ TRAP1 = 0x500
+ FRAME_CYCLES = 160000
+ 
+ 
++class _IO:
++    """Byte view of the hardware register area ($ff8000..), kept in simulated RAM."""
++
++    def __init__(self, sim):
++        self.sim = sim
++
++    def __getitem__(self, off):
++        if isinstance(off, slice):
++            return bytes(self.sim.mem.r_block(0xFF8000 + off.start, off.stop - off.start))
++        return self.sim.mem.r8(0xFF8000 + off)
++
++    def __setitem__(self, off, v):
++        self.sim.mem.w8(0xFF8000 + off, v & 0xFF)
++
++
+ class Blitter:
+     """STE Blitter (see FAST_BLITTER_SPRITES.md, Atari blitter manual)."""
+ 
+@@ -101,6 +116,10 @@ class Blitter:
+                 else:
+                     w = s & h
+                 d = r16(dst & 0xFFFFFF)
++                # The read is needed on the bus for masked writes or destination
++                # logical operations, even when HOP 2 / OP 3 copies the source.
++                if mask != 0xFFFF or op not in (0, 3, 12, 15):
++                    self.cycles += 4
+                 if op == 0: r = 0
+                 elif op == 1: r = w & d
+                 elif op == 2: r = w & ~d
+@@ -135,11 +154,11 @@ class Blitter:
+ 
+ 
+ class Sim:
+-    def __init__(self, prg, ram_kib=4096, run_dir=RUN):
++    def __init__(self, prg, ram_kib=16384, run_dir=RUN):
+         self.run_dir = Path(run_dir)
+         self.m = Machine(CPUType.M68000, ram_kib)
+         self.cpu, self.mem = self.m.cpu, self.m.mem
+-        self.io = bytearray(0x8000)           # $ff8000..$ffffff
++        self.io = _IO(self)                    # $ff8000..$ffffff is plain RAM here (registers read back)
+         self.files = {}
+         self.next_handle = 6
+         self.blitter = Blitter(self)
+@@ -157,13 +176,13 @@ class Sim:
+         if mode != "W":
+             return
+         a = addr & 0xFFFFFF
+-        if a < 0xFF8000:
++        if a < 0xFF8A3C - 3 or a > 0xFF8A3D:
+             return
+-        off = a - 0xFF8000
+         nbytes = (1, 2, 4)[width]
++        # the trace is reported before the data is stored: store it ourselves first
++        off = a - 0xFF8000
+         for i in range(nbytes):
+             self.io[off + i] = (value >> (8 * (nbytes - 1 - i))) & 0xFF
+-        # blitter start: bit 7 of $ff8a3c
+         if off <= 0xA3C < off + nbytes and self.io[0xA3C] & 0x80:
+             self.blitter.run()
+ 

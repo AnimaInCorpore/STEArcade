@@ -1,0 +1,8 @@
+# derived from the ROMs / reproducible: python port.py build <game>
+build/
+run/
+*.pkl
+*.png
+__pycache__/
+venv/
+.DS_Store
