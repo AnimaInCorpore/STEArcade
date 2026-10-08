@@ -1,8 +1,16 @@
-# Bubble Bobble (Taito 1986) — hardware model used by the host reference
+# Bubble Bobble (Taito 1986) — hardware notes with evidence grades
 
-Sets: `bublbobl` (Japan) and `bublboblr` (US, Romstar licence) — see `rom_manifest.md`.
-Only the two main-CPU ROMs differ; the model in `tools/bubble.py` runs both (`Bubble(variant=...)`).
-**Port target set: `bublboblr`** (US); `bublbobl` is the cross-check.
+> Written during a first independent bring-up of a reference machine, *before* `games/bublbobl/tools/`
+> (the port's own reference machine, translation and tests) was known to me. Where this file and
+> `games/bublbobl/README.md` disagree, the README and the code win. It stays because it records evidence grades and a
+> few findings (the US set, the MCU's pin roles, PROM bit 2 = X continuation) in one place. References below to
+> `tools/bubble.py`, `tools/bbvideo.py` and similar mean my dropped first model (git history, commit `2bc79e8`),
+> not files in this tree. My early estimate that a Falcon030 looks necessary (the main CPU 47 % busy, about 5,500
+> Z80 instructions per frame for both CPUs, up to 25 colours per frame) agrees with the README: the STE port runs
+> but is too slow to play on a plain 8 MHz STE.
+
+Sets: `bublbobl` (Japan, MAME "Ver 0.1") and `bublboblr` (US, Romstar licence, MAME "Ver 5.1") — see `rom_manifest.md`.
+Only the two main-CPU ROMs differ (sub CPU, sound CPU, MCU, graphics and PROM are byte-identical).
 
 Evidence grades: **Code** = read in the ROM disassembly; **Run** = reproduced by running the
 original ROMs in the host model (frames compared by eye against the known game);

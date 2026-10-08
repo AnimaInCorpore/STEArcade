@@ -15,9 +15,11 @@ parts, and the first two are checked against each other with a lock-step test:
    list.  Sprites are drawn with the **Blitter** (one blit per sprite line, masks as end masks, no clearing pass);
    tiles with the CPU.
 
-Layout: `engine/` (shared), `games/<game>/{src,tools,ref}`, `build/<game>/` and `run/<game>/` (generated, not in git),
-`assets/roms/`, `tools/hatari.sh` (Hatari driver), `port.py` (build/test/run front end).  `engine/paths.py` knows where
-things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment variables select the tools).
+Layout: `engine/` (shared), `games/<game>/{src,tools,ref}` (plus `docs/` where a game keeps notes and reference captures),
+`build/<game>/` and `run/<game>/` (generated, not in git), `assets/roms/` (archives; `extracted/<game>/` the unpacked files),
+`tools/hatari.sh` (Hatari driver) and `tools/windows/`, `port.py` (build/test/run front end), `legacy/` (superseded, not
+built).  `engine/paths.py` knows where things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment
+variables select the tools).
 
 ## Renderers of the ports
 

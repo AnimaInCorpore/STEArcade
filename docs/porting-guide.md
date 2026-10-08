@@ -80,6 +80,33 @@ prints 0 differing pixels for all four frames now.  Notes:
 * **The MAME source in `F030Arcade/third_party/mame` is older than the binary** (Galaga's blue channel differs:
   the source says 0x47/0x97, MAME 0.289 produces 0x51/0xAE).  The installed `mame` is the truth.
 
+#### Frames from an old MAME without Lua snapshots (F030Arcade `wolfmame-0162`, Windows)
+
+`F030Arcade/third_party/wolfmame-0162/mame.exe` knows Bubble Bobble (`bublbobl` Japan Ver 0.1, `bublboblr` US Ver 5.1;
+`-rompath assets/roms -verifyroms bublboblr` passes with the zips as shipped); the sibling `wolfmame-0184` build does
+not.  Its Lua is the old API, so `engine/mame_dump.lua` and the `mame_cmp_*` scripts (written for 0.289) do not run on it:
+the only per-frame hook is `emu.sethook(fn, "frame")`, `screen:frame_number()` and `manager:machine():exit()` exist,
+`register_frame*` and `video:snapshot()` do not.  What works is MAME's own recording:
+
+* `-aviwrite name.avi` writes **uncompressed RGB24 at the native size** (Bubble Bobble 256 x 224; the container says
+  60 fps whatever the board runs at), so the pixels are exactly what MAME draws.  The file lands in MAME's `snap/`.
+* The AVI writer is 32-bit: record ~300 s segments (3.1 GB each for 256 x 224) and chain them with `-autosave`;
+  `-seconds_to_run` is the **cumulative** emulated time, so segment k uses `(k+1) * 300`.  `-sound none -nothrottle
+  -frameskip 0 -skip_gameinfo -window`; about 25 s of wall clock per segment.
+* Read the frames with `ffmpeg -i x.avi -an -f rawvideo -pix_fmt rgb24 -` (`-fps_mode passthrough`; newer ffmpeg
+  has no `-vsync`), counting colours per frame as packed RGB: that is exact, no sampling.
+* Run MAME from a scratch directory (it writes `cfg/`, `nvram/`, `snap/`, `sta/`), and **check the recording for stray
+  input**: a key reaching the window registered a coin 27 s into the fifth segment of the Bubble Bobble run (the screens
+  then read `CREDIT 1` / `PUSH ONLY 1 PLAYER BUTTON`); frames from there on were dropped.
+* Example, `games/bublbobl/ref/mame_attract_collage.py`: 20 minutes of attract mode, 68 distinct colours, a 64 frame
+  collage that contains every one of them.  The attract loop does not repeat exactly (the demo levels change per loop),
+  so "all colours" means all colours seen, with the last new one at 12.3 minutes.
+
+Colour budget for a 16 colour target: take that colour count, then reduce with the JsOklabQuantizer strategy
+(`C:\Arbeit\jsoklabquantizer`, shared palette in Oklab, lightness ladder + k-means on a/b;
+`games/bublbobl/ref/quantize_collage.py`).  Look at the worst-mapped colours before accepting a palette: Bubble Bobble's
+default result has no green (Bub's `#00bb00` maps to a teal).
+
 Results, 2026-10-08 (all with 0 differing pixels now, `games/dkong/ref/mame_cmp_dkong.py`, `games/galaga/ref/mame_cmp_galaga.py`,
 `games/bublbobl/ref/mame_cmp_bublbobl.py`):
 

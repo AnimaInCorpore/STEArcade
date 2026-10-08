@@ -51,6 +51,15 @@ differ).  The STE port:
   bitmap through the colour table.
 * Game rows 16-239 at screen pixel 32, borders removed (277 lines, the picture centred).
 
+## Reference captures, palette, ROM manifest
+
+`docs/` (see `docs/README.md`): 64 MAME attract-mode frames with all 68 on-screen colours, the 16-colour Oklab palette
+adopted from the JsOklabQuantizer default (`docs/palette16.json`, not yet checked against gameplay frames; it has no
+green), the CRC manifest of the `bublbobl` (Japan) and `bublboblr` (US / Romstar) sets, and hardware notes with
+evidence grades.  The scripts that produce them are in `ref/`: `mame_attract_collage.py`, `quantize_collage.py`
+(+ `oklab_quantize.mjs`), `palette16.py`, `rom_manifest.py`.  The port itself is built on the `bublbobl` set; the US set
+differs only in the two main-CPU ROMs and has not been run through the translator.
+
 ## Tests
 
 Paths relative to `games/bublbobl/`; from the repository root `python port.py test bublbobl` runs the sequence below.

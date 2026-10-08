@@ -6,3 +6,7 @@ run/
 __pycache__/
 venv/
 .DS_Store
+
+# ...but documentation images are committed (per-game docs, legacy notes)
+!games/*/docs/**/*.png
+!legacy/**/*.png
