@@ -110,6 +110,7 @@ class Bublbobl:
         self.port_mode = False
         self.booted = [False, False, False]
         self.in_sub_nmi = False
+        self.rnd_state = 0x1234
 
     # ---- main CPU bus --------------------------------------------------
     def rd_main(self, a):
@@ -300,6 +301,13 @@ class Bublbobl:
                 mcu.run(64)
         self.frame += 1
 
+    def rnd(self):
+        """What the port's z80_rnd gives for `ld a,r`: a 16-bit shift register byte."""
+        s = self.rnd_state
+        s = (s >> 1) ^ (0xB400 if s & 1 else 0)
+        self.rnd_state = s
+        return s & 0xFF
+
     # ---- the STE runtime's schedule -------------------------------------
     IDLE_MAIN, IDLE_SUB = 0x01ED, 0x000A
 
@@ -347,6 +355,7 @@ class Bublbobl:
         write.  The foreground threads only boot to their idle loops."""
         self.port_mode = True
         main, sub = self.main, self.sub
+        main.r_hook = sub.r_hook = self.rnd
         if not self.booted[0]:
             k = 0
             while main.pc != self.IDLE_MAIN:

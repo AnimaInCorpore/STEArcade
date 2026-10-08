@@ -140,6 +140,8 @@ def uses_defs(ins):
         return 0, S | Z | H | N
     if mn in ("ldir", "ldi", "ldd", "lddr"):
         return 0, H | N
+    if mn == "ld a,i":
+        return 0, S | Z | H | N
     return 0, 0
 
 
