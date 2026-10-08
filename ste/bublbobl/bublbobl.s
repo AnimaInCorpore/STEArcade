@@ -422,15 +422,15 @@ hbl:
 ; the stack and restored at the end.
 
 vbl:
-	tst.b	in_logic		; Timer A's handler lowers the interrupt mask: a VBL that was pending while
-	bne	vbl_late		; the game's interrupts of the last one still run (more than a frame) comes
-	st	in_logic		; in here: it is dropped, the game runs slower
+	ifnd NOBORDER
+	arm_border_timers		; (first thing: the timers count from here)
+	endc
+	tst.b	in_logic		; the game's interrupts of the last VBL still run (they are not masked
+	bne	vbl_late		; against the VBL): this one only arms the timers, the game runs slower
+	st	in_logic
 	move.l	2(sp),dbg_vbl_pc
 	move.l	sp,dbg_vbl_sp
 	addq.w	#1,dbg_nest
-	ifnd NOBORDER
-	arm_border_timers
-	endc
 	ifd DEBUG
 	addq	#1,cnt_vbl
 	endc
@@ -464,7 +464,7 @@ vbl:
 	tst.b	quit_flag
 	bne	quit
 
-	move	#$2400,sr
+	move	#$2300,sr		; (the VBL itself may interrupt the game's interrupts: see in_logic)
 
 	tst.b	in_turn			; a booting chip's registers are live: no handlers
 	bne	vbl_render

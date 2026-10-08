@@ -30,6 +30,7 @@ S_VRAM = g_ram+$4000
 S_ORAM = g_ram+$5D00
 S_PAL = g_ram+$7800
 
+WCAP = 8
 VOLMIN = 4				; a palette entry that changed this often is volatile (flashing)
 TC_SIZE = 4096				; tile cache slots
 TC_ENTRY = 72				; key.l, opaque.l, 8 rows of (data.l, inverted mask.l)
@@ -1169,6 +1170,10 @@ rf_palette:
 	lea	bank_cnt,a2
 	move.w	(a2,d0.w),d5
 	beq.s	.nextbank
+	cmp.w	#WCAP,d5		; (a bank counts for at most this much: a few tiles of the player compete
+	bls.s	.wok			; with the hundreds of the background for the 15 slots)
+	moveq	#WCAP,d5
+.wok:
 	moveq	#0,d4			; pen 0-14
 .pen:
 	bsr	get_rgb

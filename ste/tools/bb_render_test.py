@@ -110,6 +110,7 @@ def main():
         if len(frames) <= 8 or nd:
             from bublbobl import save_png
             pal = ste_palette(mem, sym)
+            save_png(np.hstack([pal[got], ref.render_rgb()]), "/tmp/bbr_cmp_%d.png" % target, 1)
             save_png(pal[got], "/tmp/bbr_got_%d.png" % target, 2)
             save_png(pal[exp], "/tmp/bbr_exp_%d.png" % target, 2)
         if nd and len(frames) > 8:
