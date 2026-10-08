@@ -92,19 +92,126 @@ render_frame:
 	dbf	d0,.a
 .not_all:
 	bsr	rf_objects
-	; this frame's dirty cells; the screen to draw also lacks the previous frame's
+	bsr	rf_mark_banks
+	; This frame's changed cells (dirty).  The screen to draw also lacks the previous frame's changes
+	; (dirty_prev); those this frame leaves alone are copied from the screen shown, which is complete
+	; and equal to them there, the others (dirty) are drawn.
 	lea	dirty,a0
-	lea	dirty_prev,a1
+	lea	dirty_raw,a1
 	moveq	#28-1,d0
-.u:	move.l	(a0),d1
-	move.l	(a1),d2
-	move.l	d1,(a1)+		; (dirty_prev = this frame's)
-	or.l	d2,d1
-	move.l	d1,(a0)+
+.u:	move.l	(a0)+,(a1)+
 	dbf	d0,.u
 	bsr	rf_closure
+	bsr	rf_copy
+	lea	dirty_raw,a0
+	lea	dirty_prev,a1
+	moveq	#28-1,d0
+.p:	move.l	(a0)+,(a1)+		; (dirty_prev = this frame's changes, before the closure)
+	dbf	d0,.p
 	bsr	rf_redraw
 	bsr	rf_cleanup
+	rts
+
+; ------------------------------------------------------------------------------
+; The tiles of the banks whose colour mapping changed (bank_chg_b, set by rf_palette) are drawn again: the cells
+; of every tile of the objects with such a bank are dirty.  (rf_all: everything is, nothing to find.)  The flags
+; are used up here.
+; ------------------------------------------------------------------------------
+
+rf_mark_banks:
+	tst.b	rf_all
+	bne.s	.clear
+	lea	bank_chg_b,a1
+	moveq	#0,d1
+	moveq	#16-1,d0
+.any:	or.b	(a1)+,d1
+	dbf	d0,.any
+	tst.b	d1
+	beq.s	.clear
+	lea	objs,a3
+	lea	objslots,a2
+	move.w	#192-1,d6
+.obj:
+	move.w	O_COUNT(a3),d5
+	beq.s	.next
+	move.l	a2,a4
+	subq.w	#1,d5
+.slot:
+	move.w	(a4)+,d0		; x
+	move.w	(a4)+,d1		; y
+	move.w	(a4)+,d2		; the vram offset
+	addq.l	#4,a4
+	lea	snap_vram,a0
+	moveq	#0,d3
+	move.b	1(a0,d2.w),d3
+	lsr.b	#2,d3
+	and.w	#15,d3			; the tile's bank
+	lea	bank_chg_b,a1
+	tst.b	(a1,d3.w)
+	beq.s	.sn
+	movem.l	d5-d6/a2-a4,-(sp)
+	bsr	mark_tile
+	movem.l	(sp)+,d5-d6/a2-a4
+.sn:
+	dbf	d5,.slot
+.next:
+	lea	OBJ_SIZE(a3),a3
+	lea	SLOT_BYTES(a2),a2
+	dbf	d6,.obj
+.clear:
+	lea	bank_chg_b,a1
+	moveq	#16-1,d0
+.clr:	sf	(a1)+
+	dbf	d0,.clr
+	rts
+
+; ------------------------------------------------------------------------------
+; The cells the screen to draw lacks (dirty_prev: the last frame's changes) and this frame does not draw
+; (not in dirty after the closure) are copied from the screen being shown, which holds the last frame
+; complete: nothing changed in them since.  A cell is 8 lines of one movep.l.
+; ------------------------------------------------------------------------------
+
+rf_copy:
+	move.l	rf_screen,a1
+	lea	(YPAD+16)*STRIDE+16(a1),a1	; the first game cell row, column 0 of the screen to draw
+	move.l	display_screen_address,a2
+	lea	(YPAD+16)*STRIDE+16(a2),a2	; ... of the screen shown
+	lea	dirty_prev,a0
+	lea	dirty,a3
+	moveq	#28-1,d0
+.row:
+	move.l	(a0)+,d2
+	move.l	(a3)+,d1
+	not.l	d1
+	and.l	d1,d2			; lacking, and not drawn
+	beq	.skip_row
+	moveq	#0,d3			; the cell column
+.cell:
+	btst	d3,d2
+	beq	.nocopy
+	move.w	d3,d4
+	lsr.w	#1,d4
+	lsl.w	#3,d4
+	btst	#0,d3
+	beq.s	.c_even
+	addq.w	#1,d4
+.c_even:
+	lea	(a1,d4.w),a4
+	lea	(a2,d4.w),a5
+	rept 8
+	movep.l	0(a5),d7
+	movep.l	d7,0(a4)
+	lea	STRIDE(a4),a4
+	lea	STRIDE(a5),a5
+	endr
+.nocopy:
+	addq.w	#1,d3
+	cmp.w	#32,d3
+	blo	.cell
+.skip_row:
+	lea	8*STRIDE(a1),a1
+	lea	8*STRIDE(a2),a2
+	dbf	d0,.row
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -1059,6 +1166,7 @@ rf_palette:
 	lea	pal_shadow,a1
 	lea	vol,a2
 	clr.b	rf_newvol
+	clr.b	rf_nonvol
 	move.w	#256-1,d0
 .vol:
 	move.w	(a0)+,d1
@@ -1070,8 +1178,12 @@ rf_palette:
 	addq.b	#1,d2
 	move.b	d2,(a2)			; (the number of changes)
 	cmp.b	#VOLMIN,d2
+	blo.s	.nonvol
 	bne.s	.vsame
 	st	rf_newvol		; ... that is flashing: it has a slot of its own from now on
+	bra.s	.vsame
+.nonvol:
+	st	rf_nonvol		; a colour that is not flashing (yet) changed: the colour choice is done again
 .vsame:
 	addq.l	#1,a2
 	dbf	d0,.vol
@@ -1083,10 +1195,31 @@ rf_palette:
 
 	; only colours of entries that were volatile already changed, and the banks in use are the same:
 	; the mapping stands, the colours of the slots are new
+	; The colour choice is made again (.recompute) when
+	;   - an entry started to flash (rf_newvol): it gets a slot of its own from now on,
+	;   - a colour that is not flashing changed (rf_nonvol) and tile entries changed as well (bank_stale): a new
+	;     picture, not a palette animation; with the video RAM still the changes wait for it,
+	;   - a bank came into use that has no slot yet.
+	; Not when only the colours of flashing entries changed, with or without the tile entries changing (every
+	; frame of the play): their slots just get the new colours (.fp).
 	tst.b	rf_newvol
 	bne.s	.recompute
+	tst.b	rf_nonvol
+	beq.s	.nv_done
 	tst.b	bank_stale
-	bne.s	.recompute
+	bne	.recompute
+.nv_done:
+	lea	bank_seen_b,a0
+	lea	bank_known_b,a1
+	moveq	#16-1,d0
+.nb2:
+	tst.b	(a0)+
+	beq.s	.nbn2
+	tst.b	(a1)
+	beq	.recompute
+.nbn2:
+	addq.l	#1,a1
+	dbf	d0,.nb2
 	lea	kept_own,a5
 	lea	kept,a4
 	moveq	#0,d5			; the slot
@@ -1122,6 +1255,16 @@ rf_palette:
 	bsr	.write_ste
 	rts
 .recompute:
+	lea	kept,a0			; the slots as they are: the new choice keeps every colour in its slot
+	lea	kept_prev,a1
+	moveq	#8-1,d0
+.sv:	move.l	(a0)+,(a1)+
+	dbf	d0,.sv
+	lea	kept_own,a0
+	lea	kept_own_prev,a1
+	moveq	#8-1,d0
+.sv2:	move.l	(a0)+,(a1)+
+	dbf	d0,.sv2
 	; the tile entries per bank (only if the video RAM changed since)
 	tst.b	bank_stale
 	beq	.counted
@@ -1301,6 +1444,7 @@ rf_palette:
 	addq.w	#1,d6
 	bra.s	.pick
 .picked:
+	bsr	.stabilize
 
 	; every (bank, pen) -> its kept colour: a volatile one its own slot, the others the nearest
 	; shared slot
@@ -1355,14 +1499,32 @@ rf_palette:
 	cmp.w	#16,d6
 	blo	.mbank
 
-	; the same mapping as before (the colours merely changed, or the usage did not matter): only the STE
-	; palette is new, nothing is re-baked or redrawn
+	; the banks whose mapping changed (16 bytes of ttab each; bank_chg_b): only their tiles are baked and drawn
+	; again.  No bank changed (the colours merely changed, or the usage did not matter): only the STE palette is
+	; new, nothing is re-baked or redrawn.
 	lea	ttab_new,a0
 	lea	ttab,a1
-	moveq	#64-1,d0
-.same:	cmpm.l	(a0)+,(a1)+
+	lea	bank_chg_b,a2
+	moveq	#0,d3			; the number of banks that changed
+	moveq	#0,d2			; the bank
+.cb:
+	sf	(a2,d2.w)
+	moveq	#0,d4
+	moveq	#4-1,d5
+.cbl:	move.l	(a0)+,d1
+	cmp.l	(a1)+,d1
+	beq.s	.cbe
+	moveq	#1,d4
+.cbe:	dbf	d5,.cbl
+	tst.w	d4
+	beq.s	.cbn
+	st	(a2,d2.w)
+	addq.w	#1,d3
+.cbn:	addq.w	#1,d2
+	cmp.w	#16,d2
+	blo.s	.cb
+	tst.w	d3
 	bne.s	.differs
-	dbf	d0,.same
 	bsr	.write_ste
 	rts
 .differs:
@@ -1371,7 +1533,10 @@ rf_palette:
 	moveq	#64-1,d0
 .cpt:	move.l	(a0)+,(a1)+
 	dbf	d0,.cpt
-	st	rf_all
+	cmp.w	#16,d3
+	bne.s	.partial
+	st	rf_all			; (every bank: the first palette, or a new picture altogether)
+.partial:
 	bsr	.write_ste
 	bra	.tables
 .write_ste:
@@ -1404,14 +1569,144 @@ rf_palette:
 	st	pal_pending
 	rts
 
+; The new choice (kept / kept_own: slot 0 the background, then the colours in the order they were found; owner
+; 0 = shared colour, entry + 1 = a flashing entry of its own, $FFFF = unused) is put into the slots of the choice
+; before (kept_prev / kept_own_prev): a colour that was in a slot stays in it (a flashing entry by owner, a shared
+; colour by value), the others take a never used slot first, then any free one.  So a new colour changes the mapping
+; of the pens near it, not of everything behind it in the order.  Clobbers d0-d6, a0-a1.
+
+.stabilize:
+	lea	slot_claimed,a0
+	lea	slot_placed,a1
+	moveq	#16-1,d0
+.sc:	clr.b	(a0)+
+	clr.b	(a1)+
+	dbf	d0,.sc
+	lea	kept_new,a0
+	lea	kept_own_new,a1
+	moveq	#16-1,d0
+.sn:	clr.w	(a0)+
+	move.w	#$FFFF,(a1)+
+	dbf	d0,.sn
+	lea	kept,a0
+	move.w	(a0),kept_new		; slot 0: the background
+	clr.w	kept_own_new
+	st	slot_claimed
+	st	slot_placed
+	moveq	#1,d5			; pass 1: the item of the new choice
+.p1:
+	move.w	d5,d0
+	add.w	d0,d0
+	lea	kept_own,a0
+	move.w	(a0,d0.w),d1		; its owner
+	cmp.w	#$FFFF,d1
+	beq.s	.p1_next
+	lea	kept,a0
+	move.w	(a0,d0.w),d2		; its colour
+	moveq	#1,d3			; the slots before
+.p1_f:
+	lea	slot_claimed,a0
+	tst.b	(a0,d3.w)
+	bne.s	.p1_n
+	move.w	d3,d4
+	add.w	d4,d4
+	lea	kept_own_prev,a0
+	cmp.w	(a0,d4.w),d1
+	bne.s	.p1_n			; (the same owner)
+	tst.w	d1
+	bne.s	.p1_take		; a flashing entry: the owner is enough
+	lea	kept_prev,a0
+	cmp.w	(a0,d4.w),d2
+	bne.s	.p1_n			; a shared colour: the colour as well
+.p1_take:
+	lea	kept_new,a0
+	move.w	d2,(a0,d4.w)
+	lea	kept_own_new,a0
+	move.w	d1,(a0,d4.w)
+	lea	slot_claimed,a0
+	st	(a0,d3.w)
+	lea	slot_placed,a0
+	st	(a0,d5.w)
+	bra.s	.p1_next
+.p1_n:
+	addq.w	#1,d3
+	cmp.w	#16,d3
+	blo.s	.p1_f
+.p1_next:
+	addq.w	#1,d5
+	cmp.w	#16,d5
+	blo	.p1
+	moveq	#1,d5			; pass 2: the items that had no slot
+.p2:
+	lea	slot_placed,a0
+	tst.b	(a0,d5.w)
+	bne.s	.p2_next
+	move.w	d5,d0
+	add.w	d0,d0
+	lea	kept_own,a0
+	move.w	(a0,d0.w),d1
+	cmp.w	#$FFFF,d1
+	beq.s	.p2_next
+	lea	kept,a0
+	move.w	(a0,d0.w),d2
+	moveq	#0,d6			; 0: a never used slot, 1: any free one
+.p2_look:
+	moveq	#1,d3
+.p2_s:
+	lea	slot_claimed,a0
+	tst.b	(a0,d3.w)
+	bne.s	.p2_sn
+	tst.w	d6
+	bne.s	.p2_go
+	move.w	d3,d4
+	add.w	d4,d4
+	lea	kept_own_prev,a0
+	cmp.w	#$FFFF,(a0,d4.w)
+	beq.s	.p2_go
+.p2_sn:
+	addq.w	#1,d3
+	cmp.w	#16,d3
+	blo.s	.p2_s
+	tst.w	d6
+	bne.s	.p2_next		; (cannot happen: at most 15 items for 15 slots)
+	moveq	#1,d6
+	bra.s	.p2_look
+.p2_go:
+	move.w	d3,d4
+	add.w	d4,d4
+	lea	kept_new,a0
+	move.w	d2,(a0,d4.w)
+	lea	kept_own_new,a0
+	move.w	d1,(a0,d4.w)
+	lea	slot_claimed,a0
+	st	(a0,d3.w)
+.p2_next:
+	addq.w	#1,d5
+	cmp.w	#16,d5
+	blo	.p2
+	lea	kept_new,a0		; the stable choice is the choice
+	lea	kept,a1
+	moveq	#8-1,d0
+.fin:	move.l	(a0)+,(a1)+
+	dbf	d0,.fin
+	lea	kept_own_new,a0
+	lea	kept_own,a1
+	moveq	#8-1,d0
+.fin2:	move.l	(a0)+,(a1)+
+	dbf	d0,.fin2
+	rts
+
 .tables:
-	; the bake tables of every bank: data = (S[hi] << 1) | S[lo], transparency pairs
+	; the bake tables of the banks whose mapping changed: data = (S[hi] << 1) | S[lo], transparency pairs
 	lea	ttab,a0
 	lea	dtab,a1
 	lea	mtab,a2
 	lea	spread,a3
+	lea	bank_chg_b,a4
 	moveq	#0,d6			; bank
 .tbank:
+	tst.b	(a4,d6.w)
+	beq	.tskip
 	moveq	#0,d5			; v = the pixel pair
 .tv:
 	move.w	d5,d1
@@ -1455,16 +1750,24 @@ rf_palette:
 	addq.w	#1,d5
 	cmp.w	#256,d5
 	blo.s	.tv
+.tskip:
 	addq.w	#1,d6
 	cmp.w	#16,d6
-	blo.s	.tbank
+	blo	.tbank
 
-	; the baked tiles are stale
+	; the baked tiles of the changed banks are stale
 	lea	tcache,a0
 	move.l	#TC_SIZE-1,d0
 .flush:
+	move.l	(a0),d1
+	bmi.s	.fl_n			; (empty already)
+	moveq	#14,d2
+	lsr.l	d2,d1
+	and.w	#15,d1			; the entry's bank
+	tst.b	(a4,d1.w)
+	beq.s	.fl_n
 	move.l	#-1,(a0)
-	lea	TC_ENTRY(a0),a0
+.fl_n:	lea	TC_ENTRY(a0),a0
 	dbf	d0,.flush
 	rts
 
@@ -1532,12 +1835,20 @@ objs:		ds.b	192*24
 objslots:	ds.b	192*SLOT_BYTES
 dirty:		ds.l	28
 dirty_prev:	ds.l	28
+dirty_raw:	ds.l	28
 page_dirty:	ds.b	64
 tile_dirty:	ds.b	464
 ctab:		ds.b	2048
 kept_own:	ds.w	16
 vol:		ds.b	256
 kept:		ds.w	16
+kept_prev:	ds.w	16
+kept_own_prev:	ds.w	16
+kept_new:	ds.w	16
+kept_own_new:	ds.w	16
+slot_claimed:	ds.b	16
+slot_placed:	ds.b	16
+bank_chg_b:	ds.b	16
 ttab:		ds.b	256
 ttab_new:	ds.b	256
 dtab:		ds.l	16*256
@@ -1554,6 +1865,7 @@ rf_dcols:	ds.l	1
 rf_drows:	ds.l	1
 rf_all:		ds.b	1
 rf_newvol:	ds.b	1
+rf_nonvol:	ds.b	1
 rf_changed:	ds.b	1
 	even
 rf_rgb:		ds.w	1

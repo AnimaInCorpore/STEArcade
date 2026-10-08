@@ -29,8 +29,14 @@ variables select the tools).
 | Galaga | CPU, 8 x 8 cells per colour quad, `chars_over` on top of sprites | Blitter, double sizes split into 16 x 16 parts, stars plotted after | renderer against MAME (RAM injected), reference identical |
 | Bubble Bobble | CPU, `movep.l` per planar row, tile bake cache, dirty 8 x 8 cells | none: objects are strips of 8 x 8 tiles, shifted tiles merged into two cells by the CPU | pixel for pixel against the reference |
 
-Bubble Bobble's cost is in the shifted tiles (about 2.7k cycles each) and the per-frame video RAM diff (83k cycles);
-the Blitter (halftone/endmask merge of a baked tile into the screen) is the next step for it, as in the other two ports.
+Bubble Bobble's measured cost (`games/bublbobl/tools/profile.py`, `render_bench.py`; numbers in its README) is not mainly the
+shifted tiles: in the play a frame has ~570 tile draws, 495 of them aligned and 77 shifted (about 2.7k cycles each), over ~200
+dirty cells (~9k cycles a cell), and at a scene change the colour mapping change (a new palette for 13 of the 16 banks)
+costs 3-9 M cycles in one frame.  Two techniques that apply to any renderer with two draw screens and a colour budget:
+cells the other screen lacks from the last frame are **copied from the screen shown** (a cell copy is ~500 cycles, drawing it
+~7000), and a **stable slot assignment** with a per-bank mapping change keeps a new colour from remapping the whole palette
+(and from redrawing the whole screen).  The Blitter (halftone/endmask merge of a baked tile) is not the first step for this
+renderer; the per-cell work is.
 
 ## Translator (`engine/z80x.py`)
 
@@ -150,8 +156,8 @@ not Hatari frame-rate measurements. Executables grow by about 407 KB and 558 KB;
 both ports still fit the configured 4 MB STE. Both rebuilt binaries also completed
 5000 VBLs in the pinned Hatari with no crash file; screenshots confirmed the games
 running (including Galaga's sprites).  Bubble Bobble's renderer (`games/bublbobl/src/bb_render.s`) is
-a complete tile renderer but does not use the Blitter yet; it has no sprite blitter to optimize, it is
-the candidate for one (see "Renderers of the ports" below).
+a complete tile renderer that does not use the Blitter; it has no sprite blitter to optimize, and its
+measured cost is elsewhere (see "Renderers of the ports" above).
 
 The reference's arbitrary row reordering relies on matching reordered source data.
 Copying that order directly into these ports would break their sequential source

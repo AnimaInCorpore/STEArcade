@@ -482,6 +482,9 @@ vbl:
 
 	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
 	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
+	ifd SIM
+	addq.l	#1,sim_game_frames	; (profile.py: game frames run)
+	endc
 	bsr	mcu_irq			; the MCU first: it raises the main CPU's interrupt
 
 	; Main CPU IRQ (IM 2) with the interrupted registers, if requested and enabled.
@@ -570,6 +573,9 @@ vbl_render:
 	movem.l	(sp),d0-d7/a0-a6	; the main CPU's registers for its IRQ handler
 	movem.l	d0-d7/a0-a6,main_ctx
 	st	in_render
+	ifd SIM
+	addq.l	#1,sim_renders		; (profile.py: renders started)
+	endc
 	move	#$2300,sr
 	bsr	render_frame
 	move	#$2400,sr
@@ -1426,6 +1432,8 @@ crash_name:
 	ifd SIM
 sim_frame_done:				; the test harness stops here (once per frame, after the game's interrupts)
 	bra.s	sim_frame_done
+sim_renders:	dc.l	0			; renders started so far (tools/profile.py)
+sim_game_frames:	dc.l	0			; the game's interrupt rounds run so far (tools/profile.py)
 	endc
 
 ; ------------------------------------------------------------------------------

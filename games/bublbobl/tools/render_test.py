@@ -72,7 +72,7 @@ def main():
         mem.w_block(g_ram + 0x5D00, bytes(ref.oram))
         mem.w_block(g_ram + 0x7800, bytes(ref.pal))
         # call render_frame
-        sp = 0x7F000
+        sp = 0x3FF000
         cpu.w_reg(R.A7, sp - 4)
         mem.w32(sp - 4, stop)
         cpu.w_sr(0x2700)
@@ -85,6 +85,7 @@ def main():
                 print("render_frame does not return, pc %06X" % cpu.r_pc())
                 return
         scr = mem.r32(sym["draw_screen_address"])
+        swap_screens = lambda: (mem.w32(sym["draw_screen_address"], mem.r32(sym["display_screen_address"])), mem.w32(sym["display_screen_address"], scr))   # the VBL swaps after a render
         got = decode_screen(mem, scr, 10 + 16, 224)
         ttab = bytes(mem.r_block(sym["ttab"], 256))
         raw = ref.render_raw()                                 # [224][256] palette indices, 255 = background
@@ -114,6 +115,7 @@ def main():
             save_png(pal[exp], "/tmp/bbr_exp_%d.png" % target, 2)
         if nd and len(frames) > 8:
             return
+        swap_screens()
 
 
 def check_cache(mem, sym):
@@ -194,11 +196,11 @@ def check_slots(s, ref, sym):
         if oram[i * 4:i * 4 + 4] == b"\0\0\0\0":
             continue
         want, sx_end = py_slots(oram, prom, i, sx)
-        sp = 0x7F000
+        sp = 0x3FF000
         cpu.w_reg(R.A7, sp - 4)
         mem.w32(sp - 4, sym["sim_frame_done"])
         cpu.w_reg(R.A4, g_ram + 0x5D00 + 4 * i)
-        cpu.w_reg(R.A5, 0x60000)
+        cpu.w_reg(R.A5, 0x3F0000)
         cpu.w_reg(R.D7, sx & 0xFFFF)
         cpu.w_sr(0x2700)
         cpu.w_pc(sym["obj_slots"])
@@ -208,7 +210,7 @@ def check_slots(s, ref, sym):
         got_end = cpu.r_reg(R.D7) & 0xFFFF
         got = []
         for k in range(cnt):
-            x = mem.r16(0x60000 + 10 * k); y = mem.r16(0x60000 + 10 * k + 2); v = mem.r16(0x60000 + 10 * k + 4)
+            x = mem.r16(0x3F0000 + 10 * k); y = mem.r16(0x3F0000 + 10 * k + 2); v = mem.r16(0x3F0000 + 10 * k + 4)
             got.append((x - 65536 if x & 0x8000 else x, y, v))
         w16 = [((x + 32768) % 65536 - 32768, y, v) for (x, y, v) in want]
         n += 1
