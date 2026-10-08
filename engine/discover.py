@@ -10,7 +10,7 @@ ROMSIZE = 0x4000
 
 def load_rom():
     from paths import EXTRACTED
-    return open(EXTRACTED / "cpu.rom", "rb").read()
+    return open(EXTRACTED / "dkong" / "cpu.rom", "rb").read()
 
 
 def table_after_rst28(rom, pc_after, known=()):

@@ -12,7 +12,7 @@ from z80 import Z80
 from dkong_pens import PENS
 
 from paths import EXTRACTED
-ROMDIR = str(EXTRACTED)
+ROMDIR = str(EXTRACTED / "dkong")
 
 CYCLES_PER_FRAME = 50688  # 3.072 MHz / 60.606 Hz
 

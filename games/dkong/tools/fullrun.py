@@ -56,7 +56,7 @@ class Lock:
         self.m = Machine(CPUType.M68000, 2048)
         self.cpu, self.mem = self.m.cpu, self.m.mem
         self.mem.w_block(CODE, self.binary)
-        rom = open(EXTRACTED / "cpu.rom", "rb").read()
+        rom = open(EXTRACTED / "dkong" / "cpu.rom", "rb").read()
         self.mem.w_block(BLOCK, rom)
         self.ref = DKong()
         self.stops = {self.sym[k]: k for k in ("z80_hook", "z80_badpc", "z80_badjump", "z80_unsupported", "z80_nmi_ret")}

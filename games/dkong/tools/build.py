@@ -32,7 +32,7 @@ def main():
     if a.nosprites: defs.append("NOSPRITES=1")
     assemble_link("dkong", "dkong.s", "dkong", a.out, defs)
     for f in ROMS:
-        shutil.copy(EXTRACTED / f, os.path.join(os.path.dirname(a.out), f))
+        shutil.copy(EXTRACTED / "dkong" / f, os.path.join(os.path.dirname(a.out), f))
     print("built", a.out, os.path.getsize(a.out), "bytes")
 
 
