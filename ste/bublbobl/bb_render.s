@@ -30,6 +30,7 @@ S_VRAM = g_ram+$4000
 S_ORAM = g_ram+$5D00
 S_PAL = g_ram+$7800
 
+VOLMIN = 4				; a palette entry that changed this often is volatile (flashing)
 TC_SIZE = 4096				; tile cache slots
 TC_ENTRY = 72				; key.l, opaque.l, 8 rows of (data.l, inverted mask.l)
 
@@ -123,6 +124,7 @@ rf_vdiff:
 	lea	snap_vram,a1
 	lea	tile_dirty,a3
 	lea	page_dirty,a2
+	lea	bank_seen_b,a4
 	move.w	#(7424/4)-1,d0
 	moveq	#0,d3			; the long index
 .l:
@@ -134,7 +136,22 @@ rf_vdiff:
 	rts
 .diff:
 	st	bank_stale		; (a tile entry changed: the banks in use are counted again)
-	move.l	-4(a0),-4(a1)		; copy
+	move.l	-4(a0),d4
+	move.l	d4,-4(a1)		; copy
+	move.l	d4,d5			; the banks of the two entries (bits 2-5 of their second byte)
+	swap	d5
+	tst.w	d5
+	beq.s	.e1
+	lsr.w	#2,d5
+	and.w	#15,d5
+	st	(a4,d5.w)
+.e1:
+	move.w	d4,d5
+	beq.s	.e2
+	lsr.w	#2,d5
+	and.w	#15,d5
+	st	(a4,d5.w)
+.e2:
 	move.w	d3,d1
 	add.w	d1,d1			; the first tile entry (word) of the long
 	move.w	d1,d2
@@ -1022,6 +1039,17 @@ rf_palette:
 .cmp:	cmpm.l	(a0)+,(a1)+
 	bne.s	.changed
 	dbf	d0,.cmp
+	lea	bank_seen_b,a0		; the palette is the same: a bank that came into use needs a slot
+	lea	bank_known_b,a1
+	moveq	#16-1,d0
+.nb:
+	tst.b	(a0)+
+	beq.s	.nbn
+	tst.b	(a1)
+	beq	.recompute
+.nbn:
+	addq.l	#1,a1
+	dbf	d0,.nb
 	rts
 .changed:
 	; entries that change are volatile (flashing colours keep a slot of their own, so that the
@@ -1035,10 +1063,14 @@ rf_palette:
 	move.w	(a0)+,d1
 	cmp.w	(a1)+,d1
 	beq.s	.vsame
-	tst.b	(a2)
+	move.b	(a2),d2
+	cmp.b	#255,d2
+	beq.s	.vsame
+	addq.b	#1,d2
+	move.b	d2,(a2)			; (the number of changes)
+	cmp.b	#VOLMIN,d2
 	bne.s	.vsame
-	st	(a2)
-	st	rf_newvol
+	st	rf_newvol		; ... that is flashing: it has a slot of its own from now on
 .vsame:
 	addq.l	#1,a2
 	dbf	d0,.vol
@@ -1108,6 +1140,15 @@ rf_palette:
 	add.w	d1,d1
 	addq.w	#1,(a2,d1.w)
 .cn:	dbf	d0,.cnt
+	lea	bank_cnt,a2		; the banks the mapping covers
+	lea	bank_known_b,a3
+	lea	bank_seen_b,a4
+	moveq	#16-1,d0
+.kn:	tst.w	(a2)+
+	sne	d1
+	move.b	d1,(a3)+
+	move.b	d1,(a4)+
+	dbf	d0,.kn
 .counted:
 
 	; the colours of the banks in use: ctab = (rgb, weight, owner, -); entry 0 the background
@@ -1135,8 +1176,8 @@ rf_palette:
 	lsl.w	#4,d0
 	add.w	d4,d0			; the entry number
 	lea	vol,a0
-	tst.b	(a0,d0.w)
-	bne.s	.volatile
+	cmp.b	#VOLMIN,(a0,d0.w)
+	bhs.s	.volatile
 	lea	ctab,a1
 	move.w	d7,d3
 	subq.w	#1,d3
@@ -1500,6 +1541,8 @@ bank_cnt:	ds.w	16
 ste_pal:	ds.w	16
 pal_pending:	ds.b	1
 bank_stale:	ds.b	1
+bank_seen_b:	ds.b	16
+bank_known_b:	ds.b	16
 	even
 rf_screen:	ds.l	1
 rf_dcols:	ds.l	1

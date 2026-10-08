@@ -1,5 +1,6 @@
 """Who writes a shared RAM address in the first frames (reference).  python ref/bb_find_write.py <addr> <frames>"""
 import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 from bublbobl import Bublbobl
 addr = int(sys.argv[1], 16); n = int(sys.argv[2])
@@ -19,5 +20,8 @@ for name, cpu in (("main", m.main), ("sub", m.sub)):
             orig(a, v)
         cpu.wr8 = wr
     mk(name, cpu)
+import bb_logic_test as lt
 for f in range(n):
+    i0, i1, i2 = lt.inputs(f)
+    m.in0, m.in1, m.in2 = i0, i1, i2
     m.run_frame_port()

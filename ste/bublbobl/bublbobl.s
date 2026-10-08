@@ -469,6 +469,17 @@ vbl:
 	tst.b	in_turn			; a booting chip's registers are live: no handlers
 	bne	vbl_render
 
+	; The game's interrupts cost 0.5-1.1 frames here: while a frame has been drawing for a few VBLs,
+	; every other VBL skips them (the game slows down, the picture keeps coming).
+	tst.b	in_render
+	beq.s	.do_logic
+	addq.b	#1,render_age
+	cmp.b	#4,render_age
+	blo.s	.do_logic
+	eori.b	#1,skip_phase
+	bne	vbl_render
+.do_logic:
+
 	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
 	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
 	bsr	mcu_irq			; the MCU first: it raises the main CPU's interrupt
@@ -563,6 +574,7 @@ vbl_render:
 	bsr	render_frame
 	move	#$2400,sr
 	clr.b	in_render
+	clr.b	render_age
 	st	frame_ready
 
 vbl_done:
@@ -848,14 +860,179 @@ mcu_irq:
 	bra.s	mcu_exit
 .no:	rts
 
+; F1BF: B = the byte at the shared RAM / input address X (d2).  The effects of the firmware routine
+; (DDRs as the init leaves them: P1 $F0, P2 and P4 $FF): P1 data = P1 | $80, P3 DDR = 0, ($4A) = X,
+; P4 = X low, P2 = X high nibble, then | $10 (the clock: the bus cycle), A = that, B = the byte.
+
+mcu_bus_read:
+	move.b	mcu_mem+2,d0
+	and.b	#$F0,d0
+	or.b	in0_val,d0		; P1 as the pins show
+	or.b	#$80,d0
+	move.b	d0,mcu_mem+2
+	and.b	#$F0,d0
+	or.b	#$0F,d0
+	move.b	d0,p1_out		; (no edge of bit 6: the latch's bit 6 is what it was)
+	clr.b	mcu_mem+4
+	move.w	d2,mcu_mem+$4A
+	move.b	d2,mcu_mem+7
+	move.w	d2,d0
+	lsr.w	#8,d0
+	and.b	#$0F,d0
+	move.b	d0,mcu_mem+3
+	or.b	#$10,d0
+	move.b	d0,mcu_mem+3
+	move.b	d0,p2_out
+	; the bus cycle (a read): X & $800 clear: DSW0, DSW1, IN1, IN2; X & $C00 = $C00: the shared RAM
+	move.w	d2,d1
+	and.w	#$0800,d1
+	bne.s	.r_mc
+	move.w	d2,d1
+	and.w	#3,d1
+	lea	dsw0,a0
+	move.b	(a0,d1.w),p3_in
+	bra.s	.r_done
+.r_mc:
+	move.w	d2,d1
+	and.w	#$0C00,d1
+	cmp.w	#$0C00,d1
+	bne.s	.r_done
+	move.w	d2,d1
+	and.w	#$03FF,d1
+	lea	G_MCRAM,a0
+	move.b	(a0,d1.w),p3_in
+.r_done:
+	moveq	#0,d1
+	move.b	p3_in,d1		; P3 read (the DDR is 0)
+	tst.b	d1
+	rts
+
+; F1DB: write B (d1) at X (d2): P1 data = P1 & $7F, P3 DDR = $FF, P3 = B, ($4A) = X, P4 = X low,
+; P2 = X high nibble, then | $10; A = that, B = X low.
+
+mcu_bus_write:
+	move.b	mcu_mem+2,d0
+	and.b	#$F0,d0
+	or.b	in0_val,d0
+	and.b	#$7F,d0
+	move.b	d0,mcu_mem+2
+	and.b	#$F0,d0
+	or.b	#$0F,d0
+	move.b	d0,p1_out
+	move.b	#$FF,mcu_mem+4
+	move.b	d1,mcu_mem+6
+	move.w	d2,mcu_mem+$4A
+	move.b	d2,mcu_mem+7
+	move.w	d2,d0
+	lsr.w	#8,d0
+	and.b	#$0F,d0
+	move.b	d0,mcu_mem+3
+	or.b	#$10,d0
+	move.b	d0,mcu_mem+3
+	move.b	d0,p2_out
+	move.w	d2,d1			; the bus cycle (a write): only the shared RAM
+	and.w	#$0C00,d1
+	cmp.w	#$0C00,d1
+	bne.s	.w_done
+	move.w	d2,d1
+	and.w	#$03FF,d1
+	lea	G_MCRAM,a0
+	move.b	mcu_mem+6,(a0,d1.w)
+.w_done:
+	moveq	#0,d1
+	move.b	d2,d1			; B = X low (ldd $4A)
+	tst.b	d0
+	rts
+
 mcu_restart:				; the firmware asked for a reset: the init runs again at the next turn
 	clr.b	mcu_booted
 	move.l	mcu_sp0,sp
-	bra.s	mcu_exit
+	bra	mcu_exit
 
 ; The ports.  d7 = the value / the result; all other registers are kept.
 
-mcu_rd_p1:				; P1 as the pins show: the latch where output, IN0 where input
+; The usual cases first (P1: DDR $F0, P3 read: DDR 0, P2 / P3 / P4 outputs: DDR $FF): the bus is
+; clocked tens of times per frame.  Anything else takes the general versions below.
+
+mcu_rd_p1:
+	cmp.b	#$F0,mcu_mem+0
+	bne	mcu_rd_p1_slow
+	move.b	mcu_mem+2,d7
+	and.b	#$F0,d7
+	or.b	in0_val,d7		; (in0's high bits are 1: only its low nibble is an input)
+	rts
+
+mcu_rd_p3:
+	tst.b	mcu_mem+4
+	bne	mcu_rd_p3_slow
+	move.b	p3_in,d7
+	rts
+
+mcu_wr_p1:
+	cmp.b	#$F0,mcu_mem+0
+	bne	mcu_wr_p1_slow
+	and.b	#$F0,d7
+	or.b	#$0F,d7			; the output pins: data where the DDR bit is set, else 1
+	btst	#6,p1_out
+	beq.s	.n
+	btst	#6,d7
+	bne.s	.n
+	st	main_irq		; bit 6 high -> low: the main CPU's interrupt
+.n:
+	move.b	d7,p1_out
+	rts
+
+mcu_wr_p2:
+	cmp.b	#$FF,mcu_mem+1
+	bne	mcu_wr_p2_slow
+	cmp.b	#$FF,mcu_mem+5
+	bne	mcu_wr_p2_slow
+	btst	#4,d7			; the rising edge of bit 4 does the bus cycle
+	beq	.store
+	btst	#4,p2_out
+	bne	.store
+	movem.l	d0-d1/a0,-(sp)
+	moveq	#0,d0
+	move.b	d7,d0
+	and.w	#$0F,d0
+	lsl.w	#8,d0
+	move.b	mcu_mem+7,d0		; the address: P2 bits 0-3 high, P4 low
+	btst	#7,p1_out
+	beq.s	.write
+	move.w	d0,d1			; read
+	and.w	#$0800,d1
+	bne.s	.mc
+	and.w	#3,d0
+	lea	dsw0,a0
+	move.b	(a0,d0.w),p3_in		; DSW0, DSW1, IN1, IN2
+	bra.s	.bus_done
+.mc:
+	move.w	d0,d1
+	and.w	#$0c00,d1
+	cmp.w	#$0c00,d1
+	bne.s	.bus_done
+	and.w	#$03ff,d0
+	lea	G_MCRAM,a0
+	move.b	(a0,d0.w),p3_in
+	bra.s	.bus_done
+.write:
+	move.w	d0,d1
+	and.w	#$0c00,d1
+	cmp.w	#$0c00,d1
+	bne.s	.bus_done
+	and.w	#$03ff,d0
+	lea	G_MCRAM,a0
+	cmp.b	#$FF,mcu_mem+4		; (the data pins are outputs: P3's latch)
+	bne.s	.bus_done
+	move.b	mcu_mem+6,(a0,d0.w)
+.bus_done:
+	movem.l	(sp)+,d0-d1/a0
+.store:
+	move.b	d7,p2_out
+	rts
+
+
+mcu_rd_p1_slow:			; P1 as the pins show: the latch where output, IN0 where input
 	move.l	d3,-(sp)
 	move.b	mcu_mem+0,d7		; DDR
 	move.b	d7,d3
@@ -866,7 +1043,7 @@ mcu_rd_p1:				; P1 as the pins show: the latch where output, IN0 where input
 	move.l	(sp)+,d3
 	rts
 
-mcu_rd_p3:
+mcu_rd_p3_slow:
 	move.l	d3,-(sp)
 	move.b	mcu_mem+4,d7
 	move.b	d7,d3
@@ -888,7 +1065,7 @@ mcu_out	macro
 .o\@:
 	endm
 
-mcu_wr_p1:
+mcu_wr_p1_slow:
 	move.l	d3,-(sp)
 	move.b	mcu_mem+0,d3
 	mcu_out	d7,d3
@@ -903,7 +1080,7 @@ mcu_wr_p1:
 	move.l	(sp)+,d3
 	rts
 
-mcu_wr_p2:
+mcu_wr_p2_slow:
 	movem.l	d0-d3/a0,-(sp)
 	; P4 (the low address), P3 (the data) as they show, P2
 	moveq	#0,d1
@@ -1337,6 +1514,8 @@ border_a:	ds.b	1
 border_b:	ds.b	1
 frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
 in_logic:	ds.b	1		; the game's interrupts of a VBL are running
+render_age:	ds.b	1		; VBLs since the frame being drawn began
+skip_phase:	ds.b	1
 in_render:	ds.b	1		; drawing: the main CPU's registers are in main_ctx
 in_turn:	ds.b	1		; a booting chip runs with its registers live
 current:	ds.b	1		; 0: the main CPU's code runs, 1: the sub CPU's

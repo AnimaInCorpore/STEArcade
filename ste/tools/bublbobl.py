@@ -40,6 +40,7 @@ def skip_tests(main, sub):
     the RAM tests of $E000-$F7FF and $FC01-$FFFF (jumps past them; they leave the RAM zero, which it is
     already), the delay loop at $0138 (one pass instead of 16384), the sub CPU's checksum of its 32 KB
     ROM at $017B (a return).  The MCU handshake, the vector setup and the MCU's own checksum stay."""
+    original = bytes(main)
     main = bytearray(main)
     sub = bytearray(sub)
     assert main[0xC1:0xC4] == bytes([0x21, 0x00, 0xE0]) and main[0xF1:0xF4] == bytes([0x21, 0x01, 0xFC])
@@ -48,6 +49,12 @@ def skip_tests(main, sub):
     main[0xF1:0xF4] = bytes([0xC3, 0x18, 0x01])          # jp $0118
     main[0x138:0x13B] = bytes([0x21, 0x01, 0x00])        # ld hl,$0001
     sub[0x17B] = 0xC9                                    # ret
+    # the game checksums main ROM bytes $0001-$0EDC one per frame (E6FD += (de), pc $484B) and compares
+    # with $E6FE at the end: dead bytes of the old RAM test ($C4: the operand of its `ld de`) make the sum
+    # the original's
+    orig = sum(original[1:0xEDD])
+    main[0xC4] = (main[0xC4] + orig - sum(main[1:0xEDD])) & 0xFF
+    assert sum(main[1:0xEDD]) & 0xFF == orig & 0xFF
     return bytes(main), bytes(sub)
 
 

@@ -136,7 +136,26 @@ class BBEmitter(Emitter):
         finally:
             self.win_src = None
 
-    def x_ldir(self, ins): self.block_win(super().x_ldir, ins)
+    def x_ldir(self, ins):
+        if ins.pc in self.window_sites:
+            return self.block_win(super().x_ldir, ins)
+        # a1 / a2 (DE' / HL') are saved around a loop on address registers: 22 cycles a byte instead of 46
+        l = self.new_label()
+        self.e("move.w d1,d5")
+        self.e("ror.w #8,d5")              # the count (0 = 65536), BC is 0 afterwards
+        self.e("movem.l a1-a2,-(sp)")
+        self.e("lea (a6,d3.w),a1")
+        self.e("lea (a6,d2.w),a2")
+        self.e("move.w d5,d7")
+        self.e("subq.w #1,d7")
+        self.lines.append(l + ":")
+        self.e("move.b (a1)+,(a2)+")
+        self.e("dbf d7,%s" % l)
+        self.e("movem.l (sp)+,a1-a2")
+        self.e("add.w d5,d3")
+        self.e("add.w d5,d2")
+        self.e("moveq #0,d1")
+        self.flags(0, const_clear=z80x.H | z80x.N)
     def x_ldi(self, ins): self.block_win(super().x_ldi, ins)
     def x_ldd(self, ins): self.block_win(super().x_ldd, ins)
     def x_lddr(self, ins): self.block_win(super().x_lddr, ins)
@@ -233,6 +252,8 @@ def generate():
 
     # ---- main CPU
     wsites = {vpc_of_cover(pc) for pc, bank in wread}
+    for f in glob.glob(os.path.join(STE, "bb_wsites_audit_*.pkl")):      # tools/bb_window_audit.py
+        wsites |= {int(name[1:], 16) for name in pickle.load(open(f, "rb"))}
     DYN.clear()
     DYN.update(vpc_of_cover(p) for p in main_dyn)
     code, tables, em = translate(img, [0, 0x38, 0x66], DYN, cfg_main,

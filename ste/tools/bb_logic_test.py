@@ -118,6 +118,9 @@ def main():
                 break
         # compare
         errs = []
+        if mem.r16(sym["rnd_state"]) != ref.rnd_state and not getattr(ref, "_rnd_reported", False):
+            ref._rnd_reported = True
+            print("frame %d: the random generator differs: 68000 %04X reference %04X" % (f, mem.r16(sym["rnd_state"]), ref.rnd_state))
         for lo, hi in RANGES:
             got = bytes(mem.r_block(g_ram + lo - 0x8000, hi - lo))
             if lo < 0xDD00 and hi > 0xDD00:

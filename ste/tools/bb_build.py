@@ -4,6 +4,7 @@ import argparse, os, shutil, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bb_gen, bb_assets, m6801x
 from build import VASM, VLINK
+import bublbobl
 from bublbobl import ROMDIR
 
 STE = bb_gen.STE
@@ -28,7 +29,7 @@ def main():
         print("CPU%d: %d instructions, unsupported %d" % (n + 1, rep["instructions"], len(rep["unsupported"])))
         for u in rep["unsupported"][:10]:
             print("   %04X %-24s %s" % u)
-    mtext, em, code = m6801x.generate()
+    mtext, em, code = m6801x.generate(native=m6801x.NATIVE)
     open(os.path.join(STE, "build", "bb_mcu.s"), "w").write(mtext)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     bb_assets.build()
@@ -51,8 +52,12 @@ def main():
     sys.stdout.write(r.stdout + r.stderr)
     if r.returncode:
         sys.exit(r.returncode)
+    # the ROM files the runtime loads: the main and sub CPU's with the boot tests patched out (the game
+    # checksums part of its ROM while it runs)
+    main, sub = bublbobl.skip_tests(bublbobl.load(ROMS[0]), bublbobl.load(ROMS[2]))
     for f in ROMS:
-        shutil.copy(os.path.join(ROMDIR, f), os.path.join(os.path.dirname(a.out), f))
+        data = main if f == ROMS[0] else sub if f == ROMS[2] else bublbobl.load(f)
+        open(os.path.join(os.path.dirname(a.out), f), "wb").write(data)
     print("built", a.out, os.path.getsize(a.out), "bytes")
 
 
