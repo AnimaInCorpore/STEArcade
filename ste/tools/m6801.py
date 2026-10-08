@@ -448,6 +448,7 @@ class M6801:
             r = (self.x - v) & 0xFFFF
             self.setnz16(r)
             self.flag(V, ((self.x ^ v) & (self.x ^ r) & 0x8000) != 0)
+            self.flag(C, self.x < v)
             self.tick(5); return
         if k == 0xC and b:                   # LDD (CC DC EC FC)
             a = self.ea(mode, 2)

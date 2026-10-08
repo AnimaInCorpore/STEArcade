@@ -107,6 +107,9 @@ class Bublbobl:
         self.mcu_held = True
         self.sub_irq = False
         self.tiles = None
+        self.port_mode = False
+        self.booted = [False, False, False]
+        self.in_sub_nmi = False
 
     # ---- main CPU bus --------------------------------------------------
     def rd_main(self, a):
@@ -147,17 +150,24 @@ class Bublbobl:
             if a < 0xFA80:
                 if (a & 3) == 0:
                     self.m2s = v
-                    self.m2s_pending = True
                     self.snd_log.append((self.frame, v))
-                    if self.snd_nmi_en and not self.sreset:
-                        self.snd.nmi()
+                    if not self.port_mode:           # (the port has no sound CPU: nothing pending)
+                        self.m2s_pending = True
+                        if self.snd_nmi_en and not self.sreset:
+                            self.snd.nmi()
                 elif (a & 3) == 3:
                     self.sreset_w(v)
             elif a < 0xFB00:
                 pass
             elif a < 0xFB40:
                 if not self.sub_held:
-                    self.sub.nmi()
+                    if self.port_mode:
+                        if self.booted[1] and not self.in_sub_nmi:
+                            self.in_sub_nmi = True
+                            self.run_handler(self.sub, nmi=True)
+                            self.in_sub_nmi = False
+                    else:
+                        self.sub.nmi()
             elif a < 0xFB80:
                 self.bankswitch_w(v)
         else:
@@ -176,10 +186,12 @@ class Bublbobl:
         sub_run = bool(v & 0x10)
         if sub_run and self.sub_held:
             self.sub.reset()
+            self.booted[1] = False
         self.sub_held = not sub_run
         mcu_run = bool(v & 0x20)
         if mcu_run and self.mcu_held:
             self.mcu.reset()
+            self.booted[2] = False
         self.mcu_held = not mcu_run
         self.video_enable = bool(v & 0x40)
         self.flip = bool(v & 0x80)
@@ -287,6 +299,95 @@ class Bublbobl:
             if not self.mcu_held:
                 mcu.run(64)
         self.frame += 1
+
+    # ---- the STE runtime's schedule -------------------------------------
+    IDLE_MAIN, IDLE_SUB = 0x01ED, 0x000A
+
+    def run_handler(self, cpu, nmi=False, vec=0xFF):
+        """Run an interrupt handler of a Z80 to its return (the interrupted pc and sp)."""
+        sp0, pc0 = cpu.sp, cpu.pc
+        if nmi:
+            cpu.nmi()
+        elif not cpu.irq(vec):
+            return False
+        n = 0
+        while not (cpu.sp == sp0 and cpu.pc == pc0):
+            cpu.step()
+            n += 1
+            if n > 3_000_000:
+                raise RuntimeError("handler of %04X did not return" % pc0)
+        return True
+
+    def run_mcu_irq(self):
+        mcu = self.mcu
+        if mcu.cc & 0x10:
+            return False
+        sp0, pc0 = mcu.sp, mcu.pc
+        mcu.take(0xFFF8)
+        n = 0
+        while not (mcu.sp == sp0 and mcu.pc == pc0):
+            mcu.step()
+            n += 1
+            if n > 1_000_000:
+                raise RuntimeError("MCU handler did not return")
+        return True
+
+    def run_to_idle(self, cpu, idle):
+        k = 0
+        while cpu.pc != idle:
+            cpu.step()
+            k += 1
+            if k > 50_000_000:
+                raise RuntimeError("CPU does not reach its idle loop at %04X (pc %04X)" % (idle, cpu.pc))
+
+    def run_frame_port(self):
+        """One frame as the STE runtime schedules it: at the vertical blank the MCU's IRQ1
+        handler (it raises the main CPU's interrupt), then the main CPU's interrupt handler
+        and the sub CPU's, each to completion; the sub CPU's NMI (a write to FB00) runs at the
+        write.  The foreground threads only boot to their idle loops."""
+        self.port_mode = True
+        main, sub = self.main, self.sub
+        if not self.booted[0]:
+            k = 0
+            while main.pc != self.IDLE_MAIN:
+                main.step()
+                k += 1
+                if main.pc in self.YIELD_MAIN:
+                    self.boot_turns()
+                if k > 50_000_000:
+                    raise RuntimeError("main CPU does not reach its idle loop (pc %04X)" % main.pc)
+            self.booted[0] = True
+        self.boot_turns()
+        if not self.mcu_held:
+            self.mcu.irq1 = False
+            self.run_mcu_irq()
+        if self.irq_main and main.iff1 and self.booted[0]:
+            self.irq_main = False
+            self.run_handler(main, vec=self.mcram[0])
+        if not self.sub_held and self.booted[1] and sub.iff1:
+            self.run_handler(sub)
+        self.frame += 1
+
+    # the main CPU's boot waits for the MCU's handshake ($FC85 = $37) at these pcs
+    YIELD_MAIN = {0x0158, 0x015B, 0x015D}
+
+    def boot_turns(self):
+        """The booting chips run their boot code to their idle loops (the MCU's init, the sub CPU)."""
+        if not self.mcu_held and not self.booted[2]:
+            self.run_to_idle_mcu()
+            self.booted[2] = True
+        if not self.sub_held and not self.booted[1]:
+            self.run_to_idle(self.sub, self.IDLE_SUB)
+            self.booted[1] = True
+
+    def run_to_idle_mcu(self):
+        mcu = self.mcu
+        k = 0
+        while mcu.pc != 0xF043 or mcu.cc & 0x10:
+            mcu.step()
+            k += 1
+            if k > 5_000_000:
+                raise RuntimeError("MCU does not reach its idle loop (pc %04X)" % mcu.pc)
 
     # ---- rendering -----------------------------------------------------
     def palette_rgb(self):
