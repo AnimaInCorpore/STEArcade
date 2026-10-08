@@ -455,7 +455,8 @@ draw_part:
 
 	; the rectangle in the screen
 	add	#DISP_TOP,d3
-	lsl	#8,d3
+	ext.l	d3
+	lsl.l	#8,d3			; (a word shift wrapped the lines from 256 on: the ship at the bottom)
 	ext.l	d4
 	lsl.l	#3,d4
 	add.l	d3,d4

@@ -39,8 +39,8 @@ MARK_SIZE = MARK_ROWS*8
 KEY_ESC = $01
 
 	ifnd CROP_TOP
-CROP_TOP = 24				; the STE shows 277 of the 288 lines: from this buffer line on
-					; (the picture starts at DISP_TOP = 32, so 8 black lines above it)
+CROP_TOP = 32				; the STE shows 277 of the 288 lines: from this buffer line on
+					; (the picture starts at DISP_TOP = 32: its last 11 lines are lost)
 	endc
 
 	ifnd TA_DATA
