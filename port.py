@@ -26,6 +26,7 @@ COVER = {
               ("ref/colors3.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
+    "1942": [("ref/cover.py", [1, 2, 3, 4], 60000)],
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
@@ -36,8 +37,13 @@ TESTS = {
                  ("tools/logic_test.py", ["{n}"], 700),
                  ("tools/render_test.py", ["seq", "1500", "20"], None),
                  ("tools/align_test.py", ["{n}"], 900)],
+    "1942": [("tools/build.py", ["--sim"], None),
+             ("tools/logic_test.py", ["{n}"], 6000),
+             ("tools/sprite_test.py", [], None),
+             ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-MAME = {"dkong": "ref/mame_cmp_dkong.py", "galaga": "ref/mame_cmp_galaga.py", "bublbobl": "ref/mame_cmp_bublbobl.py"}
+MAME = {"dkong": "ref/mame_cmp_dkong.py", "galaga": "ref/mame_cmp_galaga.py", "bublbobl": "ref/mame_cmp_bublbobl.py",
+        "1942": "ref/mame_cmp_1942.py"}
 GAMES = sorted(COVER)
 
 

@@ -137,6 +137,7 @@ class Sim:
     def __init__(self, prg, ram_kib=4096, run_dir=RUN):
         self.run_dir = Path(run_dir)
         self.m = Machine(CPUType.M68000, ram_kib)
+        self.io_ram = ram_kib >= 16384        # RAM up to $ffffff: the hardware registers are readable memory
         self.cpu, self.mem = self.m.cpu, self.m.mem
         self.io = bytearray(0x8000)           # $ff8000..$ffffff
         self.files = {}
@@ -165,6 +166,9 @@ class Sim:
         # blitter start: bit 7 of $ff8a3c
         if off <= 0xA3C < off + nbytes and self.io[0xA3C] & 0x80:
             self.blitter.run()
+            if self.io_ram:
+                # (code that adds to the destination address needs to read back what the Blitter advanced)
+                self.mem.w_block(0xFF8A00, bytes(self.io[0xA00:0xA40]))
 
     # ---- loading -------------------------------------------------------
     def load_prg(self, path):

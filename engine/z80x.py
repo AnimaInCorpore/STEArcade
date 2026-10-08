@@ -33,6 +33,12 @@ from z80dis import decode
 S, Z, C, H, N = 1, 2, 4, 8, 16
 ALLF = S | Z | C | H | N
 CCRF = S | Z | C
+# P/V (parity after and/or/xor) is tracked only for `jp/call/ret pe|po` that do not directly follow ldi/cpi:
+# bit 7 of d6, computed by the producers where the liveness says a consumer reads it (and for Config.pv_force)
+PV = 32
+PV_BIT = 7
+PV_PRODUCERS = {"and", "or", "xor"}
+PV_PASS = {"ex af,af'", "ldi", "ldd", "ldir", "lddr", "cpi", "cpd", "cpir", "cpdr"}
 CCRBIT = {S: 0x08, Z: 0x04, C: 0x01}           # 68k CCR bit for a Z80 flag
 D6BIT = {H: 5, N: 6}
 
@@ -61,8 +67,10 @@ class Config:
     def __init__(self, prefix="Z", table="z80_dispatch", token_sym="z80_nmi_ret", mode="signed",
                  block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
-                 table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False):
+                 table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False):
         self.prefix = prefix
+        self.bit_s = bit_s              # BIT sets S as the CPU does (the flags a task saves on its stack are exact; one more instruction)
+        self.pv_force = set(pv_force)   # and/or/xor pcs whose parity must reach d6 bit 7 although the liveness does not see the reader (across ex af,af')
         self.table = table
         self.token_sym = token_sym
         self.mode = mode
@@ -93,6 +101,19 @@ class Unsupported(Exception):
 # --------------------------------------------------------------------------
 
 def uses_defs(ins):
+    """(uses, defs) over the tracked flags S Z C H N and P/V (see PV)."""
+    u, d = _uses_defs(ins)
+    mn = ins.mn
+    if d & (S | Z) or mn in ("ldi", "ldd", "ldir", "lddr"):
+        d |= PV
+    if mn == "ex af,af'":
+        d |= PV                  # (the swap carries d6 bit 7 along; what the consumer reads was produced earlier: pv_force)
+    if mn in ("jr", "jp", "call", "ret") and ins.ops and ins.ops[0][0] == "cc" and ins.ops[0][1] in ("pe", "po"):
+        u |= PV
+    return u, d
+
+
+def _uses_defs(ins):
     """(uses, defs) over the tracked flags S Z C H N."""
     mn = ins.mn
     ops = ins.ops
@@ -145,16 +166,18 @@ def uses_defs(ins):
     return 0, 0
 
 
-def flow_uses(ins):
-    """Extra liveness 'uses' at control-flow boundaries (flags a callee/caller may read)."""
-    if ins.flow in ("call", "ccall", "ret", "cret", "rst"):
+def flow_uses(ins, ijmp_flags=False):
+    """Extra liveness 'uses' at control-flow boundaries (flags a callee/caller may read).  ijmp_flags: a computed jump
+    (`jp (hl)`) passes the flags on too (1942: the scheduler starts a task with it and the task saves them on its stack)."""
+    if ins.flow in ("call", "ccall", "ret", "cret", "rst") or (ijmp_flags and ins.flow == "ijmp"):
         return CCRF
     return 0
 
 
-def compute_liveness(code, ccr_users=()):
+def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=()):
     """live_in / live_out per pc (bitmask of tracked flags).  ccr_users: conditional jumps
-    that read the 68k condition codes instead of d6 (Emitter.analyze), no use of d6."""
+    that read the 68k condition codes instead of d6 (Emitter.analyze), no use of d6.  flags_at: pcs where the
+    flags in d6 must be exact (a hook that delivers an interrupt, whose handler saves them)."""
     succs = {}
     for pc, ins in code.items():
         nxt = pc + ins.length
@@ -177,7 +200,7 @@ def compute_liveness(code, ccr_users=()):
         u, d = uses_defs(ins)
         if pc in ccr_users:
             u = 0
-        uses[pc] = u | flow_uses(ins)
+        uses[pc] = u | flow_uses(ins, ijmp_flags) | (CCRF if pc in flags_at else 0)
         defs[pc] = d
     live_in = {pc: 0 for pc in code}
     live_out = {pc: 0 for pc in code}
@@ -191,7 +214,7 @@ def compute_liveness(code, ccr_users=()):
                 lo |= live_in[s]
             ins = code[pc]
             if ins.flow in ("call", "ccall", "rst"):
-                lo &= ~(H | N)           # H/N are not preserved across calls
+                lo &= ~(H | N | PV)      # H/N/PV are not preserved across calls
             li = uses[pc] | (lo & ~defs[pc])
             if li != live_in[pc] or lo != live_out[pc]:
                 live_in[pc] = li
@@ -543,6 +566,8 @@ class Emitter:
             if fn is None:
                 raise Unsupported("mnemonic %s" % ins.mn)
             fn(ins)
+            if self.lo & PV and ins.mn not in PV_PRODUCERS and ins.mn not in PV_PASS and uses_defs(ins)[1] & PV:
+                raise Unsupported("P/V after %s" % ins.mn)
         except Unsupported as ex:
             del self.lines[start:]
             self.unsupported.append((pc, ins.text, str(ex)))
@@ -866,12 +891,34 @@ class Emitter:
     def x_cp(self, ins):
         self._simple_alu(ins, "cmp", nconst=1, isub=True)
 
+    def pv_parity(self):
+        """d6 bit 7 = P/V after a logic op: set when the parity of A is even (needs live or forced; clobbers d5 d7)."""
+        if not (self.lo & PV or self.cur.pc in self.cfg.pv_force):
+            return
+        l = self.new_label()
+        self.e("move.b d0,d7")
+        self.e("move.b d7,d5")
+        self.e("lsr.b #4,d5")
+        self.e("eor.b d5,d7")
+        self.e("move.b d7,d5")
+        self.e("lsr.b #2,d5")
+        self.e("eor.b d5,d7")
+        self.e("move.b d7,d5")
+        self.e("lsr.b #1,d5")
+        self.e("eor.b d5,d7")               # bit 0: odd parity
+        self.e("bclr #%d,d6" % PV_BIT)
+        self.e("btst #0,d7")
+        self.e("bne.s %s" % l)
+        self.e("bset #%d,d6" % PV_BIT)
+        self.lines.append(l + ":")
+
     def x_and(self, ins):
         pre, ea = self._alu_src(ins)
         for l in pre:
             self.e(l)
         self.e("and.b %s,d0" % ea)
         self.flags(S | Z | C, const_set=H, const_clear=N)
+        self.pv_parity()
 
     def x_or(self, ins):
         pre, ea = self._alu_src(ins)
@@ -879,6 +926,7 @@ class Emitter:
             self.e(l)
         self.e("or.b %s,d0" % ea)
         self.flags(S | Z | C, const_clear=H | N)
+        self.pv_parity()
 
     def x_xor(self, ins):
         pre, ea = self._alu_src(ins)
@@ -892,6 +940,7 @@ class Emitter:
             self.e("move.b %s,d7" % ea)
             self.e("eor.b d7,d0")
         self.flags(S | Z | C, const_clear=H | N)
+        self.pv_parity()
 
     def _adcsbc(self, ins, op, isub):
         dst, src = ins.ops
@@ -969,7 +1018,7 @@ class Emitter:
             self.e("move.w %s,d5" % self.mem(self.cfg.iyaddr))
             sreg = "d5"
         else:
-            sreg = self.nat16(sn, 5)
+            sreg = self.nat16(sn, 7 if dn == "iy" else 5)
         if dn in SWAPPED:
             raise Unsupported("add %s,rr" % dn)
         if dn == "iy":
@@ -1062,7 +1111,17 @@ class Emitter:
         for l in pre:
             self.e(l)
         self.e("btst #%d,%s" % (b, ea))
+        exact_s = self.cfg.bit_s and self.lo & S
+        if exact_s and bit == 7:
+            self.e("sne d5")                  # (the CCR stays) S = the tested bit
         self.flags(Z, const_set=H, const_clear=N)
+        if exact_s:                           # the real CPU sets S from bit 7 of the result: 0 for any lower bit
+            if bit == 7:
+                self.e("andi.b #8,d5")
+                self.e("andi.b #$F7,d6")
+                self.e("or.b d5,d6")
+            else:
+                self.e("andi.b #$F7,d6")
 
     def x_res(self, ins):
         if len(ins.ops) > 2:
@@ -1294,10 +1353,12 @@ class Emitter:
         tracked; `jp pe/po` right after ldi/ldd (P/V = BC != 0) is the one form supported."""
         if cc in ("pe", "po"):
             prev = self.ends.get(self.cur.pc)
-            if prev is None or self.code[prev].mn not in ("ldi", "ldd", "cpi", "cpd"):
-                raise Unsupported("%s not after ldi/ldd" % cc)
-            self.e("tst.w d1")
             taken = (cc == "pe") != inv
+            if prev is not None and self.code[prev].mn in ("ldi", "ldd", "cpi", "cpd"):
+                self.e("tst.w d1")
+                self.e("b%s %s" % ("ne" if taken else "eq", label))
+                return
+            self.e("btst #%d,d6" % PV_BIT)           # parity of a logic op, see pv_parity
             self.e("b%s %s" % ("ne" if taken else "eq", label))
             return
         self.load_cc(cc)
