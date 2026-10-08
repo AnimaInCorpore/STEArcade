@@ -461,6 +461,8 @@ erase_stars:
 	rts
 
 draw_stars:
+	cmp	#3,star_level		; throttled: no stars (the erase of the old ones ran)
+	bhs	.none
 	bsr	star_frame		; -> star_list / star_n: step.w, colour.w per star
 	move	star_n,d7
 	beq	.none

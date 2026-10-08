@@ -280,8 +280,17 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   mode with its demo play): with the starfield 25 fps in the title phases and 7-14 fps with
   the formation (14.3 average); `-D NOSTARS=1` (no erase_stars/draw_stars): 48-49 fps in the
   title phases, 9-22 with the formation (23.8 average).  So the stars cost half of a light
-  frame but the heavy phases are bound by the sprites and the translated code.  Idea (not
-  built): a render budget in the style of F030Arcade's `ffight` (a counter of the scanlines
-  since the VBL; on the STE the video address counter $ffff8209 gives the beam position
-  while Timer A/B stay with the border removal) that stops sprites/stars early and
-  continues next frame, or a fixed 25 fps divisor.
+  frame but the heavy phases are bound by the sprites and the translated code (the game's
+  two IRQ handlers take ~63% of every VBL, the renderer gets the rest).
+- Render throttle (`galaga_stars.s`, `-D NOTHROTTLE=1` switches it off): every render is
+  timed with MFP Timer D (81 us ticks, restarted at each VBL; a frame is 246 ticks, Timer
+  C's control bits stay).  A render that took longer than a frame thins the starfield one
+  step (every 2nd star, every 4th, none: `star_level`; the filter is the star's period
+  index, so a star is always shown or always hidden), 8 renders in a row under half a
+  frame bring a step back.  Measured as above: 43 fps in the title phases (25 with all
+  stars, 48 without), 9-21 with the formation, 22.3 average (14.3 / 23.8).
+  The renderer is already sliced: it runs in the VBL handler with the VBL enabled, the
+  next VBL's IRQ handlers preempt it and it resumes, its sprite entries are copied
+  (`spr_entries`) when `draw_sprites` starts, the finished screen is flipped at the next
+  VBL (`frame_ready`).  A scanline budget in the style of F030Arcade's `ffight` would
+  chunk the same work differently, not make it cheaper.

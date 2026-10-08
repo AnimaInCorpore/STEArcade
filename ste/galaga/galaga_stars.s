@@ -115,6 +115,9 @@ init_stars:
 	clr	star_idx
 	clr.b	star_enable
 	clr	star_n
+	clr	star_level
+	clr	star_mask
+	clr.b	thr_good
 	rts
 
 ; Walk a frame: the stars of the window -> star_list (step.w, colour.w per star), star_n.
@@ -172,6 +175,9 @@ star_frame:
 	moveq	#0,d1
 .scan:
 	move	(a0,d1.w),d2
+	move	d2,d3
+	and	star_mask,d3		; the throttle thins the field by the star's period index
+	bne.s	.skip			; (fixed per star: no flicker)
 	sub	d6,d2			; step within the frame
 	bcc.s	.in
 	add	#65535,d2
@@ -230,9 +236,86 @@ star_speed_pre:
 	dc.w	22*256+0,22*256+1,22*256+2,22*256+3,22*256-4,22*256-3,22*256-2,22*256-1
 
 ; ------------------------------------------------------------------------------
+; ------------------------------------------------------------------------------
+; Render throttle.  Every render is timed in Timer D ticks (81 us, restarted at each VBL;
+; a frame is FRAME_TICKS): from the VBLs it spanned and the ticks since the last one.  The
+; starfield is the optional part of the work (a quarter of a busy frame): a render that
+; took longer than a frame thins it out (every 2nd star, every 4th, none: star_level
+; 0..3), THR_RECOVER renders in a row below half a frame bring stars back one step.
+; While stars are off the erase of the screen's last stars still runs once.
+; ------------------------------------------------------------------------------
+
+	ifnd FRAME_TICKS
+FRAME_TICKS = 246
+	endc
+	ifnd THR_RECOVER
+THR_RECOVER = 8
+	endc
+
+throttle_start:
+	move	frame_counter+2,render_vbl0
+	bsr.s	ticks_since_vbl
+	move	d1,render_t0
+	rts
+
+; -> d1.w ticks since the last VBL (Timer D counts down)
+ticks_since_vbl:
+	moveq	#0,d1
+	move.b	$fffffa25.w,d1
+	neg.b	d1
+	rts
+
+throttle_update:
+	move	frame_counter+2,d0
+	sub	render_vbl0,d0		; VBLs the render spanned
+	mulu	#FRAME_TICKS,d0
+	bsr.s	ticks_since_vbl
+	add.l	d1,d0
+	moveq	#0,d1
+	move	render_t0,d1
+	sub.l	d1,d0			; ticks the render took
+	move	star_level,d1
+	cmp.l	#FRAME_TICKS,d0
+	ble.s	.in_time
+	clr.b	thr_good		; longer than a frame: fewer stars
+	cmp	#3,d1
+	bhs.s	.done
+	addq	#1,d1
+	bra.s	.set
+.in_time:
+	cmp.l	#FRAME_TICKS/2,d0
+	ble.s	.fast
+	clr.b	thr_good
+	rts
+.fast:
+	addq.b	#1,thr_good
+	cmp.b	#THR_RECOVER,thr_good
+	blo.s	.done
+	clr.b	thr_good
+	tst	d1
+	beq.s	.done
+	subq	#1,d1
+.set:
+	move	d1,star_level
+	add	d1,d1
+	lea	star_masks,a0
+	move	(a0,d1.w),star_mask
+.done:
+	rts
+
+star_masks:
+	dc.w	0,1,3,0
+
+; ------------------------------------------------------------------------------
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
+star_level:	ds.w	1		; 0 all stars .. 3 none
+star_mask:	ds.w	1		; period index bits that must be 0 for a star to be shown
+render_vbl0:	ds.w	1
+render_t0:	ds.w	1
+thr_good:	ds.b	1
+	even
 star_set_pos:	ds.w	4*128		; per set: the positions (the period has 256 hits)
 star_set_col:	ds.w	4*128		; and their STE colours
 star_set_n:	ds.w	4		; bytes used per set

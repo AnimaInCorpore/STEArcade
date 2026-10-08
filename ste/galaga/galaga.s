@@ -268,6 +268,7 @@ init_hardware:
 	move.b	$fffffa17.w,old_fa17
 	move.b	$fffffa19.w,old_fa19
 	move.b	$fffffa1b.w,old_fa1b
+	move.b	$fffffa1d.w,old_fa1d
 	move.b	$fffffa1f.w,old_fa1f
 	move.b	$fffffa21.w,old_fa21
 
@@ -336,6 +337,7 @@ restore_hardware:
 	move.b	old_fa1f,$fffffa1f.w
 	move.b	old_fa19,$fffffa19.w
 	move.b	old_fa1b,$fffffa1b.w
+	move.b	old_fa1d,$fffffa1d.w
 	move.b	old_fa21,$fffffa21.w
 
 	move.l	old_hbl,$68.w
@@ -430,6 +432,11 @@ hbl:
 
 vbl:
 	arm_border_timers
+	ifnd NOTHROTTLE
+	and.b	#$70,$fffffa1d.w	; Timer D (81 us ticks) counts from this VBL (render
+	clr.b	$fffffa25.w		; throttle); Timer C's bits stay
+	or.b	#7,$fffffa1d.w
+	endc
 	ifd CHKSP
 	cmp.l	#own_stack_top-6,sp	; the interrupted thread's stack above its top?
 	bls.s	.sp_ok
@@ -542,9 +549,15 @@ vbl_render:
 	move	cnt_render,1024(a0)
 	addq	#1,cnt_render
 	endc
+	ifnd NOTHROTTLE
+	bsr	throttle_start
+	endc
 	move	#$2300,sr
 	bsr	render_frame
 	move	#$2400,sr
+	ifnd NOTHROTTLE
+	bsr	throttle_update
+	endc
 	clr.b	in_render
 	st	frame_ready
 
@@ -1304,6 +1317,7 @@ old_fa15:	ds.b	1
 old_fa17:	ds.b	1
 old_fa19:	ds.b	1
 old_fa1b:	ds.b	1
+old_fa1d:	ds.b	1
 old_fa1f:	ds.b	1
 old_fa21:	ds.b	1
 
