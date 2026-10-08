@@ -177,7 +177,7 @@ class DKong:
             flipx = attr & 0x80
             flipy = code_b & 0x80
             sx = (x + 0xF8) & 0xFF
-            top = (246 - y) & 0xFF
+            top = (247 - y) & 0xFF
             s = g.sprites[code]
             if flipx: s = s[:, ::-1]
             if flipy: s = s[::-1, :]

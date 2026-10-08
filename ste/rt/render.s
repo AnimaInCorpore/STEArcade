@@ -26,12 +26,22 @@ init_render:
 	move	#-1,old_bank
 	clr	bank16
 	st	force_scan
+	st	spr_invalid
+	st	spr_invalid+1
+	move	#-1,spr_cache_bank
+	lea	spr_prev_rect,a0
+	move	#95,d0
+	moveq	#-1,d1
+.hide:
+	move.l	d1,(a0)+
+	dbf	d0,.hide
 	rts
 
 ; ------------------------------------------------------------------------------
 ; a6 = Z80 block
 
 render_frame:
+	clr.b	cells_ready
 	moveq	#0,d0
 	move.b	$7d86(a6),d0
 	and	#1,d0
@@ -48,10 +58,13 @@ render_frame:
 	lsl	#4,d0
 	move	d0,bank16
 	st	force_scan
+	st	spr_invalid
+	st	spr_invalid+1
 
 .same_bank:
 	bsr	scan_tiles
 	bsr	draw_dirty_tiles
+	bsr	render_sprites
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -107,15 +120,24 @@ scan_tiles:
 
 .forced:
 	clr.b	force_scan
+	lea	tile_blank,a6
 	moveq	#0,d0
-	move	#1023,d3
+	move	#1023,d4
 
 .force_one:
+	moveq	#0,d1
 	move.b	(a0)+,d1
+	moveq	#0,d2
+	move.b	(a1),d2
 	move.b	d1,(a1)+
+	move.b	(a6,d2.w),d5
+	and.b	(a6,d1.w),d5		; blank before and after: nothing to redraw
+	bne.s	.force_skip
 	bsr.s	.queue
+
+.force_skip:
 	addq	#1,d0
-	dbf	d3,.force_one
+	dbf	d4,.force_one
 
 .finished:
 	sub.l	#dirty_lists,a4
@@ -155,13 +177,16 @@ scan_tiles:
 ; Draw the queued tiles into the current draw screen.
 
 draw_dirty_tiles:
+	clr	tiles_drawn
 	move	draw_index,d0
 	move	d0,d1
 	add	d1,d1
 	lea	list_count,a1
 	move	(a1,d1.w),d7
 	beq.s	.nothing
+	bsr	ensure_cells
 	clr	(a1,d1.w)
+	move	d7,tiles_drawn
 
 	lea	dirty_lists,a2
 	moveq	#12,d1
@@ -172,14 +197,18 @@ draw_dirty_tiles:
 
 .loop:
 	move	(a2)+,d0
-	move.l	draw_screen_address,a0
 	move.l	a2,-(sp)
+	bsr	mark_tile
+	move.l	draw_screen_address,a0	; mark_tile clobbers a0
 	bsr	draw_tile
 	move.l	(sp)+,a2
 	dbf	d7,.loop
 
 .nothing:
 	rts
+
+
+	include "sprites.s"
 
 ; ------------------------------------------------------------------------------
 ; draw_tile: d0.w = tile index (visible), a0 = screen base
@@ -235,6 +264,24 @@ list_count:	ds.w	2
 old_bank:	ds.w	1
 bank16:		ds.w	1
 force_scan:	ds.b	1
+	even
+tiles_drawn:	ds.w	1
+spr_inv_cur:	ds.b	1
+	even
+cells:		ds.b	512
+cells_ready:	ds.b	1
+spr_decode_invalid:	ds.b	1
+spr_cache_bank:	ds.w	1
+spr_cache_entry:	ds.l	96
+spr_new_rect:	ds.w	96
+spr_new_routine:	ds.l	96
+spr_new_src:	ds.l	96
+spr_redraw:	ds.b	96
+spr_prev_rect:	ds.w	96*2
+spr_invalid:	ds.b	2
+	even
+spr_prev:	ds.b	384*2
+
 	even
 dirty_lists:	ds.w	2048*2
 	section text,code

@@ -724,6 +724,8 @@ z80_unsupported:
 	section text,code
 	include "../tools/rtlib.s"
 
+	include "../build/dk_sprites.s"
+
 ; ------------------------------------------------------------------------------
 	section data,data
 ; ------------------------------------------------------------------------------
@@ -799,7 +801,7 @@ display_screen_address:	ds.l	1
 
 z80_block:	ds.b	$8000
 
-	ds.b	1024
+	ds.b	4096
 own_stack_top:
 
 	cnop 0,4

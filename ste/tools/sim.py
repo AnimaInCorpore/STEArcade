@@ -23,6 +23,21 @@ TRAP1 = 0x500
 FRAME_CYCLES = 160000
 
 
+class _IO:
+    """Byte view of the hardware register area ($ff8000..), kept in simulated RAM."""
+
+    def __init__(self, sim):
+        self.sim = sim
+
+    def __getitem__(self, off):
+        if isinstance(off, slice):
+            return bytes(self.sim.mem.r_block(0xFF8000 + off.start, off.stop - off.start))
+        return self.sim.mem.r8(0xFF8000 + off)
+
+    def __setitem__(self, off, v):
+        self.sim.mem.w8(0xFF8000 + off, v & 0xFF)
+
+
 class Blitter:
     """STE Blitter (see FAST_BLITTER_SPRITES.md, Atari blitter manual)."""
 
@@ -101,6 +116,10 @@ class Blitter:
                 else:
                     w = s & h
                 d = r16(dst & 0xFFFFFF)
+                # The read is needed on the bus for masked writes or destination
+                # logical operations, even when HOP 2 / OP 3 copies the source.
+                if mask != 0xFFFF or op not in (0, 3, 12, 15):
+                    self.cycles += 4
                 if op == 0: r = 0
                 elif op == 1: r = w & d
                 elif op == 2: r = w & ~d
@@ -135,11 +154,11 @@ class Blitter:
 
 
 class Sim:
-    def __init__(self, prg, ram_kib=4096, run_dir=RUN):
+    def __init__(self, prg, ram_kib=16384, run_dir=RUN):
         self.run_dir = Path(run_dir)
         self.m = Machine(CPUType.M68000, ram_kib)
         self.cpu, self.mem = self.m.cpu, self.m.mem
-        self.io = bytearray(0x8000)           # $ff8000..$ffffff
+        self.io = _IO(self)                    # $ff8000..$ffffff is plain RAM here (registers read back)
         self.files = {}
         self.next_handle = 6
         self.blitter = Blitter(self)
@@ -157,13 +176,13 @@ class Sim:
         if mode != "W":
             return
         a = addr & 0xFFFFFF
-        if a < 0xFF8000:
+        if a < 0xFF8A3C - 3 or a > 0xFF8A3D:
             return
-        off = a - 0xFF8000
         nbytes = (1, 2, 4)[width]
+        # the trace is reported before the data is stored: store it ourselves first
+        off = a - 0xFF8000
         for i in range(nbytes):
             self.io[off + i] = (value >> (8 * (nbytes - 1 - i))) & 0xFF
-        # blitter start: bit 7 of $ff8a3c
         if off <= 0xA3C < off + nbytes and self.io[0xA3C] & 0x80:
             self.blitter.run()
 

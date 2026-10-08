@@ -119,6 +119,10 @@ def build():
     lines.append("dk_tile_combo:\t\t; combo (bank*16+colour code) -> offset of its 8 KiB block in dk_tiles")
     for i in range(0, 64, 8):
         lines.append("\tdc.l " + ",".join("%d" % (combo_block[c] * 8192) for c in range(i, i + 8)))
+    lines.append("tile_blank:")
+    blank = [1 if not gfx.tiles[c].any() else 0 for c in range(256)]
+    for i in range(0, 256, 16):
+        lines.append("	dc.b " + ",".join(str(x) for x in blank[i:i + 16]))
     lines.append("tile_cc:")
     cc = []
     off = []
