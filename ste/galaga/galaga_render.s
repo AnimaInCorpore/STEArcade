@@ -26,6 +26,11 @@ init_render:
 .clear:
 	move.l	d1,(a0)+
 	dbf	d0,.clear
+	lea	cell_content,a0
+	move	#MARK_SIZE/4-1,d0
+.clear_content:
+	clr.l	(a0)+
+	dbf	d0,.clear_content
 	clr	list_count
 	clr	list_count+2
 	clr.b	list_full
@@ -185,6 +190,28 @@ scan_cells:
 	bmi.s	.skip			; not shown
 	move.l	a3,a0
 	bsr	draw_cell
+	move	d0,d1			; cell_content: a bit per cell whose character has an opaque pixel
+	add	d1,d1			; (tile_marks' layout; the restore of the sprites tests it)
+	lea	ga_map_index,a1
+	move	(a1,d1.w),d2		; video RAM index
+	lea	g_ram,a1
+	moveq	#0,d3
+	move.b	(a1,d2.w),d3
+	and	#$7f,d3
+	lea	ga_char_blank,a1
+	move.b	(a1,d3.w),d3		; 1: blank
+	lea	ga_cell_mark_byte,a1
+	move	(a1,d1.w),d1
+	lea	ga_cell_mark_bit,a1
+	move.b	(a1,d0.w),d2
+	lea	cell_content,a1
+	tst.b	d3
+	bne.s	.cc_blank
+	bset	d2,(a1,d1.w)
+	bra.s	.cc_done
+.cc_blank:
+	bclr	d2,(a1,d1.w)
+.cc_done:
 	cmp.l	#dirty_lists+4096,a4	; a full list (a draw screen that is not drawn for a few
 	blo.s	.q0			; frames while the program rewrites the screen): the
 	st	list_full		; screen gets all its cells again
@@ -528,6 +555,7 @@ draw_stars:
 ; ------------------------------------------------------------------------------
 
 cell_shadow:	ds.b	2048
+cell_content:	ds.b	MARK_SIZE		; bit set: the background cell is not black
 list_count:	ds.w	2
 force_scan:	ds.b	1
 list_full:	ds.b	2		; per draw screen: its dirty list overflowed

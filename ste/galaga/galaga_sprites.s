@@ -115,6 +115,21 @@ test_rect	macro
 .t\@:
 	endm
 
+; Z set: no cell under the part's rectangle has a character in the background
+test_content	macro
+	lea	cell_content,a6
+	add	S_MARK(a4),a6
+	move.l	S_MASK1(a4),d2
+	and.l	(a6),d2
+	bne.s	.c\@
+	move.l	S_MASK2(a4),d2
+	and.l	8(a6),d2
+	bne.s	.c\@
+	move.l	S_MASK3(a4),d2
+	and.l	16(a6),d2
+.c\@:
+	endm
+
 sprite_first_line	macro
 	move	(a0)+,(a1)
 	move	(a0)+,(a6)
@@ -193,7 +208,32 @@ draw_sprites:
 	moveq	#3,d6			; the four part records
 .parts_a:
 	move.l	S_RECT(a4),d0
-	bmi.s	.part_next_a
+	bmi	.part_next_a
+	ifnd NOZEROFILL
+	test_content
+	bne.s	.copy_a
+	; only black below: fill with zeros (HOP 1, OP 0: no source read, half the bus cycles)
+	move	S_WORDS(a4),d1
+	move	d1,d2
+	add	d2,d2
+	neg	d2
+	add	#256+2,d2
+	move	d2,BLT_DST_YINC.w
+	move.l	draw_screen_address,d3
+	add.l	d0,d3
+	move.l	d3,BLT_DST_ADDR.w
+	move	d1,BLT_COUNT.w
+	move	S_LINES(a4),BLT_COUNT+2.w
+	move	#$0100,BLT_HOP_OP.w
+	wait_borders
+	move	#$c000,BLT_CTRL.w
+	move	#$0203,BLT_HOP_OP.w
+	mark_rect
+	moveq	#-1,d0
+	move.l	d0,S_RECT(a4)
+	bra.s	.part_next_a
+	endc
+.copy_a:
 	move	S_WORDS(a4),d1
 	move	d1,d2
 	add	d2,d2

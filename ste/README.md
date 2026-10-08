@@ -330,3 +330,12 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   (`spr_entries`) when `draw_sprites` starts, the finished screen is flipped at the next
   VBL (`frame_ready`).  A scanline budget in the style of F030Arcade's `ffight` would
   chunk the same work differently, not make it cheaper.
+- Zero-fill restore (`-D NOZEROFILL=1` switches it off): `cell_content` is a bitmap in
+  `tile_marks`' layout, a bit per background cell whose character has an opaque pixel
+  (`scan_cells` keeps it with `ga_char_blank`).  Restoring the background under a changed
+  sprite part first tests the part's cells against it; when all are blank the rectangle is
+  cleared with HOP 1 / OP 0 (no source read, no source address) instead of copied from the
+  background.  Measured as above: 22.6 fps against 22.2 over the demo (15.4 against 13.8 in
+  the first formation phase, the others within noise) - about 2% of the render, less than
+  the 5-10k cycles a frame estimated.  Planes cannot be skipped in the sprite blit itself:
+  it overwrites the destination, and all 16 sprite colour quads use plane 3.
