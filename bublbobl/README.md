@@ -24,6 +24,22 @@ target). Verified by `tools/bbrom.py`; manifest in `docs/rom_manifest.md`.
 Nothing here is a claim about the *original* beyond the grade written next to it in
 `docs/hardware.md` (Code / Run / Hyp).
 
+## MAME reference (screenshots)
+
+`F030Arcade/third_party/wolfmame-0162/mame.exe` (at `C:\Arbeit\F030Arcade`) is the only MAME there that knows
+Bubble Bobble: `bublboblr` = "Bubble Bobble (US, Ver 5.1)", `bublbobl` = "Japan, Ver 0.1"; both zips in
+`assets/roms/` pass `-verifyroms`. Its Lua has no snapshot call (`emu.sethook(fn,"frame")` is the only
+per-frame hook), so frames come from `-aviwrite` (uncompressed RGB24, lossless, native 256x224).
+The AVI writer is 32-bit: record ~300 s segments and chain them with `-autosave` (`-seconds_to_run` is cumulative).
+`tools/bbmame_collage.py` documents the exact command and builds `docs/attract_collage_64.png`
+(64 attract-mode frames, 8x8, 2048x1792) covering **every colour** seen in the recording.
+
+Facts from the capture run (`docs/attract_collage_64.json`): 68 distinct on-screen colours after boot;
+the last new colour first appeared at 736 s and none in the following 490 s, so coverage looks saturated
+but is not proven (the demo levels vary between loops, no exact long period was found). A stray coin
+registered at 1227 s (an input reached MAME's window; none was sent by the tooling) — frames from then on
+are excluded.
+
 ## Tools
 
 * `tools/bubble.py` â€” machine model (`Bubble(variant="bublboblr")`, `run_frame()`).
