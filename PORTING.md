@@ -12,6 +12,10 @@ writes must still be retained as logged or no-op effects from the beginning.
 
 ## Current status
 
+Superseded in practice by the Atari STE port in `ste/` (`ste/README.md`): whole-program
+static translation with a verified reference emulator per game, not routine-by-routine
+replacement.  The plan below is kept for the Falcon030 variant.
+
 The repository is at the analysis/foundation stage. The ROM set and initial routine notes exist,
 but the native source is not yet a buildable or validated Falcon program.
 

@@ -167,6 +167,7 @@ def main():
         visits += 1
         if not L.compare("visit %d (frame %d)" % (visits, frame)):
             return 1
+        L.cpu.w_reg(R.A7, L.cpu.r_reg(R.A7) + 4)   # the hook pushed its resume label
         L.cpu.w_pc(L.sym["Z02BD_r"])
         if visits % a.visits == 0 and L.ref.nmi_mask:
             frame += 1
@@ -196,6 +197,7 @@ def main():
             if why != "z80_nmi_ret":
                 print("68k NMI stopped:", why, "d7=%X" % (L.cpu.r_reg(R.D7) & 0xFFFF))
                 return 1
+            L.cpu.w_reg(R.A7, L.cpu.r_reg(R.A7) + 4)   # the hook pushed its resume label
             L.cpu.w_pc(L.sym["Z02BD_r"])
             if not L.compare("after NMI %d" % frame):
                 return 1

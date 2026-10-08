@@ -43,6 +43,41 @@ DMA_TRIGGER = 0x7D85
 NMI_TOKEN = 0x4001
 TABLE_ENTRIES = 0x4002
 
+
+class Config:
+    """What differs between the programs the translator handles (the defaults are the
+    Donkey Kong main CPU).
+
+    prefix: of the instruction labels (Z1234); table / token_sym: the dispatch table and
+    the code a token on the Z80 stack returns to (the runtime's interrupt entry).
+    mode "signed": a6 is the base of the Z80 address 0 and the index is the signed word
+    (addresses >= $8000 lie below a6; a 32 KB block raises for them); mode "long": the
+    index is the long (upper words of the registers kept 0), static accesses to $8000 and
+    up go through `ram_sym` (the RAM starts at a6 + $8000).  iyaddr / fshadow: two unused
+    RAM words of the program for IY and F'.  write_hooks: (lo, hi, label, bit) - after
+    `ld (nn),a` with nn in lo..hi, `bsr label` (only if bit `bit` of A is set, if given).
+    """
+
+    def __init__(self, prefix="Z", table="z80_dispatch", token_sym="z80_nmi_ret", mode="signed",
+                 block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
+                 write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
+                 table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False):
+        self.prefix = prefix
+        self.table = table
+        self.token_sym = token_sym
+        self.mode = mode
+        self.block = block
+        self.ram_sym = ram_sym
+        self.iyaddr = iyaddr
+        self.fshadow = fshadow
+        self.io_read_redirect = IO_READ_REDIRECT if io_read_redirect is None else io_read_redirect
+        self.write_hooks = list(write_hooks)
+        self.nmi_token = nmi_token
+        self.table_entries = table_entries
+        self.rst28_tables = rst28_tables
+        self.hl_tables = hl_tables
+        self.iff_sym = iff_sym          # a byte the runtime reads for the IRQ gate (ei / di)
+
 CC_NAMES = ["nz", "z", "nc", "c", "po", "pe", "p", "m"]
 CC_68K = {"nz": "ne", "z": "eq", "nc": "cc", "c": "cs", "p": "pl", "m": "mi"}
 CC_68K_INV = {"nz": "eq", "z": "ne", "nc": "cs", "c": "cc", "p": "mi", "m": "pl"}
@@ -219,7 +254,7 @@ REG16 = {"bc": "d1", "de": "d2", "hl": "d3", "ix": "d4"}
 # program works with (djnz, ld b,(hl), ...), the pair is rare.  That is also the order of
 # the bytes on the Z80 stack, so push/pop bc are plain word moves.
 HALF = {"b": ("d1", False), "c": ("d1", True), "d": ("d2", True), "e": ("d2", False),
-        "h": ("d3", True), "l": ("d3", False)}
+        "h": ("d3", True), "l": ("d3", False), "ixh": ("d4", True), "ixl": ("d4", False)}
 SWAPPED = {"bc"}
 
 
@@ -232,8 +267,10 @@ def hx(v, w=4):
 
 
 class Emitter:
-    def __init__(self, code, live_in=None, live_out=None, leaders=None):
+    def __init__(self, code, live_in=None, live_out=None, leaders=None, cfg=None):
         self.code = code
+        self.cfg = cfg or Config()
+        self.ends = {pc + ins.length: pc for pc, ins in code.items()}   # fall-through predecessor
         if live_in is None:
             live_in, live_out = compute_liveness(code)
         self.live_in = live_in
@@ -324,22 +361,42 @@ class Emitter:
     # ---- small helpers -------------------------------------------------
     def new_label(self):
         self.uid += 1
-        return "Lx%d" % self.uid
+        return "L%s%d" % (self.cfg.prefix.lower() if self.cfg.prefix != "Z" else "x", self.uid)
 
     def e(self, s):
         self.lines.append("\t" + s)
 
     def label_of(self, pc):
         self.refs.add(pc)
-        return "Z%04X" % pc
+        return "%s%04X" % (self.cfg.prefix, pc)
+
+    def half(self, n):
+        if n not in HALF:
+            raise Unsupported("8-bit register %s" % n)
+        return HALF[n]
 
     def mem(self, addr, off=0, io_read=False):
+        """effective address of the static Z80 address addr + off."""
+        cfg = self.cfg
         a = (addr + off) & 0xFFFF
-        if io_read and addr in IO_READ_REDIRECT:
-            a = IO_READ_REDIRECT[addr]
-        if a >= 0x8000:
+        if io_read and addr in cfg.io_read_redirect:
+            a = cfg.io_read_redirect[addr]
+        if a < 0x8000:
+            return "%s(a6)" % hx(a)
+        if cfg.mode == "long":
+            return "%s+%s" % (cfg.ram_sym, hx(a - 0x8000))
+        if cfg.block < 0x10000:
             raise Unsupported("address %04X outside the 32 KiB block" % a)
-        return "%s(a6)" % hx(a)
+        return "-%s(a6)" % hx(0x10000 - a)
+
+    def ind(self, reg, disp=0):
+        """effective address of the Z80 address in a data register (the pair's natural value)."""
+        x = "%s.%s" % (reg, "l" if self.cfg.mode == "long" else "w")
+        return "%d(a6,%s)" % (disp, x) if disp else "(a6,%s)" % x
+
+    def clean(self, reg):
+        """lines that clear the upper word of a scratch register before it is an index."""
+        return ["moveq #0,%s" % reg] if self.cfg.mode == "long" else []
 
     # operand access --------------------------------------------------------
     def read8(self, op, io_read=True):
@@ -350,25 +407,27 @@ class Emitter:
             if n == "a":
                 return [], "d0"
             if n in HALF:
-                reg, hi = HALF[n]
+                reg, hi = self.half(n)
                 if hi:
                     return ["move.w %s,d7" % reg, "lsr.w #8,d7"], "d7"
                 return [], reg
+            if n in ("iyh", "iyl"):      # IY lives in the block, big-endian word
+                return [], self.mem(self.cfg.iyaddr, 0 if n == "iyh" else 1)
             raise Unsupported("8-bit register %s" % n)
         if k == "imm":
             return [], "#%s" % hx(op[1], 2)
         if k == "ind":
             b, d = op[1], op[2]
             if b == "hl":
-                return [], "(a6,d3.w)"
+                return [], self.ind("d3")
             if b == "de":
-                return [], "(a6,d2.w)"
+                return [], self.ind("d2")
             if b == "bc":
-                return ["move.w d1,d7", "ror.w #8,d7"], "(a6,d7.w)"
+                return self.clean("d7") + ["move.w d1,d7", "ror.w #8,d7"], self.ind("d7")
             if b == "ix":
-                return [], "%d(a6,d4.w)" % d
+                return [], self.ind("d4", d)
             if b == "iy":
-                return ["move.w %s(a6),d5" % hx(IYADDR)], "%d(a6,d5.w)" % d
+                return self.clean("d5") + ["move.w %s,d5" % self.mem(self.cfg.iyaddr)], self.ind("d5", d)
             raise Unsupported("indirect %s" % b)
         if k == "ind16":
             return [], self.mem(op[1], 0, io_read)
@@ -382,7 +441,9 @@ class Emitter:
             n = op[1]
             if n == "a":
                 return ["move.b %s,d0" % src_ea]
-            reg, hi = HALF[n]
+            if n in ("iyh", "iyl"):
+                return ["move.b %s,%s" % (src_ea, self.mem(self.cfg.iyaddr, 0 if n == "iyh" else 1))]
+            reg, hi = self.half(n)
             if not hi:
                 return ["move.b %s,%s" % (src_ea, reg)]
             if src_ea.startswith("#"):
@@ -465,11 +526,13 @@ class Emitter:
         self.cur = ins
         self.lo = self.live_out[pc] if live_out_override is None else live_out_override
         if with_label:
-            self.lines.append("Z%04X:\t\t; %s" % (pc, ins.text))
+            self.lines.append("%s%04X:\t\t; %s" % (self.cfg.prefix, pc, ins.text))
             if pc in self.hooks:
+                # the runtime's hook (d7 = pc) resumes at the label on the stack
+                self.e("pea %s%04X_r" % (self.cfg.prefix, pc))
                 self.e("move.w #%s,d7" % hx(pc))
                 self.e("jmp z80_hook")
-                self.lines.append("Z%04X_r:" % pc)
+                self.lines.append("%s%04X_r:" % (self.cfg.prefix, pc))
         start = len(self.lines)
         self.core_at = None
         self.core_provided = 0
@@ -496,16 +559,39 @@ class Emitter:
         pass
 
     def x_di(self, ins):
-        pass
+        if self.cfg.iff_sym:
+            self.e("clr.b %s" % self.cfg.iff_sym)
 
     def x_ei(self, ins):
-        pass
+        if self.cfg.iff_sym:
+            self.e("st %s" % self.cfg.iff_sym)
 
     def x_im(self, ins):
         pass
 
     def x_halt(self, ins):
-        raise Unsupported("halt")
+        self.e("jsr z80_halt")           # the runtime: wait for the next interrupt
+
+    def x_ld_a_r(self, ins):
+        self.e("jsr z80_rnd")            # the runtime: a pseudo random byte in d0 (the refresh register)
+        self.e("tst.b d0")
+        self.flags(S | Z, const_clear=H | N)
+
+    def x_rld(self, ins):
+        pre, ea = self.read8(("ind", "hl", 0), io_read=False)
+        for l in pre:
+            self.e(l)
+        self.e("moveq #0,d7")
+        self.e("move.b %s,d7" % ea)
+        self.e("lsl.w #4,d7")            # (hl) << 4: the old high nibble in bits 8-11
+        self.e("move.b d0,d5")
+        self.e("and.b #$0F,d5")
+        self.e("or.b d5,d7")
+        self.e("move.b d7,%s" % ea)      # new (hl) = old << 4 | A & 15
+        self.e("lsr.w #8,d7")
+        self.e("and.b #$F0,d0")
+        self.e("or.b d7,d0")             # new A = A & $F0 | old (hl) >> 4
+        self.flags(S | Z, const_clear=H | N)
 
     # ---- loads ------------------------------------------------------------
     def x_ld(self, ins):
@@ -527,13 +613,18 @@ class Emitter:
                 self.e(l)
             for l in self.write8(dst, sea):
                 self.e(l)
-            if dst == ("ind16", DMA_TRIGGER) and src == ("r8", "a"):
-                # 8257 start bit: the sprite DMA runs now (dkong.py do_dma)
-                skip = self.new_label()
-                self.e("btst #0,d0")
-                self.e("beq %s" % skip)
-                self.e("bsr z80_dma")
-                self.lines.append(skip + ":")
+            if kd == "ind16" and src == ("r8", "a"):
+                for lo, hi, label, bit in self.cfg.write_hooks:
+                    if lo <= dst[1] <= hi:
+                        # the runtime acts on the write (e.g. the DK sprite DMA start bit)
+                        if bit is None:
+                            self.e("bsr %s" % label)
+                        else:
+                            skip = self.new_label()
+                            self.e("btst #%d,d0" % bit)
+                            self.e("beq %s" % skip)
+                            self.e("bsr %s" % label)
+                            self.lines.append(skip + ":")
             return
         if kd == "r16" and ks == "imm":
             self.set16(dst[1], src[1])
@@ -545,7 +636,7 @@ class Emitter:
             self.store16(src[1], dst[1])
             return
         if kd == "r16" and dst[1] == "sp" and ks == "r16":
-            self.e("lea (a6,%s.w),a5" % self.nat16(src[1], 7))
+            self.e("lea %s,a5" % self.ind(self.nat16(src[1], 7)))
             return
         raise Unsupported("ld %r,%r" % (dst, src))
 
@@ -555,7 +646,9 @@ class Emitter:
         if name in REG16:
             return REG16[name]
         if name == "iy":
-            self.e("move.w %s(a6),d%d" % (hx(IYADDR), scratch))
+            for l in self.clean("d%d" % scratch):
+                self.e(l)
+            self.e("move.w %s,d%d" % (self.mem(self.cfg.iyaddr), scratch))
             return "d%d" % scratch
         raise Unsupported("reg16 %s" % name)
 
@@ -563,6 +656,8 @@ class Emitter:
         """data register holding the natural value of a 16-bit register (a swapped pair is
         rotated into d<scratch>)."""
         if name in SWAPPED:
+            for l in self.clean("d%d" % scratch):
+                self.e(l)
             self.e("move.w %s,d%d" % (REG16[name], scratch))
             self.e("ror.w #8,d%d" % scratch)
             return "d%d" % scratch
@@ -579,11 +674,9 @@ class Emitter:
             else:
                 self.e("move.w #%s,%s" % (hx(v), r))
         elif name == "sp":
-            if v >= 0x8000:
-                raise Unsupported("sp outside block")
-            self.e("lea %s(a6),a5" % hx(v))
+            self.e("lea %s,a5" % self.mem(v))
         elif name == "iy":
-            self.e("move.w #%s,%s(a6)" % (hx(v), hx(IYADDR)))
+            self.e("move.w #%s,%s" % (hx(v), self.mem(self.cfg.iyaddr)))
         else:
             raise Unsupported("ld %s,imm" % name)
 
@@ -606,15 +699,17 @@ class Emitter:
                 self.e("lsl.w #8,%s" % r)
                 self.e("move.b %s,%s" % (lo, r))
         elif name == "sp":
+            for l in self.clean("d7"):
+                self.e(l)
             self.e("move.b %s,d7" % hi)
             self.e("lsl.w #8,d7")
             self.e("move.b %s,d7" % lo)
-            self.e("lea (a6,d7.w),a5")
+            self.e("lea %s,a5" % self.ind("d7"))
         elif name == "iy":
             self.e("move.b %s,d7" % hi)
             self.e("lsl.w #8,d7")
             self.e("move.b %s,d7" % lo)
-            self.e("move.w d7,%s(a6)" % hx(IYADDR))
+            self.e("move.w d7,%s" % self.mem(self.cfg.iyaddr))
         else:
             raise Unsupported("ld %s,(nn)" % name)
 
@@ -681,7 +776,7 @@ class Emitter:
                 else:
                     self.e("%s.l #1,a5" % op)
             elif n == "iy":
-                self.e("%s.w #1,%s(a6)" % (op, hx(IYADDR)))
+                self.e("%s.w #1,%s" % (op, self.mem(self.cfg.iyaddr)))
             else:
                 raise Unsupported("inc %s" % n)
             return
@@ -692,7 +787,7 @@ class Emitter:
             if n == "a":
                 ea = "d0"
             elif n in HALF:
-                reg, hi = HALF[n]
+                reg, hi = self.half(n)
                 if hi:
                     self.e("ror.w #8,%s" % reg)
                     post = ["ror.w #8,%s" % reg]
@@ -869,7 +964,7 @@ class Emitter:
             self.e("sub.l a6,d5")
             sreg = "d5"
         elif sn == "iy":
-            self.e("move.w %s(a6),d5" % hx(IYADDR))
+            self.e("move.w %s,d5" % self.mem(self.cfg.iyaddr))
             sreg = "d5"
         else:
             sreg = self.nat16(sn, 5)
@@ -878,10 +973,10 @@ class Emitter:
         if dn == "iy":
             if sreg == "d5":
                 raise Unsupported("add iy,sp/iy")
-            self.e("move.w %s(a6),d5" % hx(IYADDR))
+            self.e("move.w %s,d5" % self.mem(self.cfg.iyaddr))
             self.e("add.w %s,d5" % sreg)
             self.flags(C, const_clear=N)
-            self.e("move.w d5,%s(a6)" % hx(IYADDR))
+            self.e("move.w d5,%s" % self.mem(self.cfg.iyaddr))
             return
         self.e("add.w %s,%s" % (sreg, REG16[dn]))
         self.flags(C, const_clear=N)
@@ -916,7 +1011,7 @@ class Emitter:
             if n == "a":
                 ea = "d0"
             else:
-                reg, hi = HALF[n]
+                reg, hi = self.half(n)
                 if hi:
                     self.e("ror.w #8,%s" % reg)
                     post = ["ror.w #8,%s" % reg]
@@ -954,7 +1049,7 @@ class Emitter:
             n = tgt[1]
             if n == "a":
                 return "d0", bit, []
-            reg, hi = HALF[n]
+            reg, hi = self.half(n)
             return reg, (bit + 8 if hi else bit), []
         pre, ea = self.read8(tgt, io_read=False)
         return ea, bit, pre
@@ -1025,20 +1120,29 @@ class Emitter:
         if n not in SWAPPED:
             self.e("ror.w #8,%s" % r)
         if n == "iy":
-            self.e("move.w d5,%s(a6)" % hx(IYADDR))
+            self.e("move.w d5,%s" % self.mem(self.cfg.iyaddr))
 
     def x_ex(self, ins):
         a, b = ins.ops
         if a == ("r16", "de") and b == ("r16", "hl"):
             self.e("exg d2,d3")
             return
+        if a[0] == "ind" and a[1] == "sp" and b[0] == "r16" and b[1] in ("hl", "ix"):
+            r = REG16[b[1]]              # swap the register with the word on the stack
+            self.e("move.w (a5),d7")
+            self.e("ror.w #8,d7")
+            self.e("move.w %s,d5" % r)
+            self.e("ror.w #8,d5")
+            self.e("move.w d5,(a5)")
+            self.e("move.w d7,%s" % r)
+            return
         raise Unsupported("ex")
 
     def x_ex_af_afp(self, ins):
         self.e("exg d0,a3")
         self.e("move.w d6,d7")
-        self.e("move.w %s(a6),d6" % hx(FSHADOW))
-        self.e("move.w d7,%s(a6)" % hx(FSHADOW))
+        self.e("move.w %s,d6" % self.mem(self.cfg.fshadow))
+        self.e("move.w d7,%s" % self.mem(self.cfg.fshadow))
 
     def x_exx(self, ins):
         self.e("exg d1,a0")
@@ -1051,7 +1155,7 @@ class Emitter:
         self.e("move.w d1,d7")
         self.e("ror.w #8,d7")              # the count, BC is 0 afterwards
         self.lines.append(l + ":")
-        self.e("move.b (a6,d3.w),(a6,d2.w)")
+        self.e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
         self.e("addq.w #1,d3")
         self.e("addq.w #1,d2")
         self.e("subq.w #1,d7")
@@ -1059,13 +1163,60 @@ class Emitter:
         self.e("moveq #0,d1")
         self.flags(0, const_clear=H | N)
 
+    def x_ldi(self, ins):
+        self.e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
+        self.e("addq.w #1,d3")
+        self.e("addq.w #1,d2")
+        l = self.new_label()                      # dec bc, swapped
+        self.e("sub.w #$0100,d1")
+        self.e("bcc.s %s" % l)
+        self.e("subq.b #1,d1")
+        self.lines.append(l + ":")
+        self.flags(0, const_clear=H | N)
+
+    def x_ldd(self, ins):
+        self.e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
+        self.e("subq.w #1,d3")
+        self.e("subq.w #1,d2")
+        l = self.new_label()                      # dec bc, swapped
+        self.e("sub.w #$0100,d1")
+        self.e("bcc.s %s" % l)
+        self.e("subq.b #1,d1")
+        self.lines.append(l + ":")
+        self.flags(0, const_clear=H | N)
+
+    def x_lddr(self, ins):
+        l = self.new_label()
+        self.e("move.w d1,d7")
+        self.e("ror.w #8,d7")              # the count, BC is 0 afterwards
+        self.lines.append(l + ":")
+        self.e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
+        self.e("subq.w #1,d3")
+        self.e("subq.w #1,d2")
+        self.e("subq.w #1,d7")
+        self.e("bne.s %s" % l)
+        self.e("moveq #0,d1")
+        self.flags(0, const_clear=H | N)
+
+    def x_cpi(self, ins):
+        if self.lo & H:
+            raise Unsupported("H after cpi")
+        self.e("cmp.b %s,d0" % self.ind("d3"))
+        self.flags(S | Z, const_set=N)
+        self.e("addq.w #1,d3")
+        l = self.new_label()                      # dec bc, swapped (P/V = BC != 0, see branch)
+        self.e("sub.w #$0100,d1")
+        self.e("bcc.s %s" % l)
+        self.e("subq.b #1,d1")
+        self.lines.append(l + ":")
+
     def x_cpir(self, ins):
         loop = self.new_label()
         end = self.new_label()
         self.e("move.w d1,d5")
         self.e("ror.w #8,d5")              # the count
         self.lines.append(loop + ":")
-        self.e("cmp.b (a6,d3.w),d0")
+        self.e("cmp.b %s,d0" % self.ind("d3"))
         self.e("move sr,d7")
         self.e("addq.w #1,d3")
         self.e("subq.w #1,d5")
@@ -1126,10 +1277,7 @@ class Emitter:
             self.jmp_to(ops[0][1])
             return
         cc, tgt = ops[0][1], ops[1][1]
-        if cc not in CC_68K:
-            raise Unsupported("jp %s" % cc)
-        self.load_cc(cc)
-        self.e("b%s %s" % (CC_68K[cc], self.label_of(tgt)))
+        self.branch(cc, self.label_of(tgt))
 
     def x_jr(self, ins):
         ops = ins.ops
@@ -1137,8 +1285,21 @@ class Emitter:
             self.jmp_to(ops[0][1])
             return
         cc, tgt = ops[0][1], ops[1][1]
+        self.branch(cc, self.label_of(tgt))
+
+    def branch(self, cc, label, inv=False):
+        """branch to label if the Z80 condition cc holds (or does not, inv).  P/V is not
+        tracked; `jp pe/po` right after ldi/ldd (P/V = BC != 0) is the one form supported."""
+        if cc in ("pe", "po"):
+            prev = self.ends.get(self.cur.pc)
+            if prev is None or self.code[prev].mn not in ("ldi", "ldd", "cpi", "cpd"):
+                raise Unsupported("%s not after ldi/ldd" % cc)
+            self.e("tst.w d1")
+            taken = (cc == "pe") != inv
+            self.e("b%s %s" % ("ne" if taken else "eq", label))
+            return
         self.load_cc(cc)
-        self.e("b%s %s" % (CC_68K[cc], self.label_of(tgt)))
+        self.e("b%s %s" % ((CC_68K_INV if inv else CC_68K)[cc], label))
 
     def x_djnz(self, ins):
         tgt = ins.ops[0][1]
@@ -1154,8 +1315,7 @@ class Emitter:
             return
         cc, tgt = ops[0][1], ops[1][1]
         skip = self.new_label()
-        self.load_cc(cc)
-        self.e("b%s %s" % (CC_68K_INV[cc], skip))
+        self.branch(cc, skip, inv=True)
         self.push_ret(nxt)
         self.jmp_to(tgt)
         self.lines.append(skip + ":")
@@ -1165,8 +1325,7 @@ class Emitter:
         if ops:
             cc = ops[0][1]
             skip = self.new_label()
-            self.load_cc(cc)
-            self.e("b%s %s" % (CC_68K_INV[cc], skip))
+            self.branch(cc, skip, inv=True)
             self.dispatch_ret()
             self.lines.append(skip + ":")
             return

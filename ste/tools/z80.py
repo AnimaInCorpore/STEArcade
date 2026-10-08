@@ -30,6 +30,7 @@ class Z80:
         self.sp = 0xFFFF
         self.pc = 0
         self.i = self.r = 0
+        self.r_hook = None       # a machine may replace what `ld a,r` reads (the port's random byte)
         self.iff1 = self.iff2 = 0
         self.im = 0
         self.halted = False
@@ -422,7 +423,7 @@ class Z80:
                     self.f = (self.f & C) | SZ[self.a] | (PV if self.iff2 else 0)
                     return 9
                 if y == 3:
-                    self.a = self.r
+                    self.a = self.r_hook() if self.r_hook else self.r
                     self.f = (self.f & C) | SZ[self.a] | (PV if self.iff2 else 0)
                     return 9
                 if y == 4:  # RRD

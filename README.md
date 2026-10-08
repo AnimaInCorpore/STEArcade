@@ -56,6 +56,12 @@ MAME emulator sources are available at:
 
 ## Status
 
+**The live work is the Atari STE port in `ste/`** (see `ste/README.md`): Donkey Kong runs
+there from a static Z80 -> 68000 translation with a Blitter renderer (exact against the
+reference emulator, 50 fps in play), and Galaga is being brought up the same way (reference
+emulator done, translation and runtime built, boot being debugged).  The Falcon030 plan
+below predates it.
+
 The repository is currently at the analysis and runtime-foundation stage. The selected ROM set and
 initial routine contracts exist, but the Falcon source does not yet pass a clean assembler build,
 and the native routine files are drafts rather than validated replacements. See `PORTING.md` for
