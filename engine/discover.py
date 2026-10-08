@@ -55,7 +55,8 @@ def word_table(rom, start, known=(), limit=None):
 
 
 def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=(), rst28_tables=True,
-             hl_tables=False):
+             hl_tables=False, table_calls=()):
+    # table_calls: call targets that are followed by a word table (a dict maps the target to the highest code address)
     """Recursive descent.  Returns (code: dict pc->Ins, tables: dict site->list of targets).
     rst28_tables: `rst $28` is followed by a table of jump targets (Donkey Kong).
     hl_tables: `ld hl,T; rst $08|$10; ld a,(hl); inc hl; ld h,(hl); ld l,a; jp (hl)` (or
@@ -88,6 +89,14 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
                 continue
             if fl in ("call", "ccall"):
                 work.append(ins.target)
+                if fl == "call" and ins.target in table_calls:
+                    # `call T` with a word table of jump targets right behind it (T pops the return address and
+                    # jumps through it, 1942 $66F7): the table is data, the entries are code
+                    lim = table_calls[ins.target] if isinstance(table_calls, dict) else ROMSIZE
+                    tbl = [t for t in word_table(rom, nxt, known) if 0x100 <= t < lim]
+                    tables[pc] = (nxt, tbl)
+                    work.extend(tbl)
+                    break
                 pc = nxt
                 continue
             if fl == "rst":
@@ -111,7 +120,7 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
         new_targets = hl_jump_tables(rom, code, tables, known, verbose)
         if new_targets:
             return discover(rom, list(roots) + new_targets, extra_code, rst28_counts, verbose, known,
-                            rst28_tables, hl_tables)
+                            rst28_tables, hl_tables, table_calls)
     return code, tables
 
 

@@ -28,6 +28,7 @@ variables select the tools).
 | Donkey Kong | CPU, shadow diff of the tile map, dirty queue per draw screen | Blitter, generated per shape/skew code | pixel for pixel against the reference and MAME |
 | Galaga | CPU, 8 x 8 cells per colour quad, `chars_over` on top of sprites | Blitter, double sizes split into 16 x 16 parts, stars plotted after | renderer against MAME (RAM injected), reference identical |
 | Bubble Bobble | CPU, `movep.l` per planar row, tile bake cache, dirty 8 x 8 cells | none: objects are strips of 8 x 8 tiles, shifted tiles merged into two cells by the CPU | pixel for pixel against the reference |
+| 1942 | hardware scroll of a 768 line ring (two draw rings + clean), tiles baked per palette bank, characters redrawn when the window moves | Blitter, one blit per line, masks as end masks, rectangles put back from the clean ring | pixel for pixel against the reference (which equals MAME) |
 
 Bubble Bobble's measured cost (`games/bublbobl/tools/profile.py`, `render_bench.py`; numbers in its README) is not mainly the
 shifted tiles: in the play a frame has ~570 tile draws, 495 of them aligned and 77 shifted (about 2.7k cycles each), over ~200
@@ -203,3 +204,18 @@ Measured on 2026-10-07 (2400 frames of attract mode and demo play, 50 Hz frame =
 play frames 50-80%, the busiest play frames 96-119% (6 of 2400), 0.5% of the frames run
 into the next VBL; before this round the average was 75% and 9% of the VBLs were skipped.
 Level starts and the title wipe redraw every tile and take about ten frames each.
+
+
+## Whole-object drawing (all ports)
+
+Use a wider virtual screen with enough hidden space on both sides for a whole
+object, including the extra destination word of a shifted sprite. Objects crossing
+an edge are drawn whole and disappear behind the visible display window. Do not
+implement sprite clipping routines or calculate edge masks at runtime. Reserve
+vertical guard rows too when whole objects can cross the top or bottom.
+
+Sprite drawing follows `C:/Arbeit/stefastbobs2/main.s`: reorder source rows to group
+equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
+Blitter state and its automatically advancing source address. Use short HOG blits
+with the border timer guard. This is the required approach for every port; older
+renderers must be migrated when their sprite drawing is changed.

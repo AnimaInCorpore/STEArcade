@@ -132,3 +132,46 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
 * Known MAME behaviours the port does not have: the 16 sprites per scanline limit (later sprites of a line vanish)
   and the wrap around of sprites at the arcade's 256 pixel edge (MAME draws them again at x - 256 / y - 256).  Neither
   is visible in normal play.
+
+## What the 1942 port added (2026-10-08)
+
+* **A game whose foreground is the game.**  1942's Z80 runs a cooperative kernel (tasks, a scheduler with an idle loop, two interrupts); the
+  arcade's interrupts come at arbitrary points of the tasks.  The runtime does not interrupt the translated code: the VBL only raises a flag
+  and the idle hook of the scheduler (`$009A`, reached when no task is ready) delivers the interrupts and draws.  The Python reference has the
+  same schedule (`run_frame_port`), so the lock-step compares RAM at the end of every frame.  An interrupt handler that hands the CPU to
+  another task never returns to the token on the Z80 stack: the hook resets the 68000 stack before it starts a handler.
+* **The task contexts on the Z80 stack are data too.**  The kernel pushes registers and flags of sleeping tasks on their stacks, so the RAM
+  compare also sees stale flag bytes.  Making the translation equal needed: flags exact at `jp (hl)` and at hooks, `bit` setting S as the CPU
+  does, and no scratch use of registers that tasks save (`a0-a3` are the alternate registers, `d4` is IX).
+* **P/V flag**: `jp pe/po` after logic ops is parity (d6 bit 7), tracked by the translator's flag liveness; any other producer whose P/V is
+  read makes the translation stop with an `unsupported` entry (it never guesses).
+* **Jump tables behind a call** (`call T` with the words following it, T pops the return address) are found statically
+  (`discover.py table_calls`); anything the coverage does not see stops the lock-step at `z80_badpc` and names the pc.
+* **Dirty flags by coverage**: the renderer only diffs the video RAM after a store to it; the sites are coverage results, the lock-step test checks
+  that every change had its flag, and the renderer rescans now and then.
+* **Test windows that wrap.**  The first renderer test passed for 1000+ frames and the wrapped half of the scroll ring was never drawn: a window
+  position (T > 256) that the sampled frames had not covered hid a garbage upper register word.  Sweep the whole range of a scroll register.
+* **Hatari**: a Blitter pass that hogs the bus delays the VBL and the border timers by more than half a scanline, the screen then flickers between
+  open and closed borders.  Keep passes short or run them without HOG and wait for them; look at Hatari's own screenshot (RightAlt+G) of
+  several frames, not one.  A 768 line, 56 word Blitter copy hung the emulation for good in one go (32 lines at a time are fine).
+* **Generated sprite routines with streams** (`games/1942/tools/spritegen.py`, `FAST_BLITTER_SPRITES.md`).  Constants inside 8000 routines
+  (one per sprite code and shift) took 995 KB, too much for the 4 MB machine next to the rings and caches; the routines are shared by row
+  structure (772 of them, 93 KB) and the endmasks / skew of each shift are a stream read with `move (a0)+,(a2)`: same cycles, a third of
+  the memory.  The routines add to the low word of the destination address, so parts at a 64 KB boundary of the ring need a second path
+  (it reads the same streams: no masks are computed at runtime).  A routine must not use `d4-d7` / `a2-a6` for anything else: the
+  decoding of the sprite list once used `d4` and drew garbage that only showed with several entries - test with the whole list, not only
+  with single parts.  The simulator's Blitter must write the advanced addresses back for read-modify-write code (`Sim(ram_kib=16384)`).
+
+## Whole-object drawing (all ports)
+
+Use a wider virtual screen with enough hidden space on both sides for a whole
+object, including the extra destination word of a shifted sprite. Objects crossing
+an edge are drawn whole and disappear behind the visible display window. Do not
+implement sprite clipping routines or calculate edge masks at runtime. Reserve
+vertical guard rows too when whole objects can cross the top or bottom.
+
+Sprite drawing follows `C:/Arbeit/stefastbobs2/main.s`: reorder source rows to group
+equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
+Blitter state and its automatically advancing source address. Use short HOG blits
+with the border timer guard. This is the required approach for every port; older
+renderers must be migrated when their sprite drawing is changed.

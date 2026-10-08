@@ -10,6 +10,7 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 | [Donkey Kong](games/dkong/README.md) | Z80 | plays at 50 fps, pixel exact against MAME |
 | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) | attract mode and play, 25-43 fps in the light phases, 9-21 with the full formation |
 | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | boots into the attract mode, exact logic and picture; too slow to play on a plain STE, no sound |
+| [1942](games/1942/README.md) | Z80 (a cooperative kernel; sound CPU not translated) | attract mode and play with the hardware scrolled background, exact logic and picture; about 40 fps in Hatari, no sound |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
@@ -19,7 +20,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
     engine/            shared: Z80 / 6801 emulators and disassemblers, translators (z80x, translate, m6801x), STE simulator on
                        Musashi (sim.py), Blitter sprite code generator, shared runtime (rt/rtlib.s), paths and toolchain
     games/<game>/      src/ 68000 source, tools/ reference machine + generator + build + tests, ref/ analysis scripts,
-                       README (docs/ where a game has notes and reference captures: bublbobl)
+                       README (docs/ where a game has notes and reference captures: bublbobl, 1942)
     tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), windows/ (PowerShell
                        helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
     docs/              architecture.md, porting-guide.md, reference/ (68000 and Z80 manuals)
