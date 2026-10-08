@@ -66,7 +66,7 @@ writeFileSync(prefix + ".idx", idxOut);
 writeFileSync(prefix + ".json", JSON.stringify({
   strategy: "JsOklabQuantizer buildConstrainedOklabPalette (native-size summed palette)",
   options, count: COUNT, width: W, height: H,
-  palette: palette.map((c, i) => ({ index: i, L: +c.L.toFixed(4), a: +c.a.toFixed(4), b: +c.b.toFixed(4), rgb: hex(paletteRgb[i]) })),
+  palette: palette.map((c, i) => ({ index: i, L: +c.L.toFixed(8), a: +c.a.toFixed(8), b: +c.b.toFixed(8), rgb: hex(paletteRgb[i]) })),
   sourceColours: byKey.size,
   meanDeltaOklab100: +(errSum / (W * H) * 100).toFixed(3),
   maxDeltaOklab100: +(errMax * 100).toFixed(2),

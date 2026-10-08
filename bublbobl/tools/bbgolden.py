@@ -26,6 +26,7 @@ def run(variant):
         b.run_frame()
         if f in FRAMES:
             out[str(f)] = hashlib.sha1(r.render_rgb(b).tobytes()).hexdigest()
+            out[str(f) + "_q16"] = hashlib.sha1(r.render_q16(b)[0].tobytes()).hexdigest()
     return out
 
 
@@ -36,7 +37,11 @@ def main():
         print("updated", GOLDEN)
         return 0
     gold = json.load(open(GOLDEN))
+    # the full-colour hashes must be unchanged; the _q16 ones are new
+    old_ok = all(gold[v][k] == res[v][k] for v in gold for k in gold[v] if not k.endswith("_q16"))
     ok = gold == res
+    if old_ok and not ok:
+        print("full-colour frame hashes unchanged; _q16 hashes differ or are new")
     print("golden frames:", "MATCH" if ok else "MISMATCH")
     if not ok:
         print(json.dumps({"expected": gold, "got": res}, indent=1))

@@ -1,0 +1,149 @@
+{
+ "name": "bublbobl 16-colour palette",
+ "origin": "JsOklabQuantizer default settings on docs/attract_collage_64.png (MAME 0.162, bublboblr)",
+ "quantizer": {
+  "repo": "C:/Arbeit/jsoklabquantizer",
+  "commit": "066f401",
+  "note": "uncommitted js/main.mjs native-size palette path; quantizer.mjs/color.mjs as committed",
+  "options": {
+   "iterations": 18,
+   "lightnessMode": "image",
+   "fatnessBias": 0.75,
+   "colorDecay": 0
+  }
+ },
+ "order": "ascending Oklab lightness (the quantizer's ladder order)",
+ "palette": [
+  {
+   "index": 0,
+   "rgb": "#000000",
+   "L": 0,
+   "a": 0,
+   "b": 0,
+   "ste444": "$000"
+  },
+  {
+   "index": 1,
+   "rgb": "#0b0b0b",
+   "L": 0.14854601,
+   "a": 0,
+   "b": 0,
+   "ste444": "$111"
+  },
+  {
+   "index": 2,
+   "rgb": "#490403",
+   "L": 0.25954062,
+   "a": 0.08694428,
+   "b": 0.04865902,
+   "ste444": "$400"
+  },
+  {
+   "index": 3,
+   "rgb": "#700000",
+   "L": 0.34195075,
+   "a": 0.12228046,
+   "b": 0.06843517,
+   "ste444": "$700"
+  },
+  {
+   "index": 4,
+   "rgb": "#8e0017",
+   "L": 0.40716174,
+   "a": 0.15067668,
+   "b": 0.06621488,
+   "ste444": "$801"
+  },
+  {
+   "index": 5,
+   "rgb": "#0032ec",
+   "L": 0.46135489,
+   "a": -0.02809082,
+   "b": -0.26962088,
+   "ste444": "$03E"
+  },
+  {
+   "index": 6,
+   "rgb": "#6c691c",
+   "L": 0.50912608,
+   "a": -0.02945137,
+   "b": 0.09241613,
+   "ste444": "$662"
+  },
+  {
+   "index": 7,
+   "rgb": "#6054f1",
+   "L": 0.55340897,
+   "a": 0.03718129,
+   "b": -0.22285907,
+   "ste444": "$65E"
+  },
+  {
+   "index": 8,
+   "rgb": "#757ba8",
+   "L": 0.59567939,
+   "a": 0.00904163,
+   "b": -0.06772183,
+   "ste444": "$77A"
+  },
+  {
+   "index": 9,
+   "rgb": "#f62a6b",
+   "L": 0.63608545,
+   "a": 0.23078468,
+   "b": 0.03872843,
+   "ste444": "$E26"
+  },
+  {
+   "index": 10,
+   "rgb": "#00a0f0",
+   "L": 0.6768283,
+   "a": -0.07553052,
+   "b": -0.14136054,
+   "ste444": "$09E"
+  },
+  {
+   "index": 11,
+   "rgb": "#bb9ca0",
+   "L": 0.72092921,
+   "a": 0.03728701,
+   "b": 0.00537797,
+   "ste444": "$B99"
+  },
+  {
+   "index": 12,
+   "rgb": "#f482f4",
+   "L": 0.77092104,
+   "a": 0.16385807,
+   "b": -0.10529303,
+   "ste444": "$E8E"
+  },
+  {
+   "index": 13,
+   "rgb": "#dec900",
+   "L": 0.82763873,
+   "a": -0.03539168,
+   "b": 0.16950962,
+   "ste444": "$DC0"
+  },
+  {
+   "index": 14,
+   "rgb": "#00fed9",
+   "L": 0.89244173,
+   "a": -0.16572015,
+   "b": 0.00979273,
+   "ste444": "$0FD"
+  },
+  {
+   "index": 15,
+   "rgb": "#ffffff",
+   "L": 0.99999999,
+   "a": -1e-08,
+   "b": 3e-08,
+   "ste444": "$FFF"
+  }
+ ],
+ "meanDeltaOklab100": 2.365,
+ "maxDeltaOklab100": 20.78,
+ "status": "adopted as the working palette; not yet validated against gameplay frames"
+}

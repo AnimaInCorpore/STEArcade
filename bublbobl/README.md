@@ -56,6 +56,15 @@ in the palette (Bub's `#00bb00`, 2,008 px, maps to a teal; worst error 20.8). co
 but turns the yellow logo green and has a higher mean error (2.81). Read this as an input to the
 STE-vs-Falcon decision, not a final palette.
 
+### Adopted palette
+
+The default result is the working palette: `docs/palette16.json` (16 entries, ascending lightness, with Oklab
+values, sRGB and the nearest STE $0RGB). `tools/bbpalette.py` maps any RGB to it with the same nearest-Oklab rule
+and reproduces the quantizer's own image exactly (0 of 3,670,016 pixels differ). `Renderer.render_q16(machine)`
+returns a frame as 16-colour indices + RGB via a 256-entry lookup built from the board's palette RAM
+(`bbgolden.py` now also hashes these). Status: not yet validated against gameplay frames, and the missing green
+(see above) is a known weakness.
+
 ## Tools
 
 * `tools/bubble.py` — machine model (`Bubble(variant="bublboblr")`, `run_frame()`).

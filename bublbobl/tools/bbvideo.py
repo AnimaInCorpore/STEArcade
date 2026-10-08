@@ -114,6 +114,13 @@ class Renderer:
                             bmp[ry, rx] = color * 16 + p
         return bmp
 
+    def render_q16(self, m):
+        """Frame in the port's 16-colour palette (docs/palette16.json): (index map [224,256] 0..15, rgb)."""
+        import bbpalette
+        lut = bbpalette.lut_from_palette_ram(m.palram)
+        idx16 = lut[self.render_index(m)[16:240]]
+        return idx16, bbpalette.load_palette16()[1][idx16]
+
     def render_rgb(self, m):
         idx = self.render_index(m)
         pal = palette_rgb(m.palram)
