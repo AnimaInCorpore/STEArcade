@@ -61,9 +61,13 @@ render_frame:
 
 	bsr	scan_cells
 	bsr	draw_dirty_cells
+	ifnd NOSTARS
 	bsr	erase_stars
+	endc
 	bsr	draw_sprites
+	ifnd NOSTARS
 	bsr	draw_stars
+	endc
 	bsr	chars_over
 	rts
 

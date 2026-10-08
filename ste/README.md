@@ -252,3 +252,36 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   the file (`profagg.py` wants the stdout copy as `<dir>/hatari.out` and the header as
   `<dir>.prof`); an AVI of a 9000 VBL run takes 5 minutes (PNG), the same run without
   one 70 s.
+
+### Findings (2026-10-08, later)
+
+- Sources: MAME's Galaga video code is in the F030Arcade checkout,
+  `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/namco/galaga_v.cpp`
+  (also `galaga.cpp`, `namco/galaga_a.cpp`; commit 5913928b159).  Sprite flags there: bit 0
+  flip x, bit 1 flip y, bit 2 double width, bit 3 double height; x = spriteram_2[offs+1] - 40
+  + 0x100 * (spriteram_3[offs+1] & 3), y = 256 - spriteram_2[offs] + 1.  Check against it
+  before trusting `tools/galaga.py` or the renderer.
+- Hatari: use the F030Arcade build (`tools/hrun.sh galaga|dkong [seconds...]`: runs the port,
+  screenshots through `--cmd-fifo` + `hatari-debug screenshot` into `/tmp/hrun`; `PRG=` picks
+  another program).  Debugger commands go through the same FIFO (`hatari-debug m $addr 8`
+  prints memory to Hatari's stdout) - that is how the `--debug` counters are read:
+  `cnt_vbl`, `cnt_skip`, `cnt_render` (words, map address + $188e4).
+- Bugs found by looking at the screen: (1) the sprite rectangle's line offset was a word
+  shift, lines from 256 on (the ship at the bottom) wrapped to the top; (2) flip x was
+  tested as bit 7 of the flags (Donkey Kong's attribute), Galaga's is bit 0: enemies on a
+  curve were never mirrored along the screen's vertical axis (flip y is in the data
+  variants and worked); (3) the dirty cell lists (2048 cells per draw screen) overflowed into
+  `star_count` when the program rewrote the screen for several frames before a screen was
+  drawn (bus error in `erase_stars`): a full list now sets `list_full` and the draw screen
+  redraws every cell.
+- Boot: the main CPU's RAM test is skipped (`--full-selftest` keeps it), the grid screen
+  and the handshake wait ($3719 loops, ~200 frames) remain.
+- Frame rate (VBLs vs renders from the debug counters, 10 s steps from 20 s, the attract
+  mode with its demo play): with the starfield 25 fps in the title phases and 7-14 fps with
+  the formation (14.3 average); `-D NOSTARS=1` (no erase_stars/draw_stars): 48-49 fps in the
+  title phases, 9-22 with the formation (23.8 average).  So the stars cost half of a light
+  frame but the heavy phases are bound by the sprites and the translated code.  Idea (not
+  built): a render budget in the style of F030Arcade's `ffight` (a counter of the scanlines
+  since the VBL; on the STE the video address counter $ffff8209 gives the beam position
+  while Timer A/B stay with the border removal) that stops sprites/stars early and
+  continues next frame, or a fixed 25 fps divisor.

@@ -9,7 +9,7 @@ HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
 OUT=${OUT:-/tmp/hrun}
 case $PORT in
-  galaga) RUN=$STE/run/galaga; PRG=GALAGA.PRG ;;
+  galaga) RUN=$STE/run/galaga; PRG=${PRG:-GALAGA.PRG} ;;
   dkong)  RUN=$STE/run; PRG=DKONG.PRG ;;
   *) echo "unknown port $PORT"; exit 1 ;;
 esac

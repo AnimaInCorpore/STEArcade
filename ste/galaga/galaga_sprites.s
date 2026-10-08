@@ -408,8 +408,8 @@ draw_part:
 	asr	#4,d4			; chunk (-1 .. 13)
 	and	#15,d0			; skew
 
-	tst.b	d2
-	bpl.s	.top_set		; flip x: the drawn lines are at the far end
+	btst	#0,d2			; flip x (flags bit 0; Donkey Kong's is bit 7)
+	beq.s	.top_set		; flip x: the drawn lines are at the far end
 	moveq	#16,d5
 	sub	S_FIRST(a4),d5
 	sub	d6,d5
@@ -478,16 +478,16 @@ draw_part:
 	cmp	#$f000,d3		; the lines would cross a 64 KB boundary
 	bhs.s	.slow_lines
 	move	#248,d4
-	tst.b	d2
-	bpl.s	.lines_set
+	btst	#0,d2
+	beq.s	.lines_set
 	add.l	d6,d3
 	move	#-264,d4
 	bra.s	.lines_set
 .slow_lines:
 	bset	#31,d0
 	move.l	#256,d4
-	tst.b	d2
-	bpl.s	.lines_set
+	btst	#0,d2
+	beq.s	.lines_set
 	add.l	d6,d3
 	move.l	#-256,d4
 .lines_set:
