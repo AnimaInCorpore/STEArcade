@@ -55,3 +55,8 @@ against a reference frame before choosing the Falcon framebuffer layout.
   the required rotation and cocktail/flip-screen behavior.
 - DSP 56001 available for later offload
 - Final output: Atari .PRG with GEMDOS header, assembled with VASM/RMAC
+- Sprite placement (MAME `draw_sprites`, verified against a MAME snapshot with 0 differing pixels): raw row
+  `top = 247 - y` (not 246: the hardware line buffer fetches a sprite one scanline ahead), raw column `x - 8`.
+- Pen colours are MAME's resistor network output, not weighted PROM bits; use `ste/tools/dkong_pens.py`.
+  The method (MAME `-window`, Lua dump of pens, memory and snapshot, pixel compare) is in `ste/README.md`,
+  "Checking a reference against MAME".

@@ -78,7 +78,9 @@ four planes of the line (Y count 4, source = destination), and the endmasks are 
 END1/END3 hold the outline of the line (holes included) shifted to the two screen words, so
 the opaque pixels replace what is below and the rest stays.  No clearing pass, no colour
 mixing: the screen equals the reference renderer pixel for pixel (frozen at frames 650, 800,
-1000 and 1200: 0 of 57344 pixels differ).  The masks of every (shape, flip y, skew) are
+1000 and 1200: 0 of 57344 pixels differ; frame 800 re-checked after the MAME fixes below), and
+the reference equals MAME's screenshot (see "Checking a reference against MAME").  A sprite's
+left display column is u0 = y - 23 (it was y - 22 until 2026-10-08, see below).  The masks of every (shape, flip y, skew) are
 a table (`dk_spr_masks`, 256 KB), the line words come from colour data baked per colour quad
 (`dk_spr_data`, 608 KB: 19 distinct mappings of the pen values to the planes) that the
 Blitter's source address walks through, `NFSR` lets the second destination word reuse the
@@ -125,6 +127,40 @@ by it (`vbl_skip`) and the borders keep being removed.  Blits do not start while
 is pending or Timer B is within 5 lines (`wait_borders`).  A measurement for all of this:
 the top row of the game area in a Hatari AVI of 1800 VBLs is 0 for 1788 frames, 58 (border
 not removed) for none.
+
+## Checking a reference against MAME (applies to every port)
+
+"The port equals the reference renderer" only means something if the reference equals the arcade.
+Compare the reference with MAME's own screenshot, pixel by pixel, before trusting it.  Donkey Kong's
+reference had two errors that this found on 2026-10-08, neither visible in a Hatari-vs-reference test:
+
+* **Sprites were one raw row off**: `top = 246 - y`, MAME's `draw_sprites` gives `247 - y` (its
+  line buffer fetches the sprite one scanline ahead, hence the `+ 1` in `y + add_y + 1 + scanline`).
+  Fixed in `tools/dkong.py` and `rt/sprites.s` (`u0 = y - 23`).  Every sprite was one pixel shifted
+  along the arcade's raw Y axis.  Positions derived from the MAME source need a snapshot to confirm
+  them (here the derivation and the snapshot agree: 0 pixels differ with 247, about 900 with 246).
+* **The palette was wrong** (up to 75 levels per channel, e.g. skin 255,184,85 vs 245,188,160, blue
+  0,0,170 vs 4,2,220): the Galaxian style weights 0x21/0x47/0x97 and 0x55/0xAA are not what current
+  MAME computes.  Its colours come from resistor network models (`compute_res_net`: darlington stages,
+  tri-state black) and are not a per channel sum of weighted PROM bits, so take the numbers from MAME
+  itself: `tools/dkong_pens.py` is a dump of `pen_color()` for the 256 pens.  Do the same for any
+  game whose reference computes colours from PROM weights; Galaga and Bubble Bobble should be checked.
+
+How (`ref/mame_dump.lua`, `ref/mame_cmp_dkong.py`; MAME is `/opt/homebrew/bin/mame`, 0.289, the ROM zips
+are in `assets/roms`): start MAME with **`-window`** (with `-video none` there is no snapshot), run a Lua
+script at frame N that writes the pens (`palette:pen_color(i)`), a memory range and `video:snapshot()`, render
+the same memory with the reference and count differing pixels.  `venv/bin/python ref/mame_cmp_dkong.py 700 1500 2500 4000`
+prints 0 differing pixels for all four frames now.  Notes:
+
+* Take several frames: the memory is read after the frame was drawn, so a fast sprite can be one step ahead.
+* Write taps on the I/O latches (`install_write_tap`) did not report the palette bank reliably (it read 0 where the
+  screen was bank 2), so the compare tool tries all palette/sprite banks and reports the best.  A bank mismatch
+  shows as whole tile colour sets wrong, a position mismatch as a one pixel outline around every sprite.
+* Checked and fine for Donkey Kong: tile colour codes, video RAM layout, sprite x (`x + $F8`), flip x/y, the
+  8257 sprite DMA (the game programs `$6900` -> `$7000`, `$180` bytes, exactly what `z80_dma` copies).
+* Known MAME behaviours the port does not have: the 16 sprites per scanline limit (later sprites of a line vanish)
+  and the wrap around of sprites at the arcade's 256 pixel edge (MAME draws them again at x - 256 / y - 256).  Neither
+  is visible in normal play.
 
 ## Measuring (`tools/build.py` options, `tools/frametimes.py`)
 

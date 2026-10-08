@@ -8,7 +8,7 @@
 ; around: later entries are drawn over earlier ones.
 ;
 ; The screen is the arcade raster rotated 270 degrees (see assets.py): a sprite is
-; a 16 line block with its left edge at display column u0 = y - 22 and its top
+; a 16 line block with its left edge at display column u0 = y - 23 and its top
 ; line at display line v0 = (x + $F8) & $FF.  Lines run in sprite columns, so
 ; flip x draws the lines the other way round, flip y is baked into the data.
 ;
@@ -312,7 +312,7 @@ sprite_loop:
 	moveq	#0,d3
 	move.b	3(a4),d3		; x
 
-	sub	#22,d0			; u0: left display column (-22 .. 233)
+	sub	#23,d0			; u0: left display column (-23 .. 232)
 	cmp	#-16,d0
 	ble	sprite_loop		; completely left of the game area
 	cmp	#224,d0

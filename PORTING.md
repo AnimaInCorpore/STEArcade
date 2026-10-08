@@ -16,6 +16,11 @@ Superseded in practice by the Atari STE port in `ste/` (`ste/README.md`): whole-
 static translation with a verified reference emulator per game, not routine-by-routine
 replacement.  The plan below is kept for the Falcon030 variant.
 
+Verify any reference renderer against MAME's screenshot before relying on it (`ste/README.md`,
+"Checking a reference against MAME"): the Donkey Kong reference had its sprites one pixel off and the
+wrong colours until that was done.  The corrected pen table (`ste/tools/dkong_pens.py`) and the sprite
+position (`top = 247 - y`) apply to the Falcon port too.
+
 The repository is at the analysis/foundation stage. The ROM set and initial routine notes exist,
 but the native source is not yet a buildable or validated Falcon program.
 

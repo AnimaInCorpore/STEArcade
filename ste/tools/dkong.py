@@ -9,6 +9,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from z80 import Z80
+from dkong_pens import PENS
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 ROMDIR = os.path.join(ROOT, "assets", "roms", "extracted")
@@ -52,17 +53,9 @@ class Gfx:
         self.pens = [self.pen_rgb(i) for i in range(256)]
 
     def pen_rgb(self, i):
-        lo = self.prom_lo[i]
-        hi = self.prom_hi[i]
-        # PROM bits are inverted at the output (open collector pulled to 5V).
-        lo ^= 0x0F
-        hi ^= 0x0F
-        if (i & 3) == 0:
-            return (0, 0, 0)
-        r = 0x21 * ((hi >> 1) & 1) + 0x47 * ((hi >> 2) & 1) + 0x97 * ((hi >> 3) & 1)
-        g = 0x21 * ((lo >> 2) & 1) + 0x47 * ((lo >> 3) & 1) + 0x97 * (hi & 1)
-        b = 0x55 * (lo & 1) + 0xAA * ((lo >> 1) & 1)
-        return (r, g, b)
+        # MAME's palette (tools/dkong_pens.py), not a model of the resistor network
+        c = PENS[i]
+        return (c >> 16, (c >> 8) & 255, c & 255)
 
 
 class DKong:
@@ -177,7 +170,7 @@ class DKong:
             flipx = attr & 0x80
             flipy = code_b & 0x80
             sx = (x + 0xF8) & 0xFF
-            top = (246 - y) & 0xFF
+            top = (247 - y) & 0xFF   # MAME draw_sprites; 246 was one pixel off
             s = g.sprites[code]
             if flipx: s = s[:, ::-1]
             if flipy: s = s[::-1, :]
