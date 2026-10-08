@@ -40,6 +40,22 @@ but is not proven (the demo levels vary between loops, no exact long period was 
 registered at 1227 s (an input reached MAME's window; none was sent by the tooling) — frames from then on
 are excluded.
 
+## 16-colour quantization (JsOklabQuantizer strategy)
+
+`tools/bbquantize.py` runs `tools/oklab_quantize.mjs`, which imports `C:\Arbeit\jsoklabquantizer`'s own
+`quantizer.mjs` / `color.mjs` unmodified (that repo at `066f401`; its uncommitted `main.mjs` change is the
+native-size summed palette used here, so nothing is cropped or resized). One palette is built from all
+pixels of the collage in Oklab (fixed lightness ladder, k-means on a/b, defaults: fatnessBias 0.75,
+colorDecay 0, 18 iterations) and every pixel is mapped to its nearest entry.
+Results in `docs/quant/` (`attract_collage_q16_default.*` is the tool's default; `_decay1` is colorDecay 1
+for comparison; `_compare.png` shows source, both results and palettes; the JSON has the palette with the
+nearest 12-bit STE value for reference, and the per-colour mapping/error).
+
+Default result: mean error 2.37 (dOklab x100) over the 68 source colours, 15 of 16 slots used, no green
+in the palette (Bub's `#00bb00`, 2,008 px, maps to a teal; worst error 20.8). colorDecay 1 fixes the greens
+but turns the yellow logo green and has a higher mean error (2.81). Read this as an input to the
+STE-vs-Falcon decision, not a final palette.
+
 ## Tools
 
 * `tools/bubble.py` â€” machine model (`Bubble(variant="bublboblr")`, `run_frame()`).
