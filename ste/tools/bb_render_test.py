@@ -39,7 +39,11 @@ def inputs_upto(ref, f):
 
 
 def main():
-    frames = [int(a) for a in sys.argv[1:]] or [100, 300, 420, 600, 700]
+    args = sys.argv[1:]
+    if args and args[0] == "seq":                  # consecutive frames: the incremental path
+        frames = list(range(int(args[1]), int(args[1]) + int(args[2])))
+    else:
+        frames = [int(a) for a in args] or [100, 300, 420, 600, 700]
     s = Sim(str(RUN / "BUBBLE.PRG"), run_dir=RUN)
     s.mem.set_trace_mode(False)
     sym = {k: v + s.base for k, v in s.symbols(lt.MAP).items()}
@@ -89,8 +93,9 @@ def main():
         diff = got != exp
         nd = int(diff.sum())
         print("frame %d: %d of %d pixels differ (cycles %d)" % (target, nd, diff.size, n))
-        check_cache(mem, sym)
-        check_slots(s, ref, sym)
+        if len(frames) <= 8:
+            check_cache(mem, sym)
+            check_slots(s, ref, sym)
         if nd:
             ys, xs = np.nonzero(diff)
             print("   first:", [(int(x), int(y), int(got[y, x]), int(exp[y, x])) for x, y in zip(xs[:6], ys[:6])])
@@ -102,10 +107,13 @@ def main():
             print("   cell", cx, cy, "got / expected:")
             for r in range(8):
                 print("     ", "".join("%x" % got[cy * 8 + r, cx * 8 + c] for c in range(8)), "  ", "".join("%x" % exp[cy * 8 + r, cx * 8 + c] for c in range(8)))
-        from bublbobl import save_png
-        pal = ste_palette(mem, sym)
-        save_png(pal[got], "/tmp/bbr_got_%d.png" % target, 2)
-        save_png(pal[exp], "/tmp/bbr_exp_%d.png" % target, 2)
+        if len(frames) <= 8 or nd:
+            from bublbobl import save_png
+            pal = ste_palette(mem, sym)
+            save_png(pal[got], "/tmp/bbr_got_%d.png" % target, 2)
+            save_png(pal[exp], "/tmp/bbr_exp_%d.png" % target, 2)
+        if nd and len(frames) > 8:
+            return
 
 
 def check_cache(mem, sym):
@@ -190,6 +198,7 @@ def check_slots(s, ref, sym):
         cpu.w_reg(R.A7, sp - 4)
         mem.w32(sp - 4, sym["sim_frame_done"])
         cpu.w_reg(R.A4, g_ram + 0x5D00 + 4 * i)
+        cpu.w_reg(R.A5, 0x60000)
         cpu.w_reg(R.D7, sx & 0xFFFF)
         cpu.w_sr(0x2700)
         cpu.w_pc(sym["obj_slots"])
@@ -199,7 +208,7 @@ def check_slots(s, ref, sym):
         got_end = cpu.r_reg(R.D7) & 0xFFFF
         got = []
         for k in range(cnt):
-            x = mem.r16(sym["slotbuf"] + 6 * k); y = mem.r16(sym["slotbuf"] + 6 * k + 2); v = mem.r16(sym["slotbuf"] + 6 * k + 4)
+            x = mem.r16(0x60000 + 10 * k); y = mem.r16(0x60000 + 10 * k + 2); v = mem.r16(0x60000 + 10 * k + 4)
             got.append((x - 65536 if x & 0x8000 else x, y, v))
         w16 = [((x + 32768) % 65536 - 32768, y, v) for (x, y, v) in want]
         n += 1

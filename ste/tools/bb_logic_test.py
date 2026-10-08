@@ -12,8 +12,8 @@ from machine68k import Register as R
 from bublbobl import Bublbobl
 
 STE = Path(__file__).resolve().parent.parent
-RUN = STE / "run" / "bublbobl"
-MAP = STE / "build" / "bublbobl.map"
+RUN = STE / "run" / "bublbobl_sim"
+MAP = STE / "build" / "bublbobl_sim.map"
 RANGES = [(0xC000, 0xF7C0), (0xF800, 0xFA00), (0xFC00, 0x10000)]     # (the stacks at F7C0-F7FF hold the interrupt tokens)
 
 

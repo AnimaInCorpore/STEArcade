@@ -192,10 +192,25 @@ class MCUEmitter:
         self.e("move.b %s,%s" % (reg, ea))
 
     def word_src(self, ins):
+        """a 16-bit source operand; indexed words may be at odd addresses (a 68000 faults on those): two bytes into d3"""
         if ins.mode == "imm16":
             return "#$%04X" % ins.arg
         if self.is_io(ins):
             raise Unsupported("16-bit access to an I/O register: " + ins.text)
+        if ins.mode == "idx":
+            a = ins.arg
+            if a <= 126:
+                self.e("moveq #0,d3")
+                self.e("move.b %d(a6,d2.l),d3" % a)
+                self.e("lsl.w #8,d3")
+                self.e("move.b %d(a6,d2.l),d3" % (a + 1))
+            else:
+                self.e("lea %d(a6),a0" % a)
+                self.e("moveq #0,d3")
+                self.e("move.b (a0,d2.l),d3")
+                self.e("lsl.w #8,d3")
+                self.e("move.b 1(a0,d2.l),d3")
+            return "d3"
         ea, pre = self.mem_ea(ins)
         for p in pre:
             self.e(p)

@@ -2,7 +2,7 @@
 -> ste/run/bublbobl/BUBBLE.PRG (+ the four CPU ROM files)"""
 import argparse, os, shutil, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bb_gen, m6801x
+import bb_gen, bb_assets, m6801x
 from build import VASM, VLINK
 from bublbobl import ROMDIR
 
@@ -16,8 +16,11 @@ def main():
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("-D", dest="defines", action="append", default=[])
-    ap.add_argument("--out", default=os.path.join(STE, "run", "bublbobl", "BUBBLE.PRG"))
+    ap.add_argument("--out", default=None, help="default: run/bublbobl/BUBBLE.PRG, run/bublbobl_sim/BUBBLE.PRG with --sim")
     a = ap.parse_args()
+    tag = "bublbobl_sim" if a.sim else "bublbobl"
+    if a.out is None:
+        a.out = os.path.join(STE, "run", tag, "BUBBLE.PRG")
     text, reps = bb_gen.generate()
     os.makedirs(os.path.join(STE, "build"), exist_ok=True)
     open(os.path.join(STE, "build", "bb_code.s"), "w").write(text)
@@ -28,7 +31,8 @@ def main():
     mtext, em, code = m6801x.generate()
     open(os.path.join(STE, "build", "bb_mcu.s"), "w").write(mtext)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
-    obj = os.path.join(STE, "build", "bublbobl.o")
+    bb_assets.build()
+    obj = os.path.join(STE, "build", tag + ".o")
     cmd = [VASM, "-Fvobj", "-quiet", "-nowarn=2047", "-I", os.path.join(STE, "build"), "-o", obj, "bublbobl.s"]
     if a.frames:
         cmd.insert(1, "-DFRAMES=%d" % a.frames)
@@ -42,7 +46,7 @@ def main():
     sys.stdout.write(r.stdout + r.stderr)
     if r.returncode:
         sys.exit(r.returncode)
-    r = subprocess.run([VLINK, "-b", "ataritos", "-s", "-o", a.out, "-M" + os.path.join(STE, "build", "bublbobl.map"), obj],
+    r = subprocess.run([VLINK, "-b", "ataritos", "-s", "-o", a.out, "-M" + os.path.join(STE, "build", tag + ".map"), obj],
                        capture_output=True, text=True)
     sys.stdout.write(r.stdout + r.stderr)
     if r.returncode:

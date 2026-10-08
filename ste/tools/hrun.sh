@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run a port in the F030Arcade Hatari (the pinned, corrected build) and optionally grab screenshots.
-#   hrun.sh galaga|dkong [seconds-before-shot ...]     no seconds: run interactively
+#   hrun.sh galaga|dkong|bubble [seconds-before-shot ...]     no seconds: run interactively
 # Screenshots land in $OUT (default /tmp/hrun) as <port>_<seconds>.png.
 set -e
 PORT=${1:-galaga}; shift || true
@@ -11,6 +11,7 @@ OUT=${OUT:-/tmp/hrun}
 case $PORT in
   galaga) RUN=$STE/run/galaga; PRG=${PRG:-GALAGA.PRG} ;;
   dkong)  RUN=$STE/run; PRG=DKONG.PRG ;;
+  bubble) RUN=$STE/run/bublbobl; PRG=${PRG:-BUBBLE.PRG} ;;
   *) echo "unknown port $PORT"; exit 1 ;;
 esac
 mkdir -p "$OUT"; rm -f "$RUN/CRASH.TXT" "$OUT/cmd.fifo"

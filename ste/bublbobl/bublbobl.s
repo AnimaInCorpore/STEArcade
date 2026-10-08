@@ -51,6 +51,16 @@ g_ram = g_block+$8000			; $8000-$FFFF
 G_MCRAM = g_ram+$7C00			; $FC00-$FFFF: the RAM shared with the MCU
 TOKEN = $FE7F				; $7FFE on the Z80 stack, byte swapped
 
+arm_border_timers	macro
+	clr.b	$fffffa1b.w
+	move.b	#199+29,$fffffa21.w
+	move.b	#8,$fffffa1b.w
+	move.b	#TA_DATA,$fffffa1f.w
+	move.b	#4,$fffffa19.w
+	st	border_a
+	st	border_b
+	endm
+
 	section text,code
 
 ; ------------------------------------------------------------------------------
@@ -64,6 +74,10 @@ start:
 	addq	#6,sp
 	move.l	d0,old_ssp
 	lea	own_stack_top,sp
+	lea	own_stack_top-4096,a0	; (the unused part of the stack is marked: the crash dump shows how deep it went)
+	move	#1024-1,d0
+.mark:	move.l	#$A5A5A5A5,(a0)+
+	dbf	d0,.mark
 
 	bsr	load_roms
 	tst.l	d0
@@ -408,6 +422,15 @@ hbl:
 ; the stack and restored at the end.
 
 vbl:
+	tst.b	in_logic		; Timer A's handler lowers the interrupt mask: a VBL that was pending while
+	bne	vbl_late		; the game's interrupts of the last one still run (more than a frame) comes
+	st	in_logic		; in here: it is dropped, the game runs slower
+	move.l	2(sp),dbg_vbl_pc
+	move.l	sp,dbg_vbl_sp
+	addq.w	#1,dbg_nest
+	ifnd NOBORDER
+	arm_border_timers
+	endc
 	ifd DEBUG
 	addq	#1,cnt_vbl
 	endc
@@ -446,8 +469,8 @@ vbl:
 	tst.b	in_turn			; a booting chip's registers are live: no handlers
 	bne	vbl_render
 
-	tst.b	booted1			; (the chips' interrupts start once the main CPU idles)
-	beq	vbl_render
+	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
+	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
 	bsr	mcu_irq			; the MCU first: it raises the main CPU's interrupt
 
 	; Main CPU IRQ (IM 2) with the interrupted registers, if requested and enabled.
@@ -494,10 +517,28 @@ vbl:
 	beq.s	.no_irq2
 	clr.b	g2_iff
 	movem.l	ctx2,d0-d7/a0-a6
+	ifd CHKCTX
+	cmp.l	#g_block,a6
+	beq.s	.c1
+	moveq	#31,d0			; the sub CPU's context was damaged before its interrupt
+	bra	crash_common
+.c1:	cmp.l	#g2_dispatch_sw,a4
+	beq.s	.c2
+	moveq	#32,d0
+	bra	crash_common
+.c2:
+	endc
 	move.w	#TOKEN,-(a5)
 	move.l	#.after_irq2,g2_ret_to
 	jmp	Y0038
 .after_irq2:
+	ifd CHKCTX
+	cmp.l	#g_block,a6
+	beq.s	.c3
+	moveq	#33,d0			; ... by its interrupt handler
+	bra	crash_common
+.c3:
+	endc
 	movem.l	d0-d7/a0-a6,ctx2
 .no_irq2:
 
@@ -508,6 +549,7 @@ vbl:
 	endc
 
 vbl_render:
+	clr.b	in_logic
 	; Draw the frame, with the VBL enabled: when it takes longer than a frame, the
 	; next VBL runs the game's interrupts (above) and skips the drawing.
 	tst.b	in_render
@@ -524,6 +566,8 @@ vbl_render:
 	st	frame_ready
 
 vbl_done:
+	clr.b	in_logic
+	subq.w	#1,dbg_nest
 	if FRAMES
 	move.l	frame_counter,d0
 	cmp.l	#FRAMES,d0
@@ -533,6 +577,10 @@ vbl_done:
 	endc
 
 	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+
+vbl_late:
+	addq.w	#1,cnt_late
 	rte
 
 ; The token on a Z80 stack returns here: back to whoever started the handler.
@@ -545,10 +593,50 @@ g2_ret:
 	move.l	g2_ret_to,-(sp)
 	rts
 
+; The top and bottom borders are removed (Timer A in the middle of the last line before the
+; border, Timer B at the bottom border), as in the Galaga port: 277 lines.
+
 timer_a:
+	move.l	2(sp),dbg_t_pc
+	move	#$2100,sr
+	stop	#$2100
+	move	#$2700,sr
+	clr.b	$fffffa19.w
+	rept TA_NOPS
+	nop
+	endr
+	clr.b	$ffff820a.w
+	rept 9
+	nop
+	endr
+	move.b	#2,$ffff820a.w
+	clr.b	border_a
 	rte
 
 timer_b:
+	movem.l	d0/a0,-(sp)
+	lea	$fffffa21.w,a0
+	move.b	(a0),d0
+.wait1:
+	cmp.b	(a0),d0
+	beq.s	.wait1
+	clr.b	$ffff820a.w
+	moveq	#2,d0
+.wait2:
+	nop
+	dbf	d0,.wait2
+	nop
+	nop
+	nop
+	nop
+	nop
+	move.b	#2,$ffff820a.w
+	move.b	(a0),d0
+.wait3:
+	cmp.b	(a0),d0
+	beq.s	.wait3
+	movem.l	(sp)+,d0/a0
+	clr.b	border_b
 	rte
 
 ; ------------------------------------------------------------------------------
@@ -1055,6 +1143,10 @@ crash_common:
 	lea	crash_sp,a1
 	move.l	(a1),d1
 	bsr	hex_long
+	move.b	#' ',(a0)+
+	lea	start(pc),a1		; the load address: map address = address - this
+	move.l	a1,d1
+	bsr	hex_long
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
 
@@ -1075,6 +1167,30 @@ crash_common:
 	bsr	hex_word
 	move.b	#' ',(a0)+
 	dbf	d2,.stack
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	lea	own_stack_top-4096,a1	; untouched stack longs from the bottom
+	moveq	#0,d1
+.untouched:
+	cmp.l	#$A5A5A5A5,(a1)+
+	bne.s	.touched
+	addq.l	#1,d1
+	cmp.w	#1024,d1
+	blo.s	.untouched
+.touched:
+	bsr	hex_word
+	move.b	#' ',(a0)+
+	move.l	dbg_vbl_pc,d1		; where the last VBL interrupted
+	bsr	hex_long
+	move.b	#' ',(a0)+
+	move.l	dbg_t_pc,d1		; and the last timer
+	bsr	hex_long
+	move.b	#' ',(a0)+
+	move.l	dbg_vbl_sp,d1		; the stack at the last VBL, the VBL nesting
+	bsr	hex_long
+	move.b	#' ',(a0)+
+	move.w	dbg_nest,d1
+	bsr	hex_word
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
 
@@ -1146,15 +1262,8 @@ z80_unsupported:
 	ifd SIM
 	bra.s	z80_badpc
 	endc
-	bsr	restore_hardware
-	pea	bad_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-	bra	quit
+	moveq	#99,d0			; the dump: d7 = the address (an untranslated target: its pc; a
+	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
 	include "bb_render.s"
 
@@ -1224,7 +1333,10 @@ old_fa21:	ds.b	1
 	even
 
 quit_flag:	ds.b	1
+border_a:	ds.b	1
+border_b:	ds.b	1
 frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
+in_logic:	ds.b	1		; the game's interrupts of a VBL are running
 in_render:	ds.b	1		; drawing: the main CPU's registers are in main_ctx
 in_turn:	ds.b	1		; a booting chip runs with its registers live
 current:	ds.b	1		; 0: the main CPU's code runs, 1: the sub CPU's
@@ -1261,9 +1373,14 @@ in2_val:	ds.b	1
 g_bank4:	ds.w	1
 rnd_state:	ds.w	1
 cnt_acia:	ds.w	1
+cnt_late:	ds.w	1
 cnt_vbl:	ds.w	1
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
+dbg_vbl_pc:	ds.l	1
+dbg_t_pc:	ds.l	1
+dbg_vbl_sp:	ds.l	1
+dbg_nest:	ds.w	1
 crash_regs:	ds.l	16
 crash_text:	ds.b	512
 draw_index:	ds.w	1

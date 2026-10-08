@@ -35,6 +35,22 @@ def load(name):
         return f.read()
 
 
+def skip_tests(main, sub):
+    """The boot self-tests patched out of the main and the sub CPU's ROMs (the port skips them completely):
+    the RAM tests of $E000-$F7FF and $FC01-$FFFF (jumps past them; they leave the RAM zero, which it is
+    already), the delay loop at $0138 (one pass instead of 16384), the sub CPU's checksum of its 32 KB
+    ROM at $017B (a return).  The MCU handshake, the vector setup and the MCU's own checksum stay."""
+    main = bytearray(main)
+    sub = bytearray(sub)
+    assert main[0xC1:0xC4] == bytes([0x21, 0x00, 0xE0]) and main[0xF1:0xF4] == bytes([0x21, 0x01, 0xFC])
+    assert main[0x138:0x13B] == bytes([0x21, 0x00, 0x40]) and sub[0x17B] == 0x21
+    main[0xC1:0xC4] = bytes([0xC3, 0xE8, 0x00])          # jp $00E8
+    main[0xF1:0xF4] = bytes([0xC3, 0x18, 0x01])          # jp $0118
+    main[0x138:0x13B] = bytes([0x21, 0x01, 0x00])        # ld hl,$0001
+    sub[0x17B] = 0xC9                                    # ret
+    return bytes(main), bytes(sub)
+
+
 GFX_FILES = [["a78-09.12", "a78-10.13", "a78-11.14", "a78-12.15", "a78-13.16", "a78-14.17"],
              ["a78-15.30", "a78-16.31", "a78-17.32", "a78-18.33", "a78-19.34", "a78-20.35"]]
 
@@ -68,12 +84,15 @@ def decode_tiles():
 
 
 class Bublbobl:
-    def __init__(self):
+    def __init__(self, tests=False):
+        """tests=True keeps the boot self-tests (the arcade's own behaviour)"""
         main = load("a78-06-1.51") + bytes(0x8000)
         self.main_rom = bytearray(main[:0x8000])
         big = load("a78-05-1.52")
         self.banks = [big[i * 0x4000:(i + 1) * 0x4000] for i in range(4)] + [bytes(0x4000)] * 4
         self.sub_rom = load("a78-08.37")
+        if not tests:
+            self.main_rom, self.sub_rom = [bytearray(x) if i == 0 else x for i, x in enumerate(skip_tests(bytes(self.main_rom), self.sub_rom))]
         self.snd_rom = load("a78-07.46")
         self.mcu_rom = load("a78-01.17")
         self.vram = bytearray(0xDD00 - 0xC000)       # C000-DCFF
