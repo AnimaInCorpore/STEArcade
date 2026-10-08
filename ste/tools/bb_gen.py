@@ -257,28 +257,20 @@ def generate():
             v = virt(pc, e)
             row.append("Z%04X" % v if v in code else "z80_badpc")
         out.append("BKT%04X:\tdc.l %s" % (pc, ",".join(row)))
-    tables_out = ["\tsection data,data", "\tcnop 0,4", "TABLE_ENTRIES = %d" % ENTRIES]
+    # the dispatch tables are built at start from these lists (pc, label): fixed code, each bank's window code
+    tables_out = ["\tsection data,data", "\tcnop 0,2"]
+
+    def entries(name, pcs, prefix, labelof):
+        tables_out.append("%s:" % name)
+        for p in pcs:
+            tables_out.append("\tdc.w $%04X\n\tdc.l %s%04X" % (p, prefix, labelof(p)))
+
+    entries("g1_entries_fixed", [p for p in sorted(code) if p < WIN_LO] , "Z", lambda p: p)
+    tables_out.append("\tdc.w $%04X\n\tdc.l %s\n\tdc.w $FFFF" % (TOKEN, cfg_main.token_sym))
     for e in range(4):
-        tables_out.append("g1_dispatch%d:" % e)
-        row = []
-        for p in range(ENTRIES):
-            if p < WIN_LO:
-                v = p
-            elif p < WIN_HI:
-                v = virt(p, e)
-            else:
-                v = None
-            if p == TOKEN:
-                row.append(cfg_main.token_sym)
-            elif v is not None and v in code:
-                row.append("Z%04X" % v)
-            else:
-                row.append("z80_badpc")
-            if len(row) == 8:
-                tables_out.append("\tdc.l " + ",".join(row))
-                row = []
-        if row:
-            tables_out.append("\tdc.l " + ",".join(row))
+        pcs = [p for p in range(WIN_LO, WIN_HI) if virt(p, e) in code]
+        entries("g1_entries_bank%d" % e, pcs, "Z", lambda p, e=e: virt(p, e))
+        tables_out.append("\tdc.w $FFFF")
     reports.append({"instructions": len(code), "unsupported": em.unsupported, "stubs": len(em.stubs),
                     "window_sites": len(wsites)})
 
@@ -291,20 +283,10 @@ def generate():
     out.append("; --- targets that are not code")
     for p in missing:
         out.append("Y%04X:\tmove.w #$%04X,d7\n\tjmp z80_badpc" % (p, p))
-    tables_out.append("g2_dispatch:")
-    row = []
-    for p in range(ENTRIES):
-        if p == TOKEN:
-            row.append(cfg_sub.token_sym)
-        elif p in scode:
-            row.append("Y%04X" % p)
-        else:
-            row.append("z80_badpc")
-        if len(row) == 8:
-            tables_out.append("\tdc.l " + ",".join(row))
-            row = []
-    if row:
-        tables_out.append("\tdc.l " + ",".join(row))
+    tables_out.append("g2_entries:")
+    for p in sorted(scode):
+        tables_out.append("\tdc.w $%04X\n\tdc.l Y%04X" % (p, p))
+    tables_out.append("\tdc.w $%04X\n\tdc.l %s\n\tdc.w $FFFF" % (TOKEN, cfg_sub.token_sym))
     reports.append({"instructions": len(scode), "unsupported": sem.unsupported})
     return "\n".join(out + tables_out) + "\n", reports
 

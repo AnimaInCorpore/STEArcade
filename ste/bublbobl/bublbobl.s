@@ -74,35 +74,29 @@ start:
 	bsr	init_video
 	bsr	init_render
 
-	lea	g1_dispatch0,a0		; the dispatch tables in the order the code uses them
-	lea	g1_dispatch_sw,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
-	lea	g1_dispatch1,a0
+	lea	g1_dispatch_sw,a1	; the dispatch tables (fixed code + the bank's window code)
+	lea	g1_entries_fixed,a2
+	lea	g1_entries_bank0,a3
+	bsr	init_table
 	lea	g1_dispatch_sw+$40000,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
-	lea	g1_dispatch2,a0
+	lea	g1_entries_fixed,a2
+	lea	g1_entries_bank1,a3
+	bsr	init_table
 	lea	g1_dispatch_sw+$80000,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
-	lea	g1_dispatch3,a0
+	lea	g1_entries_fixed,a2
+	lea	g1_entries_bank2,a3
+	bsr	init_table
 	lea	g1_dispatch_sw+$C0000,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
-	lea	g2_dispatch,a0
+	lea	g1_entries_fixed,a2
+	lea	g1_entries_bank3,a3
+	bsr	init_table
 	lea	g2_dispatch_sw,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
+	lea	g2_entries,a2
+	sub.l	a3,a3
+	bsr	init_table
 
-	; the four ROM banks' windows (the program reads the window as data), a 5th, empty
-	; one for the bank values the board decodes to nothing
-
-	lea	g_banks,a0
-	lea	g_win,a1
-	move	#$10000/4-1,d0
-.bank:	move.l	(a0)+,(a1)+
-	dbf	d0,.bank
+	; the four ROM banks' windows were loaded into g_win (the program reads the window as
+	; data), a 5th, empty one for the bank values the board decodes to nothing
 
 	; the MCU's memory: its ROM at $F000
 
@@ -211,6 +205,36 @@ rom_error:
 	trap	#1
 
 init_cells:
+	rts
+
+; The dispatch table (byte swapped pc order, 65536 longs): a1 = the table, a2 / a3 = lists of
+; (pc.w, label.l) ending with $FFFF (a3 = 0: none)
+
+init_table:
+	move.l	a1,a4
+	move.l	#z80_badpc,d1
+	move	#65536/8-1,d2
+.fill:
+	rept 8
+	move.l	d1,(a4)+
+	endr
+	dbf	d2,.fill
+	bsr.s	.apply
+	move.l	a3,d0
+	beq.s	.done
+	move.l	a3,a2
+.apply:
+.next:
+	moveq	#0,d2
+	move.w	(a2)+,d2
+	cmp.w	#$ffff,d2
+	beq.s	.done
+	move.l	(a2)+,d3
+	ror.w	#8,d2
+	lsl.l	#2,d2
+	move.l	d3,(a1,d2.l)
+	bra.s	.next
+.done:
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -405,6 +429,11 @@ vbl:
 	move.b	2(sp),$ffff8203.w
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
+	tst.b	pal_pending
+	beq.s	.no_swap
+	clr.b	pal_pending
+	movem.l	ste_pal,d0-d7
+	movem.l	d0-d7,$ffff8240.w
 .no_swap:
 
 	addq.l	#1,frame_counter
@@ -1151,7 +1180,7 @@ rom_names:
 rom_sizes:
 	dc.l	$8000,$10000,$8000,$1000
 rom_places:
-	dc.l	G_ROM1,g_banks,g_block,mcu_rom
+	dc.l	G_ROM1,g_win,g_block,mcu_rom
 
 rom_error_text:
 	dc.b	13,10
@@ -1254,7 +1283,6 @@ ctx2:		ds.l	16		; d0-d7, a0-a6, resume address
 own_stack_top:
 
 g_block:	ds.b	$18000		; [sub ROM 32K | RAM 32K | main ROM 32K]
-g_banks:	ds.b	$10000		; the four ROM banks as loaded
 g_win:		ds.b	$14000		; the windows' copies: 4 banks + the empty one
 mcu_rom:	ds.b	$1000
 mcu_mem:	ds.b	$10000
