@@ -16,6 +16,7 @@ target). Verified by `tools/bbrom.py`; manifest in `docs/rom_manifest.md`.
 | MCU (MC6801) | real ROM executed; board protocol decoded from the ROM | `tools/m6801.py`, `tools/mcudis.py`, `docs/hardware.md` |
 | Video | strips, tiles, palette, X-continuation rendered; flip-screen not yet | `tools/bbvideo.py` |
 | Inputs | coin pins work; player/DIP bits not mapped | — |
+| Workload profile | measured | `python tools/bbprofile.py`, `docs/feasibility.md` |
 | Sound | not started (writes are logged) | — |
 | Z80 → 68000 translation | not started | — |
 | STE/Falcon runtime | not started | — |
