@@ -135,7 +135,29 @@ class GameEmitter(Emitter):
         super().emit_ins(pc, live_out_override, with_label)
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
         if pc in self.text_writers:
-            self.e('st chr_written')          # (a store to the character RAM: Scc leaves the CCR alone)
+            self.text_mark(self.code[pc])
+
+    def text_mark(self, ins):
+        """after a store to the character RAM (D000-D7FF): its block of 32 bytes marked in chr_blocks (0-31 the codes,
+        32-63 the attributes; the renderer compares only those), the CCR kept (the flag analysis may keep flags in it)"""
+        dst = ins.ops[0]
+        if ins.mn != 'ld':
+            raise Unsupported('character RAM writer %s' % ins.mn)
+        if dst[0] == 'ind16':
+            self.e('st chr_blocks+%d' % (((dst[1] - 0xd000) >> 5) & 63))   # (Scc leaves the CCR alone)
+            return
+        if dst[0] != 'ind' or dst[1] not in ('hl', 'ix', 'iy'):
+            raise Unsupported('character RAM writer %r' % (dst,))
+        assert 'a0' in self.free_aregs()
+        self.e('move sr,d5')
+        self.e('move.w %s,d7' % {'hl': 'd3', 'ix': 'd4', 'iy': 'a2'}[dst[1]])
+        if dst[2]:
+            self.e('add.w #%d,d7' % dst[2])
+        self.e('lsr.w #5,d7')
+        self.e('and.w #63,d7')                 # (D000 / 32 = $680: the block)
+        self.e('lea chr_blocks,a0')
+        self.e('st (a0,d7.w)')
+        self.e('move d5,ccr')
 
 
     def mem(self, addr, off=0, io_read=False):

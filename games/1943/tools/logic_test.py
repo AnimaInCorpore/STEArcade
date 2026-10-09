@@ -394,14 +394,16 @@ def main():
             return 1
         if not compare(frame):
             return 1
-        if not args.render:                   # (every change of the character RAM came with chr_written: gen.py)
+        if not args.render:                   # (every change of the character RAM came with its block's mark: gen.py)
             text = bytes(ref.mem[0xd000:0xd800])
-            if last_text[0] is not None and text != last_text[0] and not mem.r8(sym['chr_written']):
-                i = next(i for i in range(2048) if text[i] != last_text[0][i])
-                print(f'frame {frame}: {0xd000 + i:04x} changed without chr_written (a writer missing in the coverage)')
-                return 1
+            marks = mem.r_block(sym['chr_blocks'], 64)
+            if last_text[0] is not None:
+                for i in range(2048):
+                    if text[i] != last_text[0][i] and not marks[i >> 5]:
+                        print(f'frame {frame}: {0xd000 + i:04x} changed without its mark in chr_blocks (a writer missing in the coverage)')
+                        return 1
             last_text[0] = text
-            mem.w8(sym['chr_written'], 0)
+            mem.w_block(sym['chr_blocks'], bytes(64))
         if args.render and not picture(frame):
             return 1
         if args.render:

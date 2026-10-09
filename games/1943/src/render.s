@@ -1856,8 +1856,9 @@ generic_part:
 
 ; ---- characters -------------------------------------------------------------------------------------------------------
 ; chr_ptr[cell] = the baked character (its routine, see chr_get) of every visible, non-blank cell, or 0.  It changes
-; only where the character RAM (D000 codes, D400 attributes) differs from its copy chr_raw (compared as longs, after one
-; of the translated writers set chr_written: gen.py; else 128 bytes a frame in case a writer is missing there); then
+; only where the character RAM (D000 codes, D400 attributes) differs from its copy chr_raw (compared as longs in the
+; blocks of 32 cells the translated writers marked in chr_blocks, gen.py; and 128 bytes a frame in case a writer is
+; missing there, the whole RAM when that finds a change); then
 ; chr_list (the offset and the routine of each cell) is made again.  The cache's pool rolling over (pool_epoch) frees
 ; the baked characters: every cell is done again then.
 draw_chars:
@@ -1887,9 +1888,57 @@ draw_chars:
  bra .list
 .scan_start:
  sf chr_dirty
- tst.b chr_written
- bne.s .written
- move.w chr_roll,d0		; (no writer ran: 128 bytes a frame in case one is missing in gen.py)
+ lea chr_blocks,a1		; the blocks of 32 cells the translated writers marked (codes or attributes)
+ moveq #0,d5
+.block:
+ move.b (a1,d5.w),d0
+ or.b 32(a1,d5.w),d0
+ beq.s .no_block
+ clr.b (a1,d5.w)
+ clr.b 32(a1,d5.w)
+ movem.l d5/a1-a3,-(sp)
+ move.w d5,d0
+ lsl.w #5,d0
+ add.w d0,a2
+ add.w d0,a3
+ lea $400(a2),a4
+ lea $400(a3),a5
+ lsl.w #5,d5			; (its first cell)
+ moveq #7,d7
+.bl:
+ cmpm.l (a2)+,(a3)+
+ bne.s .bdiff
+ cmpm.l (a4)+,(a5)+
+ bne.s .bdiff2
+ addq.w #4,d5
+ dbf d7,.bl
+ bra.s .block_done
+.bdiff:
+ addq.l #4,a4
+ addq.l #4,a5
+.bdiff2:
+ move.l -4(a2),-4(a3)
+ move.l -4(a4),-4(a5)
+ st chr_dirty
+ movem.l d5/d7/a2-a5,-(sp)
+ move.w d5,d6
+ bsr chr_cell
+ addq.w #1,d6
+ bsr chr_cell
+ addq.w #1,d6
+ bsr chr_cell
+ addq.w #1,d6
+ bsr chr_cell
+ movem.l (sp)+,d5/d7/a2-a5
+ addq.w #4,d5
+ dbf d7,.bl
+.block_done:
+ movem.l (sp)+,d5/a1-a3
+.no_block:
+ addq.w #1,d5
+ cmp.w #32,d5
+ blo .block
+ move.w chr_roll,d0		; (and 128 bytes a frame in case a writer is missing in gen.py)
  add.w #128,d0
  and.w #$7ff,d0
  move.w d0,chr_roll
@@ -1903,8 +1952,6 @@ draw_chars:
  ifd DEBUG
  addq.w #1,chr_missed
  endc
-.written:
- clr.b chr_written
  lea $400(a2),a4
  lea $400(a3),a5
  move.w #255,d6
@@ -2198,7 +2245,7 @@ chr_epoch: ds.w 1
 chr_roll: ds.w 1
 chr_missed: ds.w 1
 chr_full: ds.b 1
-chr_written: ds.b 1
+chr_blocks: ds.b 64
 chr_dirty: ds.b 1
 cur_back: ds.b 1
 cover_ok: ds.b 1
