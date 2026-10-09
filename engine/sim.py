@@ -84,6 +84,8 @@ class Blitter:
                     mask = em2
                 if usesrc:
                     if not (x == xcount - 1 and nfsr):
+                        # Each fetch shifts the source buffer, including the fetch after FXSR.
+                        self.upper = self.lower
                         self.lower = r16(src & 0xFFFFFF)
                         src = (src + (sxi if x < xcount - 1 else syi)) & 0xFFFFFF
                         self.cycles += 4

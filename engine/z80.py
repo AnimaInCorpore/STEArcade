@@ -51,6 +51,10 @@ class Z80:
         self.pc = (self.pc + 1) & 0xFFFF
         return v
 
+    def fetch_opcode(self):
+        """Opcode bus fetch; encrypted machines may override independently of operands."""
+        return self.fetch8()
+
     def fetch16(self):
         lo = self.fetch8()
         return lo | (self.fetch8() << 8)
@@ -309,7 +313,7 @@ class Z80:
         return self.cycles - c0
 
     def _exec(self, ixm):
-        op = self.fetch8()
+        op = self.fetch_opcode()
         self.r = (self.r & 0x80) | ((self.r + 1) & 0x7F)
         if op == 0xDD:
             return 4 + self._exec_ix('x')
@@ -322,7 +326,7 @@ class Z80:
         return self._exec_main(op, None, 0)
 
     def _exec_ix(self, ixm):
-        op = self.fetch8()
+        op = self.fetch_opcode()
         self.r = (self.r & 0x80) | ((self.r + 1) & 0x7F)
         if op == 0xDD:
             return 4 + self._exec_ix('x')
@@ -338,7 +342,7 @@ class Z80:
         return self._exec_main(op, ixm, 0)
 
     def _exec_cb(self, ixaddr=None):
-        op = self.fetch8()
+        op = self.fetch_opcode() if ixaddr is None else self.fetch8()
         if ixaddr is None:
             self.r = (self.r & 0x80) | ((self.r + 1) & 0x7F)
         x = op >> 6
@@ -374,7 +378,7 @@ class Z80:
         return cyc
 
     def _exec_ed(self):
-        op = self.fetch8()
+        op = self.fetch_opcode()
         self.r = (self.r & 0x80) | ((self.r + 1) & 0x7F)
         x = op >> 6
         y = (op >> 3) & 7

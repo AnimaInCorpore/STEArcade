@@ -162,13 +162,54 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
   decoding of the sprite list once used `d4` and drew garbage that only showed with several entries - test with the whole list, not only
   with single parts.  The simulator's Blitter must write the advanced addresses back for read-modify-write code (`Sim(ram_kib=16384)`).
 
+* **Speed work on 1942 (2026-10-08)**, things that apply to the other ports too:
+  * *Hatari scans the old ring out once more.*  After the video base is written at the VBL, the frame that starts still shows the ring that
+    was shown before; a renderer that draws into the ring it just flipped away from tears the lower half of the picture.  Draw into a ring
+    that was neither shown nor waiting during the last frame (three rings are enough at 50 frames a second).  Look for it with a recording
+    (`tools/record.sh`, ffmpeg, one frame at a time), a ruler in the margin proved that the lines themselves were not skipped.
+  * *Publish a finished frame with one store.*  The VBL runs between any two instructions: a ring index and a ready flag written one after
+    the other can be seen half done (a ring that is shown and ready at once gave a draw ring 3 and a crash far away: records written past
+    their array).  One byte = ring + 1.
+  * *Decouple the ticks from the frames.*  The arcade ticks at 59.6 Hz, the STE shows 50: six ticks to five VBLs, and skip frames, not
+    ticks, when the CPU is short.  The game then runs at the arcade's speed where the old schedule ran at the speed of the slowest frame.
+  * *The cheats of MAME (`third_party/mamecheats/cheat.7z`, the xml of the set) reach the later stages*: lives, invincibility and a level
+    skip.  Coverage and the lock-step test need them (the first coverage stopped the program at the first stage change), the RAM
+    addresses are in the xml.
+  * *Cycle counts of the simulator and Hatari differ by a factor (1.35 here)*: use the simulator to rank the routines and Hatari
+    (`bench.sh`: counters of ticks and frames from a scripted run) to decide.
+
+* **Scrolling with virtual screens (Commando, 2026-10-08)**, after stedaimakaimura (`~/Work/stedaimakaimura/emulator.s`); the
+  numbers are in `games/commando/README.md`:
+  * *No per-frame background copy.*  Each display buffer is a virtual screen shown at the scroll position by the video address.  Every
+    buffer line `l` and `l+H` hold the same background (twin lines), so the window (and the guard lines of whole sprites) is contiguous
+    wherever it is, without the Timer B wrap of stedaimakaimura (the border removal uses Timer A and B).  Only the tile rows that scroll
+    into the band and the tiles whose RAM changed are drawn, into every buffer.  Commando's frame went from 962k to 255k cycles.
+  * *The twin period must exceed the band by the tile overhang.*  Whole tiles at the edges of the band reach up to 15 lines beyond it; with
+    H equal to the band (288) they overwrite the twin slots of visible rows.  H = 320 for a 288 line band (256 shown + 2 x 16 guard).
+  * *Put sprites back from the twin lines, not from a clean copy.*  A damage list (address, twin address, words, lines; split at line H)
+    of what sprites and characters covered is restored with short HOG Blitter bursts the next time that buffer is drawn.  The twins are
+    always clean: the damage of a frame lies in its band, whose twins are outside it.
+  * *Find changed video RAM by comparing it with a copy as longs* (`cmpm.l (a2)+,(a3)+`, about 17k cycles for 2 KB), not with a loop
+    per cell (Commando's per-cell loops over the tile and character RAM cost 330k and 210k cycles a frame).  Text: keep a list of the
+    visible, non-blank characters, rebuilt only on a change, and draw byte-aligned 8 x 8 characters with `movep.l` (keep mask, four plane
+    bytes: about 600 cycles each).
+  * *Lose no cycles on a cache hit.*  A `movem` of 14 registers around a hashed cache lookup cost more than the lookup; look up first with
+    two or three registers and save the rest only to bake.
+  * *Tools*: a cycle profiler needs `Sim(ram_kib=16384)` as soon as code reads Blitter registers back (the sprite streams add to the
+    destination address; with 4 MB the reads return 0 and the sprites land elsewhere, in Commando on the stack).  `tools/hatari.sh` stops
+    every running `hatari` first, so two sessions benchmarking at once kill each other's runs: `games/commando/tools/bench.sh` starts its
+    own Hatari (`HATARI` may name a renamed copy of the pinned build).
+
 ## The translator's register maps and second pass (all ports, 2026-10-08)
 
 The translated code got 1.08-1.73 times faster (`architecture.md`, "Translator").  What a port has to do to get it, and
 the rules its runtime must keep:
 
 * **gen.py**: go through `translate.compile_code()` (or `generate_program()`), not a copy of the steps: it does the flag
-  liveness over calls, the CCR analysis and the second pass.  Give the configs `**z80x.FAST` (signed memory model) or
+  liveness over calls, the CCR analysis and the second pass.  Pass the real entries as joins (reset, interrupts, hooks,
+  jump table targets); making every pc the coverage saw a join (Commando did) switches the CCR analysis, the precise
+  returns and the merges off.  A port with a banked window wraps its `aW` lines with `Emitter.window_wrap` and gives
+  `ret_value` (the real address a call pushes) and `direct_ok` (no return points in the window) like Bubble Bobble.  Give the configs `**z80x.FAST` (signed memory model) or
   `**z80x.FAST_LONG` (long model); `alt_af="upper"` alone where the runtime uses a0-a3 (1942).  Table generators
   leave out `em.no_entry` (z80_badpc there); a generator that lists every pc still assembles (the merged labels have stubs).
 * **Runtime, d0 and d6**: A' is in bits 16-23 of d0, F' in the upper word of d6.  Code that runs inside the translated

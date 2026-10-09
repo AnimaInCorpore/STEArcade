@@ -7,11 +7,12 @@ shared pieces are described in `docs/architecture.md`, the method in `docs/porti
 * `src/` the runtime and renderer: `1942.s` (start, schedule, input, timers), `1942_render.s` (video, palette banks, baking),
   `1942_bg.s`, `1942_chr.s` + `1942_chr2.s`, `1942_spr.s`, `1942_frame.s` (one frame, data, variables)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` / `palettes.py` (graphics, palettes), `build.py`,
-  `logic_test.py`, `render_test.py`, `profile.py`
+  `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari)
 * `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump_1942.lua`), `palette_stats.py`
 * `docs/` `palette_stats.json` (how often every palette entry shows) and `palettes.json` (the four 16 colour palettes)
 
-Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, about 15 minutes):
+Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, 8 runs of 60000 frames, about 30 minutes;
+seeds 5-8 play with MAME's cheats, see "Later stages" below):
 
     python port.py cover 1942
     python port.py build 1942              # -> run/1942/1942.PRG (+ the five ROM files)
@@ -27,9 +28,10 @@ Build and run from the repository root (needs the venv of the quick start; `pyth
 * **The schedule** (`src/1942.s`, header and `z80_hook`; `tools/machine.py run_frame_port` is the same in Python): the foreground runs
   the tasks; when the scheduler finds nothing to run (the hook at `$009A`) the runtime draws the frame (if its tasks have all slept
   again) and delivers a pending VBL: RST 08 and RST 10 run to completion with a token on the Z80 stack.  RST 10 may hand the CPU to
-  another task (`jp $0084`): the 68000 stack was reset before, so nothing leaks.  The VBL of the STE only raises `vbl_pending`
-  (a flag: the arcade holds an interrupt line while it is masked); a game that does not finish its tasks in a frame runs slower, the
-  display goes on.  The scheduler's search for a ready task is done natively (`scan_native`, saves 10% of the logic).
+  another task (`jp $0084`): the 68000 stack was reset before, so nothing leaks.  The VBL of the STE adds one tick to `vbl_pending`, and every
+  5th VBL a second one: the game ticks 60 times a second (the arcade: 59.6) while the screen shows 50 frames.  Ticks that are due run before
+  the next frame is drawn (at most `MAX_SKIP` + 1 ticks per frame, at most `MAX_PENDING` waiting): a game that is behind loses frames, not
+  speed.  `-D NOTICK60` builds the old schedule, one tick per VBL.  The scheduler's search for a ready task is done natively (`scan_native`, saves 10% of the logic).
 * **ROM banks**: `$8000-$BFFF` is a window onto three 16 KB banks (`$C806`); the program only reads them as data (the service mode
   is the one place that runs code from them, not translated).  Window reads go through `g_winbase` at the 87 instruction sites the
   coverage found (the mechanism of Bubble Bobble's main CPU); every store to `$C806` (`ld ($C806),a`, `ld (hl),n`, `ld ($C805),hl`)
@@ -49,14 +51,19 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
   offset, `LINEWID`); line `L` is tilemap column `511 - L`, lines 512-767 repeat 0-255, so that the 256 line window from
   `T = (256 - scroll) & 511` never wraps (what is drawn into lines below 256 is drawn twice only for the background; sprites and
   characters go where the window of the frame has them).  No Timer B wrap trick is needed.
-* **Double buffering**: `render_frame` draws into one draw ring, the other is shown; at the VBL `vbl_video` switches the display to the
-  finished ring (video address = ring + `T` * 256 - `PIC_TOP` lines) and the next frame may start (the hook waits while `frame_ready`).
+* **Three draw rings**: `render_frame` draws into a ring that is not shown, not waiting to be shown (`frame_ready` = its number + 1, one
+  byte: the VBL sees a finished frame whole or not at all) and **not the ring that was shown until the last VBL**: Hatari scans that
+  one out once more after the new video base is written, a ring drawn into then tears (the lower half of the picture showed the
+  characters of the next frame, one or two lines off, while the upper half was steady).  The VBL shows the newest finished frame
+  (video address = ring + `T` * 256 - `PIC_TOP` lines, palette `frame_pal`); a frame that is not shown when the next one is done is dropped.
+  Every ring keeps its own state (`ring_T`, sprite rectangles, characters drawn, tiles to copy).
 * **A frame** (`src/1942_frame.s`): window and palette bank from the Z80's registers; background RAM and character RAM are compared with
   shadows (`bg_shadow`, `fg_shadow`) only when a store to them was seen (the translated code sets `bg_dirty` / `fg_dirty` at the 25 store
   sites the coverage found, plus a rescan every 32nd frame; `logic_test.py` checks that no change goes unflagged); new tiles are baked
   and put into `clean` and noted for both draw rings; the old sprite rectangles of the ring go back (Blitter copy from `clean`); tiles;
-  characters (when the window moved: every occupied 16 x 8 chunk, the old lines that no new picture covers put back; else the changed
-  chunks); sprites (below), entry 31 first; the characters that sprites cover are drawn again.
+  characters (when the window moved - at every visit of a ring, the window moves between two of them - every occupied 16 x 8 chunk, in the
+  order that draws the neighbour after: the old lines of a chunk that the new picture does not cover are put back as the chunk is drawn;
+  else the changed chunks); sprites (below), entry 31 first; the characters that sprites cover are drawn again.
 * **Colours**: 16 per palette bank (`tools/palettes.py`: weighted k-means in Oklab over the colours of the bank's background, the sprite
   and the character entries, weights from `ref/palette_stats.py`).  The pen masks of the graphics (`tools/assets.py`) are baked into STE
   planes on first use (`tile_get`, `sprite_get`, `char_get`) and cached; a bank change flushes the caches and redraws the background.
@@ -102,14 +109,43 @@ VBLs).  Never kill other Hatari instances.
 
 ## Speed (Hatari, 2026-10-08)
 
-Musashi cycle counts per frame (a 50 Hz frame is 160256): game logic mean 40k (95%: 70k, level changes up to 1.5M once), `render_frame`
-mean 80k over 1200 frames of the attract demo from frame 1200 (median 70k, 90% under 102k, 99% under 154k, baking spikes aside; the
-Blitter's own cycles, 8k, come on top), with the generated sprite routines (a part takes about 1000 CPU cycles; the sprite pass is
-about a fifth of the frame, the characters of the HUD and the scroll steps are most of the rest).  Measured in
-Hatari with `COUNTERS.BIN` (before the generated sprite routines, with the table driven sprite code; not measured again with play, the
-keys of the automated run did not register - a 3000 VBL attract run now: 2570 Z80 ticks, 2547 renders, the 6 s boot included): 1501 VBLs of attract mode (including the 6 s boot) 43 fps, 3500 VBLs with a coin, start and play 38 fps
-(the game ticks once per drawn frame: 64% of the arcade's 59.6 Hz).  So about 40 of 50 frames a second so far; the busy frames are
-the scroll steps with many character chunks, many sprites and the first use of a tile / sprite / colour (baking is 4-12k cycles).
+`games/1942/tools/bench.sh [finish_period]` builds the DEBUG + AUTOPLAY version (scripted coin, start, fire and joystick; MAME's cheats
+for 1942b: lives E101, invincibility E0A5 and, every `finish_period` frames, "Finish Current Level Now!" EBD0 / E099 / E102 - the cheat that
+selects a starting level did nothing in this set), runs 6000 VBLs in Hatari and reads `COUNTERS.BIN`: ticks a second (the arcade: 59.6),
+frames drawn a second, VBLs between two ticks, CPU idle.  The first 300 VBLs are the boot, so 57.2 of 59.6 ticks is full speed.
+
+| | game ticks / s | frames drawn / s |
+|---|---|---|
+| before (one tick per drawn frame), the heavy scene (stage 1, many sprites) | about 40 (67% of the arcade) | about 40 |
+| now, the same scene | 57.2 (full speed) | 33.9 |
+| now, stages skipped every 600 frames | 57.5 (full speed) | 42.7 |
+
+What was lost before: (1) a double buffer that blocked the renderer while the finished ring waited for the VBL (the CPU idled for a tenth
+of its time), (2) one tick per drawn frame, so every slow frame slowed the game, (3) the characters redrawn at every ring visit (the
+window moves between two of them): `draw8` and its bookkeeping were two thirds of a frame.  Musashi (`tools/perf_test.py`, `profile.py`)
+counts the 68000's own cycles, Hatari takes about 1.35 times as many.  A tick of the logic costs about 36k, a frame 65-90k (heavy scenes:
+sprites 50%, characters 30%), 8M cycles a second do not allow 60 ticks and 50 frames in the busiest scenes: the frames give way.
+`tools/perf_test.py [ticks] [finish] [first] [norender|profile]` gives the cost of a tick, the heaviest ticks (stage changes cost 1-2.4M
+cycles: the palette bank changes and every cached picture is baked again) and a profile by routine and by Z80 region.
+
+Ideas for speed: sprite entries kept in registers (`sprite_entry` / `draw_part` are 15% of the frames of busy scenes), fewer rectangles
+(one restore per sprite part), a faster bake of tiles at a stage change, native replacements for the kernel's timer loop (`$0055`) and the
+task switch; a 4th ring is not possible (the program uses 3.85 of the 4 MB).
+
+## Later stages (the coverage and the cheats)
+
+The coverage of the translator comes from `ref/cover.py`; the first runs (random play without cheats) never got past the first stages,
+and the program stopped at `z80_badpc` at the first stage change.  Seeds 5-8 play with MAME's cheats (lives, invincibility, a level skip
+every 400 frames) and add 1800 program addresses.  `logic_test.py --cheat` (12000 frames, about ten stage changes, 0 differences) and
+`profile.py [n] [first] cheat|finish` use the same cheats on both machines.  `render_test.py` takes `ATTRACT=1` (no coin) and `SCROLLRND=1`
+(random scroll jumps: every sign and size of the window's move between two visits of a ring).
+
+## Debug options of the build (`build.py -D ...`)
+
+`DEBUG=1` counters (`COUNTERS.BIN`) and assertions (list entries, Blitter rectangles), `AUTOPLAY=1` scripted play, `FINISH=n` level skips
+with it, `RULER=1` a ring line number as colours in the left margin (the display of the lines can be read from a screenshot: no line
+skipped or repeated), `NOTICK60=1` one tick per VBL, `STAGES=1` progress as colours.  `tools/record.sh` records Hatari's picture
+(`recanim`) to look at frames one by one.
 
 ## Not done
 
@@ -121,9 +157,11 @@ common colour codes.
 
 ## Translator speed (2026-10-08)
 
-`alt_af="upper"` (A' in d0's upper bits, F' in d6's upper word: `ex af,af'` is two swaps, a3 is free for `ret`), not
-the whole `z80x.FAST`: the kernel saves tasks' registers and `scan_native` / the window reads use a0-a3 as the
-alternate registers.  `scan_native` clears F with `clr.w d6` (a `moveq` would clear F').  `gen.py` goes through
+`alt_af="upper"` (A' in d0's upper bits, F' in d6's upper word: `ex af,af'` is two swaps, a3 is free for `ret`).  The
+whole `z80x.FAST` passes the tests too (2026-10-09: `scan_native` writes d1-d3 as words now, the DEBUG histogram in
+`z80_hook` saves d0/d1/a0), but it was 0.4% slower, and the engine's `ldir` was slower than 1942's own on its short
+copies with the alternates in a0-a2: both stay as they were.  `scan_native` clears F with `clr.w d6` (a `moveq` would
+clear F').  `gen.py` goes through
 `translate.compile_code` (precise flag liveness over calls; the tasks started with `jp (hl)` and the hooks keep their
 exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -> 24.3k cycles a tick (1.16x).  The
 rest is spread thin: `ret`, `ldir` (by longs already), `push`/`pop af` around calls, `bit n,(ix+d)` with the exact S.

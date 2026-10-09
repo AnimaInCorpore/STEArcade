@@ -2,6 +2,9 @@
 read the banked ROM window ($8000-$BFFF) as data, and the stores to the latches C800-C806.
 python ref/cover.py <seed> <frames>  ->  build/1942/cover_<seed>.pkl
 
+Seeds 5 and up play with MAME's cheats for 1942b (lives E101, invincibility E0A5, "Finish Current Level Now!" EBD0 / E099 / E102
+every 400 frames of play) so that the later stages, the bosses and the ending are covered too.
+
 Scripted play: attract mode, a coin and the start button now and then, random joystick, fire and loop (bomb) buttons.
 Service mode (DSWB bit 3, code in bank 2) is not exercised: the DIP switch stays off.
 """
@@ -13,6 +16,7 @@ from machine import Machine1942
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 rnd = random.Random(seed)
+cheats = seed >= 5
 m = Machine1942()
 c = m.cpu
 pcs = set()
@@ -75,6 +79,13 @@ for f in range(frames):
         if g % 25 == 0:
             joy = rnd.choice([0xFF, 0xFF, 0xFE, 0xFD, 0xFB, 0xF7, 0xFA, 0xF6, 0xF9, 0xF5])
         m.p1 = joy
+        if cheats:
+            m.ram[0x101] = 6                                  # lives
+            m.ram[0x0A5] = 2                                  # invincible
+            if g > 600 and g % 400 == 0:                      # finish the level now
+                m.ram[0xBD0] = 7
+                m.ram[0x099] = 1
+                m.ram[0x102] = 0x43
         if rnd.random() < 0.3:
             m.p1 &= ~0x10
         if rnd.random() < 0.02:

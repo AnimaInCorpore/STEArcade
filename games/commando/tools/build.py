@@ -1,0 +1,27 @@
+"""Build COMMANDO.PRG for an unexpanded 4 MB Atari STE."""
+from pathlib import Path
+import argparse,sys,shutil
+sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'engine'))
+from paths import ROOT,build_dir
+from toolchain import assemble_link
+from prepare import prepare
+import gen,assets
+
+def main():
+    ap=argparse.ArgumentParser()
+    ap.add_argument('--sim',action='store_true');ap.add_argument('--debug',action='store_true')
+    ap.add_argument('--assets',action='store_true',help='regenerate and validate graphics and palette assets')
+    ap.add_argument('--frames',type=int,default=0);ap.add_argument('-D',dest='defines',action='append',default=[])
+    a=ap.parse_args();prepare()
+    if a.assets or not (build_dir("commando")/"spr_code.s").exists(): assets.build()
+    text,em,code,missing=gen.generate()
+    (build_dir('commando')/'code_commando.s').write_text(text)
+    print(f'Translated {len(code)} instructions; {len(em.unsupported)} explicit unsupported traps')
+    for u in em.unsupported:print(u)
+    tag='commando_sim' if a.sim else 'commando';run=ROOT/'run'/tag;run.mkdir(parents=True,exist_ok=True)
+    defs=a.defines+(['SIM=1'] if a.sim else [])+(['DEBUG=1'] if a.debug else [])
+    if a.frames:defs.append(f'FRAMES={a.frames}')
+    assemble_link('commando','commando.s',tag,str(run/'COMMANDO.PRG'),defs)
+    shutil.copy(build_dir('commando')/'maincpu.rom',run/'MAIN.ROM')
+    print('Built',run/'COMMANDO.PRG')
+if __name__=='__main__':main()

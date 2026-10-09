@@ -94,6 +94,7 @@ class WinEmitter(Emitter):
         if ins.pc in self.window_sites:
             return self.block_win(super().x_ldir, ins)
         # a1 / a2 (DE' / HL') are saved around a loop on address registers: 22 cycles a byte instead of 46
+        # (kept instead of the engine's: with the alternates in a0-a2 its set-up costs more on 1942's short copies)
         l = self.new_label()
         self.e("move.w d1,d5")
         self.e("ror.w #8,d5")              # the count (0 = 65536), BC is 0 afterwards
@@ -159,12 +160,7 @@ class WinEmitter(Emitter):
             self.e("bsr g_bank_w")               # (the byte is stored already; the routine reads it from the block)
         for kind in sorted(self.video_sites.get(pc, ())):
             self.e("st %s_dirty" % kind)               # (Scc keeps the flags)
-        new = self.lines[n0:]
-        first = next((i for i, l in enumerate(new) if "aW" in l), None)
-        if first is None:
-            return
-        body = [l.replace("aW", "a0") for l in new[first:]]
-        self.lines[n0:] = new[:first] + ["\tpea (a0)", "\tmove.l g_winbase,a0"] + body + ["\tmove.l (sp)+,a0"]
+        self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
 
 
 def config():
@@ -172,7 +168,8 @@ def config():
                        iyaddr=IY_ADDR, fshadow=IY_ADDR + 2, io_read_redirect={}, write_hooks=[BANK_HOOK],
                        nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g_iff",
                        pv_force=PV_FORCE, bit_s=True,
-                       alt_af="upper")      # (not z80x.FAST: the runtime's scan_native and window code use a0-a3 as they are)
+                       alt_af="upper")      # (z80x.FAST is 0.4% slower here: few IY / exx, more ld a,n and ex de,hl;
+                                            # scan_native writes d1-d3 as words, so FAST works too)
 
 
 def EXTRA_TABLE_ROOTS(img):

@@ -16,6 +16,8 @@ import logic_test as lt
 from assets import Oracle
 
 RUN, MAP = lt.RUN, lt.MAP
+if os.environ.get("ATTRACT"):                   # no coin: the attract mode only
+    lt.inputs = lambda f, rnd: (0xFF, 0xFF, 0xFF)
 
 
 def window(mem, base, top):
@@ -66,6 +68,8 @@ def main():
         f += 1
         if f < first or (not seq and (f - first) % step):
             continue
+        if os.environ.get("SCROLLRND"):             # the window jumps: every sign and size of the move between two visits of a ring
+            ref.scroll[0], ref.scroll[1] = rnd.randrange(256), rnd.randrange(2)
         # the video state into the sim
         mem.w_block(z(0xCC00), bytes(ref.sprram))
         mem.w_block(z(0xD000), bytes(ref.fg))
@@ -79,8 +83,6 @@ def main():
         if bytes(ref.bg) != last.get("bg"):
             mem.w8(sym["bg_dirty"], 1)
         last["fg"], last["bg"] = bytes(ref.fg), bytes(ref.bg)
-        draw_idx = mem.r16(sym["draw_idx"])
-        ring = mem.r32(sym["ring_base"] + 4 * draw_idx)
         sp = cpu.r_reg(R.A7) - 4
         mem.w32(sp, ret)
         cpu.w_reg(R.A7, sp)
@@ -96,7 +98,13 @@ def main():
             print("  a0-a7", " ".join("%08X" % cpu.r_reg(r) for r in (R.A0, R.A1, R.A2, R.A3, R.A4, R.A5, R.A6, R.A7)))
             return
         cpu.w_reg(R.A7, sp + 4)
-        mem.w8(sym["frame_ready"], 0)
+        draw_idx = mem.r16(sym["draw_idx"])         # (render_frame picks the ring: not the shown one, not the one that waits)
+        ring = mem.r32(sym["ring_base"] + 4 * draw_idx)
+        assert draw_idx not in (mem.r16(sym["shown_idx"]), mem.r16(sym["prev_idx"])), "drew into a ring that is (or was) shown"
+        mem.w16(sym["prev_idx"], mem.r16(sym["shown_idx"]))
+        if f % 4 != 3:                              # the VBL shows the frame (one in four is not shown before the next is done: dropped)
+            mem.w16(sym["shown_idx"], mem.r8(sym["frame_ready"]) - 1)
+            mem.w8(sym["frame_ready"], 0)
         cyc.append(lt.CYCLES[0] - c0)
         flip = mem.r32(sym["flip_addr"])
         top = mem.r16(sym["cur_T"])               # (the display starts PIC_TOP lines above it, in black)

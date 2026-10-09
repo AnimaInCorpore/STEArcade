@@ -28,7 +28,8 @@ variables select the tools).
 | Donkey Kong | CPU, shadow diff of the tile map, dirty queue per draw screen | Blitter, generated per shape/skew code | pixel for pixel against the reference and MAME |
 | Galaga | CPU, 8 x 8 cells per colour quad, `chars_over` on top of sprites | Blitter, double sizes split into 16 x 16 parts, stars plotted after | renderer against MAME (RAM injected), reference identical |
 | Bubble Bobble | CPU, `movep.l` per planar row, tile bake cache, dirty 8 x 8 cells | none: objects are strips of 8 x 8 tiles, shifted tiles merged into two cells by the CPU | pixel for pixel against the reference |
-| 1942 | hardware scroll of a 768 line ring (two draw rings + clean), tiles baked per palette bank, characters redrawn when the window moves | Blitter, one blit per line, masks as end masks, rectangles put back from the clean ring | pixel for pixel against the reference (which equals MAME) |
+| 1942 | hardware scroll of a 768 line ring (three draw rings + clean), tiles baked per palette bank, characters redrawn when the window moves | Blitter, one blit per line, masks as end masks, rectangles put back from the clean ring | pixel for pixel against the reference (which equals MAME) |
+| Commando | hardware scroll of three virtual screens with twin lines (line l = line l+320), only scrolled-in tile rows and changed tiles drawn, no clean map; characters a list rebuilt on change, `movep.l` | Blitter, baked shift streams; a damage list put back from the twin lines | pixel for pixel against the reference (which equals MAME) |
 
 Bubble Bobble's measured cost (`games/bublbobl/tools/profile.py`, `render_bench.py`; numbers in its README) is not mainly the
 shifted tiles: in the play a frame has ~570 tile draws, 495 of them aligned and 77 shifted (about 2.7k cycles each), over ~200
@@ -66,11 +67,11 @@ a6 = the Z80 block, a4 = the dispatch table, d5/d7 scratch.  Where A' F' BC' DE'
 |---|---|---|---|---|
 | default | a3 / a block word | a0-a2 (`exx` = 3 `exg`) | a block word | (old builds) |
 | `alt_af="upper"` | bits 16-23 of d0 / upper word of d6: `ex af,af'` = `swap d0; swap d6` (8 cycles, was 34) | | | all |
-| `z80x.FAST` (signed mode) | as above | upper words of d1-d3: `exx` = 3 `swap` | a2 (the low word, `(d,a6,a2.w)`) | DK, Galaga CPU1, Bubble Bobble main |
+| `z80x.FAST` (signed mode) | as above | upper words of d1-d3: `exx` = 3 `swap` | a2 (the low word, `(d,a6,a2.w)`) | DK, Galaga CPU1, Bubble Bobble main, Commando, Black Tiger, 1943 |
 | `z80x.FAST_LONG` (long mode) | as above | a0-a2 (the long mode needs the upper words 0) | the block | Galaga CPU2/3, Bubble Bobble sub |
 
-1942 uses `alt_af="upper"` only: its kernel keeps tasks' registers, and its runtime (`scan_native`, the window reads)
-uses a0-a3 as they are.  With A' out of a3, a3 is free in every program: a computed jump is
+1942 uses `alt_af="upper"` only: `FAST` works there too (`scan_native` writes d1-d3 as words), but it was 0.4% slower
+(1942 uses IY and `exx` little; `ld a,n` and `ex de,hl` cost a few cycles more), and 1942 keeps its own `ldir`.  With A' out of a3, a3 is free in every program: a computed jump is
 `move.l (a4,d7.l),a3; jmp (a3)` (50 cycles instead of 66 for `move.l ...,-(sp); rts`).  The rules a runtime must keep
 (see `porting-guide.md`): no long writes to d0/d6 (`moveq` clears A' / F'), with `FAST` none to d1-d3 either, and
 a0-a2 are scratch for the translated code (`ldir`), not for the runtime between instructions.
@@ -100,6 +101,12 @@ a0-a2 are scratch for the translated code (`ldir`), not for the runtime between 
 * **Carry into X** for `adc`/`sbc`/`rl`/`rr`: `moveq #1,d7; and.b d6,d7; lsr.b #1,d7` (X = C = the carry, Z set: what
   `addx`/`subx` need), 16 cycles without a branch (was ~40).
 * Z80 jumps are `bra` (vasm makes them `bra.s`/`.w`, or a `jmp` when out of range).
+* **Banked windows** (Bubble Bobble, 1942, Black Tiger, 1943): an access that may read the window uses the marker
+  register `aW`; `Emitter.window_wrap` makes it a0, loaded at the start of the instruction (after its label and hook
+  lines) and saved only where a0 holds BC'.  The start matters: the high-byte reads push on the 68000 stack, and a
+  save of a0 pushed in between (as each port's own copy of this code did, before the first `aW` line) made
+  `ld (hl),c` store a byte of the saved a0 (Black Tiger did not boot).  The base is not loaded when the instruction's
+  window check (`lea (a6),aW ...`) sets it anyway.
 
 ### Flags
 
@@ -157,8 +164,10 @@ Measured 2026-10-08 (`xprof`, translated code per game frame, Musashi cycles; Bu
 | port | before | after | |
 |---|---|---|---|
 | Galaga (both CPUs, frames 800-1200, attract) | 47.6k | 27.6k | 1.73x |
-| Bubble Bobble (main, sub, MCU; frames 500-800, play) | 70.3k | 55.4k | 1.27x |
+| Bubble Bobble (main, sub, MCU; frames 500-800, play) | 70.3k | 54.2k | 1.30x |
 | 1942 (ticks 1100-1500, play) | 28.1k | 24.3k | 1.16x |
+| Commando (ticks 600-1000, attract; 2026-10-09) | 8.4k | 7.0k | 1.20x |
+| Black Tiger (ticks 600-1000, attract; 2026-10-09) | 15.7k | 12.9k | 1.22x |
 | Donkey Kong (NMI, 1500 frames of fullrun.py) | 5.2k | 4.8k | 1.08x |
 
 The gain is where the old code was weak: Galaga's `ldir` clears (37% of its cycles), the `ret` dispatch with A' in a3,
@@ -166,7 +175,8 @@ the high bytes.  Donkey Kong's code was lean already (16 cycles a Z80 instructio
 cheaper).  Not done, by expected gain: inlining small leaf functions (call + ret = ~65 cycles; ~8% for Bubble Bobble),
 the MCU translator `m6801x.py` (9% of Bubble Bobble's translated cycles, untouched), keeping the Z80 stack words in
 68000 order so `push`/`pop` of DE/HL/IX need no `ror.w #8` (3-5%; but code that reads the stack as memory would break),
-`FAST` for 1942 (its runtime's `scan_native` and window code would have to give up a0-a3).  A factor of 2 for every
+Black Tiger guards every indirect access as a possible window read (a window check of ~40 cycles each: a quarter of its
+translated cycles); coverage-found sites as in Bubble Bobble would make that cheap.  A factor of 2 for every
 port is not in reach of the translation alone; the renderers are the larger part of most frames anyway.
 
 ## Runtime schedule (all ports)

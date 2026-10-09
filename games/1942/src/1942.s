@@ -15,8 +15,10 @@
 ;   2. delivers a pending VBL: RST 08 and RST 10 run to completion with a token on the Z80 stack
 ;      (a return to it continues at the idle loop); RST 10 may also hand the CPU to another task
 ;      (`jp $0084`), then the handler's frame is simply gone: the 68000 stack was reset first.
-; The arcade holds an interrupt line while it is masked: `vbl_pending` is a flag, not a counter.  A game
-; that does not finish its tasks in a frame runs slower, the display goes on (VBL flips the screen).
+; The arcade holds an interrupt line while it is masked, and ticks at 59.6 Hz.  The STE's 50 Hz VBL adds one tick to `vbl_pending`
+; and every 5th VBL a second one, so the game runs at the arcade's speed (60 ticks a second) when the CPU allows; ticks that are due
+; are run before the next frame is drawn (at most MAX_SKIP + 1 ticks per frame), the VBL shows the newest finished frame.  A game
+; that is further behind than MAX_PENDING ticks runs slower.  -D NOTICK60: one tick per VBL as before.
 ; tools/machine.py `run_frame_port` is this schedule in Python; the lock-step test compares RAM at the
 ; end of every frame.
 ;
@@ -27,6 +29,9 @@
 ; Needs srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7 in the current folder.
 ;
 ; ------------------------------------------------------------------------------
+
+MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
+MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
 
 BUSY = %10000000
 HOG = %01000000
@@ -83,11 +88,16 @@ wait_borders	macro
 	else
 wait_borders	macro
 .a\@:	tst.b	border_a
-	bne.s	.a\@
+	bne.s	.w\@
 	cmp.b	#6,$fffffa21.w
 	bhi.s	.d\@
 	tst.b	border_b
-	bne.s	.a\@
+	beq.s	.d\@
+.w\@:
+	ifd DEBUG
+	addq.l	#1,dbg_wait		; (spins: a loop is 36 cycles)
+	endc
+	bra.s	.a\@
 .d\@:
 	endm
 	endc
@@ -420,7 +430,61 @@ vbl:
 	move.b	in_sys,Z_SYSTEM		; (the program only reads them)
 	move.b	in_p1,Z_SYSTEM+1
 	move.b	in_p2,Z_SYSTEM+2
+	ifd AUTOPLAY				; (benchmark build: MAME's cheats for 1942b: lives E101, invincibility E0A5, and every FINISH frames
+	move.b	#6,g_block+$E101-$8000		; "Finish Current Level Now!" (EBD0, E099, E102) to get to the later stages)
+	move.b	#2,g_block+$E0A5-$8000
+	ifd FINISH
+	move.l	frame_counter,d0
+	cmp.l	#1000,d0
+	blo.s	.nofin
+	divu	#FINISH,d0
+	swap	d0
+	tst.w	d0
+	bne.s	.nofin
+	move.b	#7,g_block+$EBD0-$8000
+	move.b	#1,g_block+$E099-$8000
+	move.b	#$43,g_block+$E102-$8000
+.nofin:
+	endc
+	endc
+	ifd AUTOPLAY				; (benchmark build: scripted coin, start, fire and joystick, period 3000 frames)
+	move.l	frame_counter,d0
+	divu	#3000,d0
+	swap	d0
+	and.l	#$ffff,d0
+	cmp.w	#700,d0
+	blo.s	.ap1
+	cmp.w	#740,d0
+	bhs.s	.ap1
+	move.b	#$7F,Z_SYSTEM			; coin 1
+.ap1:	cmp.w	#760,d0
+	blo.s	.ap2
+	cmp.w	#800,d0
+	bhs.s	.ap2
+	move.b	#$FE,Z_SYSTEM			; start 1
+.ap2:	cmp.w	#840,d0
+	blo.s	.ap3
+	lsr.w	#5,d0
+	and.w	#7,d0
+	lea	ap_dirs(pc),a0
+	move.b	(a0,d0.w),d0
+	and.b	#$EF,d0				; fire held
+	move.b	d0,Z_SYSTEM+1
+.ap3:
+	endc
+	ifd NOTICK60
 	st	vbl_pending
+	else
+	addq.b	#1,vbl_pending		; the arcade ticks at 59.6 Hz, the STE shows 50: six ticks to five VBLs (a counter now)
+	subq.b	#1,vbl_phase
+	bpl.s	.ph
+	move.b	#4,vbl_phase
+	addq.b	#1,vbl_pending
+.ph:	cmp.b	#MAX_PENDING,vbl_pending
+	bls.s	.cap
+	move.b	#MAX_PENDING,vbl_pending	; (a game that is behind by more than this runs slower)
+.cap:
+	endc
 	if FRAMES
 	move.l	frame_counter,d0
 	cmp.l	#FRAMES,d0
@@ -430,6 +494,10 @@ vbl:
 	endc
 	movem.l	(sp)+,d0-d1/a0
 	rte
+
+	ifd AUTOPLAY
+ap_dirs:	dc.b	$FF,$FE,$F7,$FD,$FA,$F6,$F9,$F5		; (active low: right 0, left 1, down 2, up 3)
+	endc
 
 ; ------------------------------------------------------------------------------
 ; The hook at $009A (the scheduler found no task to run) = the schedule, see the header.
@@ -444,9 +512,15 @@ z80_hook:
 	dbgcnt	dbg_c3,2
 	tst.b	frame_dirty
 	beq.s	.check
-	tst.b	frame_ready
-	bne.s	.check			; the last frame has not been shown yet: its ring is not free
+	ifnd NOTICK60
+	tst.b	vbl_pending		; another tick is due: the frame is drawn when the game has caught up, at the latest every
+	beq.s	.render			; MAX_SKIP + 1 ticks
+	addq.b	#1,render_skips
+	cmp.b	#MAX_SKIP,render_skips
+	bls.s	.check
+	endc
 .render:
+	clr.b	render_skips
 	clr.b	frame_dirty
 	movem.l	d0-d7/a0-a6,-(sp)
 	bsr	render_frame		; (makes the frame ready to be shown)
@@ -457,6 +531,14 @@ z80_hook:
 .check:
 	tst.b	vbl_pending
 	bne.s	.deliver
+	ifd DEBUG				; idle spins: waiting for the ring to be shown (a frame to draw, dbg_idle_b) or for nothing (dbg_idle_f)
+	tst.b	frame_dirty
+	beq.s	.idle_f
+	addq.l	#1,dbg_idle_b
+	bra.s	.idle_x
+.idle_f:	addq.l	#1,dbg_idle_f
+.idle_x:
+	endc
 	ifd SIM
 	bsr	sim_wait		; (the harness: sets vbl_pending and the inputs, returns)
 	bra.s	.check
@@ -466,7 +548,21 @@ z80_hook:
 .deliver:
 	stage	$ff0
 	addq.w	#1,isr_count
-	clr.b	vbl_pending
+	ifd DEBUG				; histogram: VBLs since the last tick (bin 0-9)
+	movem.l	d0-d1/a0,-(sp)			; (the Z80 registers: A, BC and their alternates in the upper words)
+	move.l	frame_counter,d0
+	move.l	d0,d1
+	sub.l	dbg_last,d1
+	move.l	d0,dbg_last
+	cmp.w	#9,d1
+	bls.s	.hb
+	moveq	#9,d1
+.hb:	add.w	d1,d1
+	lea	dbg_hist,a0
+	addq.w	#1,(a0,d1.w)
+	movem.l	(sp)+,d0-d1/a0
+	endc
+	subq.b	#1,vbl_pending
 	st	frame_dirty
 	lea	own_stack_top,sp	; the hook's frame is dropped
 	clr.b	g_iff			; (an interrupt disables the interrupts until the handler's ei)
@@ -481,8 +577,8 @@ z80_hook:
 scan_native:
 	lea	own_stack_top,sp
 	st	g_iff				; ei
-	moveq	#0,d1				; C
-	move.w	#$EFC0,d7			; the record (no address register is free: a0-a3 are the alternate registers)
+	clr.w	d1				; C (z80x.FAST: word writes only, the upper words of d1-d3 are BC' DE' HL')
+	move.w	#$EFC0,d7			; the record
 	moveq	#15,d5
 .next:	move.b	(a6,d7.w),d0
 	cmp.b	#$20,d0
@@ -493,17 +589,17 @@ scan_native:
 	; none: C = 16, B = 0, HL = $F000, A = the last state
 	move.w	#$1000,d1			; (C in the high byte)
 	move.w	#$F000,d3
-	moveq	#4,d2
+	move.w	#4,d2
 	clr.w	d6				; (F; the upper word is F', z80x alt_af="upper")
 	jmp	Z009A
 .found:	move.w	d1,d5				; the number of the record
 	lsl.w	#8,d5				; C
-	moveq	#16,d3
+	move.w	#16,d3
 	sub.w	d1,d3				; B
 	or.w	d3,d5
 	move.w	d5,d1
 	move.w	d7,d3				; HL
-	moveq	#4,d2
+	move.w	#4,d2
 	clr.w	d6
 	jmp	Z009C
 
@@ -950,6 +1046,13 @@ dbg_counters:
 	move.w	dbg_c2,(a0)+
 	move.w	dbg_c1,(a0)+
 	move.w	isr_count,(a0)+
+	lea	dbg_hist,a1
+	moveq	#9,d0
+.h:	move.w	(a1)+,(a0)+
+	dbf	d0,.h
+	move.l	dbg_idle_b,(a0)+
+	move.l	dbg_idle_f,(a0)+
+	move.l	dbg_wait,(a0)+
 	clr	-(sp)
 	pea	dbg_name2
 	move	#$3c,-(sp)
@@ -957,7 +1060,7 @@ dbg_counters:
 	addq	#8,sp
 	move	d0,d6
 	pea	dbg_buf
-	move.l	#10,-(sp)
+	move.l	#42,-(sp)
 	move	d6,-(sp)
 	move	#$40,-(sp)
 	trap	#1
@@ -1050,7 +1153,9 @@ quit_flag:	ds.b	1
 border_a:	ds.b	1
 border_b:	ds.b	1
 ta_state:	ds.b	1
-vbl_pending:	ds.b	1		; the arcade's vertical blank has come (set by the VBL, taken at the idle hook)
+vbl_pending:	ds.b	1		; the arcade's vertical blanks that have come (a counter: the VBL adds, the idle hook takes one)
+vbl_phase:	ds.b	1		; (every 5th VBL adds a second one: 60 ticks a second)
+render_skips:	ds.b	1		; the ticks since the last frame was drawn
 frame_dirty:	ds.b	1		; the tasks of the last tick have run: draw
 frame_ready:	ds.b	1		; a frame is drawn, to be shown at the VBL
 isr_stage:	ds.b	1		; 1 RST 08 runs, 2 RST 10
@@ -1083,7 +1188,12 @@ crash_regs:	ds.l	16
 crash_text:	ds.b	512
 frame_counter:	ds.l	1
 g_winbase:	ds.l	1		; the current ROM bank's window copy + $8000
-dbg_buf:	ds.l	8
+dbg_buf:	ds.l	16
+dbg_hist:	ds.w	10
+dbg_last:	ds.l	1
+dbg_wait:	ds.l	1
+dbg_idle_b:	ds.l	1
+dbg_idle_f:	ds.l	1
 
 	ds.l	1024
 own_stack_top:

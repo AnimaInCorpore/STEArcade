@@ -158,13 +158,7 @@ class BBEmitter(Emitter):
     def emit_ins(self, pc, live_out_override=None, with_label=True):
         n0 = len(self.lines)
         super().emit_ins(pc, live_out_override, with_label)
-        new = self.lines[n0:]
-        first = next((i for i, l in enumerate(new) if "aW" in l), None)
-        if first is None:
-            return
-        body = [l.replace("aW", "a0") for l in new[first:]]
-        self.lines[n0:] = new[:first] + ["\tpea (a0)", "\tmove.l g_winbase,a0"] + \
-            [l for l in body] + ["\tmove.l (sp)+,a0"]
+        self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
 
 
 def coverage():

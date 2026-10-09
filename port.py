@@ -2,6 +2,7 @@
 """One entry point for the ports.
 
     port.py list
+    port.py prepare <game>                 verify and unpack a newly added ROM set
     port.py cover  <game> [seeds ...]        coverage runs the translator is seeded from (parallel; ~15 min for dkong)
     port.py build  <game> [build.py args]    translate + assemble + link -> run/<game>/   (--sim: the simulator build)
     port.py test   <game> [frames]           the tests that compare the build with the reference machine
@@ -22,14 +23,30 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "1943": [("ref/cover.py", [1, 2, 3], 20000)],
+    "commando": [("ref/cover.py", [1, 2, 3], 12000)],
+    "gunsmoke": [("ref/cover.py", [1, 2, 3], 20000)],
     "dkong": [("ref/cover1.py", [11, 12, 13, 14], 60000), ("ref/cover2.py", [21, 22, 23, 24], 40000),
               ("ref/colors3.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
-    "1942": [("ref/cover.py", [1, 2, 3, 4], 60000)],
+    "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8], 60000)],     # 5-8: with MAME's cheats (later stages)
+    "blktiger": [("ref/cover.py", [1, 2, 3], 20000)],
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "1943": [("tools/prepare.py", [], None), ("tools/video_test.py", [], None),
+             ("tools/reference_test.py", ["{n}"], 700)],
+    "gunsmoke": [("tools/prepare.py", [], None), ("tools/reference_test.py", ["{n}"], 700)],
+    "commando": [("tools/reference_test.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/render_test.py", ["20", "scroll"], None),
+                 ("tools/render_test.py", ["4", "edges"], None)],
+    "blktiger": [("tools/build.py", ["--sim"], None), ("tools/reference_test.py", ["700"], None),
+                 ("tools/logic_test.py", ["{n}"], 1600),
+                 ("tools/logic_test.py", ["4000", "--walk"], None),
+                 ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None)],
     "dkong": [("tools/fullrun.py", ["{n}"], 3000)],
     "galaga": [("ref/galaga5.py", ["{n}", "/tmp"], 3000)],
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
@@ -39,12 +56,14 @@ TESTS = {
                  ("tools/align_test.py", ["{n}"], 900)],
     "1942": [("tools/build.py", ["--sim"], None),
              ("tools/logic_test.py", ["{n}"], 6000),
+             ("tools/logic_test.py", ["9000", "--cheat"], None),      # MAME's cheats: the later stages
              ("tools/sprite_test.py", [], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-MAME = {"dkong": "ref/mame_cmp_dkong.py", "galaga": "ref/mame_cmp_galaga.py", "bublbobl": "ref/mame_cmp_bublbobl.py",
+MAME = {"1943": "ref/mame_cmp_1943.py", "commando": "ref/mame_cmp_commando.py", "gunsmoke": "ref/mame_cmp_gunsmoke.py", "blktiger": "ref/mame_cmp_blktiger.py", "dkong": "ref/mame_cmp_dkong.py", "galaga": "ref/mame_cmp_galaga.py", "bublbobl": "ref/mame_cmp_bublbobl.py",
         "1942": "ref/mame_cmp_1942.py"}
-GAMES = sorted(COVER)
+PREPARE = {"1943": "tools/prepare.py", "gunsmoke": "tools/prepare.py", "blktiger": "tools/prepare.py", "commando": "tools/prepare.py"}
+GAMES = sorted(set(COVER) | set(PREPARE))
 
 
 def game_script(game, rel):
@@ -70,6 +89,17 @@ def main():
         print("usage: port.py %s <%s> ..." % (cmd, "|".join(GAMES)))
         return 2
     game, rest = a[1], a[2:]
+    if game == "1943" and cmd in ("build", "run"):
+        print("1943: verified reference is available; the STE runtime is not implemented yet")
+        return 2
+    if cmd == "prepare":
+        if game not in PREPARE:
+            print("no preparation command for", game)
+            return 2
+        return call([PY, game_script(game, PREPARE[game])] + rest)
+    if game == "gunsmoke" and cmd in ("build", "run"):
+        print(game + ": reference machine is available; the STE translation and runtime are not implemented yet")
+        return 2
     if cmd == "build":
         return call([PY, game_script(game, "tools/build.py")] + rest)
     if cmd == "cover":
@@ -91,6 +121,9 @@ def main():
     if cmd == "run":
         return call([str(ROOT / "tools" / "hatari.sh"), game] + rest)
     if cmd == "mame":
+        if game not in MAME:
+            print(game + ": MAME renderer comparison is not implemented yet")
+            return 2
         return call([PY, game_script(game, MAME[game])] + rest)
     print("unknown command", cmd)
     return 2

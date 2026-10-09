@@ -737,6 +737,30 @@ class Emitter:
         self.e("move d6,ccr")
 
     # ---- instruction dispatch --------------------------------------------
+    # ---- banked windows ---------------------------------------------------------------------------
+    def window_wrap(self, n0, base="g_winbase"):
+        """The lines of the instruction emitted from n0 on that use the window register `aW` (the ports with a
+        banked window: Bubble Bobble, 1942, Black Tiger, 1943) get a0 for it, loaded with `base` (the current bank's
+        copy + $8000) at the start of the instruction, right after its label (and hook) lines: the instruction's
+        own uses of the 68000 stack (the high bytes, ldir) then nest inside.  a0 is saved around it only when the
+        register map keeps a Z80 register there (BC' without z80x.FAST)."""
+        new = self.lines[n0:]
+        if not any("aW" in l for l in new):
+            return
+        start = 0
+        while start < len(new) and _re.match(r"^[A-Za-z]+[0-9A-F]{4,5}(_r)?:", new[start]):
+            start += 1
+            if start < len(new) and new[start].strip().startswith("pea ") and new[start].strip().endswith("_r"):
+                while start < len(new) and not new[start].endswith("_r:"):
+                    start += 1          # (a hook: pea / move.w / jmp z80_hook, then its resume label)
+        body = [l.replace("aW", "a0") for l in new[start:]]
+        save = "a0" not in self.free_aregs()
+        # the base is needed for static window addresses (n(aW)); a window check (lea (a6),aW ...) sets aW itself
+        uses = [l.strip() for l in new[start:] if "aW" in l]
+        checked = uses[0].startswith("lea (a6),aW") and not any(_re.search(r"-?\d+\(aW\)", u) for u in uses)
+        self.lines[n0:] = new[:start] + (["\tpea (a0)"] if save else []) + ([] if checked else ["\tmove.l %s,a0" % base]) + \
+            body + (["\tmove.l (sp)+,a0"] if save else [])
+
     # ---- the second pass: instructions merged over labels nothing enters ------------------------------
     #
     # Code may be merged across a Z80 instruction's label only when the program cannot arrive there other than by

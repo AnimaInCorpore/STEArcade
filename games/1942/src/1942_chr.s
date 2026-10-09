@@ -105,6 +105,8 @@ chr_cells:
 	lea	chr_dirty,a0
 	or.w	d1,(a0,d0.w)
 	or.w	d1,64(a0,d0.w)
+	lea	128(a0),a0
+	or.w	d1,(a0,d0.w)
 	lea	merge_dirty,a0
 	or.w	d1,(a0,d0.w)
 	addq.l	#1,a2

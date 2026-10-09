@@ -6,8 +6,38 @@
 ; Everything is free to use, the Z80 registers are dead at the idle point where the hook calls this.
 
 render_frame:
-	dbgcnt	dbg_c2,1
 	stage	$f0f
+	; the draw ring: not the one that is shown, not the one that was shown until the last VBL (the new video base may take
+	; effect a frame late: Hatari scans the old ring out once more, a ring drawn into then tears), not the one that waits to be shown
+.sel:	move.w	shown_idx,d0
+	move.w	prev_idx,d2
+	moveq	#0,d3
+	move.b	frame_ready,d3			; 0: none, else the waiting ring + 1 (one byte: the VBL sees all of it or nothing)
+	cmp.w	shown_idx,d0
+	bne.s	.sel				; (the VBL flipped in between: again)
+	moveq	#1,d4
+	lsl.w	d0,d4
+	moveq	#1,d5
+	lsl.w	d2,d5
+	or.w	d5,d4				; the rings that are in use
+	tst.w	d3
+	beq.s	.nowait
+	subq.w	#1,d3
+	moveq	#1,d5
+	lsl.w	d3,d5
+	or.w	d5,d4
+.nowait:
+	moveq	#0,d1
+.find:	btst	d1,d4
+	beq.s	.picked
+	addq.w	#1,d1
+	cmp.w	#3,d1
+	blo.s	.find
+	st	frame_dirty			; no ring is free: the VBL has to show one first
+	rts
+.picked:
+	dbgcnt	dbg_c2,1			; (frames drawn)
+	move.w	d1,draw_idx
 	; the window: T = (256 - scroll) & 511, the palette bank
 	moveq	#0,d0
 	move.b	Z_SCROLL+1,d0
@@ -106,15 +136,19 @@ render_frame:
 	add.l	d2,d1
 	sub.l	#PIC_TOP*STRIDE,d1		; (the first lines shown are black: the picture is centred)
 	move.l	d1,flip_addr
-	eori.w	#1,draw_idx
-	st	frame_ready
+	movem.l	ste_pal,d0-d7
+	movem.l	d0-d7,frame_pal
+	move.w	draw_idx,d0
+	addq.b	#1,d0
+	move.b	d0,frame_ready			; (the last store: it makes the frame complete for the VBL, in one piece)
 	rts
 
 ; The whole clean ring is the picture of both draw rings (a palette bank change or the start): Blitter copies of the
 ; game area (14 chunks of every line), and the rings forget what they showed.
 
 rf_full:
-	moveq	#1,d3
+	clr.b	frame_ready			; (the frame that waits is overwritten as well)
+	moveq	#2,d3
 .ring:	move.w	d3,d0
 	lsl.w	#2,d0
 	lea	ring_base,a1
@@ -133,19 +167,21 @@ rf_full:
 	dbf	d4,.seg
 	dbf	d3,.ring
 	lea	tile_pend,a0
-	moveq	#63,d0
+	moveq	#95,d0
 .pend:	clr.w	(a0)+
 	dbf	d0,.pend
 	lea	chr_drawn,a0
 	lea	chr_dirty,a1
-	moveq	#63,d0
+	moveq	#95,d0
 .chr:	clr.w	(a0)+
 	clr.w	(a1)+
 	dbf	d0,.chr
 	clr.w	rect_cnt
 	clr.w	rect_cnt+2
+	clr.w	rect_cnt+4
 	move.w	#-1,ring_T
 	move.w	#-1,ring_T+2
+	move.w	#-1,ring_T+4
 	clr.b	full_redraw
 	rts
 
@@ -260,7 +296,7 @@ blank_cell:	ds.b	96
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
-ring_base:	ds.l	2
+ring_base:	ds.l	3
 clean_base:	ds.l	1
 flip_addr:	ds.l	1
 w_base:		ds.l	1
@@ -276,7 +312,7 @@ draw_idx:	ds.w	1
 cur_bank:	ds.w	1
 cur_T:		ds.w	1
 old_T:		ds.w	1
-ring_T:		ds.w	2
+ring_T:		ds.w	3
 spr_code:	ds.w	1
 spr_col:	ds.w	1
 spr_ytop:	ds.w	1
@@ -284,13 +320,16 @@ spr_n:		ds.w	1
 spr_y:		ds.w	1
 spr_xs:		ds.w	1
 spr_pcode:	ds.w	1
-rect_cnt:	ds.w	2
+rect_cnt:	ds.w	3
 ste_pal:	ds.w	16
 shown_pal:	ds.w	16
+frame_pal:	ds.w	16
+shown_idx:	ds.w	1
+prev_idx:	ds.w	1
 black_pal:	ds.w	16
-tile_pend:	ds.w	64
-chr_dirty:	ds.w	64
-chr_drawn:	ds.w	64
+tile_pend:	ds.w	96
+chr_dirty:	ds.w	96
+chr_drawn:	ds.w	96
 chunk_now:	ds.w	32
 merge_dirty:	ds.w	32
 chr_list_n:	ds.w	1
@@ -308,8 +347,8 @@ cmap:		ds.b	256
 bk_idx:		ds.b	16
 bg_shadow:	ds.b	1024
 fg_shadow:	ds.b	2048
-rects:		ds.b	2*MAX_RECTS*16
-chr_list:	ds.b	448*8
+rects:		ds.b	3*MAX_RECTS*16
+chr_list:	ds.b	448*12
 chunk_pool:	ds.b	448*96
 tile_ptr:	ds.l	65536
 spr_ptr:	ds.l	8192
@@ -317,5 +356,5 @@ chr_ptr:	ds.l	32768
 tile_pool:	ds.b	TILE_POOL_SIZE
 spr_pool:	ds.b	SPR_POOL_SIZE
 chr_pool:	ds.b	CHR_POOL_SIZE
-ring_area:	ds.b	3*RING_SIZE+256
+ring_area:	ds.b	4*RING_SIZE+512
 	section text,code

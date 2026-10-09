@@ -32,8 +32,13 @@ GAMES = {
     "galaga": ("run/galaga_sim/GALAGA.PRG", "galaga.map", ["galaga_code.s"], "ZYX"),
     "bublbobl": ("run/bublbobl_sim/BUBBLE.PRG", "bublbobl_sim.map", ["bb_code.s", "bb_mcu.s"], "ZYM"),
     "1942": ("run/1942_sim/1942.PRG", "1942_sim.map", ["code_1942.s"], "Z"),
+    "commando": ("run/commando_sim/COMMANDO.PRG", "commando_sim.map", ["code_commando.s"], "Z"),
+    "blktiger": ("run/blktiger_sim/BLKTIGER.PRG", "blktiger_sim.map", ["code_blktiger.s"], "Z"),
 }
-HEAD = re.compile(r"^([A-Z])([0-9A-F]{4}):\s*;\s*(.*)$")
+# the ports whose foreground is the game (a kernel with an idle hook): the harness stops at sim_wait, sets vbl_pending
+# (1942: and the inputs) and returns; a game frame is one such round (Commando, Black Tiger: attract mode, no inputs)
+KERNEL = {"1942", "commando", "blktiger"}
+HEAD = re.compile(r"^([A-Z])([0-9A-F]{4,5}):\s*;\s*(.*)$")       # (5 digits: banked code at virtual pcs)
 LABEL = re.compile(r"^([A-Za-z_][\w]*):")
 
 
@@ -81,7 +86,7 @@ class Driver:
         self.rnd = random.Random(1)
         self.stops = {sym[k] for k in ("sim_frame_done", "sim_wait") if k in sym}
         self.bad = sym.get("z80_badpc")
-        if game == "1942":
+        if game in KERNEL:
             self.block = sym["g_block"]
 
     def inputs(self):
@@ -106,8 +111,8 @@ class Driver:
 
     def vbl(self):
         """a new VBL: True when one was delivered"""
-        if self.game == "1942":
-            return False                      # (the 1942 build's VBL is the harness setting vbl_pending at sim_wait)
+        if self.game in KERNEL:
+            return False                      # (the VBL of these builds is the harness setting vbl_pending at sim_wait)
         if self.s.irq(4, 28):
             self.next_vbl += FRAME_CYCLES
             self.f += 1
@@ -118,6 +123,11 @@ class Driver:
 
     def on_stop(self, pc):
         """at a harness stop: True when a VBL starts"""
+        if self.game in KERNEL and pc == self.sym["sim_wait"] and self.game != "1942":
+            self.mem.w8(self.sym["vbl_pending"], 1)
+            self.resume()
+            self.f += 1
+            return True
         if self.game == "1942" and pc == self.sym["sim_wait"]:
             z = lambda a: self.block + a - 0x8000
             sys_in, p1 = 0xFF, 0xFF
@@ -263,15 +273,16 @@ def main():
     if a.game == "dkong":
         return dkong(a)
     # defaults: past the boot, into the attract demo / the play of the tests' input scripts
-    skip, frames = {"galaga": (800, 400), "bublbobl": (500, 300), "1942": (1100, 400)}[a.game]
+    skip, frames = {"galaga": (800, 400), "bublbobl": (500, 300), "1942": (1100, 400), "commando": (600, 400),
+                    "blktiger": (600, 400)}[a.game]
     if a.skip >= 0:
         skip = a.skip
     if a.frames:
         frames = a.frames
     prg, mapname, _, prefixes = GAMES[a.game]
     prg = a.prg or str(ROOT / prg)
-    s = Sim(prg, ram_kib=16384 if a.game == "1942" else 4096, run_dir=os.path.dirname(prg))
-    s.mem.set_trace_mode(a.game in ("galaga", "1942"))      # (the Blitter model starts on a traced write)
+    s = Sim(prg, ram_kib=16384 if a.game in KERNEL else 4096, run_dir=os.path.dirname(prg))
+    s.mem.set_trace_mode(a.game != "bublbobl")      # (the Blitter model starts on a traced write)
     sym = {k: v + s.base for k, v in s.symbols(build_dir(a.game) / mapname).items()}
     d = Driver(a.game, s, sym)
     cpu = s.cpu
@@ -279,7 +290,7 @@ def main():
     d.inputs()
     # a game frame: one round of the arcade's interrupts (the work of a frame is the same in every build)
     tick_pc = {"galaga": sym.get("Z0038")}.get(a.game)
-    gf = lambda: (d.gframes if a.game == "galaga" else d.f if a.game == "1942" else s.mem.r32(sym["sim_game_frames"]))
+    gf = lambda: (d.gframes if a.game == "galaga" else d.f if a.game in KERNEL else s.mem.r32(sym["sim_game_frames"]))
     vbls = 0
     step = cpu.execute
     g0 = None
@@ -307,7 +318,7 @@ def main():
         d.total += c
         if counting:
             prof.charge(pc, c)
-        if d.game != "1942" and d.total >= d.next_vbl:
+        if d.game not in KERNEL and d.total >= d.next_vbl:
             if d.vbl():
                 vbls += counting
                 if d.f % 100 == 0:

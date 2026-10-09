@@ -1,0 +1,162 @@
+[
+  {
+    "name": "bdu-01a.5e",
+    "region": "maincpu",
+    "offset": 0,
+    "size": 32768,
+    "crc32": "a8f98f22",
+    "sha1": "f77c0d0ebf3e52a21d2c0c5004350a408b8e6d24"
+  },
+  {
+    "name": "bdu-02a.6e",
+    "region": "maincpu",
+    "offset": 65536,
+    "size": 65536,
+    "crc32": "7bef96e8",
+    "sha1": "6d05a73d8400dead78c561b904bf6ef8311e7b91"
+  },
+  {
+    "name": "bdu-03a.8e",
+    "region": "maincpu",
+    "offset": 131072,
+    "size": 65536,
+    "crc32": "4089e157",
+    "sha1": "7972b1c745057802d4fd66d88b0101eb3c03e701"
+  },
+  {
+    "name": "bd-04.9e",
+    "region": "maincpu",
+    "offset": 196608,
+    "size": 65536,
+    "crc32": "ed6af6ec",
+    "sha1": "bed303c51bcddf233ad0701306d557a60ce9f5a5"
+  },
+  {
+    "name": "bd-05.10e",
+    "region": "maincpu",
+    "offset": 262144,
+    "size": 65536,
+    "crc32": "ae59b72e",
+    "sha1": "6e72214b71f2f337af236c8be891a18570cb6fbb"
+  },
+  {
+    "name": "bd-06.1l",
+    "region": "audiocpu",
+    "offset": 0,
+    "size": 32768,
+    "crc32": "2cf54274",
+    "sha1": "87df100c65999ba1e9d358ffd0fe4bba23ae0efb"
+  },
+  {
+    "name": "bd.6k",
+    "region": "mcu",
+    "offset": 0,
+    "size": 4096,
+    "crc32": "ac7d14f1",
+    "sha1": "46fd6b43f10312e3e8d3c9e0c0fd616af98fdbad"
+  },
+  {
+    "name": "bd-15.2n",
+    "region": "chars",
+    "offset": 0,
+    "size": 32768,
+    "crc32": "70175d78",
+    "sha1": "2f02be2785d1824002145ea20db79821d0393929"
+  },
+  {
+    "name": "bd-12.5b",
+    "region": "tiles",
+    "offset": 0,
+    "size": 65536,
+    "crc32": "c4524993",
+    "sha1": "9aa6c58004ca1117e5ac44ba8fc51e9128b921b8"
+  },
+  {
+    "name": "bd-11.4b",
+    "region": "tiles",
+    "offset": 65536,
+    "size": 65536,
+    "crc32": "7932c86f",
+    "sha1": "b3b1bc1e2b0db5c2eb8772f8a2c35129cc80d511"
+  },
+  {
+    "name": "bd-14.9b",
+    "region": "tiles",
+    "offset": 131072,
+    "size": 65536,
+    "crc32": "dc49593a",
+    "sha1": "e4ef42ba9f238fd43c8217657c92896f31d3912c"
+  },
+  {
+    "name": "bd-13.8b",
+    "region": "tiles",
+    "offset": 196608,
+    "size": 65536,
+    "crc32": "7ed7a122",
+    "sha1": "3acc6d4c9731db0609c2e26e3bd255847149ca33"
+  },
+  {
+    "name": "bd-08.5a",
+    "region": "sprites",
+    "offset": 0,
+    "size": 65536,
+    "crc32": "e2f17438",
+    "sha1": "3e5fdae07d40febedc59c7c7c4d9c6f0d72b58b5"
+  },
+  {
+    "name": "bd-07.4a",
+    "region": "sprites",
+    "offset": 65536,
+    "size": 65536,
+    "crc32": "5fccbd27",
+    "sha1": "33c55aa9c12b3121ca5c3b4c39a9b152b6946461"
+  },
+  {
+    "name": "bd-10.9a",
+    "region": "sprites",
+    "offset": 131072,
+    "size": 65536,
+    "crc32": "fc33ccc6",
+    "sha1": "d492626a88565c2626f98ecb1d74535f1ad68e4c"
+  },
+  {
+    "name": "bd-09.8a",
+    "region": "sprites",
+    "offset": 196608,
+    "size": 65536,
+    "crc32": "f449de01",
+    "sha1": "f6b40e9eb2471b89c42ab84f4214295d284db0c3"
+  },
+  {
+    "name": "bd01.8j",
+    "region": "proms",
+    "offset": 0,
+    "size": 256,
+    "crc32": "29b459e5",
+    "sha1": "0034734a533df3dea16b7b48e072485d7f26f850"
+  },
+  {
+    "name": "bd02.9j",
+    "region": "proms",
+    "offset": 256,
+    "size": 256,
+    "crc32": "8b741e66",
+    "sha1": "6c1fda59936a7217b05949f5c54b1f91f4b49dbe"
+  },
+  {
+    "name": "bd03.11k",
+    "region": "proms",
+    "offset": 512,
+    "size": 256,
+    "crc32": "27201c75",
+    "sha1": "c54d87f06bfe0b0908389c005014d97156e272c2"
+  },
+  {
+    "name": "bd04.11l",
+    "region": "proms",
+    "offset": 768,
+    "size": 256,
+    "crc32": "e5490b68",
+    "sha1": "40f9f92efe7dd97b49144aec02eb509834056915"
+  }
+]

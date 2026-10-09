@@ -2,7 +2,10 @@
 foreground's idle point after every frame's interrupts and tasks (the runtime's `sim_frame_done`) the RAM, the video RAM, the
 sprite RAM and the latches are compared.
 
-    python logic_test.py [frames] [--stop]
+    python logic_test.py [frames] [--stop] [--cheat]
+
+--cheat: MAME's cheats for 1942b, applied to both machines before every frame: lives E101, invincibility E0A5 and every 600 frames
+(from frame 1000) "Finish Current Level Now!" (EBD0, E099, E102), to reach the later stages, bosses and the ending.
 """
 import argparse, os, random, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
@@ -75,6 +78,7 @@ def main():
     ap.add_argument("frames", nargs="?", type=int, default=300)
     ap.add_argument("--prg", default=str(RUN / "1942.PRG"))
     ap.add_argument("--stop", action="store_true")
+    ap.add_argument("--cheat", action="store_true")
     a = ap.parse_args()
     s = Sim(a.prg, run_dir=RUN)
     s.mem.set_trace_mode(False)
@@ -145,6 +149,13 @@ def main():
         sys_in, p1, p2 = inputs(f, rnd)
         cyc0 = CYCLES[0]
         ref.sys_in, ref.p1, ref.p2 = sys_in, p1, p2
+        if a.cheat:
+            pokes = [(0xE101, 6), (0xE0A5, 2)]
+            if f >= 1000 and f % 600 == 0:
+                pokes += [(0xEBD0, 7), (0xE099, 1), (0xE102, 0x43)]
+            for addr, v in pokes:
+                ref.ram[addr - 0xE000] = v
+                mem.w8(z80(addr), v)
         mem.w8(z80(0xC000), sys_in)
         mem.w8(z80(0xC001), p1)
         mem.w8(z80(0xC002), p2)

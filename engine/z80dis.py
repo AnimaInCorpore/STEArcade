@@ -37,13 +37,17 @@ def decode(rom, pc):
     def b(i):
         return rom[(start + i) % n] if (start + i) < n else 0
 
-    op = b(0)
+    def opcode(i):
+        bus = getattr(rom, "opcodes", rom)
+        return bus[(start + i) % n] if (start + i) < n else 0
+
+    op = opcode(0)
     ix = None
     i = 0
     if op in (0xDD, 0xFD):
         ix = "ix" if op == 0xDD else "iy"
         i = 1
-        op = b(1)
+        op = opcode(1)
         if op in (0xDD, 0xFD, 0xED):  # prefix chain: treat as NOP-like
             return Ins(start, 1, "nop", [], "nop*", "seq", None)
 
@@ -91,7 +95,7 @@ def decode(rom, pc):
     base = 1 + i  # index of first operand byte for simple opcodes
 
     if op == 0xCB and not ix:
-        op2 = b(1)
+        op2 = opcode(1)
         x2 = op2 >> 6
         y2 = (op2 >> 3) & 7
         z2 = op2 & 7
@@ -112,7 +116,7 @@ def decode(rom, pc):
             return mk(4, ROT[y2], [tgt] + extra)
         return mk(4, ("bit", "res", "set")[x2 - 1], [("imm", y2), tgt] + extra)
     if op == 0xED and not ix:
-        op2 = b(1)
+        op2 = opcode(1)
         x2 = op2 >> 6
         y2 = (op2 >> 3) & 7
         z2 = op2 & 7

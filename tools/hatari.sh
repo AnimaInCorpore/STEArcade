@@ -1,9 +1,11 @@
 #!/bin/bash
 # Run a port in the F030Arcade Hatari (the pinned, corrected build); optionally press keys, grab screenshots and
 # dump memory at given times.
-#   tools/hatari.sh <game> [item@seconds ...]          game: dkong | galaga | bublbobl | 1942
+#   tools/hatari.sh <game> [item@seconds ...]          game: dkong | galaga | bublbobl | 1942 | commando | blktiger
 #   items (in time order):  shot@60                    screenshot  -> $OUT/<game>_60.png
 #                           key:5@20                   key press (Hatari key name: 5 = coin 1, 1 = start 1, Left, space ...)
+#                           hold:5@20                  key held for 0.7 s (down:KEY / up:KEY: held until up)   wait@90: just keep running
+#                           dbg:COMMAND@50             a debugger command (dbg:profile on, dbg:profile save /tmp/p.txt ...)
 #                           dump:0xADDR:0xSIZE@50      memory dump (debugger savebin) -> $OUT/<game>_<s>_<ADDR>.bin
 #   no items: run interactively.   A CRASH.TXT written by the program is printed.
 # The program is started from run/<game>/ (it loads its ROM files from there).  $OUT defaults to /tmp/hrun.
@@ -17,7 +19,10 @@ case $GAME in
   galaga)   PRG=${PRG:-GALAGA.PRG} ;;
   dkong)    PRG=${PRG:-DKONG.PRG} ;;
   bublbobl) PRG=${PRG:-BUBBLE.PRG} ;;
-  *) echo "unknown game $GAME (dkong | galaga | bublbobl | 1942)"; exit 1 ;;
+  1942)     PRG=${PRG:-1942.PRG} ;;
+  blktiger) PRG=${PRG:-BLKTIGER.PRG} ;;
+  commando) PRG=${PRG:-COMMANDO.PRG} ;;
+  *) echo "unknown game $GAME (dkong | galaga | bublbobl | 1942 | commando | blktiger)"; exit 1 ;;
 esac
 RUN=${RUN:-$ROOT/run/$GAME}
 mkdir -p "$OUT"; rm -f "$RUN/CRASH.TXT" "$OUT/cmd.fifo"
@@ -36,6 +41,12 @@ for ITEM in "$@"; do
   case $WHAT in
     shot)  printf 'hatari-debug screenshot %s\n' "$OUT/${GAME}_$S.png" > "$OUT/cmd.fifo" ;;
     key:*) printf 'hatari-event keypress %s\n' "${WHAT#key:}" > "$OUT/cmd.fifo" ;;
+    hold:*) printf 'hatari-event keydown %s\n' "${WHAT#hold:}" > "$OUT/cmd.fifo"; sleep 0.7   # (games that poll the keys once a tick)
+            printf 'hatari-event keyup %s\n' "${WHAT#hold:}" > "$OUT/cmd.fifo" ;;
+    down:*) printf 'hatari-event keydown %s\n' "${WHAT#down:}" > "$OUT/cmd.fifo" ;;
+    up:*)   printf 'hatari-event keyup %s\n' "${WHAT#up:}" > "$OUT/cmd.fifo" ;;
+    wait)  ;;
+    dbg:*) printf 'hatari-debug %s\n' "${WHAT#dbg:}" > "$OUT/cmd.fifo" ;;
     dump:*) R=${WHAT#dump:}; A=${R%%:*}; Z=${R##*:}
             printf 'hatari-debug savebin %s/%s_%s_%s.bin %s %s\n' "$OUT" "$GAME" "$S" "$A" "$A" "$Z" > "$OUT/cmd.fifo" ;;
     *) echo "bad item $ITEM"; break ;;

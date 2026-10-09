@@ -47,6 +47,8 @@ rf_bg:
 	lea	tile_pend,a0
 	or.w	d0,(a0,d1.w)
 	or.w	d0,64(a0,d1.w)
+	lea	128(a0),a0
+	or.w	d0,(a0,d1.w)
 .skip:	addq.w	#1,d5
 	cmp.w	#15,d5
 	blo.s	.row

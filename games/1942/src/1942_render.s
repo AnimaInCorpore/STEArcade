@@ -65,11 +65,13 @@ init_video:
 	add.l	#RING_SIZE,d0
 	move.l	d0,ring_base+4
 	add.l	#RING_SIZE,d0
+	move.l	d0,ring_base+8
+	add.l	#RING_SIZE,d0
 	move.l	d0,clean_base
 
 	move.l	ring_base,a0		; clear guards as well as the rings
 	sub.l	#RING_GUARD,a0
-	move.l	#3*RING_SIZE/48-1,d0
+	move.l	#(4*RING_SIZE+47)/48-1,d0
 	moveq	#0,d1
 	move.l	d1,d2
 	move.l	d1,d3
@@ -86,6 +88,41 @@ init_video:
 	lea	48(a0),a0
 	dbf	d0,.clear
 
+	ifd RULER				; (diagnostics: the line number of every ring line, mod 16, as a colour in the left margin)
+	moveq	#2,d4
+	lea	ring_base,a1
+.ruler_ring:
+	move.l	(a1)+,a0
+	move.w	#768-1,d3
+	moveq	#0,d5
+.ruler_line:
+	move.w	d5,d0
+	and.w	#15,d0
+	moveq	#0,d1
+	moveq	#0,d2
+	btst	#0,d0
+	beq.s	.r0
+	moveq	#-1,d1
+.r0:	btst	#1,d0
+	beq.s	.r1
+	moveq	#-1,d2
+.r1:	move.w	d1,(a0)
+	move.w	d2,2(a0)
+	moveq	#0,d1
+	moveq	#0,d2
+	btst	#2,d0
+	beq.s	.r2
+	moveq	#-1,d1
+.r2:	btst	#3,d0
+	beq.s	.r3
+	moveq	#-1,d2
+.r3:	move.w	d1,4(a0)
+	move.w	d2,6(a0)
+	lea	STRIDE(a0),a0
+	addq.w	#1,d5
+	dbf	d3,.ruler_line
+	dbf	d4,.ruler_ring
+	endc
 	clr.b	$ffff8260.w		; low resolution
 	move.b	#(STRIDE-160)/2,$ffff820f.w	; line offset in words
 
@@ -108,7 +145,10 @@ init_render:
 	move.w	#-1,cur_bank
 	move.w	#-1,ring_T
 	move.w	#-1,ring_T+2
+	move.w	#-1,ring_T+4
 	clr.w	draw_idx
+	clr.w	shown_idx
+	clr.w	prev_idx
 	st	full_redraw
 	clr.b	frame_ready
 	bsr	flush_caches
@@ -120,18 +160,23 @@ init_render:
 	clr.b	pal_pending
 	rts
 
-; The VBL: show the frame that is complete.  (Keeps every register.)
+; The VBL: show the newest frame that is complete (render_frame leaves the finished ring's address and palette in flip_addr /
+; frame_pal and its number + 1 in frame_ready; a frame that has not been shown when the next one is finished is dropped).  (Keeps every register.)
 
 vbl_video:
 	movem.l	d0-d7,-(sp)
 	movem.l	black_pal,d0-d7		; (the top lines of the picture are black, Timer B switches the palette on)
 	movem.l	d0-d7,$ffff8240.w
-	tst.b	frame_ready
+	move.w	shown_idx,prev_idx	; (the ring that was shown in the frame that ends)
+	moveq	#0,d1
+	move.b	frame_ready,d1		; the finished ring + 1
 	beq.s	.none
 	clr.b	frame_ready
+	subq.w	#1,d1
+	move.w	d1,shown_idx
 	move.l	flip_addr,d0
 	bsr	show_address
-	movem.l	ste_pal,d0-d7		; (the palette of the frame that is shown from now on)
+	movem.l	frame_pal,d0-d7		; (the palette of the frame that is shown from now on)
 	movem.l	d0-d7,shown_pal
 .none:	movem.l	(sp)+,d0-d7
 	rts
@@ -347,6 +392,20 @@ copy_tile:
 
 blit_copy:
 	dbgcnt	dbg_c1,0
+	ifd DEBUG
+	cmp.l	#$200000,a0			; (assertion: both rectangles are in the rings / clean)
+	blo.s	.bad
+	cmp.l	#$3F0000,a0
+	bhs.s	.bad
+	cmp.l	#$200000,a1
+	blo.s	.bad
+	cmp.l	#$3F0000,a1
+	blo.s	.good
+.bad:	move.l	(sp),d6				; the caller
+	move.w	draw_idx,d5
+	bra	z80_badpc
+.good:
+	endc
 	stage	$044
 	wait_borders
 	move.w	#2,BLT_SRC_XINC.w
@@ -365,13 +424,26 @@ blit_copy:
 	move.w	d0,BLT_COUNT.w
 	move.w	#$0203,BLT_HOP_OP.w
 	clr.b	BLT_SKEW.w
-	subq.w	#1,d1
-.row:
-	wait_borders
+	; the rows in groups of four (one look at the border timers for each; a group is about as long as the Blitter's busiest stretch
+	; in the sprite routines), then the rest
+	move.w	d1,d3
+	lsr.w	#2,d3
+	and.w	#3,d1
+	subq.w	#1,d3
+	bmi.s	.rest
+.group:	wait_borders
+	rept 4
 	move.w	#1,BLT_COUNT+2.w
 	move.b	#$c0,BLT_CTRL.w		; short HOG pass; addresses advance automatically
+	endr
+	dbf	d3,.group
+.rest:	subq.w	#1,d1
+	bmi.s	.done
+.row:	wait_borders
+	move.w	#1,BLT_COUNT+2.w
+	move.b	#$c0,BLT_CTRL.w
 	dbf	d1,.row
-	rts
+.done:	rts
 
 	include "1942_bg.s"
 	include "1942_chr.s"

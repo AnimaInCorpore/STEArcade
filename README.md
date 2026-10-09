@@ -10,7 +10,11 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 | [Donkey Kong](games/dkong/README.md) | Z80 | plays at 50 fps, pixel exact against MAME |
 | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) | attract mode and play, 25-43 fps in the light phases, 9-21 with the full formation |
 | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | boots into the attract mode, exact logic and picture; too slow to play on a plain STE, no sound |
-| [1942](games/1942/README.md) | Z80 (a cooperative kernel; sound CPU not translated) | attract mode and play with the hardware scrolled background, exact logic and picture; about 40 fps in Hatari, no sound |
+| [1942](games/1942/README.md) | Z80 (a cooperative kernel; sound CPU not translated) | attract mode and play with the hardware scrolled background, exact logic and picture; the arcade's speed (60 ticks a second) and 34-43 frames a second in Hatari, no sound |
+| [1943](games/1943/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | Euro reference boots; graphics exact against MAME at three frames; STE runtime in development |
+| [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | STE runtime, banked translation, virtual-screen scrolling and firmware protection; sound and rendering optimisation pending |
+| [Commando](games/commando/README.md) | Z80 (encrypted opcodes; sound CPU omitted) | playable STE runtime, scrolling Blitter renderer, exact reference/translation checks; 16 colours, no sound |
+| [Gun.Smoke](games/gunsmoke/README.md) | Z80 (sound CPU omitted) | main-CPU reference boot, bank-aware coverage and MAME-verified renderer; STE runtime pending |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).

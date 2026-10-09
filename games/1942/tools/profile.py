@@ -1,7 +1,7 @@
 """Where render_frame spends its cycles (Musashi, the Blitter model counted separately): the frames of render_test.py seq,
 every instruction of the frames `first`..`first + n` attributed to the nearest symbol before it.
 
-    python profile.py [n] [first]
+    python profile.py [n] [first] [cheat|finish]      (cheat: lives and invincibility, finish: and "Finish Current Level Now!" every 600 frames, the later stages: see logic_test.py --cheat)
 """
 import os, random, re, sys, bisect, collections
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
@@ -16,6 +16,8 @@ RUN, MAP = lt.RUN, lt.MAP
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 60
     first = int(sys.argv[2]) if len(sys.argv) > 2 else 1200
+    mode = sys.argv[3] if len(sys.argv) > 3 else ""
+    cheat = mode in ("cheat", "finish")
     s = Sim(str(RUN / "1942.PRG"), ram_kib=16384, run_dir=RUN)
     s.mem.set_trace_mode(False)
     sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
@@ -40,6 +42,10 @@ def main():
     warm = 30
     while frames < n + warm:
         ref.sys_in, ref.p1, ref.p2 = lt.inputs(f, rnd)
+        if cheat:
+            ref.ram[0x101], ref.ram[0x0A5] = 6, 2
+            if mode == "finish" and f >= 1000 and f % 600 == 0:
+                ref.ram[0xBD0], ref.ram[0x099], ref.ram[0x102] = 7, 1, 0x43
         ref.run_frame_port()
         f += 1
         if f < first:
@@ -77,6 +83,8 @@ def main():
             s.blitter.cycles = 0
         mem.set_trace_mode(False)
         cpu.w_reg(R.A7, sp + 4)
+        mem.w16(sym["prev_idx"], mem.r16(sym["shown_idx"]))      # (the VBL shows the frame)
+        mem.w16(sym["shown_idx"], mem.r8(sym["frame_ready"]) - 1)
         mem.w8(sym["frame_ready"], 0)
         frames += 1
     print("%d frames from %d: %d cycles a frame (%d CPU, %d Blitter)" % (n, first, (cpu_cycles + blit) // n, cpu_cycles // n, blit // n))

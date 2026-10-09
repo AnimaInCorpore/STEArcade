@@ -14,8 +14,8 @@ a static translation of the programs, and a runtime around them.
   ($8000-$BFFF) onto four 16 KB banks.  Window code is translated per bank (virtual pc `$10000 + $4000 * bank +
   offset`), a jump from fixed code into the window goes through a stub that picks the bank's label, `ret` and
   `jp (hl)` through the dispatch table of the current bank (`a4` follows the bank register `$FB40`).  Reads of the
-  window as data use `g_winbase` (through a0, saved around the instruction by the wrapper; with `z80x.FAST` a0 is
-  free now, the save could go); the sites are those the coverage runs and `tools/window_audit.py` found.
+  window as data use `g_winbase` (through a0, `Emitter.window_wrap`: with `z80x.FAST` a0 is free, no save); the sites
+  are those the coverage runs and `tools/window_audit.py` found.
 * **Sub CPU** (1.4k instructions): the same shared RAM (`g_ram`), "long" memory model.
 * **MCU** (`engine/m6801x.py`, 940 instructions): the firmware translated 6801 -> 68000, the self-test that
   can never pass on the board skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write)
@@ -202,7 +202,12 @@ Main CPU `z80x.FAST` (A' F' and BC' DE' HL' in the upper words of d0 / d6 and d1
 `z80x.FAST_LONG`; the window stubs' `move.l ...,a3` no longer clobbers A'.  `gen.py` goes through `translate.compile_code`
 (its own copy of the pipeline is gone) and uses the engine's `ldir`; its return points in the window are left out of
 the direct returns (`direct_ok`: a stack word cannot tell the bank).  `engine/xprof.py bublbobl` (frames 500-800 of
-the logic test's input script, per game frame, the main CPU's idle loop `$01ED` apart): translated code 70.3k -> 55.4k
-cycles (1.27x).  What is left: `ret` / `call` (~15%), the 360 byte copy at `$04B6` (odd source, even destination: bytes,
+the logic test's input script, per game frame, the main CPU's idle loop `$01ED` apart): translated code 70.3k -> 54.2k
+cycles (1.30x; 2026-10-09, the engine's window wrapper without the a0 save).  What is left: `ret` / `call` (~15%), the 360 byte copy at `$04B6` (odd source, even destination: bytes,
 ~5k), the MCU (5.3k, `m6801x.py` untouched).  Tests: `logic_test.py 700`, `render_test.py seq 1500 20`, `mcu_test.py`,
 `align_test.py` all pass; Hatari runs the attract mode.
+
+`tools/profile.py 1200` after it (2026-10-09, Musashi, the real VBL schedule): game frames per VBL / pictures a second
+0.80 / 14.2 (attract, 100-400), 0.58 / 2.2 (play, 600-900), 0.65 / 3.5 (play, 900-1200), against 0.79 / 13.8, 0.57 / 1.8,
+0.63 / 3.3 before: the translated code is a fifth of the CPU in the play, the renderer more than two thirds
+(~109k cycles a VBL), so the frame rate moved little.

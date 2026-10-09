@@ -10,3 +10,6 @@ venv/
 # ...but documentation images are committed (per-game docs, legacy notes)
 !games/*/docs/**/*.png
 !legacy/**/*.png
+
+# MAME writes its configuration into the directory it runs in
+cfg/

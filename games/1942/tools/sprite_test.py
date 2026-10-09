@@ -59,7 +59,7 @@ def main():
         elif code % 25 == 0:
             positions += [(x, y) for x in (-15, 0, 9, 223) for y in range(-15, 256, 7)]
         for x, y in positions:
-            idx, T = rng.randrange(2), rng.choice((0, 1, 124, 255, 256, 300, 511))
+            idx, T = rng.randrange(3), rng.choice((0, 1, 124, 255, 256, 300, 511))
             mem.w16(sym["cur_T"], T)
             mem.w16(sym["draw_idx"], idx)
             ring = mem.r32(sym["ring_base"] + 4 * idx) + T * 256

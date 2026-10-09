@@ -2,7 +2,7 @@
 ; Chunks.  The chunk (cx, cy) lies at the ring lines T + 8 * cy ... T + 8 * cy + 7 (T = the window's top line).
 ; Every occupied chunk has merged data (chunk_pool, 96 bytes: 8 rows of the keep mask (a long), planes 0/1 and planes 2/3
 ; of both cells), rebuilt when one of its cells changed (merge_dirty); chr_list lists the occupied chunks: the byte offset of
-; the chunk's first line in a window of the ring (8 * cy * STRIDE + GAME_X + 8 * cx) and its data.
+; the chunk's first line in a window of the ring (8 * cy * STRIDE + GAME_X + 8 * cx), its data, cy * 2 and its bit (12 bytes).
 ; ------------------------------------------------------------------------------
 
 ; d0.w = chunk column, d1.w = chunk row: a3 = the lane 0 data of the left cell, a4 = the lane 1 data of the right one
@@ -136,6 +136,12 @@ chr_build_list:
 	move.l	d0,(a5)+
 	bsr	chunk_data
 	move.l	a0,(a5)+
+	move.w	d6,d0
+	add.w	d0,d0
+	move.w	d0,(a5)+			; cy * 2: the index into chr_drawn / chunk_now
+	moveq	#1,d0
+	lsl.w	d4,d0
+	move.w	d0,(a5)+			; the chunk's bit
 	addq.w	#1,d3
 .skip:	addq.w	#1,d4
 	cmp.w	#14,d4
@@ -150,7 +156,6 @@ chr_build_list:
 ; there), a3 = the chunk's merged data.  8 rows.
 
 draw8:
-	rept 8
 	movem.l	(a2),d0-d1
 	move.l	(a3)+,d2
 	and.l	d2,d0
@@ -158,9 +163,55 @@ draw8:
 	or.l	(a3)+,d0
 	or.l	(a3)+,d1
 	movem.l	d0-d1,(a1)
-	lea	STRIDE(a1),a1
-	lea	STRIDE(a2),a2
-	endr
+	movem.l	256(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,256(a1)
+	movem.l	512(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,512(a1)
+	movem.l	768(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,768(a1)
+	movem.l	1024(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,1024(a1)
+	movem.l	1280(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,1280(a1)
+	movem.l	1536(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,1536(a1)
+	movem.l	1792(a2),d0-d1
+	move.l	(a3)+,d2
+	and.l	d2,d0
+	and.l	d2,d1
+	or.l	(a3)+,d0
+	or.l	(a3)+,d1
+	movem.l	d0-d1,1792(a1)
 	rts
 
 ; d0.w = rows - 1: the background (a2) is put back into a1
@@ -187,29 +238,34 @@ rf_chr:
 	tst.b	t_moved
 	beq	.still
 
-	; the old picture
+	; the old picture: the chunks it had that are blank now go back in full here; the lines of the others that the new picture
+	; does not cover are put back as the chunk is drawn (below)
+	moveq	#0,d5				; the window's move (0: nothing to put back)
 	move.w	draw_idx,d0
 	add.w	d0,d0
 	lea	ring_T,a0
 	move.w	(a0,d0.w),d3			; the old window (-1: nothing was drawn)
-	bmi	.new
-	move.w	cur_T,d4
-	sub.w	d3,d4				; d = new - old
+	bmi.s	.new
+	move.w	cur_T,d5
+	sub.w	d3,d5				; d = new - old (not 0)
 	move.w	d3,old_T
-	move.w	d4,chr_d
+	move.w	d5,chr_d
 	move.w	draw_idx,d0
 	lsl.w	#6,d0
 	lea	chr_drawn,a4
 	add.w	d0,a4
+	lea	chunk_now,a0
 	moveq	#0,d6
-.ocy:	move.w	(a4)+,d5
+.ocy:	move.w	(a0)+,d0
+	not.w	d0
+	and.w	(a4)+,d0			; drawn before, blank now
 	beq.s	.onext
 	moveq	#0,d4
-.ocx:	btst	d4,d5
+.ocx:	btst	d4,d0
 	beq.s	.oskip
-	movem.l	d4-d6/a4,-(sp)
+	movem.l	d0/d4-d6/a0/a4,-(sp)
 	bsr	chr_restore_old
-	movem.l	(sp)+,d4-d6/a4
+	movem.l	(sp)+,d0/d4-d6/a0/a4
 .oskip:	addq.w	#1,d4
 	cmp.w	#14,d4
 	blo.s	.ocx
@@ -217,24 +273,66 @@ rf_chr:
 	cmp.w	#32,d6
 	blo.s	.ocy
 
-	; the new picture
+	; the new picture: every occupied chunk.  Its lines of the old picture that the new one does not cover are put back first; that
+	; reaches into the neighbouring chunk's lines (above when the window moved down, below when up), so the chunks are taken in the
+	; order that draws the neighbour after (rows from the bottom when d > 0).
 .new:	move.w	chr_list_n,d7
 	subq.w	#1,d7
-	bmi.s	.fin
+	bmi	.fin
+	moveq	#0,d6
+	move.w	cur_T,d6
+	lsl.l	#8,d6				; the window's offset in the ring
 	lea	chr_list,a4
+	moveq	#12,d4				; the step through the list
+	tst.w	d5
+	ble.s	.up
+	move.w	d7,d0				; (d > 0: from the last entry)
+	mulu	#12,d0
+	add.l	d0,a4
+	moveq	#-12,d4
+.up:	move.w	draw_idx,d0
+	lsl.w	#6,d0
+	lea	chr_drawn,a0
+	add.w	d0,a0
+.n:	ifd DEBUG
+	cmp.l	#$20000,(a4)
+	blo.s	.nok
 	moveq	#0,d1
-	move.w	cur_T,d1
-	lsl.l	#8,d1				; the window's offset in the ring
-.n:	move.l	(a4)+,d0
-	add.l	d1,d0
-	move.l	(a4)+,a3
-	lea	(a5,d0.l),a1
+	move.w	chr_list_n,d1
+	move.l	a4,a0
+	move.l	d1,a1
+	moveq	#0,d1
+	move.w	draw_idx,d1
+	move.l	d1,a2
+	move.l	d5,a3
+	movem.l	chr_list,d0-d7		; (the first entries of the list are in the crash report)
+	bra	z80_badpc
+.nok:
+	endc
+	move.l	(a4),d0
+	move.l	4(a4),a3
+	add.l	d6,d0
+	tst.w	d5
+	beq.s	.draw
+	move.w	8(a4),d2
+	move.w	10(a4),d3
+	ifd DEBUG
+	btst	#0,d2
+	beq.s	.d2ok
+	movem.l	-24(a4),d0-d5			; (the entries before and this one)
+	movem.l	(a4),d6-d7/a0-a3
+	bra	z80_badpc
+.d2ok:
+	endc
+	and.w	(a0,d2.w),d3			; drawn before?
+	beq.s	.draw
+	bsr	chr_fold_restore
+.draw:	lea	(a5,d0.l),a1
 	lea	(a6,d0.l),a2
-	movem.l	d1/d7/a4,-(sp)
 	bsr	draw8
-	movem.l	(sp)+,d1/d7/a4
+	adda.l	d4,a4
 	dbf	d7,.n
-	bra.s	.fin
+	bra	.fin
 
 .still:	move.w	draw_idx,d0
 	lsl.w	#6,d0
@@ -352,6 +450,39 @@ chr_restore_old:
 	subq.w	#1,d0
 	bsr	restore_rows
 .out:	rts
+
+; The lines of the old picture of a chunk that the new picture does not cover (d5.w = d = new window - old window, d0.l = the ring
+; offset of the chunk's first line at the new window, a5 = ring, a6 = clean): put back from clean.  Keeps d0 and a3 / a4, clobbers d1-d3, a1-a2.
+
+chr_fold_restore:
+	move.l	d0,-(sp)
+	move.w	d5,d1
+	ext.l	d1
+	move.w	d1,d0
+	bpl.s	.abs
+	neg.w	d0
+.abs:	cmp.w	#8,d0
+	bhs.s	.all
+	tst.l	d1
+	bmi.s	.below
+	neg.l	d1				; moved down: the d lines before the new first line
+	bra.s	.go
+.below:	moveq	#8,d1				; moved up: the |d| lines after the new last line
+	bra.s	.go
+.all:	neg.l	d1				; the old picture's own place, all 8 lines
+	moveq	#8,d0
+.go:	lsl.l	#8,d1
+	add.l	(sp),d1
+	lea	(a5,d1.l),a1
+	lea	(a6,d1.l),a2
+	subq.w	#1,d0
+.r:	movem.l	(a2),d1-d2
+	movem.l	d1-d2,(a1)
+	lea	STRIDE(a1),a1
+	lea	STRIDE(a2),a2
+	dbf	d0,.r
+	move.l	(sp)+,d0
+	rts
 
 ; the chunk (d4, d6) is drawn over what the ring shows (a sprite was drawn there or put back)
 
