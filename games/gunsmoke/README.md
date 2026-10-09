@@ -68,9 +68,13 @@ gets past round 1's boss.
   the twin period is 320 (a band of 288 lines plus 32 for the overhang of whole 32-line
   tiles), with 32 lines above and below for the twins of tiles that cross line 320.
   Each buffer draws the tile rows that scrolled into its band since it was last drawn.
-  A new D802 (the game slides it 0 -> 48 a line a frame, e.g. at the round's poster),
-  background on/off or a jump of more than 200 lines redraws the band: about 1-1.8M
-  cycles, the slow frames of the port.
+* **D802 slides** (the game moves it 0 -> 48 a pixel a frame at each round's poster, then
+  back to 0 in one step): when D802 grew by 1-15 since a buffer was drawn, the Blitter
+  moves the window's chunks of the band's lines and their twins left in place (skew with
+  FXSR, 8 lines a burst per plane), and only the window's last word column is drawn from
+  the tiles that reach the new pixels (`shift_ring`, `draw_strip`). A slide frame costs
+  441k cycles instead of 821k (a band redraw). The step back, background on/off and
+  jumps of more than 200 lines still redraw the band (1-1.8M cycles).
 * **The screen shows 48 pixels on each side of the 224-pixel window**: tiles and
   sprites drawn whole into the margins would be visible there, so each tile that
   reaches a side clears the two chunks there and each sprite over a side clears its 16
@@ -87,18 +91,22 @@ gets past round 1's boss.
   of the hashed cache makes the 16 pen masks of each row and a generated routine per
   colour bank ORs them into the four STE planes. One pool per kind.
 * **Timers**: `wait_borders` also keeps HOG blits away from Timer A's palette switches
-  (the picture's first lines were black when the palette came on late); text damage is
-  restored in 2-line bursts.
+  (the picture's first lines were black when the palette came on late) and from the last
+  lines before the VBL: after the palette off, Timer A runs once more (`VBL_SOON_DATA`)
+  and marks them. A blit across the VBL delays the top border routine, the border stays
+  closed and the picture drops by 29 lines (2 of 14 Hatari screenshots of the round
+  posters before; a DEBUG build counts the VBLs that found the mark: 5999 of 6001). Text
+  damage is restored in 2-line bursts.
 
 Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
 
 ## Speed (2026-10-09)
 
 `tools/bench.ps1` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
-included): 54.4 game ticks a second (91% of the arcade's 59.6) and 29.0 drawn frames a
+included): 54.2 game ticks a second (91% of the arcade's 59.6) and 28.1 drawn frames a
 second. `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
-84-380k cycles (median 84k in round 1, 243k in round 3, 381k in round 7), a full
-redraw 1-1.8M.
+84-380k cycles (median 84k in round 1, 243k in round 3, 381k in round 7), a frame of a
+D802 slide 441k, a full redraw 1-1.8M.
 
 ## Validation
 
@@ -113,9 +121,11 @@ redraw 1-1.8M.
   ending.
 * `render_test.py`: pixel exact through the colour map in consecutive play (rounds 1, 3,
   7, the ending), spaced samples (rounds 6, 9), a sweep of S and D802 over their range,
-  and whole sprites at the window's edges; the side bars stay black.
+  and whole sprites at the window's edges; the side bars stay black; consecutive frames
+  through the D802 slides of rounds 1 and 7.
 * Hatari (F030Arcade build, STE, 4 MB, TOS 2.06): attract mode, coin, start, the round
   poster with its sideways slide, play.
 
-Not done: sound, the flip screen (the DIP switch is upright), the service mode, a
-cheaper D802 slide (a Blitter shift of the band instead of a redraw).
+Not done: sound, the flip screen (the DIP switch is upright), the service mode. The D802
+slide could get cheaper still: the twin copies are shifted every time a buffer is drawn,
+though only a restore or a wrap of the window reads them.

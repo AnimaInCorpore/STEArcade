@@ -34,4 +34,5 @@ if (-not (Test-Path "$bench\COUNTERS.BIN")) { "no COUNTERS.BIN"; exit 1 }
 $b = [IO.File]::ReadAllBytes("$bench\COUNTERS.BIN")
 $vbl = $b[0] * 256 + $b[1]; $renders = $b[2] * 256 + $b[3]; $ticks = $b[4] * 256 + $b[5]
 "VBLs $vbl, frames drawn $renders, ticks $ticks"
+if ($b.Length -ge 14) { "near-VBL mark in time at {0} VBLs, missing at {1}" -f ($b[10] * 256 + $b[11]), ($b[12] * 256 + $b[13]) }
 "game ticks {0:N1} /s (arcade 59.6) = {1:N0}% speed;  frames drawn {2:N1} /s" -f ($ticks / $vbl * 50), ($ticks / $vbl * 50 / 59.6 * 100), ($renders / $vbl * 50)

@@ -31,6 +31,9 @@ TA_NOPS = 84
 ; TA3_DATA to the palette off; the numbers of Commando, which has the same picture).
 
 PIC_TOP = 10
+	ifnd VBL_SOON_DATA
+VBL_SOON_DATA = 8			; Timer A counts (/200) from the palette off to the last lines before the VBL
+	endc
 	ifnd TA2_DATA
 TA2_DATA = 28
 	endc
@@ -39,6 +42,9 @@ TA3_DATA = 200
 	endc
 
 arm_border_timers	macro
+	ifd DEBUG
+	move.b	ta_state,ta_at_vbl
+	endc
 	clr.b	$fffffa19.w		; (a Timer A that is still counting would take the new data only at its next underflow)
 	clr.b	$fffffa1b.w
 	move.b	#199+29,$fffffa21.w	; Timer B data
@@ -62,6 +68,8 @@ wait_borders	macro
 .a\@:	tst.b	border_a		; the top border is due
 	bne.s	.w\@
 	cmp.b	#1,ta_state		; the palette goes on (about 9 lines after the top border)
+	beq.s	.w\@
+	cmp.b	#4,ta_state		; the VBL comes (a blit across it delays the top border: the picture drops)
 	beq.s	.w\@
 	cmp.b	#2,ta_state		; the palette goes off within 4 counts of Timer A (/200: about 5 lines)
 	bne.s	.b\@
@@ -411,6 +419,14 @@ vbl:
 	endc
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	cmp.b	#4,ta_at_vbl		; (the near-VBL mark came in time / not)
+	bne.s	.late
+	addq.w	#1,dbg_soon
+	bra.s	.counted
+.late:	addq.w	#1,dbg_late
+.counted:
+	endc
 	bsr	vbl_video
 	move.b	in_sys,Z_SYSTEM		; (the program only reads them)
 	move.b	in_p1,Z_SYSTEM+1
@@ -557,9 +573,15 @@ timer_a_later:
 	move.b	#TA3_DATA,$fffffa1f.w
 	move.b	#7,$fffffa19.w
 	bra.s	.out
-.off:	movem.l	black_pal,d0-d7
+.off:	cmp.b	#2,ta_state
+	bne.s	.soon
+	movem.l	black_pal,d0-d7
 	movem.l	d0-d7,$ffff8240.w
-	move.b	#3,ta_state
+	move.b	#3,ta_state		; the next event: the VBL is near
+	move.b	#VBL_SOON_DATA,$fffffa1f.w
+	move.b	#7,$fffffa19.w
+	bra.s	.out
+.soon:	move.b	#4,ta_state		; (wait_borders starts no blit until the VBL)
 .out:	movem.l	(sp)+,d0-d7
 	rte
 
@@ -870,7 +892,8 @@ z80_halt:
 	rts
 
 	ifd DEBUG
-; COUNTERS.BIN (words): VBLs, renders, the ticks the Z80 handled (isr_count); (longs) Blitter waits
+; COUNTERS.BIN (words): VBLs, renders, the ticks the Z80 handled (isr_count); (long) Blitter waits; (words) VBLs
+; with the near-VBL mark set in time, VBLs without it
 
 dbg_counters:
 	lea	dbg_buf,a0
@@ -878,6 +901,8 @@ dbg_counters:
 	move.w	dbg_renders,(a0)+
 	move.w	isr_count,(a0)+
 	move.l	dbg_wait,(a0)+
+	move.w	dbg_soon,(a0)+
+	move.w	dbg_late,(a0)+
 	clr	-(sp)
 	pea	dbg_name2
 	move	#$3c,-(sp)
@@ -885,7 +910,7 @@ dbg_counters:
 	addq	#8,sp
 	move	d0,d6
 	pea	dbg_buf
-	move.l	#10,-(sp)
+	move.l	#14,-(sp)
 	move	d6,-(sp)
 	move	#$40,-(sp)
 	trap	#1
@@ -983,6 +1008,10 @@ in_p2:		ds.b	1
 	even
 isr_count:	ds.w	1
 dbg_renders:	ds.w	1
+dbg_soon:	ds.w	1
+dbg_late:	ds.w	1
+ta_at_vbl:	ds.b	1
+	even
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16
