@@ -346,6 +346,9 @@ def main():
             print("stopped at %06X" % pc)
             break
         c = step(1).cycles
+        if s.blitter.cycles:                # (HOG mode: the CPU waits; charged to the instruction that started it)
+            c += s.blitter.cycles
+            s.blitter.cycles = 0
         d.total += c
         if counting:
             prof.charge(pc, c)
