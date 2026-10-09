@@ -58,8 +58,9 @@ def rotate_char(tile):
 
 
 def build_chars(g, pmap):
-    """Per colour quad the 128 characters (rotated, 4 planes x 8 rows), and the opacity
-    masks.  A quad = the STE colour of pens 1-3 (pen 0 transparent)."""
+    """Per colour quad the 128 characters (rotated, 4 planes x 8 rows).  A quad = the
+    STE colour of pens 1-3, 0 for a transparent pen (pen 0, and pens that look up $1f):
+    chars_over takes the pixels not 0 as opaque."""
     quads, quad_of = [], []
     for c in range(64):
         q = tuple(pmap[g.char_lut[c * 4 + p]] if g.char_lut[c * 4 + p] != 0x1f else 0 for p in (1, 2, 3))
@@ -79,17 +80,8 @@ def build_chars(g, pmap):
                     for u in range(8):
                         byte |= ((int(row[u]) >> p) & 1) << (7 - u)
                     data.append(byte)
-    masks = bytearray()
-    for code in range(128):
-        disp = rotate_char(g.chars[code])
-        for v in range(8):
-            byte = 0
-            for u in range(8):
-                if disp[v, u]:
-                    byte |= 1 << (7 - u)
-            masks.append(byte)
     blank = [code for code in range(128) if not g.chars[code].any()]
-    return quads, quad_of, bytes(data), bytes(masks), blank
+    return quads, quad_of, bytes(data), blank
 
 
 def sprite_lines(g, code, flipy):
@@ -151,7 +143,7 @@ def build_sprites(g, pmap):
 def build():
     g = Gfx()
     pal, pmap = build_palette(g)
-    cquads, cquad_of, cdata, cmasks, blank = build_chars(g, pmap)
+    cquads, cquad_of, cdata, blank = build_chars(g, pmap)
     squads, squad_of, smasks, sdata, spans = build_sprites(g, pmap)
     os.makedirs(BUILD, exist_ok=True)
     open(os.path.join(BUILD, "ga_chars.bin"), "wb").write(cdata)
@@ -171,10 +163,6 @@ def build():
     bl = [1 if c in blank else 0 for c in range(128)]
     for i in range(0, 128, 32):
         lines.append("\tdc.b " + ",".join(str(x) for x in bl[i:i + 32]))
-    lines.append("\tcnop 0,2")
-    lines.append("ga_char_masks:\t\t; character -> 8 bytes of opacity (rotated)")
-    for i in range(0, 1024, 16):
-        lines.append("\tdc.b " + ",".join(str(x) for x in cmasks[i:i + 16]))
     # the tile map: 36 x 28 display cells -> video RAM index (tilemap_scan) and screen offset
     lines.append("\tcnop 0,2")
     lines.append("ga_map_index:\t\t; display cell (36 rows of 28) -> video RAM index of the character")

@@ -394,6 +394,9 @@ chars_over:
 	rts
 
 ; d0.w = display cell, d3 = its code: the character's opaque pixels over the draw screen.
+; Opaque are the pixels not black in the colour quad's data: a pen that looks up colour
+; $1f is transparent in the arcade (colour codes 27-29 have such pens 1-3), and no other
+; pen is STE colour 0 (tools/assets.py).
 
 draw_cell_masked:
 	move	d0,d1
@@ -412,9 +415,6 @@ draw_cell_masked:
 	add.l	d1,d4
 	lea	ga_chars,a2
 	add.l	d4,a2			; source: 8 rows of 4 plane bytes
-	lsl	#3,d3
-	lea	ga_char_masks,a3
-	add	d3,a3			; 8 mask bytes
 	move	d0,d1
 	lsl	#2,d1
 	lea	ga_cell_off,a1
@@ -424,19 +424,26 @@ draw_cell_masked:
 	add.l	d1,a0
 	moveq	#7,d7
 .rows:
-	move.b	(a3)+,d4		; mask: 1 = opaque
-	move.b	d4,d5
-	not.b	d5
-	rept 4
-	move.b	(a0),d1
-	and.b	d5,d1
+	move.b	(a2)+,d0
+	move.b	(a2)+,d1
 	move.b	(a2)+,d2
-	and.b	d4,d2
-	or.b	d2,d1
-	move.b	d1,(a0)
-	addq.l	#2,a0
-	endr
-	lea	256-8(a0),a0
+	move.b	(a2)+,d3
+	move.b	d0,d4			; mask: 1 = opaque
+	or.b	d1,d4
+	or.b	d2,d4
+	or.b	d3,d4
+	beq.s	.next_row
+	not.b	d4
+	and.b	d4,(a0)
+	or.b	d0,(a0)
+	and.b	d4,2(a0)
+	or.b	d1,2(a0)
+	and.b	d4,4(a0)
+	or.b	d2,4(a0)
+	and.b	d4,6(a0)
+	or.b	d3,6(a0)
+.next_row:
+	lea	256(a0),a0
 	dbf	d7,.rows
 	rts
 
