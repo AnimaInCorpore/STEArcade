@@ -125,6 +125,9 @@ quit:
 	bsr	dbg_counters
 	endc
 	bsr	restore_hardware
+	ifd DEBUG
+	bsr	bd_report
+	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
 	trap	#1

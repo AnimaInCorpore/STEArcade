@@ -46,23 +46,19 @@ BLT_SKEW = $ffff8a3d
 Z_CHR = G_Z80+$d000-$10000
 Z_SCROLL = G_Z80+$d800-$10000
 
-	ifd SIM
+; No pass waits for the border timers: their events come early and sync themselves to the video (engine/rt/borders.s);
+; a HOG pass over BLIT_PIECE words runs in pieces (blit_go), so that none holds the CPU more than ~1.5 lines.
 wait_b	macro
 	endm
-	elseif NOWAIT
-wait_b	macro				; (measurements only: the borders may flicker)
-	endm
-	else
-wait_b	macro
-.a\@:	tst.b	border_a
-	bne.s	.a\@
-	cmp.b	#6,$fffffa21.w
-	bhi.s	.d\@
-	tst.b	border_b
-	bne.s	.a\@
+; Y count in \1 (a data register): the pass of 2 words a line, whole when it is at most BLIT_PIECE words
+go2	macro
+	cmp.w	#BLIT_PIECE/2,\1
+	bhi.s	.p\@
+	move.b	#$c0,(a6)
+	bra.s	.d\@
+.p\@:	bsr	blit_go
 .d\@:
 	endm
-	endc
 
  section text,code
 init_video:
@@ -638,12 +634,11 @@ ff_clean:
 .n:
  move.l d0,d2
  add.l d4,d2
- wait_b
  move.w #56,BLT_COUNT.w
  move.l d2,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d1,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  add.l #16*STRIDE,d0
  sub.w d1,d3
  bgt.s .burst
@@ -708,14 +703,13 @@ restore_damage:
  add.w d4,d4
  neg.w d4
  add.w #STRIDE+2,d4
- wait_b
  move.w d4,BLT_SRC_YINC.w
  move.w d4,BLT_DST_YINC.w
  move.w d2,BLT_COUNT.w
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
 .test:
  cmp.l a3,a2
  blo .rect
@@ -835,11 +829,10 @@ clear_outside:
  move.w d0,BLT_DST_YINC.w
  clr.w BLT_HOP_OP.w		; (all zero)
  clr.b BLT_SKEW.w
- wait_b
  move.l a0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT.w
  move.w d1,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  rts
 
 ; ---- the front layer ------------------------------------------------------------------------------------------------
@@ -1009,11 +1002,10 @@ front_tile:
  lea (a0,d0.w),a2
  add.l d6,d2
  rept 4
- wait_b
  move.l a2,(a3)
  move.l d2,(a4)
  move.w d1,(a5)
- move.b #$c0,(a6)
+ go2 d1
  addq.l #4,a2
  addq.l #2,d2
  endr
@@ -1033,7 +1025,6 @@ front_tile:
  move.l a2,(a3)			; (the source advances by a line with each call)
  add.l d6,d2
  subq.w #1,d1
- wait_b
 .line:
  move.l d2,(a4)
  move.w d5,(a5)
@@ -1125,11 +1116,10 @@ front_tile:
 .run_regs:
  moveq #3,d3
 .plane:
- wait_b
  move.l a2,(a3)
  move.l d2,(a4)
  move.w d1,(a5)
- move.b #$c0,(a6)
+ go2 d1
  addq.l #4,a2
  addq.l #2,d2
  dbf d3,.plane
@@ -1145,7 +1135,6 @@ front_tile:
  subq.w #1,d1
  moveq #4,d3
 .gline:
- wait_b
  move.l d2,(a4)
  move.w d3,(a5)
  move.b #$c0,(a6)
@@ -1314,11 +1303,10 @@ sea_blank:
  add.w sea_soff,a2
  move.l obj_addr,d2
  move.w sea_n1,d1
- wait_b
  move.l a2,(a3)
  move.l d2,(a4)
  move.w d1,(a5)
- move.b #$c0,(a6)
+ bsr blit_go
  moveq #32,d0
  sub.w d1,d0			; the lines of the second tile
  beq.s .one
@@ -1327,11 +1315,10 @@ sea_blank:
  add.l d1,d2
  move.l sea_src2,a2
  add.w sea_soff,a2
- wait_b
  move.l a2,(a3)
  move.l d2,(a4)
  move.w d0,(a5)
- move.b #$c0,(a6)
+ bsr blit_go
 .one:
  move.w #8,BLT_DST_XINC.w	; (the pass's constant)
  rts
@@ -1426,11 +1413,10 @@ sea_mixed:
  move.w d3,BLT_END1.w
  move.w d3,BLT_END2.w
  move.w d3,BLT_END3.w
- wait_b
  move.l a2,(a3)
  move.l d2,(a4)
  move.w d1,(a5)
- move.b #$c0,(a6)
+ bsr blit_go
 .none:
  rts
 
@@ -1774,7 +1760,6 @@ sprite_part:
  move.w #-264,d5
  moveq #4,d6
  move.w #$c0,d7
- wait_b
  jsr (a1)
  movem.l (sp)+,d4-d7/a2-a6
  bra.s .margins
@@ -1844,7 +1829,6 @@ generic_part:
  subq.w #1,d1
 .row:
  adda.w (a0)+,a1
- wait_b
  move.l a1,BLT_DST_ADDR.w
  move.w #4,BLT_COUNT+2.w
  move.b #$c0,BLT_CTRL.w

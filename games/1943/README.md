@@ -88,14 +88,28 @@ ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
   tiles into all its copies; `back_line`); a change of the layer's enable or a jump draws the band whole.
 * **Everything else is drawn every frame and listed as damage**, copied back from the twin lines at the ring's next
   visit: the sprites of colours 10 and 11 (behind the front layer), the front layer (whole 32 x 32 baked tiles, blank
-  ones skipped, one Blitter call per run of lines with equal opaque masks and plane, the masks shifted to the
-  horizontal scroll), the other sprites (the generated routines and endmask streams of
-  `games/1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (`movep.l`, a list rebuilt when the
-  character RAM changes).  What an object draws into the 48 pixel margins beside the window is cleared.
+  ones skipped; runs of lines with equal opaque masks: 4 lines and more one Blitter call per plane, shorter ones one
+  call per line with the 4 planes as Y count, masks shifted to the horizontal scroll; an unshifted tile at the window's
+  edge draws only its inner chunk), the other sprites (two lists sorted once a frame; the generated routines and
+  endmask streams of `games/1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (each baked as a
+  small `movep.l` routine; the list is rebuilt when the character RAM changes, compared only in the 32-cell blocks
+  its 55 translated writers mark).  A fully opaque front tile's damage is left where the next frame's opaque tiles
+  cover it.  What an object draws into the 48 pixel margins beside the window is cleared.
+* **Front-follow rings through cloud banks**: when the window's fully opaque front cells outnumber the blank ones (by
+  16 of the 72, back again the other way; both layers on, no horizontal front scroll), a ring follows the front layer
+  instead: its twin lines hold the front layer, drawn as its lines scroll in, and a sea pass draws the back layer where
+  the front is transparent (blank cells two plain copies, the back tiles being in the same columns; mixed cells the
+  tile's sea runs, inverted masks, one call per chunk and run).  Sprites of colours 10/11 get the front cells they
+  overlap drawn over them again.  When such a ring's window wraps at the ring's end, the old band's lines are copied
+  back from their twins (the sea is not damage).  A cloud bank frame went from 506k to 246k Musashi cycles.
 * **Colours**: one 16 colour palette, Oklab k-means over the colours of every stage weighted by how often they show
   (`ref/palette_stats.py` -> `docs/palette_stats.json`, `docs/palette.json`).  Tiles of both layers are baked at
   build time (`tools/assets.py`: 396 back, 583 front tiles); sprites and characters are baked on first use into a
   pool with hashed caches.
+* **Borders**: `engine/rt/borders.s` (shared with Commando and Gun.Smoke): Timer B fires 2 lines before the palette
+  on, the bottom border and the palette off and polls to the line end, the bottom border starts Timer A for the next
+  top border, which syncs to its HBL; nothing waits, HOG passes over 32 words run in pieces (`blit_go`).  Hatari, 4000
+  VBLs: 0 late events.
 * **Not exact**: where a sprite of colour 10/11 comes earlier in the list than an overlapping sprite of another
   colour, the arcade shows the first (or the front layer over it), the port the second.  The test recognises such
   pictures by rendering the reference in the port's order.
@@ -104,17 +118,28 @@ ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
 
 `port.py test 1943` builds the simulator version and runs `tools/logic_test.py`: the translated program on Musashi
 against the reference's port schedule, RAM, video latches, sprite buffer, latches, MCU reply and MCU RAM compared at
-every tick; with `--render` each picture the renderer finished is compared with the reference renderer through the
-palette map (the margins must be black).  `--cheat n` plays stage n with MAME's cheats, `--seed n` random inputs.
-Results (2026-10-09): 3000 ticks of attract and play, random play with seeds 1 and 2 (8000 ticks each), every stage
-0-14 with cheats (4000-5000 ticks): logic exact, pictures exact.
+every tick, and that every change of the character RAM came with its block's mark; with `--render` each picture the
+renderer finished is compared with the reference renderer through the palette map (the margins must be black),
+`--twins` also checks the ring's twin lines (the back layer, or the front layer in front-follow).  `--cheat n` plays
+stage n with MAME's cheats, `--seed n` random inputs.  Results (2026-10-09): every stage 0-14 with cheats (4000 ticks),
+the default schedule, random seeds 1-3: logic exact, pictures exact but for the sprite order case above (stage 3: 127
+of 2000 pictures, a few pixels each).
 
-## Speed (2026-10-09, first measurement)
+## Speed (2026-10-09)
 
-`tools/perf_test.py 1500 1300 --profile` (Musashi, play): a tick's logic about 110k cycles (translated Z80 37k, the
-MCU interpreter about 62k), a frame about 340k (front tiles 124k, characters 73k, sprites 61k, damage 48k).  Hatari
-(DEBUG + AUTOPLAY build, 4000 VBLs): 31.9 ticks a second (53% of the arcade), 6.4 frames drawn a second.
+| | first runtime | now |
+|---|---|---|
+| a tick's logic, Musashi (`tools/perf_test.py 1400 1300`, play) | 110k (MCU interpreter 62k) | 46k (translated MCU 8k) |
+| a frame, open sea and a carrier | 340k | 222k |
+| a frame, a cloud bank (`--cheat 9`, ticks 2600-2650) | 562k | 246k |
+| Hatari, DEBUG + AUTOPLAY, 4000 VBLs | 31.9 ticks/s (53%), 6.4 frames/s | 55.7 ticks/s (93%), 11.2 frames/s |
+
+The logic gains: the i8751 firmware translated (`tools/mcux.py`), the window guard only at the 291 sites the
+coverage saw reading the banked window (and sites it never ran; block instructions always), a signed one-compare
+guard, a table bank switch.  `MAX_SKIPS` 8 (4 gave 87% speed and 15.5 frames/s).  `-D STAGE=n` makes the AUTOPLAY
+build play stage n with the cheats; `engine/xprof.py 1943` profiles the translated code (`X1943_STAGE=n`).
 
 ## Not done
 
-Sound; the flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; the speed.
+Sound; the flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
+busiest scenes (the game's own logic is 86k cycles a tick there).

@@ -9,19 +9,9 @@ KEY_ESC = $01
 PIC_TOP = 10                     ; (the picture: 256 lines from the 10th displayed line; Commando's timer values)
 TA_DATA = 98
 TA_NOPS = 84
-TA2_DATA = 28
-TA3_DATA = 200
-arm_border_timers macro
-    clr.b $fffffa19.w
-    clr.b $fffffa1b.w
-    move.b #228,$fffffa21.w
-    move.b #8,$fffffa1b.w
-    clr.b ta_state
-    move.b #TA_DATA,$fffffa1f.w
-    move.b #4,$fffffa19.w
-    st border_a
-    st border_b
-    endm
+PIC_LINES = 256
+BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's first line, off after its last)
+    include "borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
 BUSY = $80
 HOG = $40
 G_Z80 = g_block+$8000
@@ -33,7 +23,7 @@ FRAMES = 0
 NOWAIT = 0
     endc
     ifnd MAX_SKIPS
-MAX_SKIPS = 4                    ; frames skipped in a row while game ticks are pending (the game first)
+MAX_SKIPS = 8                    ; frames skipped in a row while game ticks are pending (the game first: 4 gave 87% speed)
     endc
     section text,code
 start:
@@ -323,7 +313,7 @@ hbl:
     rte
 vbl:
     ifnd SIM
-    arm_border_timers
+    borders_vbl                  ; (first thing: Timer B counts the frame's lines)
     endc
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
@@ -357,96 +347,8 @@ vbl:
     movem.l (sp)+,d0-d7/a0
     rte
 
-wait_borders:
-    ifnd SIM
-.again:
-    tst.b border_a
-    bne.s .again
-    cmp.b #6,$fffffa21.w
-    bhi.s .done
-    tst.b border_b
-    bne.s .again
-.done:
-    endc
-    rts
-
-; wait_heavy: a long HOG blit may start only in the visible area: after the top border is open and at least 10
-; lines before the bottom border's Timer B event.  Started later, it would delay that event or the VBL that arms
-; Timer A, and the border would stay closed (a jump of the picture).  Short blits use wait_borders.
-wait_heavy:
-    ifnd SIM
-.again:
-    tst.b border_a
-    bne.s .again                 ; the top border is not open yet
-    tst.b border_b
-    beq.s .again                 ; the bottom border is open already: wait for the next frame's top
-    cmp.b #10,$fffffa21.w
-    bls.s .again                 ; too close to the bottom border
-    endc
-    rts
-
-timer_a:
-	tst.b	ta_state
-	bne	timer_a_later
-	move	#$2100,sr		; Enable HBL
-	stop	#$2100			; Wait for HBL
-	move	#$2700,sr		; Stop all interrupts
-	clr.b	$fffffa19.w		; Stop Timer A
-	rept TA_NOPS
-	nop
-	endr
-	clr.b	$ffff820a.w		; Remove the top border
-	rept 9
-	nop
-	endr
-	move.b	#2,$ffff820a.w
-	move.b	#1,ta_state		; the next event: the palette on
-	move.b	#TA2_DATA,$fffffa1f.w
-	move.b	#4,$fffffa19.w
-	rte
-
-timer_a_later:
-	movem.l	d0-d7,-(sp)
-	clr.b	$fffffa19.w
-	cmp.b	#1,ta_state
-	bne.s	.off
-	movem.l	shown_pal,d0-d7
-	movem.l	d0-d7,$ffff8240.w
-	clr.b	border_a		; (blits may start now: a HOG blit before would delay the palette, the first line flickers)
-	move.b	#2,ta_state		; the next event: the palette off
-	move.b	#TA3_DATA,$fffffa1f.w
-	move.b	#7,$fffffa19.w
-	bra.s	.out
-.off:	movem.l	black_pal,d0-d7
-	movem.l	d0-d7,$ffff8240.w
-	move.b	#3,ta_state
-.out:	movem.l	(sp)+,d0-d7
-	rte
-
-; Bottom border removal (Timer B)
-
-timer_b:
-	movem.l	d0/a0,-(sp)
-	lea	$fffffa21.w,a0
-	move.b	(a0),d0
-.wait1:	cmp.b	(a0),d0
-	beq.s	.wait1
-	clr.b	$ffff820a.w
-	moveq	#2,d0
-.wait2:	nop
-	dbf	d0,.wait2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
-	move.b	(a0),d0
-.wait3:	cmp.b	(a0),d0
-	beq.s	.wait3
-	movem.l	(sp)+,d0/a0
-	clr.b	border_b
-	rte
+    borders_handlers
+    borders_blit_go
 
     ifd DEBUG
 ; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, sprite list buffers, MCU replies
@@ -477,6 +379,7 @@ dbg_counters:
 dbg_name:
     dc.b "COUNTERS.BIN",0
     even
+    borders_report               ; (BORDERS.BIN: the frames and events the border code had to correct, bd_report)
     else
 dbg_counters:
     rts
@@ -548,9 +451,8 @@ old_fa1b: ds.b 1
 old_fa1d: ds.b 1
 old_fa1f: ds.b 1
 old_fa21: ds.b 1
-border_a: ds.b 1
-border_b: ds.b 1
-ta_state: ds.b 1
+    borders_vars
+    even
 quit_flag: ds.b 1
 vbl_pending: ds.b 1
 tick_phase: ds.b 1
