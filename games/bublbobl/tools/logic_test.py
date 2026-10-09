@@ -4,7 +4,7 @@ shared video / work RAM, the palette and the MCU's RAM are compared.
 
     python logic_test.py [frames] [--input scripted|random] [--stop-on-error]
 """
-import argparse, os, sys
+import argparse, os, re, sys
 from pathlib import Path
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 from sim import Sim
@@ -87,6 +87,35 @@ def main():
     s.bad = sym["z80_badpc"]
     g_ram = sym["g_block"] + 0x8000
     ref = Bublbobl()
+    ref.main.afmask = ref.sub.afmask = 0xC1         # (push / pop af: the translation keeps S Z C)
+    # The translator merges `push rr / pop rr'` into a move (the stack word below SP is dead): the bytes such a push
+    # writes in the reference are not compared until another instruction writes them.
+    merged = set()
+    for line in (build_dir("bublbobl") / "bb_code.s").read_text().splitlines():
+        hit = re.match(r"^([ZY])([0-9A-F]{4,5}):\t\t; push .* \(merged\)", line)
+        if hit:
+            merged.add((hit[1], int(hit[2], 16)))
+    dead = set()
+    for tag, z in (("Z", ref.main), ("Y", ref.sub)):
+        def hook(tag, z):
+            step0, write0 = z.step, z.wr8
+            site = [None]
+
+            def step():
+                pc = z.pc
+                if tag == "Z" and 0x8000 <= pc < 0xC000:
+                    pc += ((ref.bank ^ 4) & 7) * 0x4000
+                site[0] = (tag, pc)
+                return step0()
+
+            def write(ad, v):
+                if site[0] in merged:
+                    dead.add(ad)
+                else:
+                    dead.discard(ad)
+                return write0(ad, v)
+            z.step, z.wr8 = step, write
+        hook(tag, z)
     mem, cpu = s.mem, s.cpu
     print("sim_frame_done %06X g_block %06X (load base %06X)" % (frame_done, sym["g_block"], s.base))
     in0_a, in1_a, in2_a = sym["in0_val"], sym["in1_val"], sym["in2_val"]
@@ -138,7 +167,7 @@ def main():
             for ad in range(lo, hi):
                 want[ad - lo] = ref.rd_main(ad) if not (0xFA00 <= ad < 0xFC00) else 0
             # (rd_main of the window range is not used here; the ranges start at C000)
-            d = [lo + i for i in range(hi - lo) if got[i] != want[i]]
+            d = [lo + i for i in range(hi - lo) if got[i] != want[i] and lo + i not in dead]
             if d:
                 errs.append((d[0], len(d), d[:8]))
                 if bad == 0:

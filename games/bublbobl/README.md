@@ -204,8 +204,13 @@ tiles of the banks that changed over several frames, or fade through the old col
 barrier would remove it; 106 store sites) and the shifted tiles (77 a frame, 2.7k cycles each: **not** the main cost as
 the earlier estimate had it, so the Blitter is not the first thing to try); cheaper translated code (the Z80 handler
 is 40-70% of the logic, the `ld a,r` / `ex af,af'` / `exx` register shuffles are in the hot paths).
-Open: `logic_test.py 1500` differs in one byte (`$E0A8`) from frame 923 on this checkout, with or without the renderer
-changes (so not a renderer matter; 700 frames pass); the coverage run of seed 4 stops at frame ~18000 with
+`logic_test.py` passes 6000 frames (2026-10-09).  Its reference keeps S Z C in `push af` / `pop af` (`afmask`, as the
+other ports' tests do) and does not compare the bytes of merged `push rr / pop rr'` until something else writes them.
+The difference it showed from frame 923 on (`$E0A8`, later `$E0A6`) was a flags byte in a task context: `$1929` does
+`push af ... pop bc` with the alternate F (the reference's `$2C`, Y X P/V, the translation's `$00`), `exx` keeps it as
+C', the task switch at `$0094` pushes it; no reader (the reference with and without the mask differs in these two
+bytes only over 6000 frames).  `$E0DE`/`$E0DF` from frame 1002 were the dead word of the merged `push hl / pop iy` at
+`$1479`.  Open: the coverage run of seed 4 stops at frame ~18000 with
 `handler of 01ED did not return` in the reference machine (`ref/cover.py 4 20000`), so five seeds were used.
 Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, a keyboard
 check of coin / start in Hatari (the scancodes: `5` coin 1, `1` start 1, `6` coin 2, `2` start 2, arrows, space
