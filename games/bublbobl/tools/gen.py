@@ -20,7 +20,7 @@ from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
 from translate import compile_code
 from machine import load, skip_tests
 
-from paths import build_dir
+from paths import build_dir, require_coverage
 BUILD = str(build_dir("bublbobl"))
 
 WIN_LO, WIN_HI = 0x8000, 0xC000
@@ -323,6 +323,7 @@ def generate():
 
 
 def coverage_all():
+    require_coverage("bublbobl", ["bb_cover_%d.pkl" % s for s in range(1, 7)])
     main, sub, wread = set(), set(), set()
     for f in glob.glob(os.path.join(BUILD, "bb_cover_*.pkl")):
         d = pickle.load(open(f, "rb"))

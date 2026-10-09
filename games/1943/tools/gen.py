@@ -9,7 +9,7 @@ import z80x, z80dis, discover
 from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
 from translate import compile_code
 
-from paths import build_dir
+from paths import build_dir, require_coverage
 
 WIN_LO, WIN_HI, VBASE = 0x8000, 0xc000, 0x10000
 IDLE = 0x00d4
@@ -166,6 +166,7 @@ class GameEmitter(Emitter):
 
 def generate(extra_roots=()):
     rom = image()
+    require_coverage('1943', [f'cover{s}.pkl' for s in (1, 2, 3)])
     pcs, wread = set(), set()
     for path in BUILD.glob('cover*.pkl'):
         with path.open('rb') as f:

@@ -6,7 +6,7 @@
     run/<game>/        the .PRG and the ROM files it loads               (not in git)
     assets/roms/       ROM archives; extracted/ holds the unpacked files
 """
-import os
+import os, sys
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parent
@@ -28,6 +28,14 @@ def build_dir(game):
     d = ROOT / "build" / game
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def require_coverage(game, names):
+    """Stops the build when a coverage pickle of `port.py cover <game>` is missing: without them the translation misses
+    the code reached only through jump tables and the program stops at z80_badpc."""
+    missing = [n for n in names if not (build_dir(game) / n).exists()]
+    if missing:
+        sys.exit("error: no coverage %s in %s: python port.py cover %s" % (" ".join(missing), build_dir(game), game))
 
 
 def run_dir(game):

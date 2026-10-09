@@ -15,7 +15,7 @@ import argparse, glob, os, pickle, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import z80x
 from translate import generate_program
-from paths import build_dir
+from paths import build_dir, require_coverage
 BUILD = str(build_dir("galaga"))
 from machine import load, skip_ram_test
 
@@ -48,6 +48,7 @@ YIELDS = [{0x3589, 0x359C}, {0x057F, 0x0596, 0x05B1}, set()]
 
 
 def coverage():
+    require_coverage("galaga", ["galaga_cover_%d.pkl" % s for s in (1, 2, 3)])
     dyn = [set(), set(), set()]
     for f in glob.glob(os.path.join(BUILD, "galaga_cover_*.pkl")):
         d = pickle.load(open(f, "rb"))

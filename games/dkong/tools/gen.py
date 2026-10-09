@@ -10,12 +10,16 @@ import z80x
 from z80x import TABLE_ENTRIES
 from discover import load_rom
 from translate import generate_program
-from paths import build_dir
+from paths import build_dir, require_coverage
 
 BUILD = build_dir("dkong")
 
 
+COVER = ["cover_%d.pkl" % s for s in (11, 12, 13, 14)] + ["cover2_%d.pkl" % s for s in (21, 22, 23, 24)]
+
+
 def dyn_pcs():
+    require_coverage("dkong", COVER)
     dyn = set()
     for f in glob.glob(str(BUILD / "cover*.pkl")):
         p, io = pickle.load(open(f, "rb"))

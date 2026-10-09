@@ -19,7 +19,7 @@ from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
 from translate import compile_code
 from machine import main_rom
 
-from paths import build_dir
+from paths import build_dir, require_coverage
 BUILD = str(build_dir("1942"))
 
 WIN_LO, WIN_HI = 0x8000, 0xC000
@@ -180,11 +180,7 @@ def EXTRA_TABLE_ROOTS(img):
 
 def coverage():
     pcs, wread = set(), set()
-    missing = [s for s in range(1, 9) if not os.path.exists(os.path.join(BUILD, "cover_%d.pkl" % s))]
-    if missing and not getattr(coverage, "warned", False):    # (build/ is not in git: seeds 5-8 cover the later stages, without them they stop at z80_badpc)
-        print("warning: no coverage for seeds %s: python games/1942/ref/cover.py <seed>" % " ".join(map(str, missing)),
-              file=sys.stderr)
-        coverage.warned = True
+    require_coverage("1942", ["cover_%d.pkl" % s for s in range(1, 9)])     # seeds 5-8 cover the later stages
     for f in glob.glob(os.path.join(BUILD, "cover_*.pkl")):
         d = pickle.load(open(f, "rb"))
         pcs |= d["pcs"]
