@@ -268,3 +268,25 @@ Also seen in Black Tiger (2026-10-09):
   NOT mask AND screen, then pixels OR screen).  65 HUD characters went from 300k cycles a frame to 13-49k (plus 18-24k for the text RAM compare).
 * Incremental virtual screens: check only the cells that scrolled in; draw a new tile to its twins one page away too
   (outside the window), so the next page is ready; per display ring a damage list restored from the clean screen.
+
+## What Gun.Smoke added (2026-10-09)
+
+* **A reference that boots is not a reference that plays.**  Gun.Smoke's first reference returned the real vertical blank
+  in SYSTEM bit 3; MAME declares it `IPT_CUSTOM` without a read callback, so it always reads 1, and the interrupt handler
+  skips its body when it reads 0.  The game sat in its first screen, the coverage stopped at 300 pcs, and the MAME picture
+  checks passed (they render MAME's state).  Look at the reference after a few thousand frames, and count the pcs.
+* **Window reads through `(iy+d)`**: with `z80x.FAST` IY is the low word of a2 (the upper word is not 0), so a gen's
+  window check must match `(a6,a2.w)` too and compare a copy of the word (`move.w a2,d5`).  z80x's `write8` takes its
+  address from `read8(op, io_read=False)`: a gen that guards in `read8` also guards stores unless it tells them apart
+  (`GSEmitter.storing`).  Fixed the same way in Black Tiger's and Bubble Bobble's gens (Bubble Bobble missed
+  `ld a,(iy-1)` at two window read sites); 1943's gen still has the gap.
+* **The STE shows 48 pixels on each side of a 224-pixel window**: whole tiles and sprites drawn into the side margins are
+  visible there.  Clear the side chunks a tile or a sprite reached (the damage list then restores black from the twin);
+  `render_test.py` checks the side bars.
+* **HOG blits also delay Timer A's palette switches** (the picture's first lines black when the palette came on late):
+  `wait_borders` waits while the palette-on event is pending and just before palette-off; text restores in 2-line bursts.
+* **Generated sprite code is large for big sprite sets**: 2008 shapes (x 16 shifts) would take 2.85 MB.  Generate the
+  routines and streams for the shapes coverage drew most within a budget (1074 shapes, 96.5% of the draws, 830 KB) and
+  draw the rest with the same Blitter calls a row at a time, end masks from the stored opaque rows.
+* **Cheats that patch code** (MAME's start round of Gun.Smoke changes an instruction's operand) need the same patch in
+  the translated instruction for a lock-step test; setting the value in RAM after a tick is too late.

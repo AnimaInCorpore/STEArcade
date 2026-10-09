@@ -32,11 +32,9 @@ class GunSmoke:
         if a < 0xc000:
             return self.rom[0x8000 + self.bank * 0x4000 + a - 0x8000]
         if 0xc000 <= a <= 0xc004:
-            value = self.inputs[a - 0xc000]
-            if a == 0xc000:
-                line = (self.cpu.cycles % CYCLES_PER_FRAME) // CYCLES_PER_LINE
-                value = (value & ~8) if line >= 240 or line < 16 else value | 8
-            return value
+            # SYSTEM bit 3 is MAME's "VBLANK" IPT_CUSTOM without a read callback: it always reads 1 (inactive,
+            # active low).  The interrupt handler skips its whole body when it reads 0.
+            return self.inputs[a - 0xc000] | (8 if a == 0xc000 else 0)
         if 0xc4c9 <= a <= 0xc4cb:
             return (255, 0, 0)[a - 0xc4c9]
         if 0xd000 <= a <= 0xd802 or a >= 0xe000:
@@ -72,7 +70,40 @@ class GunSmoke:
                 self.pending_irq = True
         self.frame += 1
 
-    run_frame_port = run_frame
+    # The runtime's schedule (src/gunsmoke.s, z80_hook): the program is a cooperative kernel (eight tasks at EF80, the
+    # scheduler 00AD-00CE).  The interrupt is delivered when the scheduler found no task ready (IDLE: the `jr $00B0`
+    # after the last of the eight): RST 38 runs to completion with RESCAN (where that jr goes) as its return address,
+    # so the scheduler scans again and the tasks it woke run until it idles again.  One call = one arcade frame.
+    IDLE = 0x00ce
+    RESCAN = 0x00b0
+    booted = False
+
+    def run_to_idle(self, limit=3000000):
+        c = self.cpu
+        for _ in range(limit):
+            if c.pc == self.IDLE:
+                return
+            c.step()
+        raise RuntimeError(f'The foreground did not idle (pc {c.pc:04x}, frame {self.frame})')
+
+    def run_frame_port(self):
+        c = self.cpu
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        c.iff1 = c.iff2 = 0
+        c.push(self.RESCAN)
+        c.pc = 0x38
+        for _ in range(2000000):
+            c.step()
+            if c.pc == self.RESCAN:
+                break
+        else:
+            raise RuntimeError('The interrupt did not return')
+        self.irq_count += 1
+        c.pc = self.RESCAN
+        self.run_to_idle()
+        self.frame += 1
 
     def render_rgb(self):
         if self.video is None:

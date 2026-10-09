@@ -25,7 +25,7 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 COVER = {
     "1943": [("ref/cover.py", [1, 2, 3], 20000)],
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
-    "gunsmoke": [("ref/cover.py", [1, 2, 3], 20000)],
+    "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
     "dkong": [("ref/cover1.py", [11, 12, 13, 14], 60000), ("ref/cover2.py", [21, 22, 23, 24], 40000),
               ("ref/colors3.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
@@ -37,7 +37,13 @@ COVER = {
 TESTS = {
     "1943": [("tools/prepare.py", [], None), ("tools/video_test.py", [], None),
              ("tools/reference_test.py", ["{n}"], 700)],
-    "gunsmoke": [("tools/prepare.py", [], None), ("tools/reference_test.py", ["{n}"], 700)],
+    "gunsmoke": [("tools/reference_test.py", ["700"], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["4000", "--seed", "9"], None),     # MAME's cheats: round 6
+                 ("tools/render_test.py", ["40", "seq", "--first", "1500"], None),
+                 ("tools/render_test.py", ["20", "scroll"], None),
+                 ("tools/render_test.py", ["4", "edges"], None)],
     "commando": [("tools/reference_test.py", [], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
@@ -97,9 +103,6 @@ def main():
             print("no preparation command for", game)
             return 2
         return call([PY, game_script(game, PREPARE[game])] + rest)
-    if game == "gunsmoke" and cmd in ("build", "run"):
-        print(game + ": reference machine is available; the STE translation and runtime are not implemented yet")
-        return 2
     if cmd == "build":
         return call([PY, game_script(game, "tools/build.py")] + rest)
     if cmd == "cover":

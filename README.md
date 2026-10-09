@@ -14,7 +14,7 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 | [1943](games/1943/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | Euro reference boots; graphics exact against MAME at three frames; STE runtime in development |
 | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | STE runtime, banked translation, virtual-screen scrolling and firmware protection; sound and rendering optimisation pending |
 | [Commando](games/commando/README.md) | Z80 (encrypted opcodes; sound CPU omitted) | playable STE runtime, scrolling Blitter renderer, exact reference/translation checks; 16 colours, no sound |
-| [Gun.Smoke](games/gunsmoke/README.md) | Z80 (sound CPU omitted) | main-CPU reference boot, bank-aware coverage and MAME-verified renderer; STE runtime pending |
+| [Gun.Smoke](games/gunsmoke/README.md) | Z80 (four ROM banks with code; sound CPU omitted) | attract mode and play, exact logic and picture against the reference (checked in rounds 1-3, 6, 7, 9 and the ending); 54 ticks (91% of the arcade) and 29 frames a second in Hatari, 16 colours, no sound |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
