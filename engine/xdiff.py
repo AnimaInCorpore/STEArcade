@@ -37,7 +37,7 @@ STACK_DEAD = 0x100
 
 class Runner:
     def __init__(self, prg, mapfile, label):
-        self.s = Sim(prg, run_dir=os.path.dirname(prg))
+        self.s = Sim(prg, ram_kib=16384, run_dir=os.path.dirname(prg))   # (readable registers: borders.s blit_go)
         self.s.mem.set_trace_mode(True)
         self.sym = {k: v + self.s.base for k, v in self.s.symbols(mapfile).items()}
         self.stop = self.sym[label]
