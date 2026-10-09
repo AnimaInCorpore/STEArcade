@@ -27,7 +27,12 @@ class SoundBoard:
         self.frame = self.line = 0
         self.cpu = Z80(self.rd8, self.wr8)
         self.irq = False
+        self.taken = 0              # IRQs taken
         self.reset_held = False
+        self.regs = [[0] * 16, [0] * 16]    # the SSG registers as last written
+        self.in_irq = False
+        self.on_irq_done = None     # called when a handler has returned to the main loop (its writes are done)
+        self.irq_latch = 0          # the latch when the IRQ was taken
 
     def rd8(self, a):
         if a == 0x6000:
@@ -43,8 +48,15 @@ class SoundBoard:
             chip = (a >> 1) & 1
             if a & 1:
                 self.writes.append((self.frame, self.line, chip, self.addr[chip], v))
+                if self.addr[chip] < 16:
+                    self.regs[chip][self.addr[chip]] = v
             else:
                 self.addr[chip] = v
+
+    IDLE = (0x0073, 0x0074)     # the main loop: ei; jr $0073
+
+    def idle(self):
+        return self.cpu.pc in self.IDLE
 
     def run_line(self, target, irq_now):
         """run to the cycle count target; irq_now: the PROM raises the IRQ on this line (held until taken)"""
@@ -57,6 +69,9 @@ class SoundBoard:
         while c.cycles < target:
             if self.irq and c.iff1 and not getattr(c, "ei_delay", False):
                 self.irq = False
+                self.taken += 1
+                self.in_irq = True
+                self.irq_latch = self.latch
                 c.iff1 = c.iff2 = 0
                 c.halted = False
                 c.push(c.pc)
@@ -65,6 +80,10 @@ class SoundBoard:
             if hasattr(c, "ei_delay"):
                 c.ei_delay = False
             c.step()
+            if self.in_irq and c.pc in self.IDLE:
+                self.in_irq = False
+                if self.on_irq_done:
+                    self.on_irq_done(self)
 
 
 def run(frames, on_frame=None):
