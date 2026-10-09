@@ -794,6 +794,7 @@ restore_damage:
  move.w #2,BLT_DST_XINC.w
  move.w #$0203,BLT_HOP_OP.w
  clr.b BLT_SKEW.w
+ lea piece_lines,a0
  bra .test
 .rect:
  move.l (a2)+,d0
@@ -810,11 +811,26 @@ restore_damage:
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- bsr blit_go			; (up to 8 x 16 words: in pieces)
+ cmp.w #16,d2
+ bhi.s .divide			; (wider than the table: blit_go divides)
+ moveq #0,d1
+ move.b -1(a0,d2.w),d1		; the lines a piece: BLIT_PIECE / the words a line
+ bsr blit_go_lines		; (up to 8 x 16 words: in pieces)
 .test:
  cmp.l a3,a2
  blo .rect
  rts
+.divide:
+ bsr blit_go
+ bra.s .test
+
+ section data,data
+piece_lines:			; BLIT_PIECE / the words a line, for 1-16 words (restore_damage: no divu)
+ rept 16
+ dc.b BLIT_PIECE/(REPTN+1)
+ endr
+ even
+ section text,code
 
 ; d2 = the address of a rectangle's first line and chunk, d0 = its buffer line, d1 = lines, d3 = words a line: added to
 ; the damage list with its twin as the source (split at line RING_H).  Keeps all registers.

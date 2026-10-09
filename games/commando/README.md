@@ -127,3 +127,13 @@ the interrupts, the idle hook, the targets of the `RST 30` word tables, which `d
 the coverage saw was a join, which switched the CCR analysis, the precise returns and the merges off.  Merged pcs get
 z80_badpc in `z80_entries`.  `engine/xprof.py commando` (ticks 600-1000, attract): translated code 8.4k -> 7.0k cycles a
 tick (1.20x).  `logic_test.py 3000`: exact.
+
+## Restores without divu (2026-10-09, later)
+
+`restore_damage` takes the lines a piece from `piece_lines` (BLIT_PIECE / the words a line, 1-16 words) and calls
+`blit_go_lines`; `blit_go`'s `divu` cost 9.5k cycles a frame over ~68 restores.  `perf_test.py 2500 900` (CPU +
+Blitter, Musashi): a frame 185.8k -> 182.0k.  `render_test.py 300 seq`, `20 scroll`, `4 edges`: exact.  Hatari
+`bench.sh`: 56.4 ticks (95%), 27.2 frames a second, no late border events (the run-to-run noise is larger than 2%).
+What is left is spread thin: the sprite pass ~750 cycles of set-up a sprite, the characters ~610 a cell (8 rows of
+`movep.l` read-modify-write; only 10 of 248 rows a frame are blank and 17 opaque), the restores' Blitter time ~36k,
+the translated code flat (the largest form, `ret`, 10%).
