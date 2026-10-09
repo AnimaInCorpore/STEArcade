@@ -338,62 +338,60 @@ draw_cell:
 
 ; ------------------------------------------------------------------------------
 ; The characters over the sprites: every cell a sprite was drawn in this frame
-; (spr_marks) whose character is not blank gets the character back, the opaque pixels
-; only.
+; (spr_marks) whose character is not blank (cell_content, the same layout) gets the
+; character back, the opaque pixels only.  (A cell the program rewrites during the
+; render is caught up by the next frame's scan_cells.)
 
 chars_over:
 	lea	spr_marks,a4
+	lea	cell_content,a3
 	lea	ga_mark_cell,a5		; per mark bit: the display cell or -1
-	lea	ga_map_index,a1
-	lea	g_ram,a2
-	lea	ga_char_blank,a3
 	move	#MARK_ROWS-1,d7
 .row:
-	tst.l	(a4)		; (an or.b of byte 4 into the long tests its low byte only)
-	bne.s	.marked
-	tst.b	4(a4)
-	beq.s	.next_row
-.marked:
-	moveq	#0,d6			; byte of the row (8 cells each)
-	moveq	#0,d4			; the byte's first cell * 2
-.byte:
-	move.b	(a4,d6.w),d0
-	beq.s	.next_byte
-	move	d4,d3
+	move.l	(a4)+,d5		; cells 0-31 of the row
+	and.l	(a3)+,d5
+	move.b	(a4),d6			; cells 32-39
+	and.b	(a3),d6
+	addq.l	#4,a4
+	addq.l	#4,a3
+	moveq	#0,d4			; cell * 2
+	tst.l	d5
+	beq.s	.high
 .bit:
-	add.b	d0,d0
+	add.l	d5,d5
 	bcc.s	.no_bit
-	move	(a5,d3.w),d2		; display cell
+	move	(a5,d4.w),d0		; display cell
 	bmi.s	.no_bit
-	move	d2,d1
-	add	d1,d1
-	move	(a1,d1.w),d1		; video RAM index
-	moveq	#0,d5
-	move.b	(a2,d1.w),d5
-	and	#$7f,d5			; code
-	tst.b	(a3,d5.w)
-	bne.s	.no_bit			; blank
-	movem.l	d0-d7/a0-a5,-(sp)
-	move	d2,d0
-	move	d5,d3
+	movem.l	d4-d7/a3-a5,-(sp)
 	bsr	draw_cell_masked
-	movem.l	(sp)+,d0-d7/a0-a5
+	movem.l	(sp)+,d4-d7/a3-a5
 .no_bit:
-	addq	#2,d3
-	tst.b	d0
+	addq	#2,d4
+	tst.l	d5
 	bne.s	.bit
-.next_byte:
-	add	#16,d4
-	addq	#1,d6
-	cmp	#5,d6
-	blo.s	.byte
+.high:
+	tst.b	d6
+	beq.s	.next_row
+	moveq	#64,d4
+.bit_h:
+	add.b	d6,d6
+	bcc.s	.no_bit_h
+	move	(a5,d4.w),d0
+	bmi.s	.no_bit_h
+	movem.l	d4-d7/a3-a5,-(sp)
+	bsr	draw_cell_masked
+	movem.l	(sp)+,d4-d7/a3-a5
+.no_bit_h:
+	addq	#2,d4
+	tst.b	d6
+	bne.s	.bit_h
 .next_row:
-	addq.l	#8,a4
 	lea	80(a5),a5
 	dbf	d7,.row
 	rts
 
-; d0.w = display cell, d3 = its code: the character's opaque pixels over the draw screen.
+; d0.w = display cell: the character's opaque pixels over the draw screen.  Trashes
+; d0-d7, a0-a2.
 ; Opaque are the pixels not black in the colour quad's data: a pen that looks up colour
 ; $1f is transparent in the arcade (colour codes 27-29 have such pens 1-3), and no other
 ; pen is STE colour 0 (tools/assets.py).
@@ -410,7 +408,10 @@ draw_cell_masked:
 	lsl	#2,d4
 	lea	ga_char_quad,a2
 	move.l	(a2,d4.w),d4
-	move	d3,d1
+	lea	g_ram,a1
+	moveq	#0,d1
+	move.b	(a1,d2.w),d1
+	and	#$7f,d1			; code
 	lsl	#5,d1
 	add.l	d1,d4
 	lea	ga_chars,a2
