@@ -317,7 +317,6 @@ draw_part:
 	add.l	d0,a1
 	move.l	4(a1),a0			; the stream of masks and the control word
 	move.l	(a1),a1				; the routine
-	wait_borders
 	jmp	(a1)
 .out:	rts
 
@@ -369,7 +368,6 @@ generic_part:
 	addq.l	#2,a2				; (the control word)
 .rows:	subq.w	#1,d1
 .row:	adda.w	(a0)+,a1
-	wait_borders
 	move.l	a1,BLT_DST_ADDR.w
 	move.w	#4,BLT_COUNT+2.w
 	move.b	#$c0,BLT_CTRL.w

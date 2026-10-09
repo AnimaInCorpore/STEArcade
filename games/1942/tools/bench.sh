@@ -18,9 +18,10 @@ python3 - <<'P'
 import struct
 d = open('run/1942/COUNTERS.BIN', 'rb').read()
 v, h, r, b, i = struct.unpack('>5H', d[:10]); hist = struct.unpack('>10H', d[10:30])
-ib, idf, wt = struct.unpack('>3I', d[30:42])
+ib, idf, pieced = struct.unpack('>3I', d[30:42]); bd = struct.unpack('>5H', d[42:52])
 print("VBLs between two ticks, 0..9+:", hist)
-print("idle spins: no free ring", ib, "nothing to do", idf, "; border-wait spins", wt, "(~%.1f%% of the CPU time)" % (100 * wt * 36 / (6001 * 160256)))
+print("idle spins: no free ring", ib, "nothing to do", idf, "; Blitter passes run in pieces", pieced)
+print("borders: top border armed by the VBL in %d frames; events that started too late: top border %d, palette on %d, bottom border %d, palette off %d" % bd)
 print("VBLs", v, "frames drawn", r, "ticks", i)
 print("game ticks %.1f /s (arcade 59.6) = %.0f%% speed;  frames drawn %.1f /s" % (i / v * 50, i / v * 50 / 59.6 * 100, r / v * 50))
 P

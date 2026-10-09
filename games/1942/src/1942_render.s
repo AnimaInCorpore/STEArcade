@@ -407,7 +407,6 @@ blit_copy:
 .good:
 	endc
 	stage	$044
-	wait_borders
 	move.w	#2,BLT_SRC_XINC.w
 	move.w	#2,BLT_DST_XINC.w
 	move.w	d0,d2
@@ -424,26 +423,8 @@ blit_copy:
 	move.w	d0,BLT_COUNT.w
 	move.w	#$0203,BLT_HOP_OP.w
 	clr.b	BLT_SKEW.w
-	; the rows in groups of four (one look at the border timers for each; a group is about as long as the Blitter's busiest stretch
-	; in the sprite routines), then the rest
-	move.w	d1,d3
-	lsr.w	#2,d3
-	and.w	#3,d1
-	subq.w	#1,d3
-	bmi.s	.rest
-.group:	wait_borders
-	rept 4
-	move.w	#1,BLT_COUNT+2.w
-	move.b	#$c0,BLT_CTRL.w		; short HOG pass; addresses advance automatically
-	endr
-	dbf	d3,.group
-.rest:	subq.w	#1,d1
-	bmi.s	.done
-.row:	wait_borders
-	move.w	#1,BLT_COUNT+2.w
-	move.b	#$c0,BLT_CTRL.w
-	dbf	d1,.row
-.done:	rts
+	move.w	d1,BLT_COUNT+2.w
+	bra	blit_go				; (rows of more than BLIT_PIECE words: a line a pass)
 
 	include "1942_bg.s"
 	include "1942_chr.s"

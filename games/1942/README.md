@@ -67,10 +67,10 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
 * **Colours**: 16 per palette bank (`tools/palettes.py`: weighted k-means in Oklab over the colours of the bank's background, the sprite
   and the character entries, weights from `ref/palette_stats.py`).  The pen masks of the graphics (`tools/assets.py`) are baked into STE
   planes on first use (`tile_get`, `sprite_get`, `char_get`) and cached; a bank change flushes the caches and redraws the background.
-* **Timers**: Timer A removes the top border, then switches the palette on at the picture's first line and off after its last (the black
-  bars; `TA2_DATA`, `TA3_DATA` found by looking at screenshots), Timer B the bottom border.  **Blits that hog the bus delay the VBL and
-  the border timers and make the picture flicker**: a sprite part (16 short row blits, about three scanlines) starts only when
-  `wait_borders` allows; `blit_copy` runs without HOG and is waited for.
+* **Timers**: `engine/rt/borders.s` (shared by the Blitter ports): Timer A removes the top border, Timer B the bottom one and
+  switches the palette on at the picture's first line and off after its last (the black bars).  Blits that hog the bus delay the
+  interrupts, so every event comes ~2-3 lines early and syncs itself to the video (Timer B polls its line counter, Timer A picks its
+  HBL by reading its own counter); no blit waits.  `blit_copy` runs rows longer than 32 words a line a pass (`blit_go`).
 * **Sprites** (`src/1942_spr.s`, `tools/spritegen.py`, the method of `stefastbobs2/FAST_BLITTER_SPRITES.md`): the baked source of a part
   has its rows in blit order (equal opaque masks adjacent, transparent rows left out, `assets.sprite_orders`), one Blitter call per
   row draws the four planes (Y count 4, the opaque mask cut into the two destination words as END1 / END3, holes included, NFSR for
