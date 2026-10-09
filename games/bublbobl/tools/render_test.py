@@ -38,7 +38,7 @@ def inputs_upto(ref, f):
 
 
 def main():
-    args = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != "--layers"]
     if args and args[0] == "seq":                  # consecutive frames: the incremental path
         frames = list(range(int(args[1]), int(args[1]) + int(args[2])))
     else:
@@ -69,6 +69,7 @@ def main():
             f += 1
         # the reference state into the 68000's memory
         mem.w_block(g_ram + 0x4000, bytes(ref.vram))
+        mem.w8(sym["vmark_all"], 1)                      # (the game's writers mark what they change)
         mem.w_block(g_ram + 0x5D00, bytes(ref.oram))
         mem.w_block(g_ram + 0x7800, bytes(ref.pal))
         # call render_frame
@@ -92,6 +93,10 @@ def main():
         exp = np.array([ttab[v] if v != 255 else 0 for v in raw.ravel()], np.uint8).reshape(224, 256)
         diff = got != exp
         nd = int(diff.sum())
+        if "--layers" in sys.argv:
+            pc = lambda name: sum(bin(mem.r32(sym[name] + 4 * i)).count("1") for i in range(28))
+            print("   moving range %d-%d, cells: dirty %d (before the closure %d), mov %d, stale %d, need %d, need_k %d, composites invalid %d" % (
+                mem.r16(sym["lay_lo"]), (mem.r16(sym["lay_hi"]) ^ 0x8000) - 0x8000, pc("dirty"), pc("dirty_raw"), pc("mov"), pc("stale"), pc("need"), pc("need_k"), pc("comp_bad")))
         print("frame %d: %d of %d pixels differ (cycles %d)" % (target, nd, diff.size, n))
         if len(frames) <= 8:
             check_cache(mem, sym)

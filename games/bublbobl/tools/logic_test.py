@@ -116,6 +116,15 @@ def main():
             cpu.w_reg(R.A7, sp + 4)
             if booted:
                 break
+        # every page of the video RAM that differs from the renderer's copy is marked (gen.VRAM_WRITERS)
+        if not mem.r8(sym["vmark_all"]) and not mem.r8(sym["vdiff_busy"]):
+            live = bytes(mem.r_block(g_ram + 0xC000 - 0x8000, 0x1D00))
+            snap = bytes(mem.r_block(sym["snap_vram"], 0x1D00))
+            for pg in range(58):
+                if live[pg * 128:pg * 128 + 128] != snap[pg * 128:pg * 128 + 128] and not mem.r8(sym["vmarks"] + 0x180 + pg):
+                    i = next(i for i in range(pg * 128, pg * 128 + 128) if live[i] != snap[i])
+                    print("frame %d: video RAM %04X changed without its page mark (a writer missing in gen.VRAM_WRITERS)" % (f, 0xC000 + i))
+                    return
         # compare
         errs = []
         if mem.r16(sym["rnd_state"]) != ref.rnd_state and not getattr(ref, "_rnd_reported", False):

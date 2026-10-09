@@ -85,6 +85,7 @@ def main():
 
     cpu, mem = s.cpu, s.mem
     per_frame = []                                  # (bucket counter, routine counter, game frames) per VBL
+    rf_stats = []                                   # (dirty cells, whole redraws, palette changes) so far, per VBL
     hb_last = 0
     gframes = 0
     rn_last = 0
@@ -119,6 +120,8 @@ def main():
             if s.irq(4, 28):
                 next_vbl += FRAME_CYCLES
                 per_frame.append((cur_b, cur_r, gframes, renders))
+                if "sim_rf_cells" in sym:
+                    rf_stats.append((mem.r32(sym["sim_rf_cells"]), mem.r32(sym["sim_rf_whole"]), mem.r32(sym["sim_rf_all"])))
                 gframes = 0
                 renders = 0
                 cur_b, cur_r = collections.Counter(), collections.Counter()
@@ -138,6 +141,11 @@ def main():
         gf = sum(x[2] for x in sel)
         rnd = sum(x[3] for x in sel)
         busy = sum(v for k, v in B.items() if k != "idle / harness")
+        if rf_stats and hi <= len(rf_stats):
+            c0 = rf_stats[lo - 1] if lo else (0, 0, 0)
+            c1 = rf_stats[hi - 1]
+            rn = max(1, sum(x[3] for x in sel))
+            print("   renders: %d dirty cells each (mean), %d drawn whole, %d with a new palette" % ((c1[0] - c0[0]) // rn, c1[1] - c0[1], c1[2] - c0[2]))
         print("frames %d-%d (%d VBLs): busy %.0f%% of the CPU (%d cycles per VBL of %d)" % (lo, hi, n, 100.0 * busy / (n * FRAME_CYCLES), busy // n, FRAME_CYCLES))
         print("   game frames run per VBL: %.2f  (1.00 = the port's full speed, i.e. 50 of the arcade's 59.19 frames/s); pictures drawn: %.1f per second (%d renders in %d VBLs)" % (gf / n, 50.0 * rnd / n, rnd, n))
         for k, v in B.most_common():

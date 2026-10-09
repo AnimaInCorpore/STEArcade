@@ -35,7 +35,197 @@ VOLMIN = 4				; a palette entry that changed this often is volatile (flashing)
 TC_SIZE = 4096				; tile cache slots
 TC_ENTRY = 72				; key.l, opaque.l, 8 rows of (data.l, inverted mask.l)
 
+; rf_map2 = stale if the object a3 is outside the moving range (its tiles are in the composites)
+stale_if_static	macro
+	clr.l	rf_map2
+	cmp.b	#1,O_LAYER(a3)
+	beq.s	.m\@
+	move.l	#stale,rf_map2
+.m\@:
+	endm
+
+; ---- the per-cell macros of the composites (inline in each_cell: keep d0-d2, d5, a0, a1, a3)
+
+; for each cell of the bitmap \1: a4 = its screen byte (from a1 = the screen's first game cell), d4 = its
+; offset in a composite table (cell * 32), then \3 (inline: keeps d0-d2, d5, a0, a1, a3)
+each_cell	macro
+	lea	\1,a0
+	moveq	#28-1,d0		; rows to go
+	moveq	#0,d5			; the row's first cell * 32
+.row\@:
+	move.l	(a0)+,d2
+	beq	.skip\@
+	moveq	#0,d1			; the column
+.cell\@:
+	btst	d1,d2
+	beq	.no\@
+	move.w	d1,d4
+	lsr.w	#1,d4
+	lsl.w	#3,d4
+	btst	#0,d1
+	beq.s	.even\@
+	addq.w	#1,d4
+.even\@:
+	lea	(a1,d4.w),a4
+	move.w	d1,d4
+	lsl.w	#5,d4
+	add.w	d5,d4
+	\3
+.no\@:
+	addq.w	#1,d1
+	cmp.w	#32,d1
+	blo	.cell\@
+.skip\@:
+	lea	8*STRIDE(a1),a1
+	add.w	#32*32,d5
+	dbf	d0,.row\@
+	endm
+
+cap	macro				; \1 = the table: 8 lines of the cell at a4 -> \1 + d4
+	lea	\1,a5
+	add.w	d4,a5
+o	set	0
+	rept 8
+	movep.l	o(a4),d7
+	move.l	d7,(a5)+
+o	set	o+STRIDE
+	endr
+	endm
+cap_b	macro
+	cap	comp_B
+	endm
+cap_s	macro
+	cap	comp_S
+	endm
+cap_k	macro
+	cap	comp_K
+	endm
+; the cell on colour 15 against the one on black (comp_K): the pixels where all four planes agree are
+; opaque; comp_K = that mask in all four planes, kany = a pixel of it is
+cap_kmask	macro
+	lea	comp_K,a5
+	add.w	d4,a5
+	moveq	#0,d6
+o	set	0
+	rept 8
+	movep.l	o(a4),d7
+	move.l	d7,(a5)+
+	or.b	d7,d6
+o	set	o+STRIDE
+	endr
+	lsr.w	#5,d4
+	lea	comp_kany,a5
+	move.b	d6,(a5,d4.w)
+	endm
+cap_mask	macro
+	lea	comp_K,a5
+	add.w	d4,a5
+	moveq	#0,d6
+o	set	0
+	rept 8
+	movep.l	o(a4),d7
+	move.l	(a5),d3
+	eor.l	d3,d7			; the planes that differ
+	move.l	d7,d3
+	swap	d3
+	or.w	d3,d7
+	move.w	d7,d3
+	lsr.w	#8,d3
+	or.b	d3,d7
+	not.b	d7			; opaque pixels
+	or.b	d7,d6
+	move.b	d7,d3
+	lsl.w	#8,d7
+	move.b	d3,d7
+	move.w	d7,d3
+	swap	d7
+	move.w	d3,d7
+	move.l	d7,(a5)+
+o	set	o+STRIDE
+	endr
+	lsr.w	#5,d4
+	lea	comp_kany,a5
+	move.b	d6,(a5,d4.w)
+	endm
+
+fill_cell	macro			; comp_B where mov (its row's long in d3), else comp_S
+	lea	comp_S,a5
+	btst	d1,d3
+	beq.s	.go\@
+	lea	comp_B,a5
+.go\@:
+	add.w	d4,a5
+o	set	0
+	rept 8
+	move.l	(a5)+,d7
+	movep.l	d7,o(a4)
+o	set	o+STRIDE
+	endr
+	endm
+fill_row	macro			; d3 = mov's long of this row (row 27 - d0, from a3)
+	moveq	#27,d3
+	sub.w	d0,d3
+	lsl.w	#2,d3
+	move.l	(a3,d3.w),d3
+	fill_cell
+	endm
+
+over_cell	macro
+	move.w	d4,d3
+	lsr.w	#5,d3
+	lea	comp_kany,a5
+	tst.b	(a5,d3.w)
+	beq	.none\@
+	lea	comp_K,a5
+	add.w	d4,a5
+	lea	comp_S,a6
+	add.w	d4,a6
+o	set	0
+	rept 8
+	move.l	(a5)+,d3		; opaque above
+	move.l	(a6)+,d6
+	and.l	d3,d6
+	not.l	d3
+	movep.l	o(a4),d7
+	and.l	d3,d7
+	or.l	d6,d7
+	movep.l	d7,o(a4)
+o	set	o+STRIDE
+	endr
+.none\@:
+	endm
 init_render:
+	lea	comp_bad,a0		; (no composite is valid yet)
+	lea	comp_bad_k,a1
+	moveq	#28-1,d0
+.bad:	move.l	#-1,(a0)+
+	move.l	#-1,(a1)+
+	dbf	d0,.bad
+	; xin_used: the 8 shapes whose first row continues the column of the object before (the x entering)
+	lea	bb_prom,a0
+	lea	xin_used,a1
+	moveq	#8-1,d0
+.shape:
+	sf	(a1)
+	moveq	#0,d1
+.yc:
+	move.w	d1,d2
+	lsr.w	#1,d2
+	move.b	(a0,d2.w),d3
+	btst	#3,d3
+	bne.s	.skip_row
+	btst	#2,d3
+	sne	(a1)
+	bra.s	.found
+.skip_row:
+	addq.w	#1,d1
+	cmp.w	#32,d1
+	blo.s	.yc
+.found:
+	addq.l	#1,a1
+	lea	16(a0),a0
+	dbf	d0,.shape
+	st	vmark_all			; (the first frame compares the whole video RAM)
 	lea	tcache,a0
 	move.l	#TC_SIZE-1,d0
 .t:	move.l	#-1,(a0)
@@ -75,41 +265,361 @@ rf_init_state:
 ;   object's tiles on them are drawn in list order.
 ; ------------------------------------------------------------------------------
 
+; bitmap ops on 28 longs: \1 op \2 -> \2 (or / and / andnot / copy)
+bm_or	macro
+	lea	\1,a0
+	lea	\2,a1
+	moveq	#28-1,d0
+.l\@:	move.l	(a0)+,d1
+	or.l	d1,(a1)+
+	dbf	d0,.l\@
+	endm
+bm_copy	macro
+	lea	\1,a0
+	lea	\2,a1
+	moveq	#28-1,d0
+.l\@:	move.l	(a0)+,(a1)+
+	dbf	d0,.l\@
+	endm
+bm_and	macro				; \3 = \1 and \2
+	lea	\1,a0
+	lea	\2,a1
+	lea	\3,a2
+	moveq	#28-1,d0
+.l\@:	move.l	(a0)+,d1
+	and.l	(a1)+,d1
+	move.l	d1,(a2)+
+	dbf	d0,.l\@
+	endm
+bm_andnot	macro			; \2 = \2 and not \1
+	lea	\1,a0
+	lea	\2,a1
+	moveq	#28-1,d0
+.l\@:	move.l	(a0)+,d1
+	not.l	d1
+	and.l	d1,(a1)+
+	dbf	d0,.l\@
+	endm
+bm_fill	macro				; \1 = \2 (a long)
+	lea	\1,a0
+	moveq	#28-1,d0
+.l\@:	move.l	#\2,(a0)+
+	dbf	d0,.l\@
+	endm
+
+FULL_CELLS = 300			; more dirty cells than this: drawn as before, every object on them
+NEED_MAX = 1000			; (off: building the composites a frame lacks pays back in the play; 96-160 draw the start of a level faster and the rest slower)
+
 render_frame:
 	move.l	draw_screen_address,rf_screen
 	clr.b	rf_all
+	move.l	#dirty,rf_map
+	clr.l	rf_map2
+	clr.l	rf_fill
+	sf	rf_noclear
 	bsr	rf_vdiff
 	bsr	rf_palette
-	lea	dirty,a0
-	moveq	#28-1,d0
-.c:	clr.l	(a0)+
-	dbf	d0,.c
+	bm_fill	dirty,0
+	bm_fill	stale,0
 	tst.b	rf_all
 	beq.s	.not_all
-	lea	dirty,a0		; (the palette changed: every cell of both screens)
-	moveq	#28-1,d0
-.a:	move.l	#-1,(a0)+
-	dbf	d0,.a
+	bm_fill	dirty,-1		; (the palette changed: every cell of both screens)
 .not_all:
-	bsr	rf_objects
-	bsr	rf_mark_banks
+	bsr	rf_objects		; (stale: the cells of changed objects outside the moving range)
+	bsr	classify		; (comp_bad / comp_bad_k: the cells of objects that changed layer)
+	bm_copy	stale,stale_k		; (shapes changed there: the masks above too; colours alone leave them)
+	tst.b	rf_all
+	beq.s	.colours
+	bm_fill	comp_bad,-1		; every composite in new colours (the masks: once, at the start)
+	tst.b	masks_valid
+	bne.s	.colours
+	bm_fill	comp_bad_k,-1
+	st	masks_valid
+.colours:
+	bsr	rf_mark_banks		; (stale: the cells of static objects' tiles whose colours changed)
+	bm_or	stale,comp_bad
+	bm_or	stale_k,comp_bad_k
+	bm_or	stale,dirty
 	; This frame's changed cells (dirty).  The screen to draw also lacks the previous frame's changes
 	; (dirty_prev); those this frame leaves alone are copied from the screen shown, which is complete
 	; and equal to them there, the others (dirty) are drawn.
-	lea	dirty,a0
-	lea	dirty_raw,a1
+	bm_copy	dirty,dirty_raw
+	bsr	closure_rect		; closure over the moving range (the composites hold the rest whole)
+	lea	dirty,a0		; many cells: drawn whole, as before (the composites wait)
+	moveq	#0,d2
 	moveq	#28-1,d0
-.u:	move.l	(a0)+,(a1)+
-	dbf	d0,.u
+.count:	move.l	(a0)+,d1
+.bits:	tst.l	d1
+	beq.s	.counted
+	move.l	d1,d3
+	subq.l	#1,d3
+	and.l	d3,d1
+	addq.w	#1,d2
+	bra.s	.bits
+.counted:
+	dbf	d0,.count
+	ifd SIM
+	add.l	d2,sim_rf_cells		; (tools/profile.py: dirty cells, whole redraws, palette changes)
+	tst.b	rf_all
+	beq.s	.sim_na
+	addq.l	#1,sim_rf_all
+.sim_na:
+	endc
+	sf	rf_whole
+	cmp.w	#FULL_CELLS,d2
+	bls.s	.composite
+	ifd SIM
+	addq.l	#1,sim_rf_whole
+	endc
+	st	rf_whole
+	clr.w	rf_lo
+	move.w	#191,rf_hi
 	bsr	rf_closure
-	bsr	rf_copy
-	lea	dirty_raw,a0
-	lea	dirty_prev,a1
+.composite:
+	tst.b	rf_whole
+	bne.s	.counted_need
+	bm_and	dirty,comp_bad,need	; the composites the dirty cells lack: many, drawn whole as well
+	lea	need,a0
+	moveq	#0,d2
 	moveq	#28-1,d0
-.p:	move.l	(a0)+,(a1)+		; (dirty_prev = this frame's changes, before the closure)
-	dbf	d0,.p
+.ncount:
+	move.l	(a0)+,d1
+.nbits:	tst.l	d1
+	beq.s	.ncounted
+	move.l	d1,d3
+	subq.l	#1,d3
+	and.l	d3,d1
+	addq.w	#1,d2
+	bra.s	.nbits
+.ncounted:
+	dbf	d0,.ncount
+	cmp.w	#NEED_MAX,d2
+	bls.s	.counted_need
+	st	rf_whole
+	clr.w	rf_lo
+	move.w	#191,rf_hi
+	move.l	#dirty,rf_map
+	bsr	rf_closure
+.counted_need:
+	bsr	rf_copy
+	bm_copy	dirty_raw,dirty_prev	; (dirty_prev = this frame's changes, before the closure)
+	tst.b	rf_whole
+	beq.s	.layers
+	move.l	#dirty,rf_map
+	clr.w	rf_lo
+	move.w	#191,rf_hi
 	bsr	rf_redraw
+	bra	.done
+.layers:
+	bm_and	dirty,comp_bad_k,need_k
+	bsr	build_composites
+	bsr	mov_cells		; the cells the moving range's tiles cover
+	bsr	comp_fill		; dirty cells: the composite under the moving range, or the whole static picture
+	move.l	#dirty,rf_map
+	st	rf_noclear
+	move.w	lay_lo,rf_lo
+	move.w	lay_hi,rf_hi
+	bsr	rf_redraw		; the moving range's tiles, in list order
+	sf	rf_noclear
+	bsr	comp_overlay		; the objects after it, through their mask
+.done:
 	bsr	rf_cleanup
+	rts
+
+; ------------------------------------------------------------------------------
+; Layers.  The objects whose tiles changed within the last AGE_K renders make the moving range
+; lay_lo..lay_hi (and every object between); the objects before it are composited below it, those after
+; it above it, per 8 x 8 cell (comp_B: below, comp_S: below and above, comp_K: where above is opaque).
+; An object that changes layer makes its cells' composites stale.
+; ------------------------------------------------------------------------------
+
+AGE_K = 8
+
+classify:
+	lea	objs,a3
+	moveq	#0,d0
+	move.w	#192,d1			; lo
+	moveq	#-1,d2			; hi
+.range:
+	tst.w	O_COUNT(a3)
+	beq.s	.r_next
+	cmp.b	#AGE_K,O_AGE(a3)
+	bhs.s	.r_next
+	cmp.w	d1,d0
+	bge.s	.r_hi
+	move.w	d0,d1
+.r_hi:
+	move.w	d0,d2
+.r_next:
+	lea	OBJ_SIZE(a3),a3
+	addq.w	#1,d0
+	cmp.w	#192,d0
+	blo.s	.range
+	cmp.w	lay_lo,d1
+	bne.s	.moved
+	cmp.w	lay_hi,d2
+	beq	.same			; (no object changes layer)
+.moved:
+	move.w	d1,lay_lo
+	move.w	d2,lay_hi
+	lea	objs,a3
+	lea	objslots,a2
+	moveq	#0,d0
+.layer:
+	tst.w	O_COUNT(a3)
+	beq.s	.l_next
+	moveq	#0,d3
+	cmp.w	lay_lo,d0
+	blt.s	.set
+	moveq	#2,d3
+	cmp.w	lay_hi,d0
+	bgt.s	.set
+	moveq	#1,d3
+.set:
+	cmp.b	O_LAYER(a3),d3
+	beq.s	.l_next
+	move.b	d3,O_LAYER(a3)
+	movem.l	d0/a2-a3,-(sp)
+	move.l	#comp_bad,rf_map	; (its cells' composites; the picture stays)
+	move.l	#comp_bad_k,rf_map2
+	move.w	O_COUNT(a3),d5
+	move.l	a2,a0
+	bsr	mark_slots
+	move.l	#dirty,rf_map
+	clr.l	rf_map2
+	movem.l	(sp)+,d0/a2-a3
+.l_next:
+	lea	OBJ_SIZE(a3),a3
+	lea	SLOT_BYTES(a2),a2
+	addq.w	#1,d0
+	cmp.w	#192,d0
+	blo.s	.layer
+.same:
+	rts
+
+; the cells the moving range's objects may cover -> mov (the rows x columns of each object's tiles: a
+; superset, which only makes a cell take the composite below and the overlay)
+mov_cells:
+	lea	mov,a0
+	moveq	#28-1,d0
+.c:	clr.l	(a0)+
+	dbf	d0,.c
+	move.w	lay_hi,d6
+	sub.w	lay_lo,d6
+	bmi.s	.done
+	move.w	lay_lo,d0
+	mulu	#OBJ_SIZE,d0
+	lea	objs,a3
+	add.l	d0,a3
+	lea	mov,a0
+.obj:
+	tst.w	O_COUNT(a3)
+	beq.s	.next
+	move.l	O_COLS(a3),d1
+	move.l	O_ROWS(a3),d2
+	moveq	#0,d3
+.row:
+	lsr.l	#1,d2
+	bcc.s	.no_row
+	or.l	d1,(a0,d3.w)
+.no_row:
+	addq.w	#4,d3
+	tst.l	d2
+	bne.s	.row
+.next:
+	lea	OBJ_SIZE(a3),a3
+	dbf	d6,.obj
+.done:
+	rts
+
+; The composites of the cells need (and the masks of need_k), on the canvas: below (objects 0 ..
+; lay_lo-1), then above (lay_hi+1 .. 191) on it; above alone on black and on colour 15: where the two agree it
+; is opaque.  They are valid then (comp_bad / comp_bad_k).
+build_composites:
+	lea	need,a0
+	moveq	#0,d0
+	moveq	#28-1,d1
+.any:	or.l	(a0)+,d0
+	dbf	d1,.any
+	tst.l	d0
+	beq	.no_b
+	move.l	#need,rf_map		; (a shifted tile on a cell makes all its cells part of it)
+	clr.w	rf_lo
+	move.w	#191,rf_hi
+	st	rf_skip
+	bsr	rf_closure
+	sf	rf_skip
+	move.l	rf_screen,-(sp)
+	move.l	#canvas,rf_screen
+	clr.w	rf_lo			; below
+	move.w	lay_lo,d0
+	subq.w	#1,d0
+	move.w	d0,rf_hi
+	bsr	rf_redraw
+	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	each_cell	need,comp_B,cap_b
+	st	rf_noclear		; above, on it
+	bsr	set_above
+	bsr	rf_redraw
+	sf	rf_noclear
+	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	each_cell	need,comp_S,cap_s
+	move.l	(sp)+,rf_screen
+	bm_andnot	need,comp_bad
+.no_b:
+	lea	need_k,a0
+	moveq	#0,d0
+	moveq	#28-1,d1
+.anyk:	or.l	(a0)+,d0
+	dbf	d1,.anyk
+	tst.l	d0
+	beq	.no_k
+	move.l	#need_k,rf_map
+	clr.w	rf_lo
+	move.w	#191,rf_hi
+	st	rf_skip
+	bsr	rf_closure
+	sf	rf_skip
+	move.l	rf_screen,-(sp)
+	move.l	#canvas,rf_screen
+	bsr	set_above
+	st	rf_maskmode		; above as its opacity, on black: the mask in all four planes
+	bsr	rf_redraw
+	sf	rf_maskmode
+	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	each_cell	need_k,comp_K,cap_kmask
+	move.l	(sp)+,rf_screen
+	bm_andnot	need_k,comp_bad_k
+.no_k:
+	move.l	#dirty,rf_map
+	rts
+set_above:
+	move.w	lay_hi,d0
+	addq.w	#1,d0
+	move.w	d0,rf_lo
+	move.w	#191,rf_hi
+	rts
+
+; the dirty cells of the screen: comp_B where the moving range has tiles (mov), else comp_S
+comp_fill:
+	move.l	rf_screen,a1
+	lea	(YPAD+16)*STRIDE+16(a1),a1
+	lea	mov,a3
+	each_cell	dirty,comp_S,fill_row
+	rts
+; the dirty cells the moving range drew on: the objects above it again, through comp_K, from comp_S
+comp_overlay:
+	lea	dirty,a0
+	lea	mov,a2
+	lea	dmov,a3
+	moveq	#28-1,d0
+.and:	move.l	(a0)+,d1
+	and.l	(a2)+,d1
+	move.l	d1,(a3)+
+	dbf	d0,.and
+	move.l	rf_screen,a1
+	lea	(YPAD+16)*STRIDE+16(a1),a1
+	each_cell	dmov,comp_S,over_cell
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -120,7 +630,7 @@ render_frame:
 
 rf_mark_banks:
 	tst.b	rf_all
-	bne.s	.clear
+	bne	.clear
 	lea	bank_chg_b,a1
 	moveq	#0,d1
 	moveq	#16-1,d0
@@ -149,9 +659,11 @@ rf_mark_banks:
 	lea	bank_chg_b,a1
 	tst.b	(a1,d3.w)
 	beq.s	.sn
+	stale_if_static
 	movem.l	d5-d6/a2-a4,-(sp)
 	bsr	mark_tile
 	movem.l	(sp)+,d5-d6/a2-a4
+	clr.l	rf_map2
 .sn:
 	dbf	d5,.slot
 .next:
@@ -220,6 +732,11 @@ rf_copy:
 ; ------------------------------------------------------------------------------
 
 rf_vdiff:
+	st	vdiff_busy			; (a VBL may interrupt this: logic_test.py checks the marks only outside)
+	bsr.s	.diff
+	sf	vdiff_busy
+	rts
+.diff:
 	lea	page_dirty,a3
 	moveq	#64/4-1,d0
 .pz:	clr.l	(a3)+
@@ -228,13 +745,53 @@ rf_vdiff:
 	move.w	#(3712/32)-1,d0
 .tz:	clr.l	(a3)+
 	dbf	d0,.tz
-	lea	S_VRAM,a0
-	lea	snap_vram,a1
 	lea	tile_dirty,a3
 	lea	page_dirty,a2
 	lea	bank_seen_b,a4
+	lea	vmarks+$180,a5			; (the pages of C000-DCFF: the translated writers mark them, gen.VRAM_WRITERS)
+	tst.b	vmark_all
+	bne.s	.all
+	move.w	vroll,d0			; one page a frame in turn, in case a writer is missing
+	addq.w	#1,d0
+	cmp.w	#58,d0
+	blo.s	.roll
+	moveq	#0,d0
+.roll:
+	move.w	d0,vroll
+	st	(a5,d0.w)
+	moveq	#0,d6
+.page:
+	tst.b	(a5,d6.w)
+	beq.s	.skip
+	sf	(a5,d6.w)
+	move.w	d6,d3
+	lsl.w	#5,d3				; the long index
+	move.w	d3,d0
+	lsl.w	#2,d0
+	lea	S_VRAM,a0
+	lea	snap_vram,a1
+	add.w	d0,a0
+	add.w	d0,a1
+	moveq	#32-1,d0
+	bsr.s	vcompare
+.skip:
+	addq.w	#1,d6
+	cmp.w	#58,d6
+	blo.s	.page
+	rts
+.all:
+	sf	vmark_all
+	moveq	#58/2-1,d0
+.clear:
+	clr.w	(a5)+
+	dbf	d0,.clear
+	lea	S_VRAM,a0
+	lea	snap_vram,a1
 	move.w	#(7424/4)-1,d0
-	moveq	#0,d3			; the long index
+	moveq	#0,d3
+; d0+1 longs from a0 (the video RAM) against a1 (the copy), d3 = the first long index: the copy brought up to
+; date, the tile entries and pages that changed flagged.
+vcompare:
 .l:
 	cmpm.l	(a0)+,(a1)+
 	bne.s	.diff
@@ -288,6 +845,8 @@ O_SXEND = 8
 O_COLS = 10
 O_ROWS = 14
 O_UNAL = 18
+O_AGE = 20				; renders since the object (or one of its tiles) last changed, up to 255
+O_LAYER = 21				; 0 = below the moving range, 1 = in it, 2 = above (classify)
 SLOT_MAX = 64
 SLOT_REC = 10
 SLOT_BYTES = SLOT_MAX*SLOT_REC
@@ -302,11 +861,20 @@ rf_objects:
 	move.l	(a4),d0
 	beq	.inactive
 	tst.w	O_COUNT(a3)
-	beq.s	.changed		; it was not there
-	cmp.w	O_XIN(a3),d7
-	bne.s	.changed
+	beq	.changed		; it was not there
 	cmp.l	O_ENTRY(a3),d0
-	bne.s	.changed
+	bne	.changed
+	cmp.w	O_XIN(a3),d7
+	beq.s	.xin_same
+	move.l	d0,d1			; another x entering: a change only for a shape that continues the column
+	swap	d1
+	lsr.w	#5,d1
+	and.w	#7,d1
+	lea	xin_used,a0
+	tst.b	(a0,d1.w)
+	bne	.changed
+	move.w	d7,O_XIN(a3)
+.xin_same:
 	; unchanged: only the tiles whose entries changed
 	moveq	#0,d1
 	move.b	O_ENTRY+1(a3),d1	; the shape / page number
@@ -321,6 +889,7 @@ rf_objects:
 	lea	page_dirty,a0
 	tst.b	(a0,d2.w)
 	beq	.same
+	stale_if_static
 	movem.l	d6-d7/a2-a4,-(sp)
 	move.w	O_COUNT(a3),d5
 	subq.w	#1,d5
@@ -338,16 +907,23 @@ rf_objects:
 	movem.l	d5/a1,-(sp)
 	bsr	mark_tile
 	movem.l	(sp)+,d5/a1
+	move.l	12(sp),a0		; (the object: a3 on the stack) changed
+	clr.b	O_AGE(a0)
 .t_clean:
 	dbf	d5,.tile
 	movem.l	(sp)+,d6-d7/a2-a4
+	clr.l	rf_map2
 	bra.s	.same
 .changed:
+	stale_if_static
+	clr.b	O_AGE(a3)
+	move.b	#1,O_LAYER(a3)		; (a changed object is in the moving range)
 	movem.l	d6-d7/a2-a4,-(sp)
-	move.w	O_COUNT(a3),d5		; the old tiles' cells
+	tst.w	O_COUNT(a3)		; the old tiles' cells (rows x columns)
 	beq.s	.no_old
-	move.l	a2,a0
-	bsr	mark_slots
+	move.l	O_COLS(a3),d1
+	move.l	O_ROWS(a3),d2
+	bsr	mark_rect
 .no_old:
 	movem.l	(sp),d6-d7/a2-a4
 	move.w	d7,O_XIN(a3)
@@ -362,22 +938,28 @@ rf_objects:
 	move.l	d1,O_COLS(a3)
 	move.l	d2,O_ROWS(a3)
 	move.w	d3,O_UNAL(a3)
-	move.w	O_COUNT(a3),d5
-	move.l	a2,a0
-	bsr	mark_slots
+	bsr	mark_rect		; the new ones
 	movem.l	(sp)+,d6-d7/a2-a4
+	clr.l	rf_map2
+	bra.s	.next_x
 .same:
+	addq.b	#1,O_AGE(a3)
+	bcc.s	.next_x
+	st	O_AGE(a3)
+.next_x:
 	move.w	O_SXEND(a3),d7
 	add.w	#16,d7
 	bra.s	.advance
 .inactive:
 	tst.w	O_COUNT(a3)
 	beq.s	.advance
+	stale_if_static
 	movem.l	d6-d7/a2-a4,-(sp)
-	move.w	O_COUNT(a3),d5
-	move.l	a2,a0
-	bsr	mark_slots
+	move.l	O_COLS(a3),d1
+	move.l	O_ROWS(a3),d2
+	bsr	mark_rect
 	movem.l	(sp)+,d6-d7/a2-a4
+	clr.l	rf_map2
 	clr.w	O_COUNT(a3)
 	clr.l	O_ENTRY(a3)
 .advance:
@@ -386,6 +968,25 @@ rf_objects:
 	lea	SLOT_BYTES(a2),a2
 	dbf	d6,.obj
 	rts
+
+; d1 = columns, d2 = rows: the cells rows x columns into rf_map (and rf_map2): the tiles of an object with
+; those masks, or a superset of them.  Clobbers d0, a0, a1.
+mark_rect:
+	move.l	rf_map,a0
+	bsr.s	.one
+	move.l	rf_map2,d0
+	beq.s	.done
+	move.l	d0,a0
+.one:
+	move.l	d2,d0
+	move.l	a0,a1
+.r:	lsr.l	#1,d0
+	bcc.s	.n
+	or.l	d1,(a1)
+.n:	addq.l	#4,a1
+	tst.l	d0
+	bne.s	.r
+.done:	rts
 
 ; a0 = slots, d5.w = count: the cells of every tile dirty.  Clobbers d0-d7, a0.
 
@@ -427,7 +1028,15 @@ mark_cell	macro
 ; d0.w = x (signed), d1.w = y (0-255): the cells of the 8 x 8 tile there dirty.  Clobbers d2-d7, a0.
 
 mark_tile:
-	lea	dirty,a0
+	move.l	rf_map,a0
+	bsr.s	mark_tile_in
+	move.l	rf_map2,d2
+	beq.s	.one
+	move.l	d2,a0
+	bra.s	mark_tile_in
+.one:
+	rts
+mark_tile_in:
 	move.w	d0,d2
 	asr.w	#3,d2			; cx
 	move.w	d1,d3
@@ -650,7 +1259,7 @@ count_cell	macro			; d2 = column, d3 = row: d4 + 1 if on the screen, d5 + 1 if d
 ; dirty.  Clobbers d0-d3, d6, d7, a0.
 
 tile_state:
-	lea	dirty,a0
+	move.l	rf_map,a0
 	moveq	#0,d4
 	moveq	#0,d5
 	move.w	d0,d2
@@ -677,14 +1286,20 @@ tile_state:
 	rts
 
 rf_closure:
+	move.w	rf_hi,d6
+	sub.w	rf_lo,d6
+	bmi	.none
 .again:
 	clr.b	rf_changed
-	lea	objs,a3
-	lea	objslots,a2
-	move.w	#192-1,d6
+	bsr	range_start		; a3, a2, d6 = the objects rf_lo..rf_hi
 .obj:
 	tst.w	O_UNAL(a3)
-	beq.s	.next
+	beq	.next
+	tst.b	rf_skip			; (the composites: not the moving range)
+	beq.s	.take
+	cmp.b	#1,O_LAYER(a3)
+	beq	.next
+.take:
 	move.w	O_COUNT(a3),d1
 	beq.s	.next
 	move.l	d6,-(sp)
@@ -719,6 +1334,84 @@ rf_closure:
 	dbf	d6,.obj
 	tst.b	rf_changed
 	bne	.again
+.none:
+	rts
+
+; The closure of the moving range on dirty, by rectangles: a shifted object whose rows x columns are partly
+; dirty makes them all dirty (a superset of its tiles' cells: only more cells are drawn).
+closure_rect:
+	move.w	lay_hi,d6
+	sub.w	lay_lo,d6
+	bmi	.none
+	move.w	d6,d5
+	move.w	lay_lo,d0
+	mulu	#OBJ_SIZE,d0
+	lea	objs,a2
+	add.l	d0,a2
+	lea	dirty,a0
+.again:
+	sf	rf_changed
+	move.l	a2,a3
+	move.w	d5,d6
+.obj:
+	tst.w	O_UNAL(a3)
+	beq.s	.next
+	tst.w	O_COUNT(a3)
+	beq.s	.next
+	move.l	O_COLS(a3),d1
+	move.l	O_ROWS(a3),d2
+	moveq	#0,d3			; some dirty
+	moveq	#0,d4			; some clean
+	move.l	a0,a1
+.rows:
+	lsr.l	#1,d2
+	bcc.s	.no_row
+	move.l	(a1),d0
+	and.l	d1,d0
+	or.l	d0,d3
+	cmp.l	d1,d0
+	beq.s	.no_row
+	st	d4
+.no_row:
+	addq.l	#4,a1
+	tst.l	d2
+	bne.s	.rows
+	tst.l	d3
+	beq.s	.next
+	tst.b	d4
+	beq.s	.next
+	move.l	O_ROWS(a3),d2		; partly dirty: all of it
+	move.l	a0,a1
+.fill:
+	lsr.l	#1,d2
+	bcc.s	.no_fill
+	or.l	d1,(a1)
+.no_fill:
+	addq.l	#4,a1
+	tst.l	d2
+	bne.s	.fill
+	st	rf_changed
+.next:
+	lea	OBJ_SIZE(a3),a3
+	dbf	d6,.obj
+	tst.b	rf_changed
+	bne.s	.again
+.none:
+	rts
+
+; a3 = objs, a2 = objslots of object rf_lo, d6 = rf_hi - rf_lo (a dbf count)
+range_start:
+	move.w	rf_lo,d6
+	move.w	d6,d7
+	mulu	#OBJ_SIZE,d7
+	lea	objs,a3
+	add.l	d7,a3
+	move.w	d6,d7
+	mulu	#SLOT_BYTES,d7
+	lea	objslots,a2
+	add.l	d7,a2
+	neg.w	d6
+	add.w	rf_hi,d6
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -727,7 +1420,7 @@ rf_closure:
 
 rf_redraw:
 	; the columns and rows with something dirty
-	lea	dirty,a0
+	move.l	rf_map,a0
 	moveq	#0,d4			; the OR of the rows
 	moveq	#0,d5			; the rows that are not empty
 	moveq	#0,d6
@@ -745,11 +1438,13 @@ rf_redraw:
 	tst.l	d4
 	beq	.nothing
 
-	; clear
+	; clear (rf_fill: 0 or -1)
+	tst.b	rf_noclear
+	bne	.draw
 	move.l	rf_screen,a1
 	lea	(YPAD+16)*STRIDE+16(a1),a1	; the first game cell row, column 0
-	lea	dirty,a0
-	moveq	#0,d1
+	move.l	rf_map,a0
+	move.l	rf_fill,d1
 	moveq	#28-1,d0
 .row:
 	move.l	(a0)+,d2
@@ -780,9 +1475,11 @@ rf_redraw:
 	dbf	d0,.row
 
 	; draw
-	lea	objs,a3
-	lea	objslots,a2
-	move.w	#192-1,d6
+.draw:
+	move.w	rf_hi,d6
+	sub.w	rf_lo,d6
+	bmi	.nothing
+	bsr	range_start
 .obj:
 	move.w	O_COUNT(a3),d1
 	beq	.nextobj
@@ -800,7 +1497,7 @@ rf_redraw:
 	lsl.w	d4,d3
 	move.w	d3,rf_attrhi
 	subq.w	#1,d1
-	lea	dirty,a0
+	move.l	rf_map,a0
 .slot:
 	move.w	6(a2),d4		; the byte of the tile's first cell in the dirty bitmap
 	bmi.s	.next
@@ -814,7 +1511,7 @@ rf_redraw:
 	move.w	rf_attrhi,d3
 	bsr	draw_tile
 	movem.l	(sp)+,d1/a2
-	lea	dirty,a0
+	move.l	rf_map,a0
 .next:
 	lea	SLOT_REC(a2),a2
 	dbf	d1,.slot
@@ -948,6 +1645,20 @@ draw_tile:
 	movem.l	d0-d1,-(sp)
 	bsr	get_tile		; a0 = the cache entry
 	movem.l	(sp)+,d0-d1
+	tst.b	rf_maskmode		; (the composites' masks: the tile's opacity as its pixels, colour 15)
+	beq	.colours
+	lea	mask_entry,a1
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	rept 8
+	move.l	4(a0),d5
+	not.l	d5
+	move.l	d5,(a1)+
+	move.l	4(a0),(a1)+
+	addq.l	#8,a0
+	endr
+	lea	mask_entry,a0
+.colours:
 
 	; the screen address of the tile's first row
 	move.w	d1,d5
@@ -1907,6 +2618,47 @@ objslots:	ds.b	192*SLOT_BYTES
 dirty:		ds.l	28
 dirty_prev:	ds.l	28
 hang_rows:	ds.b	32
+stale:		ds.l	28		; cells whose composites are rebuilt this frame
+stale_k:	ds.l	28		; (and their masks: a shape changed)
+comp_bad:	ds.l	28		; cells whose composites are not valid (built when they are drawn)
+comp_bad_k:	ds.l	28		; (their masks)
+need:		ds.l	28
+need_k:		ds.l	28
+rf_whole:	ds.b	1
+	even
+	ifd SIM
+sim_rf_cells:	ds.l	1
+sim_rf_whole:	ds.l	1
+sim_rf_all:	ds.l	1
+	endc
+rf_skip:	ds.b	1
+rf_maskmode:	ds.b	1
+	even
+mask_entry:	ds.b	TC_ENTRY
+masks_valid:	ds.b	1
+	even
+mov:		ds.l	28		; cells the moving range's tiles cover
+dmov:		ds.l	28
+comp_kany:	ds.b	896
+xin_used:	ds.b	8
+rf_map:		ds.l	1		; the bitmap mark_tile / tile_state / rf_redraw / rf_closure work on
+rf_map2:	ds.l	1		; (mark_tile: a second one, or 0)
+rf_fill:	ds.l	1
+rf_lo:		ds.w	1		; the objects rf_redraw / rf_closure take
+rf_hi:		ds.w	1
+lay_lo:		ds.w	1		; the moving range
+lay_hi:		ds.w	1
+rf_noclear:	ds.b	1
+	even
+comp_B:		ds.b	896*32
+comp_S:		ds.b	896*32
+comp_K:		ds.b	896*32
+canvas:		ds.b	SCREEN_SIZE
+vmarks:	ds.b	512			; the video RAM pages written (gen.VRAM_WRITERS)
+vmark_all:	ds.b	1
+vdiff_busy:	ds.b	1
+	even
+vroll:	ds.w	1
 hang_top:	ds.b	1
 hang_bottom:	ds.b	1
 	even

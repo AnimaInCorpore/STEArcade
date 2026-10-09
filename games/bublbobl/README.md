@@ -53,6 +53,21 @@ differ).  The STE port:
   changed (diff of the video RAM against a copy) its cells; a shifted tile that touches a dirty cell makes all
   its cells dirty; the dirty cells are cleared and every object's tiles on them are drawn in list order.  Exact:
   the result is the reference's bitmap through the colour table.
+* **Layers and composites** (2026-10-09): the objects whose tiles changed within the last 8 renders make the
+  *moving range* (the sprites, 16-62 in the play); the objects before it are composited *below* it, those after it
+  (the level's 16 background columns, drawn last, in front of the sprites) *above* it, per 8 x 8 cell: `comp_B`
+  (below), `comp_S` (below and above: the static picture), `comp_K` (where above is opaque, the four planes).  A dirty
+  cell without moving tiles is one copy of `comp_S`; with them: `comp_B`, the moving range's tiles in list order, then
+  `comp_S` through `comp_K`.  The composites are built lazily, for the dirty cells that lack them (`comp_bad`): below
+  and above drawn on a canvas, the mask by drawing above with each tile's opacity as its pixels (`rf_maskmode`); a
+  colour change rebuilds `comp_B` / `comp_S` only, a change of layer only invalidates.  A frame with more than 300
+  dirty cells is drawn whole, as before.  The closure of the moving range works on the objects' row x column
+  rectangles; the old and new cells of a changed object are marked the same way (supersets: only more cells drawn).
+  An object whose shape starts a new column no longer counts as changed when the x entering it changes (the
+  background columns were redrawn whenever the last sprite moved).
+* **The video RAM diff** compares only the 128-byte pages the translated writers marked (`gen.VRAM_WRITERS`, 104
+  instructions from `ref/vsites.py`; `logic_test.py` checks that every difference from the renderer's copy is marked),
+  plus one page a frame in turn.
 * Double buffer: the screen being drawn also lacks the last frame's changes.  The cells of those that this frame
   does not draw are **copied from the screen shown** (`rf_copy`: one `movep.l` per line, ~500 cycles a cell
   against ~7000 to draw it): that screen holds the last frame complete, and nothing changed in them since.
@@ -220,3 +235,18 @@ at x < 0 or x > 248) and `rf_cleanup` erases only those, in the same frame: 27k 
 costs (`tools/render_bench.py 1500 150 --prof`, play, about 870k cycles): the redraw of the dirty cells in list order
 (`draw_tile` 224k, `rf_redraw` 210k), the video RAM compare (`rf_vdiff`, 84k), the object bookkeeping (`obj_slots`,
 `mark_tile`, `tile_state`, about 150k) and the copy of what the other screen lacks (`rf_copy`, 41k).
+
+## Speed (2026-10-09)
+
+`tools/profile.py 1200` (the real schedule on Musashi; game frames per VBL, pictures a second):
+
+| window | 2026-10-08 | video RAM marks | + layers |
+|---|---|---|---|
+| attract, 100-400 | 0.79 / 13.8 | 0.78 / 26.3 | 0.77 / 23.7 |
+| play, 600-900 | 0.57 / 1.8 | 0.57 / 1.8 | 0.57 / 1.7 |
+| play, 900-1200 | 0.63 / 3.3 | | **0.75 / 6.7** |
+
+Consecutive frames (`render_test.py seq 1600 100`, every frame drawn): median 920k -> 640k cycles.  The start of a
+level (600-900) builds the composites of nearly every cell; `NEED_MAX` 96-160 (draw such frames whole and leave
+the composites) gives 0.58 / 2.0 there and 0.68-0.69 / 4.5-5.0 later, so it is off.  All 1200 frames of
+`render_test.py seq` over attract and play are exact; `--layers` prints the moving range and the cell counts.

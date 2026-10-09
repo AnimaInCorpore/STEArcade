@@ -33,6 +33,36 @@ TOKEN = 0x7FFE                   # the return address token of the interrupt ent
 ENTRIES = 0xC002
 
 
+# The main CPU's instructions that write the video RAM (C000-DCFF), from ref/vsites.py (three seeds of attract and
+# play): the form of their address.  Each marks the 128-byte page it wrote in vmarks (the page of the address,
+# 0-511), so rf_vdiff compares only those pages with its copy ('all': the ldir that clears the whole RAM).  The CCR
+# is kept around the computation (the translated code keeps flags in it).  rf_vdiff also compares one page a frame
+# in turn, in case a writer is missing here; logic_test.py checks that every change is marked.
+VRAM_WRITERS = {
+    0x003BD: ('hl', 0), 0x003BF: 'all', 0x003EA: ('hl', 0), 0x003ED: ('hl', 0), 0x003FF: ('hl', 0),
+    0x00402: ('hl', 0), 0x00AD0: ('de', 0), 0x00D50: ('hl', 0), 0x00E9D: ('de', 0), 0x00EA1: ('de', 0),
+    0x00ECB: ('hl', 0), 0x00ECE: ('hl', 0), 0x00FD2: ('iy', -64), 0x00FD5: ('iy', -65), 0x00FD9: ('iy', 0),
+    0x00FDC: ('iy', 1), 0x00FE0: ('iy', 64), 0x00FE3: ('iy', 65), 0x01480: ('iy', 12), 0x01483: ('iy', 13),
+    0x01487: ('iy', 76), 0x0148A: ('iy', 77), 0x0148E: ('iy', 14), 0x01491: ('iy', 15), 0x01495: ('iy', 78),
+    0x01498: ('iy', 79), 0x014A1: ('iy', 76), 0x014A4: ('iy', 77), 0x014A8: ('iy', 12), 0x014AB: ('iy', 13),
+    0x014AF: ('iy', 78), 0x014B2: ('iy', 79), 0x014B6: ('iy', 14), 0x014B9: ('iy', 15), 0x0194E: ('hl', 0),
+    0x01951: ('hl', 0), 0x01985: ('iy', 0), 0x01988: ('iy', 1), 0x019DE: ('iy', 0), 0x019E2: ('iy', 1),
+    0x01A00: ('iy', 0), 0x01A04: ('iy', 1), 0x01A21: ('iy', 0), 0x01A25: ('iy', 1), 0x01A3C: ('iy', 0),
+    0x01A40: ('iy', 1), 0x01A51: ('iy', 0), 0x01A55: ('iy', 1), 0x01A66: ('iy', 0), 0x01A6A: ('iy', 1),
+    0x01A85: ('hl', 0), 0x01A90: ('hl', 0), 0x01ADA: ('iy', 0), 0x01ADD: ('iy', 1), 0x01AE1: ('iy', 64),
+    0x01AE4: ('iy', 65), 0x02229: ('hl', 0), 0x03016: ('hl', 0), 0x03018: ('hl', 0), 0x03034: ('hl', 0),
+    0x03036: ('hl', 0), 0x03054: ('hl', 0), 0x03056: ('hl', 0), 0x03072: ('hl', 0), 0x03074: ('hl', 0),
+    0x03092: ('hl', 0), 0x03094: ('hl', 0), 0x030A0: ('hl', 0), 0x030A2: ('hl', 0), 0x030E0: ('abs', 0xD508),
+    0x030E3: ('abs', 0xD50A), 0x030E6: ('abs', 0xD548), 0x030E9: ('abs', 0xD54A), 0x030F4: ('abs', 0xD509), 0x030F7: ('abs', 0xD50B),
+    0x030FA: ('abs', 0xD549), 0x030FD: ('abs', 0xD54B), 0x0311D: ('abs', 0xD548), 0x03121: ('abs', 0xD54A), 0x03318: ('hl', 0),
+    0x0331B: ('hl', 0), 0x03335: ('hl', 0), 0x03338: ('hl', 0), 0x034F9: ('hl', 0), 0x034FC: ('hl', 0),
+    0x03559: ('de', 0), 0x0355C: ('de', 0), 0x03A36: ('iy', -65), 0x03A39: ('iy', 1), 0x03A3C: ('iy', 65),
+    0x03CB0: ('hl', 0), 0x03CB2: ('hl', 0), 0x1A0AE: ('hl', 0), 0x1A0B0: ('hl', 0), 0x1A0D9: ('hl', 0),
+    0x1A0DE: ('hl', 0), 0x1A133: ('hl', 0), 0x1A135: ('hl', 0), 0x1A13F: ('hl', 0), 0x1A141: ('hl', 0),
+    0x1A181: ('hl', 0), 0x1A183: ('hl', 0), 0x1FE30: ('de', 0), 0x1FE34: ('de', 0),
+}
+
+
 def virt(pc, bank):
     return VBASE + bank * 0x4000 + (pc - WIN_LO)
 
@@ -159,6 +189,20 @@ class BBEmitter(Emitter):
         n0 = len(self.lines)
         super().emit_ins(pc, live_out_override, with_label)
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
+        form = VRAM_WRITERS.get(pc)
+        if form == 'all':
+            self.e('st vmark_all')
+        elif form and form[0] == 'abs':
+            self.e('st vmarks+%d' % (form[1] >> 7))
+        elif form:
+            self.e('move sr,-(sp)')
+            self.e('move.w %s,d7' % {'hl': 'd3', 'de': 'd2', 'iy': 'a2'}[form[0]])
+            if form[1]:
+                self.e('add.w #%d,d7' % form[1])
+            self.e('lsr.w #7,d7')
+            self.e('lea vmarks,a0')
+            self.e('st (a0,d7.w)')
+            self.e('move (sp)+,ccr')
 
 
 def coverage():

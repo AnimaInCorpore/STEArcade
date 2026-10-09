@@ -81,6 +81,7 @@ def main():
                 ref.run_frame_port()
                 f += 1
             mem.w_block(g_ram + 0x4000, bytes(ref.vram))
+            mem.w8(sym["vmark_all"], 1)                      # (the game's writers mark what they change)
             mem.w_block(g_ram + 0x5D00, bytes(ref.oram))
             mem.w_block(g_ram + 0x7800, bytes(ref.pal))
             ttab_before = bytes(mem.r_block(sym["ttab"], 256))
