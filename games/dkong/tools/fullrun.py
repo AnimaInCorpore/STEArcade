@@ -195,8 +195,7 @@ def main():
             if why != "z80_nmi_ret":
                 print("68k NMI stopped:", why, "d7=%X" % (L.cpu.r_reg(R.D7) & 0xFFFF))
                 return 1
-            L.cpu.w_reg(R.A7, L.cpu.r_reg(R.A7) + 4)   # the hook pushed its resume label
-            L.cpu.w_pc(L.sym["Z02BD_r"])
+            L.cpu.w_pc(L.sym["Z02BD_r"])            # the ret token jumps here: nothing pushed on a7
             if not L.compare("after NMI %d" % frame):
                 return 1
             if frame % 20 == 0:

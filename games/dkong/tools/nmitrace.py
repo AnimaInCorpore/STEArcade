@@ -15,6 +15,7 @@ while True:
     assert why == "z80_hook", why
     visits += 1
     assert L.compare("visit %d" % visits)
+    L.cpu.w_reg(R.A7, L.cpu.r_reg(R.A7) + 4)   # the hook pushed its resume label
     L.cpu.w_pc(L.sym["Z02BD_r"])
     if visits % 3 == 0 and L.ref.nmi_mask:
         frame += 1
