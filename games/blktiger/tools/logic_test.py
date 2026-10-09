@@ -37,7 +37,9 @@ def main():
     sym = {k:v+sim.base for k,v in sim.symbols(build_dir('blktiger')/'blktiger_sim.map').items()}
     stops = {sym[n]:n for n in ['sim_wait','sim_frame_done','z80_badpc']}
     mem, cpu = sim.mem, sim.cpu
-    mem.w16(sym['render_frame'],0x4e75)
+    # (no drawing: render_frame only runs text_scan, whose rows the text check below compares)
+    mem.w16(sym['render_frame'],0x4ef9)
+    mem.w32(sym['render_frame']+2,sym['text_scan'])
     ref = BlackTiger()
     block = sym['g_block']
 
@@ -90,6 +92,7 @@ def main():
     # PAL_WRITERS): a change without its flag is a writer missing there.  (A bank switch reloads the bank.)
     regions = [('bg_dirty', block+0x4000, 0x1000), ('pal_dirty', block+0x5800, 0x800)]
     last = {}
+    text_checked = [0]
     def hooks(frame):
         bank = mem.r8(sym['g_bg_bank'])
         for flag, a, size in regions:
@@ -103,6 +106,17 @@ def main():
             last[flag] = now
             mem.w8(sym[flag], 0)
         mem.w8(sym['map_dirty'], 0)
+        # The text layer rebuilds only the rows the hooked stores marked (gen.TEXT_WRITERS): right after the frame's
+        # text_scan the renderer's copy of rows 2-29 must equal the text RAM, else a writer is missing there.
+        if mem.r8(sym['text_valid']):
+            text_checked[0] += 1
+            for half in (0, 0x400):
+                ram = mem.r_block(block+0x5000+half+64, 896)
+                shadow = mem.r_block(sym['text_shadow']+half+64, 896)
+                if ram != shadow:
+                    i = next(i for i in range(896) if ram[i] != shadow[i])
+                    print(f'frame {frame}: text {0xd000+half+64+i:04x} changed without a mark (a writer missing in gen.TEXT_WRITERS)')
+                    return False
         return True
 
     ref.run_to_idle()
@@ -141,7 +155,7 @@ def main():
             raise RuntimeError(f'Unexpected stop {stop}')
         if frame % 100 == 0:
             print('frame',frame,'matched',flush=True)
-    print(args.frames,'frames matched')
+    print(args.frames,'frames matched; the text layer checked in',text_checked[0])
     return 0
 
 

@@ -6,6 +6,8 @@
 ; kept per cell.
 STRIDE = 384
 RING_LINES = 544
+TEXT_RUNS = 8                    ; runs a text row (at most 7: four blanks split a run)
+TEXT_ROW_POOL = 2048             ; strip bytes a text row (at most about 2000)
 RING_SIZE = STRIDE*RING_LINES
 GUARD = 16*STRIDE
 COLS = 48
@@ -1274,42 +1276,124 @@ sprite_blit:
 ; A strip line is [0, bytes of the run.., 0 ..] (L = N+2 words, N words of
 ; pixels), read with FXSR; blocks: mask, planes 0-3, 8 lines each.
 text_scan:
-    lea g_block+$5000+64,a0
-    lea text_shadow+64,a1
-    move.w #896/4-1,d0
-.codes:
-    cmpm.l (a0)+,(a1)+
-    dbne d0,.codes
-    bne.s .rebuild
-    lea g_block+$5400+64,a0
-    lea text_shadow+$400+64,a1
-    move.w #896/4-1,d0
-.attributes:
-    cmpm.l (a0)+,(a1)+
-    dbne d0,.attributes
-    bne.s .rebuild
     move.b g_control,d0
     and.b #$40,d0
     cmp.b text_flip,d0
-    bne.s .rebuild
+    bne.s .all
     tst.b text_valid
-    beq.s .rebuild
-    rts
-.rebuild:
-    st text_valid
-    move.b g_control,d0
-    and.b #$40,d0
+    bne.s .rows
+.all:
+    st text_valid                ; a flip (or the first frame): every row again
     move.b d0,text_flip
-    lea g_block+$5000,a0
-    lea text_shadow,a1
-    move.w #$800/4-1,d0
-.copy:
-    move.l (a0)+,(a1)+
-    dbf d0,.copy
-    move.l #text_pool,pool_next
-    move.l #run_list,run_next
-    clr.w run_count
+    st text_force
+.rows:
+    move.w text_roll,d0          ; one row a frame is compared anyway (a writer missing from gen.TEXT_WRITERS)
+    addq.w #1,d0
+    cmp.w #30,d0
+    blo.s .roll
+    moveq #2,d0
+.roll:
+    move.w d0,text_roll
     move.w #2,text_row
+.check:
+    move.w text_row,d1
+    tst.b text_force
+    bne .changed
+    lea text_rows_dirty,a0
+    tst.b (a0,d1.w)
+    bne.s .compare               ; a hooked store to its codes
+    tst.b 32(a0,d1.w)
+    bne.s .compare               ; or to its attributes (the same value written again rebuilds nothing)
+    tst.b text_compare
+    bne.s .compare               ; a block copy: every row compared
+    cmp.w text_roll,d1
+    bne .next_check
+.compare:
+    lsl.w #5,d1
+    lea g_block+$5000,a0
+    add.w d1,a0
+    lea text_shadow,a1
+    add.w d1,a1
+    rept 8
+    cmpm.l (a0)+,(a1)+
+    bne.s .changed
+    endr
+    lea $400-32(a0),a0
+    lea $400-32(a1),a1
+    rept 8
+    cmpm.l (a0)+,(a1)+
+    bne.s .changed
+    endr
+    bra .next_check
+.changed:
+    move.w text_row,d1           ; the row's codes and attributes to the shadow
+    lsl.w #5,d1
+    lea g_block+$5000,a0
+    add.w d1,a0
+    lea text_shadow,a1
+    add.w d1,a1
+    rept 8
+    move.l (a0)+,(a1)+
+    endr
+    lea $400-32(a0),a0
+    lea $400-32(a1),a1
+    rept 8
+    move.l (a0)+,(a1)+
+    endr
+    ifd DEBUG
+    addq.l #1,dbg_text_rows
+    endc
+    bsr text_row_build
+    st text_relist
+.next_check:
+    addq.w #1,text_row
+    cmp.w #30,text_row
+    blo .check
+    clr.b text_force
+    clr.b text_compare
+    tst.b text_relist
+    beq.s .listed
+    clr.b text_relist
+    lea run_list,a0              ; the rows' runs one after the other in draw_list
+    lea draw_list,a1
+    lea text_runs,a2
+    moveq #0,d2
+    moveq #28-1,d1
+.relist_row:
+    move.l a0,a3
+    move.w (a2)+,d0
+    add.w d0,d2
+    subq.w #1,d0
+    bmi.s .relist_next
+.relist_run:
+    move.l (a3)+,(a1)+
+    move.l (a3)+,(a1)+
+    move.l (a3)+,(a1)+
+    dbf d0,.relist_run
+.relist_next:
+    lea TEXT_RUNS*12(a0),a0
+    dbf d1,.relist_row
+    move.w d2,run_count
+.listed:
+    lea text_rows_dirty,a0
+    rept 16
+    clr.l (a0)+
+    endr
+    rts
+
+; text_row_build: the runs of row text_row (2-29) from the shadow, into the row's own slots of run_list
+; (TEXT_RUNS runs) and text_pool (TEXT_ROW_POOL bytes), its count to text_runs.
+text_row_build:
+    move.w text_row,d0
+    subq.w #2,d0
+    move.w d0,d1
+    mulu #TEXT_RUNS*12,d1
+    add.l #run_list,d1
+    move.l d1,run_next
+    mulu #TEXT_ROW_POOL,d0
+    add.l #text_pool,d0
+    move.l d0,pool_next
+    clr.w run_count
 .row:
     ; the row's characters in screen order: x = i*8 (flipped: column 31-i)
     lea row_tmp,a1
@@ -1444,19 +1528,17 @@ text_scan:
     move.w chars_left,d5
     bra .run
 .next_row:
-    addq.w #1,text_row
-    cmp.w #30,text_row
-    blo .row
+    move.w text_row,d0
+    subq.w #2,d0
+    add.w d0,d0
+    lea text_runs,a0
+    move.w run_count,(a0,d0.w)
     rts
 
 character_pass:
     btst #7,g_control
     bne .done
     bsr text_scan
-    move.w run_count,d7
-    subq.w #1,d7
-    bmi .done
-    lea run_list,a3
     move.w #2,$ffff8a20.w
     move.w #2,$ffff8a22.w
     move.w #-1,$ffff8a28.w
@@ -1464,6 +1546,10 @@ character_pass:
     move.w #-1,$ffff8a2c.w
     move.w #8,$ffff8a2e.w
     move.b #2,$ffff8a3a.w
+    move.w run_count,d7
+    subq.w #1,d7
+    bmi .done
+    lea draw_list,a3
 .run:
     move.w (a3)+,d0
     add.w physical_x,d0
@@ -1726,9 +1812,18 @@ strip_list1: ds.w 6*WIN_ROWS
 front_list: ds.w CELLS
 cell_front: ds.w CELLS*16
 text_shadow: ds.b $800
-run_list: ds.w 6*8*28
+run_list: ds.b TEXT_RUNS*12*28
+text_runs: ds.w 28
+text_roll: ds.w 1
+text_relist: ds.b 1
+    even
+draw_list: ds.b TEXT_RUNS*12*28
+text_force: ds.b 1
+text_compare: ds.b 1              ; (set by the translated block copies to the text RAM)
+text_rows_dirty: ds.b 64          ; (set by the translated stores: rows 0-31 codes, 32-63 attributes)
+    even
 row_tmp: ds.w 3*32
-text_pool: ds.b 60000
+text_pool: ds.b TEXT_ROW_POOL*28
 pool_next: ds.l 1
 run_next: ds.l 1
 run_count: ds.w 1

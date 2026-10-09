@@ -25,6 +25,18 @@ BG_WRITERS = {0x090d, 0x090f, 0x091f, 0x0921, 0x0931, 0x0933, 0x0943, 0x0945, 0x
 PAL_WRITERS = {0x1951, 0x1959, ('bank', 6, 0x809d), ('bank', 6, 0xb944), ('bank', 6, 0xb951), ('bank', 6, 0xbaa1),
                ('bank', 6, 0xbaac), ('bank', 6, 0xbab8), ('bank', 6, 0xbac3), ('bank', 6, 0xbacf), ('bank', 6, 0xbada)}
 
+# The instructions that write the text RAM (d000-d7ff), from the reference with cover.py's three input schedules
+# (random play, --walk, --auto; 8000 frames each, the same 72 sites in each): a store marks its text row in
+# text_rows_dirty (rows 0-31 the codes, 32-63 the attributes), a block copy sets text_compare.  The renderer then
+# rebuilds only those rows (and compares one row a frame in case a writer is missing here).
+TEXT_WRITERS = {0x055e, 0x0561, 0x0568, 0x056c, 0x057c, 0x057f, 0x058c, 0x058f, 0x059c, 0x05a1, 0x08ee, 0x08f0,
+                0x08fb, 0x08fd, 0x0b6e, 0x0b70, 0x0b7b, 0x0b7d, 0x0bd2, 0x0bd7, 0x0c5a, 0x0c5d, 0x1179, 0x117b,
+                0x1186, 0x1188, 0x12ac, 0x12ae, 0x12d7, 0x12d9, 0x12e4, 0x12e6, 0x13ac, 0x1443, 0x1446, 0x1466,
+                0x1475, 0x1477, 0x1482, 0x1484, 0x23a5, 0x23a8, 0x23b0, 0x2630, 0x2632, 0x263d, 0x263f, 0x2648,
+                0x264b, 0x265d, 0x2b5b, 0x2b5e, 0x2b63, 0x2b67, 0x2b7a, 0x2b7d, 0x5020, 0x5023, 0x5033, 0x5036,
+                0x503d, 0x5040, 0x504a, 0x504d, 0x5054, 0x5057, ('bank', 6, 0xb91f), ('bank', 6, 0xb921),
+                ('bank', 7, 0x908c), ('bank', 7, 0x908f), ('bank', 7, 0x909d), ('bank', 7, 0x90a0)}
+
 
 def virt(pc, bank):
     return VBASE + bank*0x4000 + pc-WIN_LO
@@ -41,6 +53,7 @@ def _pcs(writers):
     return {virt(w[2], w[1]) if isinstance(w, tuple) else w for w in writers}
 
 
+TEXT_PCS = _pcs(TEXT_WRITERS)
 DIRTY_FLAGS = {**{pc: 'bg_dirty' for pc in _pcs(BG_WRITERS)}, **{pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}}
 
 
@@ -156,6 +169,27 @@ class BTEmitter(Emitter):
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
         if pc in DIRTY_FLAGS:
             self.e('st %s' % DIRTY_FLAGS[pc])  # (Scc leaves the flags alone)
+        if pc in TEXT_PCS:
+            self.text_mark(self.code[pc])
+
+    def text_mark(self, ins):
+        """after a text RAM store: its row marked (the CCR kept: the flag analysis may leave flags live in it)"""
+        if ins.mn in ('ldir', 'lddr', 'ldi', 'ldd'):
+            self.e('st text_compare')
+            return
+        dst = ins.ops[0]
+        if dst[0] != 'ind' or dst[1] not in ('hl', 'ix'):
+            raise Unsupported('text writer %r' % (dst,))
+        assert 'a0' in self.free_aregs()
+        self.e('move sr,d5')
+        self.e('move.w %s,d7' % ('d3' if dst[1] == 'hl' else 'd4'))
+        if dst[2]:
+            self.e('add.w #%d,d7' % dst[2])
+        self.e('lsr.w #5,d7')
+        self.e('and.w #63,d7')                 # (d000 >> 5 = $680: the row of the codes / attributes)
+        self.e('lea text_rows_dirty,a0')
+        self.e('st (a0,d7.w)')
+        self.e('move d5,ccr')
 
 
     def mem(self, addr, off=0, io_read=False):

@@ -515,7 +515,7 @@ timer_b:
     ifd DEBUG
 ; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, background changes found by the rolling check (a writer
 ; missing from gen.BG_WRITERS); then longs: wait_heavy calls and its spins waiting for the top border, after the bottom
-; border, near the bottom border (DEBUG: 64 / 88 / 112 cycles a spin)
+; border, near the bottom border (DEBUG: 64 / 88 / 112 cycles a spin), the text rows rebuilt
 dbg_counters:
     lea dbg_buf,a0
     move.w frame_counter+2,(a0)+
@@ -526,6 +526,7 @@ dbg_counters:
     move.l dbg_heavy_top,(a0)+
     move.l dbg_heavy_low,(a0)+
     move.l dbg_heavy_near,(a0)+
+    move.l dbg_text_rows,(a0)+
     clr -(sp)
     pea dbg_name
     move #$3c,-(sp)
@@ -533,7 +534,7 @@ dbg_counters:
     addq #8,sp
     move d0,d6
     pea dbg_buf
-    move.l #24,-(sp)
+    move.l #28,-(sp)
     move d6,-(sp)
     move #$40,-(sp)
     trap #1
@@ -667,11 +668,12 @@ bg_roll: ds.w 1
 bg_missed: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
-dbg_buf: ds.w 12
+dbg_buf: ds.w 14
 dbg_heavy: ds.l 1
 dbg_heavy_top: ds.l 1
 dbg_heavy_low: ds.l 1
 dbg_heavy_near: ds.l 1
+dbg_text_rows: ds.l 1
 g_iy: ds.w 1
 g_fshadow: ds.w 1
     ds.b 16384
