@@ -79,6 +79,34 @@ render_frame:
 	rts
 
 ; ------------------------------------------------------------------------------
+; After a translated block instruction that wrote the video RAM (gen.py): the blocks of 32 bytes from vblock_de (DE
+; before) to d2 (DE after), either direction, marked; more than all of them: vblock_all.  Registers and CCR kept.
+
+vblock_range:
+	move	sr,-(sp)
+	movem.l	d0-d1/a0,-(sp)
+	move	vblock_de,d0
+	move	d2,d1
+	cmp	d0,d1
+	bhs.s	.up
+	exg	d0,d1
+.up:	lsr	#5,d0
+	lsr	#5,d1
+	sub	d0,d1			; blocks - 1
+	cmp	#63,d1
+	bls.s	.mark
+	st	vblock_all
+	bra.s	.done
+.mark:	lea	vblocks,a0
+.m:	and	#63,d0
+	st	(a0,d0.w)
+	addq	#1,d0
+	dbf	d1,.m
+.done:	movem.l	(sp)+,d0-d1/a0
+	move	(sp)+,ccr
+	rts
+
+; ------------------------------------------------------------------------------
 ; Find the changed cells (code or colour), draw them into the background and queue them.
 
 scan_cells:
@@ -97,8 +125,65 @@ scan_cells:
 	tst.b	force_scan
 	bne	.forced
 
+	; The translated writers of the video RAM mark the blocks of 32 bytes they wrote (vblocks, gen.py; vblock_all: any
+	; of it): only those are compared with the copy, then 128 bytes a render in case a writer is missing there (a
+	; change found there is still drawn; DEBUG counts it in scan_missed).  A mark is cleared before its block is
+	; compared: a write during the compare marks it again for the next render.
+	clr.b	scan_rolling
+	lea	vblocks,a2
+	tst.b	vblock_all
+	beq.s	.blocks
+	clr.b	vblock_all
+	moveq	#64/4-1,d7
+.clr:	clr.l	(a2)+
+	dbf	d7,.clr
 	move	#512/8-1,d7
-.scan:
+	bsr	.compare
+	bra	.finished
+.blocks:
+	moveq	#0,d6			; the block
+.bl4:	tst.l	(a2,d6.w)		; (four marks at a time)
+	bne.s	.bl
+	addq	#4,d6
+	cmp	#64,d6
+	blo.s	.bl4
+	bra.s	.roll
+.bl:	tst.b	(a2,d6.w)
+	beq.s	.nob
+	clr.b	(a2,d6.w)
+	move	d6,-(sp)
+	move	d6,d0
+	lsl	#5,d0
+	lea	g_ram,a0
+	lea	cell_shadow,a1
+	add	d0,a0
+	add	d0,a1
+	moveq	#0,d7
+	bsr	.compare
+	move	(sp)+,d6
+.nob:	addq	#1,d6
+	moveq	#3,d0
+	and	d6,d0
+	bne.s	.bl
+	cmp	#64,d6
+	blo.s	.bl4
+.roll:
+	st	scan_rolling
+	move	chars_roll,d0
+	add	#128,d0
+	and	#$7ff,d0
+	move	d0,chars_roll
+	lea	g_ram,a0
+	lea	cell_shadow,a1
+	add	d0,a0
+	add	d0,a1
+	moveq	#128/32-1,d7
+	bsr	.compare
+	clr.b	scan_rolling
+	bra	.finished
+
+; d7 + 1 groups of 32 bytes at a0 (the video RAM) / a1 (its copy): the changed cells queued
+.compare:
 	cmpm.l	(a0)+,(a1)+
 	bne.s	.diff0
 .c1:	cmpm.l	(a0)+,(a1)+
@@ -115,8 +200,8 @@ scan_cells:
 	bne.s	.diff6
 .c7:	cmpm.l	(a0)+,(a1)+
 	bne.s	.diff7
-.c8:	dbf	d7,.scan
-	bra	.finished
+.c8:	dbf	d7,.compare
+	rts
 
 .diff0:	bsr.s	.diff
 	bra.s	.c1
@@ -138,6 +223,12 @@ scan_cells:
 ; The long before a0 / a1 differs: queue the cells of its changed bytes.
 
 .diff:
+	ifd DEBUG
+	tst.b	scan_rolling
+	beq.s	.counted
+	addq	#1,scan_missed		; a change no translated writer flagged
+.counted:
+	endc
 	subq.l	#4,a0
 	subq.l	#4,a1
 	move.l	a0,d0
@@ -554,6 +645,14 @@ cell_shadow:	ds.b	2048
 cell_content:	ds.b	MARK_SIZE		; bit set: the background cell is not black
 list_count:	ds.w	2
 force_scan:	ds.b	1
+vblock_all:	ds.b	1		; (the translated writers: all of the video RAM may have changed)
+scan_rolling:	ds.b	1
+	even
+vblocks:	ds.b	64		; (the translated writers: the blocks of 32 bytes they wrote, gen.py)
+	even
+vblock_de:	ds.w	1		; (DE before a block instruction that writes the video RAM)
+chars_roll:	ds.w	1
+scan_missed:	ds.w	1		; (DEBUG)
 list_full:	ds.b	2		; per draw screen: its dirty list overflowed
 	even
 dirty_lists:	ds.w	2048*2

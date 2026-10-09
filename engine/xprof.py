@@ -15,6 +15,7 @@ import argparse
 import bisect
 import collections
 import os
+from pathlib import Path
 import random
 import re
 import sys
@@ -314,7 +315,8 @@ def main():
     # (16 MB: the hardware registers are readable memory; borders.s blit_go reads the Blitter's counts back)
     s = Sim(prg, ram_kib=16384 if a.game in KERNEL or a.game == "galaga" else 4096, run_dir=os.path.dirname(prg))
     s.mem.set_trace_mode(a.game != "bublbobl")      # (the Blitter model starts on a traced write)
-    sym = {k: v + s.base for k, v in s.symbols(build_dir(a.game) / mapname).items()}
+    mapfile = Path(prg).parent / mapname          # (--prg: its own map when it lies beside it)
+    sym = {k: v + s.base for k, v in s.symbols(mapfile if mapfile.exists() else build_dir(a.game) / mapname).items()}
     d = Driver(a.game, s, sym)
     cpu = s.cpu
     prof = Prof(a.game, sym, cpu)

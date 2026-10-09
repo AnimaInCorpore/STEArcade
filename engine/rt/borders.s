@@ -219,12 +219,18 @@ timer_b:
 BLIT_PIECE = 32
 	endc
 borders_blit_go	macro
+; blit_go_lines: as blit_go, d1.w = the lines a piece (BLIT_PIECE / the words a line: the caller knows them, no divu)
+blit_go_lines:
+	movem.l	d0-d2,-(sp)
+	move.w	$ffff8a38.w,d0		; the lines
+	bra.s	blit_go_split
 blit_go:
 	movem.l	d0-d2,-(sp)
 	move.w	$ffff8a38.w,d0		; the lines
 	move.w	$ffff8a36.w,d2		; the words a line
 	moveq	#BLIT_PIECE,d1
 	divu	d2,d1			; the lines a piece
+blit_go_split:
 	cmp.w	d0,d1
 	bhs.s	.whole
 	ifd DEBUG

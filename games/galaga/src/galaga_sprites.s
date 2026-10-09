@@ -45,7 +45,7 @@ SLOT_SIZE = 56
 	else
 SLOT_SIZE = 32
 	endc
-S_ENTRY = 0				; .l  the entry drawn (bytes 0-3: code, colour, x, y)
+S_ENTRY = 0				; .l  the entry drawn (bytes 0-3: code, colour, y, x low)
 S_RECT = 4				; .l  byte offset of the rectangle's first word in the screen, -1: none
 S_WORDS = 8				; .w  words per line (4 or 8)
 S_FLAGS = 10				; .w  entry bytes 4-5 (flags, x high) when drawn
@@ -57,7 +57,11 @@ S_LINES = 28				; .w  lines of the rectangle
 S_PREPARED = 32			; d0-d1/d3-d5/a0: cached blit setup, per draw screen
 S_FIRST = 30				; .w  first line of the shape that is drawn
 
-ENTRY_SIZE = 8				; spr_entries: code, colour, x, y, flags, xhigh, pad
+ENTRY_SIZE = 8				; spr_entries: code, colour, y, x low, flags, x high, (2 bytes not used)
+
+	ifne BLIT_PIECE-32
+	fail	"the restores' lines a piece (eor.b #4^8) assume 32-word pieces"
+	endc
 
 init_sprites:
 	lea	slot_state,a0
@@ -89,10 +93,13 @@ mark_rect	macro
 	add	S_MARK(a4),a6
 	move.l	S_MASK1(a4),d0
 	or.l	d0,(a6)
-	move.l	S_MASK2(a4),d0
+	tst.l	S_MASK2(a4)		; (S_MASK2 / S_MASK3: the row mask or 0, draw_part)
+	beq.s	.m\@
 	or.l	d0,8(a6)
-	move.l	S_MASK3(a4),d0
+	tst.l	S_MASK3(a4)
+	beq.s	.m\@
 	or.l	d0,16(a6)
+.m\@:
 	endm
 
 mark_drawn	macro
@@ -175,11 +182,9 @@ draw_sprites:
 	moveq	#63,d7
 .gather:
 	move	(a0)+,(a3)+		; code, colour
-	move	(a1)+,d0		; y (raw sy), x low  (MAME: spriteram_2[offs] = y, +1 = x)
-	ror	#8,d0
-	move	d0,(a3)+		; x low, y
+	move	(a1)+,(a3)+		; y (raw sy), x low  (MAME: spriteram_2[offs] = y, +1 = x)
 	move	(a2)+,(a3)+		; flags, x high
-	clr	(a3)+
+	addq.l	#2,a3			; (bytes 6-7: not used)
 	dbf	d7,.gather
 
 	lea	slot_state,a4
@@ -231,7 +236,8 @@ draw_sprites:
 	move	S_LINES(a4),BLT_COUNT+2.w
 	move	#$0100,BLT_HOP_OP.w
 	clr.b	BLT_SKEW.w
-	bsr	blit_go			; (up to 8 x 16 words: in pieces)
+	eor.b	#4^8,d1			; the lines a piece: 32 / (4 or 8 words)
+	bsr	blit_go_lines		; (up to 8 x 16 words: in pieces)
 	move	#$0203,BLT_HOP_OP.w
 	mark_rect
 	moveq	#-1,d0
@@ -255,7 +261,8 @@ draw_sprites:
 	move	d1,BLT_COUNT.w
 	move	S_LINES(a4),BLT_COUNT+2.w
 	clr.b	BLT_SKEW.w
-	bsr	blit_go			; (up to 8 x 16 words: in pieces)
+	eor.b	#4^8,d1			; the lines a piece: 32 / (4 or 8 words)
+	bsr	blit_go_lines		; (up to 8 x 16 words: in pieces)
 	mark_rect
 	moveq	#-1,d0
 	move.l	d0,S_RECT(a4)
@@ -279,17 +286,17 @@ draw_sprites:
 	move	#$0203,BLT_HOP_OP.w
 
 	move.l	slot_base,a4
-	lea	spr_entries,a1
-	move.l	a1,entry_ptr
 	lea	BLT_END1.w,a1
 	lea	BLT_CTRL.w,a2
 	lea	BLT_DST_ADDR+2.w,a3
 	lea	BLT_COUNT+2.w,a5
-	move	#63,entry_left
-	move.l	any_base,any_ptr
+	move.l	#spr_entries,d5		; the entry
+	move.l	any_base,a0		; its "a part is on the screen" byte
+	moveq	#63,d7			; entries left
+	; (draw_part uses every other register: d4-d7 / a0 are saved around it)
 
 entry_loop:
-	move.l	entry_ptr,a6
+	move.l	d5,a6
 	move.l	(a6),d2
 	cmp.l	S_ENTRY(a4),d2
 	bne.s	.changed
@@ -297,61 +304,74 @@ entry_loop:
 	cmp	S_FLAGS(a4),d2
 	bne.s	.changed
 	; unchanged: the touched parts again, if any part is on the screen
-	move.l	any_ptr,a0
 	tst.b	(a0)
 	beq.s	.none_u
-	moveq	#3,d7
+	moveq	#3,d6
 .parts_u:
 	tst.l	S_RECT(a4)
 	bmi.s	.part_next_u
 	test_rect
 	beq.s	.part_next_u
-	move	d7,-(sp)
+	movem.l	d4-d7/a0,-(sp)
+	move	d6,d7			; (draw_part: the record of part 3 - d7)
 	bsr	draw_part
-	move	(sp)+,d7
+	movem.l	(sp)+,d4-d7/a0
 .part_next_u:
 	lea	SLOT_SIZE(a4),a4
-	dbf	d7,.parts_u
-	bra	entry_next
+	dbf	d6,.parts_u
+	bra.s	entry_next
 .none_u:
 	lea	4*SLOT_SIZE(a4),a4
-	bra	entry_next
+	bra.s	entry_next
 
 .changed:
 	; Phase A left every record of a changed entry without a rectangle: the parts that
 	; exist get the entry and are drawn, the others stay as they are.
-	move.l	entry_ptr,a6
 	moveq	#0,d0			; the parts the size flags give (most entries: one)
 	move.b	4(a6),d0
 	lsr.b	#2,d0
 	and	#3,d0
-	lea	part_masks,a0
-	move.b	(a0,d0.w),part_bits
-	move.l	any_ptr,a0
+	lea	part_masks,a6
+	move.b	(a6,d0.w),d4
 	clr.b	(a0)
-	moveq	#3,d7
-.parts_c:
-	btst	d7,part_bits
-	beq.s	.part_none_c
-	move.l	entry_ptr,a6		; (record 0, part 0, always: the entry compared)
+	cmp.b	#%1000,d4		; one part (most entries): record 0 only
+	bne.s	.several_c
+	move.l	d5,a6
 	move.l	(a6),S_ENTRY(a4)
 	move	4(a6),S_FLAGS(a4)
-	move	d7,-(sp)
+	movem.l	d4-d7/a0,-(sp)
+	moveq	#3,d7
 	bsr	draw_part
-	move	(sp)+,d7
+	movem.l	(sp)+,d4-d7/a0
+	tst.l	S_RECT(a4)
+	bmi.s	.single_none
+	st	(a0)
+.single_none:
+	lea	4*SLOT_SIZE(a4),a4
+	bra.s	entry_next
+.several_c:
+	moveq	#3,d6
+.parts_c:
+	btst	d6,d4
+	beq.s	.part_none_c
+	move.l	d5,a6			; (record 0, part 0, always: the entry compared)
+	move.l	(a6),S_ENTRY(a4)
+	move	4(a6),S_FLAGS(a4)
+	movem.l	d4-d7/a0,-(sp)
+	move	d6,d7
+	bsr	draw_part
+	movem.l	(sp)+,d4-d7/a0
 	tst.l	S_RECT(a4)
 	bmi.s	.part_none_c
-	move.l	any_ptr,a0
 	st	(a0)
 .part_none_c:
 	lea	SLOT_SIZE(a4),a4
-	dbf	d7,.parts_c
+	dbf	d6,.parts_c
 
 entry_next:
-	addq.l	#1,any_ptr
-	addq.l	#ENTRY_SIZE,entry_ptr
-	subq	#1,entry_left
-	bpl	entry_loop
+	addq.l	#1,a0
+	addq.l	#ENTRY_SIZE,d5
+	dbf	d7,entry_loop
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -394,11 +414,11 @@ draw_part:
 	moveq	#3,d3
 	and.b	S_FLAGS+1(a4),d3	; x high
 	lsl	#8,d3
-	move.b	2(a4),d3		; | x low
+	move.b	3(a4),d3		; | x low
 	sub	#40,d3
 	add	2(a6),d3		; raw sx = display top line (v0)
 	moveq	#1,d0			; (257 - y - 16 * size y) & 255, in the low byte
-	sub.b	3(a4),d0
+	sub.b	2(a4),d0		; (y)
 	sub.b	4(a6),d0
 	neg	d0
 	add	#240,d0
@@ -538,8 +558,11 @@ draw_part:
 	add.l	d6,a0
 .masks_set:
 
-	; colour data: v * variant + quad of the colour code + first * 8
-	mulu	#SPR_VARIANT,d1
+	; colour data: ga_spr_vdata[v] (v * variant + first * 8) + quad of the colour code
+	add	d1,d1
+	add	d1,d1
+	lea	ga_spr_vdata,a6
+	move.l	(a6,d1.w),d1
 	moveq	#0,d2
 	move.b	1(a4),d2		; colour code
 	and	#$3f,d2
@@ -548,11 +571,6 @@ draw_part:
 	moveq	#0,d6
 	move	(a6,d2.w),d6
 	add.l	d6,d1
-	moveq	#0,d6
-	move	S_FIRST(a4),d6
-	lsl.l	#3,d6
-	add.l	d6,d1
-	add.l	#ga_spr_data,d1
 	ifd CACHESPRITES
 	movem.l	d0-d1/d3-d5/a0,S_PREPARED(a4)
 	endc
@@ -627,8 +645,21 @@ draw_part:
 	endr
 
 .blits_done:
-	mark_rect
-	mark_drawn
+	; the cells in tile_marks and spr_marks (S_MASK2 / S_MASK3: the row mask or 0, see above)
+	lea	tile_marks,a6
+	add	S_MARK(a4),a6
+	move.l	S_MASK1(a4),d0
+	or.l	d0,(a6)
+	or.l	d0,spr_marks-tile_marks(a6)
+	tst.l	S_MASK2(a4)
+	beq.s	.marked
+	or.l	d0,8(a6)
+	or.l	d0,spr_marks-tile_marks+8(a6)
+	tst.l	S_MASK3(a4)
+	beq.s	.marked
+	or.l	d0,16(a6)
+	or.l	d0,spr_marks-tile_marks+16(a6)
+.marked:
 	rts
 
 .no_part:
@@ -646,15 +677,11 @@ part_masks:	dc.b	%1000,%1100,%1010,%1111
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
-part_bits:	ds.b	1
 	even
 slot_state:	ds.b	2*256*SLOT_SIZE
 slot_base:	ds.l	1
-entry_ptr:	ds.l	1
-entry_left:	ds.w	1
 slot_any:	ds.b	2*64		; per draw screen and entry: a part of it is on the screen
 any_base:	ds.l	1
-any_ptr:	ds.l	1
 spr_entries:	ds.b	64*ENTRY_SIZE
 tile_marks:	ds.b	MARK_SIZE
 spr_marks:	ds.b	MARK_SIZE

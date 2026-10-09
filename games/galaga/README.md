@@ -228,3 +228,29 @@ Reproduce Windows timing with `tools/bench.ps1` (relative to this game directory
 or `tools/bench.ps1 -Name galaga_cache_bench -Extra '-D','CACHESPRITES=1'`.
 Each output directory contains `GALAGA.PRG`, `galaga.map`, and `RATE.BIN`;
 pass the before/after directories to the renderer comparison script.
+
+## Renderer speed (2026-10-09, later)
+
+Measured on a fixed workload: the `--sim` build under `engine/xdiff.py`'s schedule (interrupts on a clock of
+translated instructions, so every build is in the same game state and draws the same renders), the Blitter's cycles
+included, game frames 3200-3400 (86 renders): 137.4k -> 111.7k cycles a render (-19%).  The steps:
+
+* `blit_go_lines` (engine/rt/borders.s): the restores pass the lines a piece (32 / their 4 or 8 words), no `divu`.
+* `entry_loop` keeps its state in registers (saved around `draw_part` only) and draws a one-part changed entry
+  without walking the other three records.
+* `draw_part`: the colour data from `ga_spr_vdata` (assets.py: per shape v * variant + first line * 8, no `mulu`),
+  the cell marks of both bitmaps from one register (the record's row masks are the row mask or 0).
+* `spr_entries` hold the arcade's byte order (code, colour, y, x low): no `ror` in the gather.
+* The video RAM is compared per block of 32 bytes its writers mark (as 1943's character RAM): `ref/cover.py` records
+  the instructions that write $8000-$87FF (71, all on the main CPU), `gen.py`'s Emitter marks the block of a store's
+  address, a block instruction's blocks from DE before to DE after (`vblock_range`), `push` / `call` all of it;
+  `scan_cells` compares the marked blocks and 128 bytes a render in case a writer is missing (DEBUG: `scan_missed`).
+  The game rewrites its credit text every frame with the same bytes, so a single "written" flag would scan the
+  whole RAM every render: 19.4k -> 7.6k cycles a render.  Checked: no unmarked block changed in 3594 scans (6000 game
+  frames), `xdiff` against the build before: the same memory at all 4000 game frames.
+
+Pictures: `render_opt_test.py` (identical bytes), and both screens of `-D FREEZEAT=N -D NOSTARS=1` sim builds,
+before and after, byte-identical at N = 2200 and 3600 (the README's reference points).  Hatari (RATE=500, 9000
+VBLs, attract mode; the phases fall differently in the two runs): 28.7 -> 35.6 frames a second on average, the
+heaviest 500-VBL windows 15.0-15.6 -> 19.5-20.9.  Musashi does not fault on odd word accesses: two bss words of
+this change were odd and only Hatari showed it (address errors), so run a Hatari build after a bss change.

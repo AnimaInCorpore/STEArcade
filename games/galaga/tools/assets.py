@@ -221,6 +221,9 @@ def build():
     for i in range(0, 256, 8):
         lines.append("\tdc.b " + ",".join("%d,%d" % s for s in spans[i:i + 8]))
     lines.append("\tcnop 0,2")
+    lines.append("ga_spr_vdata:\t\t; (code, flip y) -> its colour data from the first line drawn (+ the quad's offset)")
+    for i in range(0, 256, 4):
+        lines.append("\tdc.l " + ",".join("ga_spr_data+%d" % (v * len(squads) * 128 + spans[v][0] * 8) for v in range(i, i + 4)))
     # draw_part: per (flags & 15, part) what the flags make of the part, 8 bytes: graphics offset 0-3 of the
     # 2 x 2 sprite (MAME's [[0,1],[2,3]][y ^ sizey*flipy][x ^ sizex*flipx]), flip y, 16 * x part (word),
     # 16 * size y, 0, 16 * y part (word)

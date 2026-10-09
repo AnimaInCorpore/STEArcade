@@ -1,5 +1,5 @@
-"""Galaga coverage run for the translator: executed pcs per CPU and the sites of the
-I/O accesses.  python ref/cover.py <seed> <frames>  ->  galaga_cover_<seed>.pkl"""
+"""Galaga coverage run for the translator: executed pcs per CPU, the instructions that write the video RAM and the
+sites of the I/O accesses.  python ref/cover.py <seed> <frames>  ->  galaga_cover_<seed>.pkl"""
 import os, pickle, random, sys
 sys.path[:0] = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 from paths import build_dir
@@ -10,12 +10,20 @@ frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 rnd = random.Random(seed)
 m = Galaga()
 pcs = [set(), set(), set()]
+vwrites = [set(), set(), set()]     # the instructions that write the video RAM (8000-87FF): gen.py flags them
+cur = [0, 0, 0]
 orig = [c.step for c in m.cpus]
 for n in range(3):
     def step(n=n, cpu=m.cpus[n], f=orig[n]):
         pcs[n].add(cpu.pc)
+        cur[n] = cpu.pc
         return f()
     m.cpus[n].step = step
+    def wr8(a, v, n=n, f=m.cpus[n].wr8):
+        if 0x8000 <= a < 0x8800:
+            vwrites[n].add(cur[n])
+        return f(a, v)
+    m.cpus[n].wr8 = wr8
 
 coin_at = 1500 + rnd.randrange(600)
 state = "attract"
@@ -42,6 +50,6 @@ for f in range(frames):
     m.run_frame()
     if f % 2000 == 0:
         print(seed, "frame", f, state, "pcs", [len(p) for p in pcs], flush=True)
-pickle.dump({"pcs": pcs, "frames": frames, "seed": seed},
+pickle.dump({"pcs": pcs, "vwrites": vwrites, "frames": frames, "seed": seed},
             open(build_dir("galaga") / ("galaga_cover_%d.pkl" % seed), "wb"))
-print("done", seed, [len(p) for p in pcs])
+print("done", seed, [len(p) for p in pcs], "video RAM writers", [len(w) for w in vwrites])

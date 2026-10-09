@@ -40,15 +40,15 @@ def compile_code(code, joins, cfg, hooks=(), emitter=Emitter, ijmp_flags=False, 
     return em
 
 
-def generate_program(rom, roots, dyn, cfg, hooks=(), extra_roots=()):
+def generate_program(rom, roots, dyn, cfg, hooks=(), extra_roots=(), emitter=Emitter, **kw):
     """-> (code lines, table lines, report, emitter) of one program.  roots: entry pcs;
-    dyn: pcs seen executing (coverage), seeds for the discovery and known code."""
+    dyn: pcs seen executing (coverage), seeds for the discovery and known code.  emitter / kw: see compile_code."""
     code, tables = discover(rom, list(roots) + sorted(dyn) + list(extra_roots), known=dyn,
                             rst28_tables=cfg.rst28_tables, hl_tables=cfg.hl_tables)
     joins = set(roots) | set(hooks)
     for nxt, targets in tables.values():
         joins |= set(targets)
-    em = compile_code(code, joins, cfg, hooks)
+    em = compile_code(code, joins, cfg, hooks, emitter=emitter, **kw)
     lines = list(em.lines)
     # stubs for labels that are referenced but not translated
     missing = sorted(p for p in em.refs if p not in code)

@@ -21,6 +21,14 @@ class TestHarness(Harness):
             cycles += self.cpu.execute(1).cycles
         raise AssertionError(f"routine did not return: {self.cpu.r_pc():x}")
 
+def written(h):
+    """the video RAM was written: as a translated writer would, mark it (vblock_all, builds that have it)"""
+    try:
+        h.mem.w8(h.addr("vblock_all"), 0xFF)
+    except KeyError:
+        pass
+
+
 def sequence(h, repaint=False):
     rng = random.Random(1942)
     h.mem.w32(h.addr("bg_address"), SOURCE)
@@ -33,6 +41,7 @@ def sequence(h, repaint=False):
     h.mem.w_block(ram, bytes(rng.randrange(128) if i % 31 == 0 else 0 for i in range(1024)))
     h.mem.w_block(ram + 0x400, bytes(rng.randrange(64) for _ in range(1024)))
     h.mem.w8(ram + 0x2005, 1)
+    written(h)
     entries = [bytearray(128) for _ in range(3)]
     for slot in range(48):
         entries[0][slot*2:slot*2+2] = bytes((rng.randrange(128), rng.randrange(64)))
@@ -49,6 +58,7 @@ def sequence(h, repaint=False):
         if frame % 8 == 0:
             entries[0][2] = rng.randrange(128)
             h.mem.w8(ram + frame, rng.randrange(128))
+            written(h)
         for off, data in zip((0xb80, 0x1380, 0x1b80), entries):
             h.mem.w_block(ram + off, bytes(data))
         b = h.bus_cycles
