@@ -2,7 +2,7 @@
 
 The main Z80 program is statically translated to 68000 code and runs with keyboard
 and joystick input on an unexpanded 8 MHz, 4 MB Atari STE. Graphics use a fixed
-16-colour Oklab palette. The sound CPU and YM2203 output are omitted.
+16-colour Oklab palette. The sound effects play on the STE's YM2149 (see "Sound effects"); the music (FM) does not.
 
     python3 port.py build commando
     python3 port.py run commando
@@ -137,3 +137,34 @@ Blitter, Musashi): a frame 185.8k -> 182.0k.  `render_test.py 300 seq`, `20 scro
 What is left is spread thin: the sprite pass ~750 cycles of set-up a sprite, the characters ~610 a cell (8 rows of
 `movep.l` read-modify-write; only 10 of 248 rows a frame are blank and 17 opaque), the restores' Blitter time ~36k,
 the translated code flat (the largest form, `ret`, 10%).
+
+## Sound effects (2026-10-10)
+
+The sound board (`tools/sound.py`, from MAME capcom/commando.cpp): a Z80 at 3 MHz, latch at 6000 (the main CPU's
+C800), two YM2203, four IRQs a frame from the scanline PROM.  Its driver keeps the two kinds of sound apart: the
+music (commands $20-$2C, 13 tunes) uses only the six FM channels, the effects (commands $02-$1B) only the SSG
+(square waves and noise, 3 channels of one chip each).  The STE has no FM, and the music as samples (the Donkey Kong
+way) does not fit: the program uses ~3.95 of the 4 MB.  The effects map onto the STE's YM2149.
+
+Translating the driver would cost ~3,800 Z80 instructions a frame (its IRQ handler; the effects alone ~2,700), so the
+effects are register streams (`tools/sound_sfx.py`) played by `src/sfx.s`, in the driver's own scheme (audio ROM):
+per chip four slots, only the highest active one is stepped (0537 / 0564) and output (0955 / 0A27); a command
+(re)starts its effect in its slot (092E), command 0 / $1C-$1F clear all (00E6).  An effect's output after n steps
+depends only on n and on the IRQ counter's phase (05F8: part of the work every 4th IRQ), so each effect is recorded
+alone in the four phases (same length and loop in all; phases 1-3 as exceptions to phase 0): 41.5 KB
+(`build.py --sound` records them again).  The SSG periods are scaled by 8/3: the driver sets the prescaler to 3 at
+boot (0064: registers $2D then $2E; MAME ymfm `ym2203::write`), an SSG clock of 750 kHz; the STE's YM2149 runs at
+2 MHz (derived, not yet measured against MAME's output).  Noise periods above 11 clamp at 31 (5 bits): the lowest
+noises come out higher.
+
+The STE plays one chip: the one whose shown effect started last (the arcade has 2 x 3 channels; both chips' effects
+sound together in ~2% of the frames of the game run).  The four IRQs of an arcade tick run at the tick's start
+(`.deliver`), with the latch as the tick before left it, and the YM gets the state after the fourth: a 60 Hz update
+of the arcade's 240 (sweeps move in steps of four).  No interrupt handler of the port touches the YM, so its writes
+are not masked (masking them made border events late).
+
+Checks: `sound_sfx.py check 3000`: the encoded data through the decoder against the driver, IRQ by IRQ over 3000
+frames of the game: 509 of 23812 chip outputs differ, all after an effect resumed from a pause (the quiet tail of
+$06, at volume 1); `sfx_test.py 3000` (in `port.py test`): the 68000 player against that decoder, 0 of 23809
+differ.  `logic_test.py 3000` and the render tests pass.  Hatari `bench.sh`: 55.6 ticks (93%), 27.2 frames a second,
+no late border events.
