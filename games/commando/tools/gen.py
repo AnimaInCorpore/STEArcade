@@ -7,6 +7,14 @@ from translate import compile_code
 from machine import Program,BUILD
 IDLE=0x8001
 TOKEN=0xc7fe
+# The instructions that write the tile RAM (D800-DFFF) and the character RAM (D000-D7FF), from the coverage's write
+# sites: each sets bg_written / fg_written after it, so the renderer compares the RAM with its copies only then (and
+# 128 bytes of each a frame in case a writer is missing here).
+BG_WRITERS={0x0090,0x0092,0x009d,0x009f,0xa76a,0xa76f,0xa79b,0xa79d,0xa7a2,0xa7a4}
+FG_WRITERS={0x0073,0x0078,0x0080,0x0085,0x0610,0x0614,0x0640,0x0e75,0x8057,0x806c,0x8142,0x8146,0x8163,0x8178,
+            0x817b,0x81a9,0x81ad,0x8625,0x8628,0x9c78,0x9c7b,0x9c8f,0x9c93,0x9ca9,0x9cac,0x9cb9,0x9cbd,0x9ce2,
+            0x9ce6,0x9d36,0x9d39}
+DIRTY={**{pc:'bg_written' for pc in BG_WRITERS},**{pc:'fg_written' for pc in FG_WRITERS}}
 
 
 def discover(img,roots,known,tables=None):
@@ -40,6 +48,7 @@ class Emitter(z80x.Emitter):
     def emit_ins(self,pc,*a,**k):
         super().emit_ins(pc,*a,**k)
         if pc in self.buffer_sites:self.e('bsr buffer_sprites')
+        if pc in DIRTY:self.e('st '+DIRTY[pc])        # (Scc leaves the flags alone)
     def x_ld_i_a(self,ins):self.e('move.b d0,g1_ireg')
     def _incdec(self,ins,op):
         if self.lo & z80x.H and ins.ops[0]==('r8','a'):

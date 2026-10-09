@@ -244,3 +244,27 @@ equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
 Blitter state and its automatically advancing source address. Use short HOG blits
 with the border timer guard. This is the required approach for every port; older
 renderers must be migrated when their sprite drawing is changed.
+
+## Change detection by translated writers (2026-10-09)
+
+Comparing video RAM with a copy every frame costs 7.5 cycles a byte (`cmpm.l` + `dbne`): 15k for 2 KB.  When few
+instructions write a RAM region, let them say so: record the write sites in a reference run (Commando's `ref/cover.py`
+keeps `(pc, address)`; for Black Tiger `wr8` was hooked with the instruction's start pc - the Z80 core's `pc` at write
+time is already the next instruction), list them in `gen.py` and emit `st <flag>` after each (`Scc` leaves the CCR
+alone).  The runtime compares only when the flag is set, plus a few hundred bytes a frame in case a writer is missing,
+and the logic test checks that every change of the region comes with its flag.  Black Tiger: background RAM (14
+writers) and palette (10); Commando: tile RAM (10) and character RAM (31); 1942 had done the same for its tile and
+character RAM.  Keep the game's own state exact anyway: Black Tiger still copies the outgoing background bank at a
+bank switch when no flag is set (the game reads its map for collisions).
+
+Also seen in Black Tiger (2026-10-09):
+
+* `moveq #0,dN` before `move.w x,dN` when dN is then used as a long (an address offset, a cache key): the upper word
+  holds whatever the caller left there; a new caller changed it and characters disappeared.
+* An AUTOPLAY build must not let the VBL copy the keyboard state into the inputs it scripts: the game then plays
+  differently from the reference run that gave the coverage, and reaches code the coverage never saw (`z80_badpc`).
+* Text that stays put while the background scrolls under it: compose runs of characters into planar strips when the
+  text changes, draw each run with the Blitter (FXSR, a zero word at each end of a strip line, two passes a plane:
+  NOT mask AND screen, then pixels OR screen).  65 HUD characters went from 300k cycles a frame to 13-49k (plus 18-24k for the text RAM compare).
+* Incremental virtual screens: check only the cells that scrolled in; draw a new tile to its twins one page away too
+  (outside the window), so the next page is ready; per display ring a damage list restored from the clean screen.

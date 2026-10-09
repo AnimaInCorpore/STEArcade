@@ -12,6 +12,7 @@ def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
     walk = "--walk" in sys.argv[3:]
+    auto = "--auto" in sys.argv[3:]     # the AUTOPLAY schedule of tools/bench.sh (period 3000 ticks)
     from logic_test import inputs
     rng = random.Random(seed)
     m = BlackTiger()
@@ -43,10 +44,14 @@ def main():
             m.inputs[:3] = inputs(frame)
             if frame >= 1000:
                 m.inputs[1] = 255 ^ 1 ^ 16 ^ (32 if frame%90<15 else 0)
+        if auto:
+            t = (frame + 1) % 3000
+            m.inputs[0] = 0xff & ~(0x40 if 900 <= t < 905 else 0) & ~(1 if 940 <= t < 945 else 0)
+            m.inputs[1] = 255 ^ 1 ^ 16 ^ (32 if t % 90 < 15 else 0) if t >= 1000 else 255
         m.run_frame_port()
         if frame % 1000 == 0:
             print(f'frame {frame}: {len(seen)} bank/PC pairs', flush=True)
-    output = build_dir('blktiger') / ('cover_walk.pkl' if walk else f'cover{seed}.pkl')
+    output = build_dir('blktiger') / ('cover_auto.pkl' if auto else 'cover_walk.pkl' if walk else f'cover{seed}.pkl')
     with output.open('wb') as f:
         pickle.dump({'pcs': seen, 'wread': wread, 'io': m.io_log, 'seed': seed, 'frames': frames}, f)
     print(output)

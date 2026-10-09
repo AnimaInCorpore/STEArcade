@@ -86,6 +86,25 @@ def main():
             return False
         return True
 
+    # The renderer compares the background bank and the palette only after a hooked writer (gen.BG_WRITERS /
+    # PAL_WRITERS): a change without its flag is a writer missing there.  (A bank switch reloads the bank.)
+    regions = [('bg_dirty', block+0x4000, 0x1000), ('pal_dirty', block+0x5800, 0x800)]
+    last = {}
+    def hooks(frame):
+        bank = mem.r8(sym['g_bg_bank'])
+        for flag, a, size in regions:
+            now = bytes(mem.r_block(a, size)), bank
+            # (a bank switch flushes a written bank: bg_flush then sets map_dirty instead)
+            flagged = mem.r8(sym[flag]) or flag == 'bg_dirty' and mem.r8(sym['map_dirty'])
+            if flag in last and now[1] == last[flag][1] and now[0] != last[flag][0] and not flagged:
+                i = next(i for i in range(size) if now[0][i] != last[flag][0][i])
+                print(f'frame {frame}: {a-block-0x8000+0x10000+i:04x} changed without {flag} (a writer missing in gen.py)')
+                return False
+            last[flag] = now
+            mem.w8(sym[flag], 0)
+        mem.w8(sym['map_dirty'], 0)
+        return True
+
     ref.run_to_idle()
     ref.booted = True
     stop = run_to_stop()
@@ -114,7 +133,7 @@ def main():
         if stop != 'sim_frame_done':
             print(f'frame {frame}: stopped {stop}, target={mem.r16(sym["g_dispatch_pc"]):04x}, d7={cpu.r_reg(R.D7):08x}, bank={mem.r8(sym["g_bank"])}')
             return 1
-        if not compare(frame):
+        if not compare(frame) or not hooks(frame):
             return 1
         resume()
         stop = run_to_stop()

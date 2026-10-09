@@ -63,6 +63,7 @@ def main():
             m.scroll[:]=bytes([sx&255,sx>>8,sy&255,sy>>8])
         block=sym['g_block']
         mem.w_block(block+0x5000,bytes(m.mem[0xd000:]))
+        mem.w8(sym['bg_written'],1);mem.w8(sym['fg_written'],1)   # (the game's writers set them)
         mem.w_block(block+0x4808,bytes(m.scroll))
         mem.w_block(sym['sprite_buffer'],bytes(m.sprites))
         sp=cpu.r_reg(R.A7)-4;mem.w32(sp,ret);cpu.w_reg(R.A7,sp);cpu.w_pc(sym['render_frame'])

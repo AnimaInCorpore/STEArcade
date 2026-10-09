@@ -826,7 +826,8 @@ rf_redraw:
 .nothing:
 	rts
 
-; the tiles that hang over the game area are drawn into the black bands around it: erase them
+; the tiles that hang over the game area are drawn into the black bands around it: erase them, where draw_tile
+; drew this frame (hang_top, hang_bottom, hang_rows: the 8-line rows with a tile at x < 0 or x > 248)
 
 rf_cleanup:
 	move.l	rf_screen,a1
@@ -834,6 +835,9 @@ rf_cleanup:
 	move.l	d1,d2
 	move.l	d1,d3
 	move.l	d1,d4
+	tst.b	hang_top
+	beq.s	.no_top
+	clr.b	hang_top
 	lea	(YPAD+9)*STRIDE(a1),a0		; rows 9-15
 	moveq	#7-1,d0
 .t:
@@ -842,6 +846,10 @@ rf_cleanup:
 	lea	16(a0),a0
 	endr
 	dbf	d0,.t
+.no_top:
+	tst.b	hang_bottom
+	beq.s	.no_bottom
+	clr.b	hang_bottom
 	lea	(YPAD+240)*STRIDE(a1),a0	; rows 240-246
 	moveq	#7-1,d0
 .b:
@@ -850,17 +858,30 @@ rf_cleanup:
 	lea	16(a0),a0
 	endr
 	dbf	d0,.b
+.no_bottom:
 	; the margins: the tiles at x < 0 and x > 248 hang into the groups next to the game area
+	lea	hang_rows,a3
+	clr.w	(a3)				; (rows 0-1 and 30-31: in the top and bottom bands)
+	clr.w	30(a3)
 	lea	(YPAD+16)*STRIDE+8(a1),a0
-	lea	(YPAD+16)*STRIDE+144(a1),a2
-	move.w	#224-1,d0
-.m:	move.l	d1,(a0)
-	move.l	d1,4(a0)
-	move.l	d1,(a2)
-	move.l	d1,4(a2)
-	lea	STRIDE(a0),a0
-	lea	STRIDE(a2),a2
-	dbf	d0,.m
+	moveq	#2,d5
+.row:
+	tst.b	(a3,d5.w)
+	beq	.next
+	clr.b	(a3,d5.w)
+o	set	0
+	rept 8
+	move.l	d1,o(a0)
+	move.l	d1,o+4(a0)
+	move.l	d1,o+136(a0)
+	move.l	d1,o+140(a0)
+o	set	o+STRIDE
+	endr
+.next:
+	lea	8*STRIDE(a0),a0
+	addq.w	#1,d5
+	cmp.w	#30,d5
+	blo	.row
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -877,6 +898,22 @@ draw_tile:
 	blt	.out
 	cmp.w	#239,d1
 	bgt	.out
+	cmp.w	#248,d0			; (hanging over the game area: rf_cleanup erases that band)
+	bls.s	.in_x
+	move.w	d1,d7
+	lsr.w	#3,d7
+	lea	hang_rows,a0
+	st	(a0,d7.w)
+	st	1(a0,d7.w)
+.in_x:
+	cmp.w	#16,d1
+	bhs.s	.in_top
+	st	hang_top
+.in_top:
+	cmp.w	#232,d1
+	bls.s	.in_y
+	st	hang_bottom
+.in_y:
 	lea	G_VRAM,a0
 	moveq	#0,d4
 	moveq	#0,d5
@@ -1869,6 +1906,10 @@ objs:		ds.b	192*24
 objslots:	ds.b	192*SLOT_BYTES
 dirty:		ds.l	28
 dirty_prev:	ds.l	28
+hang_rows:	ds.b	32
+hang_top:	ds.b	1
+hang_bottom:	ds.b	1
+	even
 dirty_raw:	ds.l	28
 page_dirty:	ds.b	64
 tile_dirty:	ds.b	464

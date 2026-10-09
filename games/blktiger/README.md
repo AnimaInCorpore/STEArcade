@@ -10,6 +10,8 @@ python port.py run blktiger           # pinned F030Arcade Hatari, STE / 4 MB / T
 python port.py test blktiger          # firmware, CPU lockstep and renderer checks
 python port.py mame blktiger 1500     # reference bitmap against MAME state
 python port.py cover blktiger 1       # optional additional bank-aware coverage
+games/blktiger/tools/perf_test.py     # Musashi: a tick's and a frame's cycles (profile, logic, frames)
+games/blktiger/tools/bench.sh         # Hatari: DEBUG + AUTOPLAY build, ticks and frames a second
 ```
 
 Supply `assets/roms/blktiger.zip`. Preparation checks all 20 ROMs against the
@@ -26,26 +28,58 @@ scancodes for special keys: Right `77`, Space `57`, Alt `56`, Escape `01`.
 
 ## Display and timing
 
-Two 768 by 544 planar buffers provide hidden margins and room for a two-axis
-virtual-screen viewport. Coarse scrolling changes the Shifter address; fine
-scrolling uses `$ffff8265`, with the extra-fetch correction in `$ffff820f`.
-A clean background cache and per-buffer damage restore overwritten tiles.
-Layout changes, global flip, palette changes and world-map edits are reflected
-in cache keys. This follows the virtual-screen approach in stedaimakaimura;
-the larger buffers avoid a scanout wrap interrupt sharing Timer B.
+Two 768 by 544 planar buffers (the display rings) and a third, clean one hold
+the background as virtual screens: the camera moves the Shifter address
+(coarse) and `$ffff8265` (fine, with the extra-fetch correction in
+`$ffff820f`); the larger buffers avoid a scanout wrap interrupt sharing Timer B.
+Everything is drawn whole into hidden margins, nothing is clipped. Per frame
+(`render.s`):
+
+* **The clean screen** holds the 17 by 15 cells the view can touch. Only the
+  cells scrolled in are checked against their cache key; a full check of the
+  window comes with a new 256-pixel page, a mode (flip, layout, background
+  off), map or palette change. A new tile is also drawn to its twins 16 cells
+  away outside the window, so the jump to the next page finds them ready.
+* **Each ring** keeps a damage list: cells the clean screen changed, the
+  cells sprites and text covered two frames ago, margin cells that must lose
+  their black. Only those are copied from the clean screen.
+* **Front pens** (the background's priority half) are in the clean tiles; they
+  are drawn again only over the cells sprites touched (a mask per cell).
+* **The text layer** is a list of runs (characters on one row, gaps of up to
+  three blanks), composed into planar strips when the text RAM or the flip
+  changes; a frame draws each run with the Blitter, shifted, two passes a plane.
+* **The black side margins** (32 pixels each side of the 320-pixel window) are
+  a mask per cell and ring, changed only where the window moved.
+* **Change detection**: the translated writers of the background RAM and the
+  palette set `bg_dirty` / `pal_dirty` (`gen.BG_WRITERS`, `gen.PAL_WRITERS`,
+  from coverage); 256 / 128 bytes a frame are compared in case one is missing
+  (a DEBUG build counts what that finds). The text RAM (about 80 writers) is
+  compared each frame.
 
 Whole sprites use precomputed shifted masks and equal-mask row groups, including
-mirrored variants. They draw into hidden margins without runtime clipping.
-Background split priority and viewport-anchored text follow MAME. A fixed
-16-colour STE palette approximates the arcade palette; renderer comparisons
-use that same colour mapping.
+mirrored variants. Background split priority and viewport-anchored text follow
+MAME. A fixed 16-colour STE palette approximates the arcade palette; renderer
+comparisons use that same colour mapping.
 
 The cooperative task scheduler yields at the game's idle loop. Native VBLs
-queue six game ticks per five 50 Hz fields, with drawing skipped while ticks
-are pending, capped at two consecutive skips to keep the display responsive.
-When the CPU cannot keep up, game timing also slows. Rendering still needs optimisation: simulated warm frames take
-roughly 1.6–2.2 million 68000 cycles, with larger cache-fill costs. This is an
-initial functional port, not a full-speed renderer on an 8 MHz STE.
+queue six game ticks per five 50 Hz fields; drawing is skipped while ticks are
+pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frames.
+
+## Speed (2026-10-09)
+
+| | before | now |
+|---|---|---|
+| a frame, Musashi cycles (`tools/perf_test.py 1500 1000`, play) | 2.15 M | 231 k |
+| a game tick (logic) | 54 k | 47 k |
+| Hatari (`tools/bench.sh`, 6000 VBLs of play) | | 38.9 ticks/s (65% of the arcade), 12.3 frames/s |
+
+`MAX_SKIPS=2` gives 33.5 ticks/s and 14.0 frames/s. The logic is now the larger
+part: the bank switches of the background RAM (4 KB copied out and in, the game
+reads its map for collisions) and the guarded window reads. `perf_test.py`
+takes `profile` (render_frame by routine), `logic [regions]` (the tick by
+routine or Z80 page), `frames` (a frame's cost, map / palette changes, tiles
+baked). `render_test.py --consecutive --walk` draws every frame (the
+incremental paths) and checks the black margins too.
 
 ## Validation and limitations
 

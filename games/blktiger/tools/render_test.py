@@ -46,7 +46,10 @@ class Renderer:
     def render(self,m):
         mem,sym=self.mem,self.sym
         mem.w_block(sym['g_block']+0x5000,bytes(m.mem[0xd000:]))
-        mem.w_block(sym['g_bg'],bytes(m.bg))
+        mem.w8(sym['pal_dirty'],1)        # (the game's palette writers set it)
+        if bytes(m.bg)!=getattr(self,'last_bg',None):
+            # (the game's bg_flush flags a changed map for the renderer)
+            self.last_bg=bytes(m.bg);mem.w_block(sym['g_bg'],self.last_bg);mem.w8(sym['map_dirty'],1)
         mem.w_block(sym['bt_sprites'],bytes(m.sprites))
         for name,value in [('g_layout',m.layout),('g_control',m.control),('g_video_enable',m.video_enable)]:
             mem.w8(sym[name],value)
@@ -68,6 +71,8 @@ class Renderer:
         self.call('vbl_video')
         assert self.sim.io[0x265]==x&15
         assert self.sim.io[0x20f]==112-(4 if x&15 else 0)
+        # The 32-pixel side margins of the 320-pixel window are black (pen 0).
+        assert not pixels[:,x-32:x].any() and not pixels[:,x+256:x+288].any(),'side margins not black'
         return pixels[:,x:x+256].copy(),used
 
 
@@ -79,14 +84,22 @@ def main():
     ap.add_argument('--scroll-sweep',action='store_true')
     ap.add_argument('--flip-layout-sweep',action='store_true')
     ap.add_argument('--sprite-edges',action='store_true')
+    ap.add_argument('--consecutive',action='store_true',help='draw every frame from --first on (the incremental paths), compare every --step')
+    ap.add_argument('--walk',action='store_true',help="logic_test's walk: right and attack from frame 1000")
     args=ap.parse_args()
     renderer=Renderer()
     ref=BlackTiger()
     oracle=Oracle()
     last=args.first+(args.frames-1)*args.step
     for frame in range(last+1):
-        ref.inputs[:3]=inputs(frame)
+        values=inputs(frame)
+        if args.walk and frame>=1000:
+            values=values[0],255^1^16^(32 if frame%90<15 else 0),255
+        ref.inputs[:3]=values
         ref.run_frame_port()
+        if args.consecutive and frame>=args.first and (frame-args.first)%args.step:
+            renderer.render(ref)
+            continue
         if frame<args.first or (frame-args.first)%args.step:
             continue
         states=[tuple(ref.scroll)]

@@ -474,6 +474,22 @@ bg_scan:
  dbf d0,.copy
  rts
 .start:
+ tst.b bg_written			; (set by the translated writers, gen.BG_WRITERS)
+ bne.s .written
+ move.w bg_roll,d0			; else 128 bytes a frame, in case a writer is missing there
+ add.w #128,d0
+ and.w #$7ff,d0
+ move.w d0,bg_roll
+ lea (a2,d0.w),a4
+ lea (a3,d0.w),a5
+ moveq #128/4-1,d0
+.roll:
+ cmpm.l (a4)+,(a5)+
+ dbne d0,.roll
+ bne.s .written
+ rts
+.written:
+ clr.b bg_written
  lea $400(a2),a4
  lea $400(a3),a5
  lea ring_dirty,a0
@@ -1095,9 +1111,24 @@ draw_foreground:
  cmp.w #1024,d6
  blo.s .all
  st fg_dirty
- bra.s .scanned
+ bra .scanned
 .scan_start:
  sf fg_dirty
+ tst.b fg_written			; (set by the translated writers, gen.FG_WRITERS)
+ bne.s .written
+ move.w fg_roll,d0			; else 128 bytes a frame, in case a writer is missing there
+ add.w #128,d0
+ and.w #$7ff,d0
+ move.w d0,fg_roll
+ lea (a2,d0.w),a4
+ lea (a3,d0.w),a5
+ moveq #128/4-1,d0
+.roll:
+ cmpm.l (a4)+,(a5)+
+ dbne d0,.roll
+ beq .scanned
+.written:
+ clr.b fg_written
  lea $400(a2),a4
  lea $400(a3),a5
  move.w #255,d6
@@ -1107,7 +1138,7 @@ draw_foreground:
  cmpm.l (a4)+,(a5)+
  bne.s .diff2
  dbf d6,.scan
- bra.s .scanned
+ bra .scanned
 .diff:
  addq.l #4,a4
  addq.l #4,a5
@@ -1287,8 +1318,12 @@ pool_ptr: ds.l 1
 pool: ds.b POOL_SIZE
 cache_misses: ds.l 1
 pool_epoch: ds.w 1
+bg_roll: ds.w 1
+fg_roll: ds.w 1
 fg_epoch: ds.w 1
 bg_full: ds.b 1
+bg_written: ds.b 1
+fg_written: ds.b 1
 fg_full: ds.b 1
 fg_dirty: ds.b 1
 fg_retry: ds.b 1

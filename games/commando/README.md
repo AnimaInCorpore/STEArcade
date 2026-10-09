@@ -55,6 +55,14 @@ screen clear 151k) to 255k; a tick of the logic is about 36k. What is left is
 real work: restoring the damage (46k), sprites (~120k with their streams) and
 characters (40k).
 
+2026-10-09: the tile and character RAM are compared with their copies only after
+a translated writer ran: `gen.BG_WRITERS` / `FG_WRITERS` (10 and 31 instructions,
+from the coverage's write sites) emit `st bg_written` / `st fg_written`, and 128
+bytes of each are compared a frame in case a writer is missing (`logic_test.py`
+checks that every change of the two RAMs comes with its flag). A frame went from
+246k to 213k Musashi cycles; `tools/bench.sh`: 55.1 game ticks (93% of the
+arcade) and 27.1 drawn frames a second.
+
 Validation:
 
 * All 22 ROM files pass the checked-in MAME CRC32/SHA1 manifest.

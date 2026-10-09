@@ -211,3 +211,12 @@ cycles (1.30x; 2026-10-09, the engine's window wrapper without the a0 save).  Wh
 0.80 / 14.2 (attract, 100-400), 0.58 / 2.2 (play, 600-900), 0.65 / 3.5 (play, 900-1200), against 0.79 / 13.8, 0.57 / 1.8,
 0.63 / 3.3 before: the translated code is a fifth of the CPU in the play, the renderer more than two thirds
 (~109k cycles a VBL), so the frame rate moved little.
+
+## Edge bands (2026-10-09)
+
+Tiles that hang over the game area are drawn whole into the 16-pixel bands around it (the screen is the plain 320-pixel
+one); `draw_tile` notes which band it drew into (`hang_top`, `hang_bottom`, `hang_rows` for the 8-line rows with a tile
+at x < 0 or x > 248) and `rf_cleanup` erases only those, in the same frame: 27k -> 1.7k cycles a frame.  What a frame
+costs (`tools/render_bench.py 1500 150 --prof`, play, about 870k cycles): the redraw of the dirty cells in list order
+(`draw_tile` 224k, `rf_redraw` 210k), the video RAM compare (`rf_vdiff`, 84k), the object bookkeeping (`obj_slots`,
+`mark_tile`, `tile_state`, about 150k) and the copy of what the other screen lacks (`rf_copy`, 41k).

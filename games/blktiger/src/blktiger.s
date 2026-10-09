@@ -23,6 +23,9 @@ IDLE_PC = $00d4
     ifnd FRAMES
 FRAMES = 0
     endc
+    ifnd MAX_SKIPS
+MAX_SKIPS = 4                    ; frames skipped in a row while game ticks are pending (the game first)
+    endc
     section text,code
 start:
     clr.l -(sp)
@@ -145,13 +148,14 @@ z80_hook:
     tst.b vbl_pending
     beq.s .draw_now
     addq.b #1,render_skips
-    cmp.b #3,render_skips
+    cmp.b #MAX_SKIPS+1,render_skips
     blo.s .skip_draw
 .draw_now:
     clr.b render_skips
     endc
-    bsr bg_flush
+    bsr bg_sync
     bsr render_frame
+    addq.w #1,cnt_renders
 .skip_draw:
     movem.l (sp)+,d0-d7/a0-a6
     ifd SIM
@@ -170,6 +174,42 @@ z80_hook:
     endc
 .deliver:
     subq.b #1,vbl_pending
+    addq.w #1,cnt_ticks
+    ifd AUTOPLAY
+    ; (benchmark build: logic_test's inputs, period 3000 ticks: coin, start, then right + attack)
+    movem.l d0-d1,-(sp)
+    moveq #0,d0
+    move.w cnt_ticks,d0
+    divu #3000,d0
+    swap d0
+    moveq #-1,d1
+    cmp.w #900,d0
+    blo.s .ap_sys
+    cmp.w #905,d0
+    bhs.s .ap_start
+    and.b #~$40,d1
+.ap_start:
+    cmp.w #940,d0
+    blo.s .ap_sys
+    cmp.w #945,d0
+    bhs.s .ap_sys
+    and.b #~1,d1
+.ap_sys:
+    move.b d1,bt_inputs
+    moveq #-1,d1
+    cmp.w #1000,d0
+    blo.s .ap_p1
+    eor.b #1|16,d1
+    ext.l d0
+    divu #90,d0
+    swap d0
+    cmp.w #15,d0
+    bhs.s .ap_p1
+    eor.b #32,d1
+.ap_p1:
+    move.b d1,bt_inputs+1
+    movem.l (sp)+,d0-d1
+    endc
     st frame_dirty
     st isr_stage
     movem.l d0-d7/a0-a6,-(sp)
@@ -241,12 +281,28 @@ bt_out_0c:
     move.b d0,g_video_enable
     rts
 bt_out_0d:
-    movem.l d0-d2/a0-a1,-(sp)
+    movem.l d0-d7/a0-a2,-(sp)
     and.w #3,d0
     cmp.b g_bg_bank,d0
     beq.s .same
     move.w d0,-(sp)
+    ; The outgoing bank back to g_bg: compared (for the renderer) only after a hooked writer,
+    ; else copied (the game's state stays exact even if gen.BG_WRITERS misses one).
+    tst.b bg_dirty
+    beq.s .copy_out
+    clr.b bg_dirty
     bsr bg_flush
+    bra.s .saved
+.copy_out:
+    lea g_block+$4000,a0
+    move.l g_bgactive,a1
+    moveq #$1000/32-1,d0
+.out:
+    movem.l (a0)+,d1-d7/a2
+    movem.l d1-d7/a2,(a1)
+    lea 32(a1),a1
+    dbf d0,.out
+.saved:
     move.w (sp)+,d0
     move.b d0,g_bg_bank
     lsl.w #8,d0
@@ -255,20 +311,58 @@ bt_out_0d:
     lea (a0,d0.w),a0
     move.l a0,g_bgactive
     lea g_block+$4000,a1
-    move #$1000/4-1,d1
+    moveq #$1000/32-1,d0
 .load:
-    move.l (a0)+,(a1)+
-    dbf d1,.load
+    movem.l (a0)+,d1-d7/a2
+    movem.l d1-d7/a2,(a1)
+    lea 32(a1),a1
+    dbf d0,.load
 .same:
-    movem.l (sp)+,d0-d2/a0-a1
+    movem.l (sp)+,d0-d7/a0-a2
     rts
 bt_out_0e:
     move.b d0,g_layout
     rts
+; Before a frame: the renderer's copy of the active background bank.  The translated writers set
+; bg_dirty; 256 bytes a frame are compared in case one is missing from gen.BG_WRITERS (DEBUG counts them).
+bg_sync:
+    tst.b bg_dirty
+    bne.s .flush
+    moveq #0,d0
+    move.w bg_roll,d0
+    add.w #256,d0
+    and.w #$fff,d0
+    move.w d0,bg_roll
+    lea g_block+$4000,a0
+    add.l d0,a0
+    move.l g_bgactive,a1
+    add.l d0,a1
+    moveq #256/4-1,d1
+.compare:
+    cmpm.l (a0)+,(a1)+
+    dbne d1,.compare
+    bne.s .missed
+    rts
+.missed:
+    ifd DEBUG
+    addq.w #1,bg_missed
+    endc
+.flush:
+    clr.b bg_dirty
+; The active background bank back to g_bg; a change makes the renderer check its window.
 bg_flush:
     lea g_block+$4000,a0
     move.l g_bgactive,a1
     move #$1000/4-1,d1
+.compare:
+    cmpm.l (a0)+,(a1)+
+    dbne d1,.compare
+    bne.s .changed
+    rts
+.changed:
+    st map_dirty
+    subq.l #4,a0
+    subq.l #4,a1
 .copy:
     move.l (a0)+,(a1)+
     dbf d1,.copy
@@ -282,9 +376,11 @@ vbl:
     endc
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
+    ifnd AUTOPLAY                ; (the benchmark's inputs are set at each tick)
     move.b in_sys,bt_inputs
     move.b in_p1,bt_inputs+1
     move.b in_p2,bt_inputs+2
+    endc
     bsr vbl_video
     cmp.b #32,vbl_pending
     bhs.s .cap
@@ -381,8 +477,39 @@ timer_b:
 	clr.b	border_b
 	rte
 
+    ifd DEBUG
+; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, background changes found by the rolling check (a writer
+; missing from gen.BG_WRITERS)
+dbg_counters:
+    lea dbg_buf,a0
+    move.w frame_counter+2,(a0)+
+    move.w cnt_renders,(a0)+
+    move.w cnt_ticks,(a0)+
+    move.w bg_missed,(a0)+
+    clr -(sp)
+    pea dbg_name
+    move #$3c,-(sp)
+    trap #1
+    addq #8,sp
+    move d0,d6
+    pea dbg_buf
+    move.l #8,-(sp)
+    move d6,-(sp)
+    move #$40,-(sp)
+    trap #1
+    lea 12(sp),sp
+    move d6,-(sp)
+    move #$3e,-(sp)
+    trap #1
+    addq #4,sp
+    rts
+dbg_name:
+    dc.b "COUNTERS.BIN",0
+    even
+    else
 dbg_counters:
     rts
+    endc
     include "hardware.s"
     include "mcu.s"
     include "render.s"
@@ -471,6 +598,7 @@ g_video_enable: ds.b 1
 g_layout: ds.b 1
 g_scroll: ds.b 4
 g_sound_latch: ds.b 1
+bg_dirty: ds.b 1
 g_coin_lockout: ds.b 1
 g_mcu_response: ds.b 1
 mcu_command: ds.b 1
@@ -495,6 +623,11 @@ frame_counter: ds.l 1
 g_winbase: ds.l 1
 g_wdispatch: ds.l 1
 g_dispatch_pc: ds.w 1
+bg_roll: ds.w 1
+bg_missed: ds.w 1
+cnt_renders: ds.w 1
+cnt_ticks: ds.w 1
+dbg_buf: ds.w 8
 g_iy: ds.w 1
 g_fshadow: ds.w 1
     ds.b 16384

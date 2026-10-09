@@ -36,12 +36,22 @@ def main():
         for a,v in list(zip(range(0xc808,0xc80c),m.scroll))+[(0xc804,m.control)]:
             if mem.r8(addr(a))!=v:raise RuntimeError(f'Latch {a:04x} differs in frame {f}')
         if bytes(mem.r_block(sym['sprite_buffer'],384))!=m.sprites:raise RuntimeError(f'Sprite latch differs in frame {f}')
-    run_to({wait});m.run_to_idle();m.booted=True;compare(-1)
+    # The renderer compares the tile and character RAM only after a hooked writer (gen.BG_WRITERS / FG_WRITERS):
+    # a change without its flag is a writer missing there.
+    regions=[('bg_written',0xd800,0x800),('fg_written',0xd000,0x800)];last={}
+    def hooks(f):
+        for flag,a,size in regions:
+            now=bytes(mem.r_block(addr(a),size))
+            if last.get(flag) is not None and now!=last[flag] and not mem.r8(sym[flag]):
+                i=next(i for i in range(size) if now[i]!=last[flag][i])
+                raise RuntimeError(f'frame {f}: {a+i:04x} changed without {flag} (a writer missing in gen.py)')
+            last[flag]=now;mem.w8(sym[flag],0)
+    run_to({wait});m.run_to_idle();m.booted=True;compare(-1);hooks(-1)
     for f in range(n):
         m.inputs[:3]=inputs(f,rnd)
         for a,v in zip(range(0xc000,0xc003),m.inputs[:3]):mem.w8(addr(a),v)
         mem.w8(sym['vbl_pending'],1)
-        m.run_frame_port();resume();run_to({done});compare(f);resume();run_to({wait})
+        m.run_frame_port();resume();run_to({done});compare(f);resume();run_to({wait});hooks(f)
         if f%1000==999:print(f'{f+1} frames exact',flush=True)
-    print(f'PASS: {n} frames; all video RAM, work RAM, sprite buffers and latches exact')
+    print(f'PASS: {n} frames; all video RAM, work RAM, sprite buffers and latches exact; every tile / character RAM change flagged')
 if __name__=='__main__':main()

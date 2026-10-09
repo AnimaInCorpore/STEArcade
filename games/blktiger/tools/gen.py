@@ -16,12 +16,32 @@ IDLE = 0x00d4
 BUILD = build_dir('blktiger')
 
 
+# The instructions that write the background RAM (c000-cfff), from bank-aware coverage of attract and play
+# (the map copies at level starts, the tile updates at 2af7 / 2afb): each sets bg_dirty after it, so the runtime
+# compares the RAM with the renderer's copy only then (and 256 bytes a frame in case a writer is missing here).
+BG_WRITERS = {0x090d, 0x090f, 0x091f, 0x0921, 0x0931, 0x0933, 0x0943, 0x0945, 0x0c44, 0x1239, 0x2518, 0x2af7, 0x2afb,
+              ('bank', 6, 0xb90d)}
+# The same for the palette RAM (d800-dfff, the fades): pal_dirty.
+PAL_WRITERS = {0x1951, 0x1959, ('bank', 6, 0x809d), ('bank', 6, 0xb944), ('bank', 6, 0xb951), ('bank', 6, 0xbaa1),
+               ('bank', 6, 0xbaac), ('bank', 6, 0xbab8), ('bank', 6, 0xbac3), ('bank', 6, 0xbacf), ('bank', 6, 0xbada)}
+
+
 def virt(pc, bank):
     return VBASE + bank*0x4000 + pc-WIN_LO
 
 
+SCRIPT_ENTRIES = {0x3006, 0x32e6, 0x366b, 0x3dab, virt(0xa1d1, 7)}   # (the animation script interpreters)
+
+
 def real(pc):
     return WIN_LO + ((pc-VBASE) & 0x3fff) if pc >= VBASE else pc
+
+
+def _pcs(writers):
+    return {virt(w[2], w[1]) if isinstance(w, tuple) else w for w in writers}
+
+
+DIRTY_FLAGS = {**{pc: 'bg_dirty' for pc in _pcs(BG_WRITERS)}, **{pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}}
 
 
 def image():
@@ -100,8 +120,8 @@ class BTEmitter(Emitter):
     def win_check(self, reg):
         """lines: aW = the window's base if the address in reg is in 8000-BFFF, else a6"""
         l = self.new_label()
-        return ["lea (a6),aW", "cmp.w #$8000,%s" % reg, "blo.s %s" % l, "cmp.w #$C000,%s" % reg, "bhs.s %s" % l,
-                "move.l g_winbase,aW", l + ":"]
+        # (as a signed word, 8000-BFFF is exactly the range below C000)
+        return ["lea (a6),aW", "cmp.w #$C000,%s" % reg, "bge.s %s" % l, "move.l g_winbase,aW", l + ":"]
 
     def block_win(self, fn, ins):
         """a block instruction at a site that read the window: aW = the base of the source (hl)"""
@@ -134,6 +154,8 @@ class BTEmitter(Emitter):
         n0 = len(self.lines)
         super().emit_ins(pc, live_out_override, with_label)
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
+        if pc in DIRTY_FLAGS:
+            self.e('st %s' % DIRTY_FLAGS[pc])  # (Scc leaves the flags alone)
 
 
     def mem(self, addr, off=0, io_read=False):
@@ -224,17 +246,13 @@ def generate(extra_roots=()):
                     if target > table:
                         boundary = min(boundary,target)
                     continuations.add(virt(target,bank) if window else target)
-            # Animation scripts passed to $3006 contain five-byte frames,
-            # $00 + code pointer, and $ff + script pointer. A code record can
-            # resume at its following record, so discover the complete chain.
-            for pc,ins in code.items():
-                if ins.mn != 'ld' or ins.ops[0] != ('r16','hl') or ins.ops[1][0] != 'imm':
-                    continue
-                nxt=code.get(pc+ins.length)
-                if not nxt or nxt.mn not in ('jp','call') or nxt.target != 0x3006:
-                    continue
-                cursor=ins.ops[1][1]
-                bank=(pc-VBASE)//0x4000 if pc >= VBASE else -1
+            # Animation scripts contain five-byte frames, $00 + code pointer,
+            # and $ff + script pointer. A code record can resume at its
+            # following record, so discover the complete chain.  Scripts go
+            # to one of the interpreters (the same code at each of
+            # SCRIPT_ENTRIES: ld (ix+30),l / ld (ix+31),h / ld a,(hl) ...),
+            # or HL is stored to ix+30/31 for later.
+            def script(cursor, bank):
                 visited=set()
                 for _ in range(256):
                     if cursor in visited or not WIN_LO <= cursor < WIN_HI or bank < 0:
@@ -257,6 +275,14 @@ def generate(extra_roots=()):
                         cursor+=5
                     else:
                         break
+            for pc,ins in code.items():
+                if ins.mn != 'ld' or ins.ops[0] != ('r16','hl') or ins.ops[1][0] != 'imm':
+                    continue
+                nxt=code.get(pc+ins.length)
+                bank=(pc-VBASE)//0x4000 if pc >= VBASE else -1
+                if nxt and (nxt.mn in ('jp','call') and nxt.target in SCRIPT_ENTRIES
+                            or nxt.mn == 'ld' and list(nxt.ops) == [('ind','ix',30),('r8','l')]):
+                    script(ins.ops[1][1], bank)
             missing = continuations - set(code)
             if not missing:
                 break
