@@ -99,31 +99,28 @@ gets past round 1's boss.
 * **Baking**: tiles, sprites and characters are kept as pixel-value bit planes; a miss
   of the hashed cache makes the 16 pen masks of each row and a generated routine per
   colour bank ORs them into the four STE planes. One pool per kind.
-* **Timers and HOG blits**: a HOG pass holds the CPU and its interrupts. Across the VBL or
-  near Timer A's top border event it made the border stay closed (the picture dropped by
-  29 lines for a frame), near a palette switch the palette came late. As in Black Tiger
-  and 1943 (`wait_heavy`), a pass starts whole only in the visible area: after the
-  palette is on and at least 10 lines before the bottom border's Timer B event. In the
-  rest of the frame (the lower border, the VBL, the top border: about a third of it)
-  `blit_go` runs the pass in pieces of at most 16 words instead of waiting (the Blitter
-  keeps its addresses, a piece is under half a line, the CPU takes its interrupts
-  between pieces), each after `wait_light`: not in the last 2-3 lines before a timer
-  event, nothing between the top border and the palette on. Sprite rows are short passes
-  themselves. The wait for the visible area alone cost 12% of the time (26 frames a
-  second); the pieces cost nothing measurable. `-D PIECES=1` makes the simulator build run
-  every pass in pieces, so `render_test.py` checks them. Two timing details: the top
-  border routine keeps its instruction timing (`ta_pad`: 20 cycles less made the palette
-  come on in the line above the picture), and the VBL writes the video counter too (the
-  STE loads the base into it before the VBL: without it a frame showed the previous
-  buffer's address under the new fine scroll, 3 pixels off, as Black Tiger found).
+* **Timers and HOG blits**: a HOG pass holds the CPU and its interrupts; started near the
+  VBL or a timer event it made a border stay closed or the palette come late. The border
+  code (`engine/rt/borders.s`, shared by the Blitter ports) has each event come early and
+  sync itself to the video, so no pass waits: Timer B fires 2 lines before the palette on,
+  the bottom border and the palette off and polls its counter to the exact line end; the
+  bottom border event starts Timer A for the next frame's top border (line-exact, so a
+  late VBL does not move it), which fires ~3 lines early and picks the right HBL by
+  reading Timer A. A pass may hold the CPU only ~1.5 lines: `blit_go` runs passes over 32
+  words in pieces (64-word pieces still let a palette event start late now and then). The
+  palette off is line-exact now (the last picture line was sometimes black from a varying
+  x before). The DEBUG build counts late events (`bench.ps1`: 0 in 6000 VBLs; `-D
+  BD_PCLOG=1` logs the interrupted PCs of late events). The VBL writes the video counter
+  too (the STE loads the base into it before the VBL: without it a frame showed the
+  previous buffer's address under the new fine scroll, 3 pixels off, as Black Tiger found).
 
 Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
 
 ## Speed (2026-10-09)
 
 `tools/bench.ps1` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
-included): 54.0 game ticks a second (91% of the arcade's 59.6) and 27.8 drawn frames a
-second. `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
+included): 53-54 game ticks a second (~90% of the arcade's 59.6) and 26-28 drawn frames a
+second (the autoplay run differs from build to build). `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
 84-380k cycles (median 89k in round 1, 251k in round 3), a frame of a D802 slide 238k, a
 full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.8M).
 

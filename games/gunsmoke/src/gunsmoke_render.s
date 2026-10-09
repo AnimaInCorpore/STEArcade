@@ -1093,7 +1093,6 @@ sprite_part:
  move.w #-264,d5
  moveq #4,d6
  move.w #$c0,d7
- wait_light			; (the routine's rows are short passes: the light guard)
  jsr (a1)
 .out:
  rts
@@ -1140,7 +1139,6 @@ generic_part:
  subq.w #1,d1
 .row:
  adda.w (a0)+,a1
- wait_light
  move.l a1,BLT_DST_ADDR.w
  move.w #4,BLT_COUNT+2.w
  move.b #$c0,BLT_CTRL.w
@@ -1174,7 +1172,6 @@ any_part:
  moveq #16,d7
  sub.w d3,d7
  lsl.w d7,d1
- wait_light
  move.w d0,BLT_END1.w
  move.w d1,BLT_END3.w
  move.l a1,BLT_SRC_ADDR.w
