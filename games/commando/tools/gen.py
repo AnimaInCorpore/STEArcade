@@ -73,7 +73,7 @@ def generate():
     cfg=z80x.Config(prefix='Z',table='z80_dispatch',token_sym='z80_irq_ret',mode='signed',
                     block=65536,iyaddr=0xc7f0,fshadow=0xc7f2,io_read_redirect={},
                     write_hooks=[],nmi_token=TOKEN,table_entries=0xc000,rst28_tables=False,
-                    iff_sym='g_iff',bit_s=True,**z80x.FAST)
+                    bit_s=True,**z80x.FAST)
     tables=set()
     code=discover(img,[0,8,16]+sorted(known),known,tables)
     # All direct stores to the sprite buffer latch, plus indirect sites from coverage.

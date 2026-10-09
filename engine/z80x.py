@@ -97,7 +97,8 @@ class Config:
         self.table_entries = table_entries
         self.rst28_tables = rst28_tables
         self.hl_tables = hl_tables
-        self.iff_sym = iff_sym          # a byte the runtime reads for the IRQ gate (ei / di)
+        self.iff_sym = iff_sym          # a byte the runtime reads for the IRQ gate (ei / di); None: ei / di emit nothing
+                                        # (the ports that deliver interrupts only at their idle hook and never read it)
 
 # the fast register maps (module docs): a "signed" mode program, a "long" mode program
 FAST = dict(alt_af="upper", alt_regs="upper", iy_reg="a2")

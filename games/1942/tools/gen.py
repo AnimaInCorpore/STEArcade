@@ -166,7 +166,7 @@ class WinEmitter(Emitter):
 def config():
     return z80x.Config(prefix="Z", table="z80_dispatch", token_sym="z80_irq_ret", mode="signed", block=0x10000,
                        iyaddr=IY_ADDR, fshadow=IY_ADDR + 2, io_read_redirect={}, write_hooks=[BANK_HOOK],
-                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g_iff",
+                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False,
                        pv_force=PV_FORCE, bit_s=True,
                        **z80x.FAST)      # (xprof 1100-1500: 24254 cycles a tick, alt_af="upper" alone 24306; the engine's ldir 24407)
 

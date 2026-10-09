@@ -292,7 +292,7 @@ def generate(extra_roots=()):
     code = {pc: ins for pc, ins in code.items() if pc < 0x8000 or pc >= VBASE}
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0xc000,
                       iyaddr=0x10000, fshadow=0x10002, io_read_redirect={}, write_hooks=[],
-                      iff_sym='g_iff', rst28_tables=False, bit_s=True, **z80x.FAST)
+                      rst28_tables=False, bit_s=True, **z80x.FAST)
     # Every indirect read is guarded: coverage must not decide memory semantics.
     sites = {pc for pc, ins in code.items() if any(o[0]=='ind' for o in ins.ops) or ins.mn in ('ldir','lddr','ldi','ldd','cpi','cpir')}
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
