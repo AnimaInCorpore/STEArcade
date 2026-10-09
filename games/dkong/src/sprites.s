@@ -265,8 +265,8 @@ draw_sprites:
 	move.l	d3,BLT_DST_ADDR.w
 	move	d1,BLT_COUNT.w		; X count
 	move	S_LINES(a4),BLT_COUNT+2.w
-	wait_borders
-	move	#$c000,BLT_CTRL.w
+	clr.b	BLT_SKEW.w
+	bsr	blit_go			; (up to 8 x 16 words: in pieces)
 	mark_rect			; the sprites that touch it have to be drawn again
 	moveq	#-1,d0
 	move.l	d0,S_RECT(a4)
@@ -494,8 +494,6 @@ sprite_loop:
 .go:
 	moveq	#4,d1			; Y count: the four planes
 	moveq	#-64,d2			; BUSY | HOG
-
-	wait_borders
 
 	ifnd NOSPRITECODE
 	tst.l	d0

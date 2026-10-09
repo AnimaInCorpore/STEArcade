@@ -22,9 +22,8 @@ MARK_ROWS = 36				; 8 pixel rows of tile_marks (sprites.s): 32 shown, sprites ma
 MARK_SIZE = MARK_ROWS*8
 KEY_ESC = $01
 
-; Timer A fires TA_DATA * 20.3 us after the VBL, in the middle of scanline 31; its handler
-; waits for the next scanline start and removes the top border from there.  (97 was
-; right when the timers started ~400 cycles after the VBL; they start right away now.)
+; The VBL's Timer A for the top border when the last frame's bottom border did not start it (borders.s): TA_DATA *
+; 20.3 us after the VBL, in scanline 31; the handler waits for the next scanline start.
 
 	ifnd TA_DATA
 TA_DATA = 98
@@ -37,33 +36,11 @@ TA_NOPS = 84
 FRAMES = 0				; quit after n frames (0 = never), for measurements
 	endc
 
-; Timer A removes the top border, Timer B the bottom one (both counted from the VBL).
+; Border removal: engine/rt/borders.s.  Its events come early and sync themselves to the video, so a Blitter pass
+; may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces (blit_go, there).
 
-arm_border_timers	macro
-	clr.b	$fffffa1b.w
-	move.b	#199+29,$fffffa21.w	; Timer B data
-	move.b	#8,$fffffa1b.w		; Timer B control
-
-	move.b	#TA_DATA,$fffffa1f.w	; Timer A data
-	move.b	#4,$fffffa19.w		; Timer A control
-
-	st	border_a		; cleared by the timer handlers
-	st	border_b
-	endm
-
-; Border removal needs the VBL and both timer interrupts on time, and a Blitter pass in HOG
-; mode takes the bus away for up to two scanlines.  No pass starts while Timer A is pending
-; or Timer B is a few lines from firing (a record is up to four passes) (its data register counts the lines down).
-
-wait_borders	macro
-.a\@:	tst.b	border_a
-	bne.s	.a\@
-	cmp.b	#6,$fffffa21.w
-	bhi.s	.d\@
-	tst.b	border_b
-	bne.s	.a\@
-.d\@:
-	endm
+BD_PALETTE = 0
+	include	"borders.s"
 
 stage	macro
 	ifd DEBUG
@@ -268,6 +245,9 @@ quit:
 	bsr	dump_times
 	endc
 	bsr	restore_hardware
+	ifd DEBUG
+	bsr	bd_report
+	endc
 
 	move.l	old_ssp,-(sp)		; Super off
 	move	#$20,-(sp)
@@ -324,11 +304,11 @@ clear_screen:
 	move.b	#1,$ffff8a3a.w		; HOP 1 (halftone only)
 	move.b	#0,$ffff8a3b.w		; OP 0 (destination = 0)
 	clr.b	$ffff8a3d.w		; FXSR, NFSR, Skew
-	move	#$8000,$ffff8a36.w	; X Count = 64 KB
+	move	#2,$ffff8a30.w		; Destination Y increment
+	move	#16,$ffff8a36.w		; X Count: 16 words, 2048 lines = 64 KB
 	move.l	d0,$ffff8a32.w
-	move	#1,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w	; Busy + Hog
-	rts
+	move	#2048,$ffff8a38.w
+	bra	blit_go			; (the interrupts run: in pieces)
 
 ; ------------------------------------------------------------------------------
 ; Interrupts
@@ -342,9 +322,7 @@ hbl:
 ; on the stack and restored at the end.
 
 vbl:
-	; The timers start first, so that a VBL inside a long frame (vbl_skip) and a normal
-	; one reach Timer A with the same delay.
-	arm_border_timers
+	borders_vbl			; (first: Timer B counts the frame's lines)
 
 	ifd DEBUG
 	addq	#1,cnt_vbl
@@ -445,8 +423,8 @@ vbl_render:
 	ifd DEBUG
 	move.l	draw_screen_address,a0
 	move	frame_counter+2,(a0)
-	move	cnt_timer_a,256(a0)
-	move	cnt_timer_b,512(a0)
+	move	bd_fallbacks,256(a0)
+	move	bd_late_low,512(a0)
 	move	cnt_vbl,768(a0)
 	move	cnt_skip,1024(a0)
 	endc
@@ -497,70 +475,9 @@ vbl_skip:
 	endc
 	rte
 
-; Top border removal (Timer A), see balls64.s of the fast Blitter objects demo.
-
-timer_a:
-	addq	#1,cnt_timer_a
-	move	#$2100,sr		; Enable HBL
-	stop	#$2100			; Wait for HBL
-	move	#$2700,sr		; Stop all interrupts
-
-	clr.b	$fffffa19.w		; Stop Timer A
-
-	rept TA_NOPS
-	nop
-	endr
-
-	clr.b	$ffff820a.w		; Remove the top border
-
-	rept 9
-	nop
-	endr
-
-	move.b	#2,$ffff820a.w
-
-	clr.b	border_a
-	rte
-
-; Bottom border removal (Timer B)
-
-timer_b:
-	addq	#1,cnt_timer_b
-	movem.l	d0/a0,-(sp)
-
-	lea	$fffffa21.w,a0
-	move.b	(a0),d0
-
-.wait1:
-	cmp.b	(a0),d0
-	beq.s	.wait1
-
-	clr.b	$ffff820a.w
-
-	moveq	#2,d0
-
-.wait2:
-	nop
-	dbf	d0,.wait2
-
-	nop
-	nop
-	nop
-	nop
-	nop
-
-	move.b	#2,$ffff820a.w
-
-	move.b	(a0),d0
-
-.wait3:
-	cmp.b	(a0),d0
-	beq.s	.wait3
-
-	movem.l	(sp)+,d0/a0
-
-	clr.b	border_b
-	rte
+	borders_handlers
+	borders_blit_go
+	borders_report
 
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD)
@@ -940,8 +857,7 @@ old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
 vbl_busy:	ds.b	1
-border_a:	ds.b	1
-border_b:	ds.b	1
+	borders_vars
 freeze_flag:	ds.b	1
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
@@ -952,8 +868,6 @@ joy1_state:	ds.b	1
 	even
 
 frame_counter:	ds.l	1
-cnt_timer_a:	ds.w	1
-cnt_timer_b:	ds.w	1
 cnt_acia:	ds.w	1
 cnt_vbl:	ds.w	1
 cnt_skip:	ds.w	1
