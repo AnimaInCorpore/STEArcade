@@ -12,6 +12,14 @@
 ;      call per run and plane, the masks shifted to the horizontal scroll), the blank ones skipped
 ;   3. the other sprites, the last entry first (the generated Blitter routines of games/1942/tools/spritegen.py)
 ;   4. the characters (a list of the visible non-blank cells, rebuilt when the character RAM changes; movep.l)
+;
+; Through a bank of clouds the front layer covers most of the window: a ring then follows the FRONT layer (its mode
+; ring_mode, chosen with some hysteresis from the counts of fully opaque and blank front cells in the window): its twin
+; lines hold the front layer (index 0 where it is transparent), drawn once as its lines scroll in, and every frame the
+; sea pass draws the back layer where the front is transparent (blank cells: two plain copies, the back layer's tiles
+; being in the same columns; mixed cells: the runs of lines with transparent pixels, the masks inverted).  The sprites
+; of colours 10 and 11 are drawn after the sea pass and the front cells they overlap again over them.  This mode needs
+; both layers on and no horizontal front scroll.
 ; What a front tile or a sprite draws beside the 224 pixels of the window (the 48 pixel margins show) is cleared.
 STRIDE = 256
 GAME_X = 24				; the window's first chunk in a line (the display shows 3 chunks of margin each side)
@@ -169,6 +177,8 @@ render_frame:
 .chosen:
  move.w d0,draw_idx
  bsr ring_update
+ tst.b cur_ff
+ bne.s .ff
  btst #6,g_layers
  beq.s .no_sprites1
  bsr sprite_lists
@@ -180,6 +190,17 @@ render_frame:
  beq.s .no_front
  bsr draw_front
 .no_front:
+ bra.s .sprites2
+.ff:
+ bsr sea_pass			; (the front layer is in the ring: the back layer where it is transparent)
+ btst #6,g_layers
+ beq.s .sprites2
+ bsr sprite_lists
+ lea spr_behind,a0
+ move.l spr_behind_end,a1
+ bsr draw_sprites
+ bsr front_over_behind		; (and the front cells over them again)
+.sprites2:
  btst #6,g_layers
  beq.s .no_sprites2
  lea spr_front,a0
@@ -227,19 +248,36 @@ ring_update:
  lsl.w #8,d1
  or.w d0,d1
  move.w d1,cur_bx
+ moveq #0,d0
+ move.b Z_SCROLL,d0
+ moveq #0,d1
+ move.b Z_SCROLL+1,d1
+ lsl.w #8,d1
+ or.w d0,d1
+ move.w d1,cur_fx
  move.b g_layers,d0
  and.b #$20,d0
  move.b d0,cur_back
+ bsr choose_mode		; -> cur_ff
  move.w draw_idx,d2
  lea ring_valid,a0
  tst.b (a0,d2.w)
  beq .full
+ lea ring_mode,a0
+ move.b cur_ff,d0
+ cmp.b (a0,d2.w),d0
+ bne .full
  lea ring_back,a0
+ move.b cur_back,d0
  cmp.b (a0,d2.w),d0
  bne .full
  move.w ring_off2,d2
  lea ring_bx,a0
  move.w cur_bx,d0
+ tst.b cur_ff
+ beq.s .follow
+ move.w cur_fx,d0		; (front-follow: the front layer's scroll)
+.follow:
  sub.w (a0,d2.w),d0		; the scroll since the last visit
  move.w d0,d7
  bpl.s .positive
@@ -250,21 +288,31 @@ ring_update:
  move.w d0,scroll_d
  move.w ring_off2,d2
  lea ring_bx,a0
- move.w cur_bx,(a0,d2.w)
+ add.w d0,(a0,d2.w)		; (the scroll the ring follows)
  lea ring_top,a0
  move.w (a0,d2.w),d1
+ move.w d1,old_top
+ sf top_wrapped
  sub.w scroll_d,d1		; (bx + 1: the picture one line down, the window one line up in the ring)
  bpl.s .t1
  add.w #RING_H,d1
+ st top_wrapped
 .t1:
  cmp.w #RING_H,d1
  blo.s .t2
  sub.w #RING_H,d1
+ st top_wrapped
 .t2:
  move.w d1,(a0,d2.w)
  move.w d1,cur_top
  bsr cover_setup
  bsr restore_damage
+ tst.b cur_ff
+ beq.s .no_clean
+ tst.b top_wrapped
+ beq.s .no_clean
+ bsr ff_clean
+.no_clean:
  move.w scroll_d,d0
  beq.s .base
  bmi.s .down
@@ -291,9 +339,15 @@ ring_update:
  st (a0,d2.w)
  lea ring_back,a0
  move.b cur_back,(a0,d2.w)
+ lea ring_mode,a0
+ move.b cur_ff,(a0,d2.w)
  move.w ring_off2,d2
  lea ring_bx,a0
  move.w cur_bx,(a0,d2.w)
+ tst.b cur_ff
+ beq.s .fb
+ move.w cur_fx,(a0,d2.w)	; (front-follow: the front layer's scroll)
+.fb:
  lea ring_top,a0
  clr.w (a0,d2.w)
  clr.w cur_top
@@ -301,7 +355,7 @@ ring_update:
  move.w #-RING_ABOVE,d1
  move.w #RING_ABOVE+256+32,d0
  bsr back_lines
- bra.s .base
+ bra .base
 
 ; d1 = the first window line (-32 .. 287), d0 = lines: the back layer's lines there, into every copy in the ring.
 back_lines:
@@ -316,7 +370,8 @@ back_lines:
 
 ; d1 = a window line: map line M = bx + 255 - y; 14 chunks (the window) of the 8 tiles of map column M / 32 at
 ; their line 31 - (M & 31), or black when the layer is off, into buffer line b = top + y (mod RING_H), b + RING_H,
-; b + 2 RING_H (b < 32) and b - RING_H (b >= RING_H - 32).
+; b + 2 RING_H (b < 32) and b - RING_H (b >= RING_H - 32).  Front-follow: the front layer's line (M = fx + 255 - y,
+; index 0 where it is transparent).
 back_line:
  move.w cur_top,d2
  add.w d1,d2
@@ -327,10 +382,12 @@ back_line:
  blo.s .b2
  sub.w #RING_H,d2
 .b2:
+ lea back_ptrs,a2		; the 8 source lines
+ tst.b cur_ff
+ bne.s .front
  move.w cur_bx,d3
  add.w #255,d3
  sub.w d1,d3			; M
- lea back_ptrs,a2		; the 8 source lines
  tst.b cur_back
  beq.s .black
  moveq #31,d4
@@ -352,12 +409,54 @@ back_line:
  add.l d4,d6
  move.l d6,(a2)+
  dbf d5,.tile
- bra.s .copies
+ bra .copies
 .black:
  moveq #7,d5
 .zero:
  move.l #zero_line,(a2)+
  dbf d5,.zero
+ bra.s .copies
+.front:
+ move.w cur_fx,d3
+ add.w #255,d3
+ sub.w d1,d3			; M
+ moveq #31,d4
+ and.w d3,d4
+ eor.w #31,d4
+ lsl.w #4,d4			; (line 31 - (M & 31)) * 16
+ lsr.w #5,d3
+ moveq #0,d5
+ move.w d3,d5
+ lsl.l #5,d5			; (8 longs a column)
+ lea front_map,a0
+ add.l d5,a0
+ lea front_tiles-1,a1
+ lea front_buf,a3		; (the front tiles' lines are plane-interleaved: reordered into chunks of 4 plane words)
+ moveq #7,d5
+.ftile:
+ move.l a3,(a2)+
+ move.l (a0)+,d6
+ bne.s .fsome
+ clr.l (a3)+
+ clr.l (a3)+
+ clr.l (a3)+
+ clr.l (a3)+
+ dbf d5,.ftile
+ bra.s .copies
+.fsome:
+ bclr #31,d6
+ add.l a1,d6
+ add.l d4,d6
+ move.l d6,a4
+ move.w (a4),(a3)+		; p0w0 p0w1 p1w0 p1w1 p2w0 p2w1 p3w0 p3w1 -> p0w0 p1w0 p2w0 p3w0 p0w1 p1w1 p2w1 p3w1
+ move.w 4(a4),(a3)+
+ move.w 8(a4),(a3)+
+ move.w 12(a4),(a3)+
+ move.w 2(a4),(a3)+
+ move.w 6(a4),(a3)+
+ move.w 10(a4),(a3)+
+ move.w 14(a4),(a3)+
+ dbf d5,.ftile
 .copies:
  move.w d2,d0
  bsr.s .put
@@ -399,8 +498,66 @@ back_line:
  move.l (a0)+,(a1)+
  rts
 
+; The ring's mode (cur_ff): front-follow when the front layer covers the window more than the back layer shows, back-
+; follow when it is the other way round (hysteresis: 16 cells of the 72), back-follow unless both layers are on and
+; the front layer has no horizontal scroll.
+FF_HYST = 16
+choose_mode:
+ sf cur_ff
+ move.b g_layers,d0
+ and.b #$30,d0
+ cmp.b #$30,d0
+ bne.s .out
+ tst.b Z_SCROLL+2
+ bne.s .out
+ move.w cur_fx,d1
+ lsr.w #5,d1			; the first front column
+ moveq #0,d4			; opaque cells
+ moveq #0,d5			; blank cells
+ lea front_map,a1
+ moveq #8,d3
+.column:
+ moveq #0,d0
+ move.w d1,d0
+ and.w #2047,d0
+ lsl.l #5,d0
+ lea (a1,d0.l),a0
+ moveq #7,d2
+.cell:
+ move.l (a0)+,d0
+ bne.s .some
+ addq.w #1,d5
+ bra.s .next
+.some:
+ bpl.s .next
+ addq.w #1,d4
+.next:
+ dbf d2,.cell
+ addq.w #1,d1
+ dbf d3,.column
+ move.w draw_idx,d2
+ lea ring_valid,a0
+ tst.b (a0,d2.w)
+ beq.s .fresh
+ lea ring_mode,a0
+ tst.b (a0,d2.w)
+ bne.s .was_ff
+.fresh:
+ sub.w d5,d4			; back-follow until the opaque cells outnumber the blank ones by FF_HYST
+ cmp.w #FF_HYST,d4
+ blt.s .out
+ st cur_ff
+ rts
+.was_ff:
+ sub.w d4,d5			; front-follow until the blank cells outnumber the opaque ones by FF_HYST
+ cmp.w #FF_HYST,d5
+ bge.s .out
+ st cur_ff
+.out:
+ rts
+
 ; Before the damage of a ring is restored: whether the rectangles of fully opaque front tiles may be left where the new
-; frame's opaque tiles cover them (the front layer on, its horizontal scroll that of the ring's last visit).
+; frame's opaque tiles cover them (back-follow, the front layer on, its horizontal scroll that of the ring's last visit).
 cover_setup:
  sf cover_ok
  moveq #0,d0
@@ -409,6 +566,8 @@ cover_setup:
  lea ring_fy,a0
  move.w (a0,d2.w),d1
  move.w d0,(a0,d2.w)
+ tst.b cur_ff
+ bne.s .no
  btst #4,g_layers
  beq.s .no
  cmp.w d0,d1
@@ -424,6 +583,61 @@ cover_setup:
  move.w d1,cover_fx		; fx + 255: window line y shows front map line fx + 255 - y
  st cover_ok
 .no:
+ rts
+
+; Front-follow, the window wrapped at the ring's end: the lines of the old band that are not in the new one become the
+; twins of new band lines, and they hold the sea of the last visit (the sea pass is not damage): copied back from their
+; twins.  Scrolled forward (the top below 0, now + RING_H): old lines top - 32 .. top - d + 287 from 320 lines below;
+; backward (the top beyond RING_H): old lines top - d - 32 .. top + 287 from 320 lines above.
+ff_clean:
+ move.w old_top,d0
+ move.w scroll_d,d1
+ bmi.s .back
+ sub.w #32,d0			; first line
+ move.w #320,d3
+ sub.w d1,d3			; lines: 320 - d
+ move.l #RING_H*STRIDE,d4
+ bra.s .go
+.back:
+ sub.w d1,d0
+ sub.w #32,d0			; first line: top - d - 32
+ move.w #320,d3
+ add.w d1,d3			; lines: 320 + d
+ move.l #-RING_H*STRIDE,d4
+.go:
+ tst.w d3
+ ble .out
+ ext.l d0
+ lsl.l #8,d0
+ add.l ring_addr,d0
+ add.l #GAME_X,d0		; the first line's window chunk 0
+ move.w #$ffff,BLT_END1.w
+ move.w #$ffff,BLT_END2.w
+ move.w #$ffff,BLT_END3.w
+ move.w #2,BLT_SRC_XINC.w
+ move.w #2,BLT_DST_XINC.w
+ move.w #STRIDE+2-2*56,BLT_SRC_YINC.w
+ move.w #STRIDE+2-2*56,BLT_DST_YINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ clr.b BLT_SKEW.w
+.burst:
+ moveq #16,d1
+ cmp.w d1,d3
+ bhs.s .n
+ move.w d3,d1
+.n:
+ move.l d0,d2
+ add.l d4,d2
+ wait_b
+ move.w #56,BLT_COUNT.w
+ move.l d2,BLT_SRC_ADDR.w
+ move.l d0,BLT_DST_ADDR.w
+ move.w d1,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ add.l #16*STRIDE,d0
+ sub.w d1,d3
+ bgt.s .burst
+.out:
  rts
 
 ; The damage list of the ring (dmg_start .. its end): copied back from the twin lines.  A rectangle of a fully opaque
@@ -736,6 +950,8 @@ front_tile:
  add.w d6,a0			; (the right word: the source 2 bytes on)
  move.w d4,d3
  lsl.w #2,d3			; words a line (damage)
+ tst.b front_nodmg
+ bne.s .no_dmg			; (front-follow: what it draws is in the twin lines already)
  tst.b front_full
  beq.s .dmg
  tst.w d5
@@ -750,8 +966,9 @@ front_tile:
  add.l #16*STRIDE,d2
  add.w #16,d0
  bsr add_damage
- lea 512(a0),a1
- sub.w d6,a1			; the runs
+.no_dmg:
+ lea 514(a0),a1
+ sub.w d6,a1			; the runs (after the offset of the sea's runs)
  move.w d4,BLT_COUNT.w		; X count = the chunks (a word of each)
  tst.w d5
  bne .general
@@ -918,7 +1135,7 @@ front_tile:
  tst.w d5
  beq.s .out			; (unshifted: nothing beside the window)
  move.w obj_chunk,d0		; the chunks beside the window
- bmi.s .outside
+ bmi .outside
  cmp.w #11,d0
  ble.s .out
 .outside:
@@ -931,6 +1148,379 @@ front_tile:
  move.w #8,BLT_DST_XINC.w
 .out:
  movem.l (sp)+,d6-d7/a0
+ rts
+
+; ---- front-follow: the sea pass -----------------------------------------------------------------------------------------
+; Every front cell of the window that is not fully opaque gets the back layer where it is transparent.  The back layer
+; is in the same columns (no horizontal front scroll): window line y of a cell shows back map line bx + 255 - y; a cell
+; spans two back tiles, split at its line n1 (the lines of the first: its lines tb .. 31).
+sea_pass:
+ move.w #2,BLT_SRC_XINC.w
+ move.w #8,BLT_DST_XINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ move.w #$ffff,BLT_END2.w
+ clr.b BLT_SKEW.w
+ lea BLT_SRC_ADDR.w,a3
+ lea BLT_DST_ADDR.w,a4
+ lea BLT_COUNT+2.w,a5
+ lea BLT_CTRL.w,a6
+ move.w cur_fx,d1
+ move.w d1,d0
+ and.w #31,d0
+ add.w #224,d0
+ move.w d0,front_y		; (as draw_front)
+ lsr.w #5,d1
+ move.w d1,front_col
+ moveq #8,d7
+.column:
+ cmp.w #-32,front_y
+ ble .done
+ moveq #0,d6			; row
+.row:
+ moveq #0,d0
+ move.w front_col,d0
+ and.w #2047,d0
+ lsl.w #3,d0
+ add.w d6,d0
+ lsl.l #2,d0
+ lea front_map,a0
+ move.l (a0,d0.l),d0
+ bmi .next			; (fully opaque)
+ movem.l d6-d7,-(sp)
+ move.l d0,-(sp)
+ ; the two back tiles: Mb = bx + 255 - y (the cell's first line), tb = 31 - (Mb & 31), n1 = 32 - tb
+ move.w cur_bx,d2
+ add.w #255,d2
+ sub.w front_y,d2
+ moveq #31,d3
+ and.w d2,d3
+ eor.w #31,d3			; tb
+ moveq #32,d0
+ sub.w d3,d0
+ move.w d0,sea_n1
+ lsl.w #4,d3			; (16 bytes a line)
+ lsr.w #5,d2			; the back column
+ move.w d2,d4
+ lsl.w #4,d2
+ add.w d6,d2
+ add.w d6,d2			; (back_map + column * 16 + row * 2)
+ lea back_map,a1
+ moveq #0,d0
+ move.w (a1,d2.w),d0
+ moveq #9,d1
+ lsl.l d1,d0
+ add.l #back_tiles,d0
+ add.l d3,d0
+ move.l d0,sea_src1
+ subq.w #1,d4
+ and.w #2047,d4
+ lsl.w #4,d4
+ add.w d6,d4
+ add.w d6,d4
+ moveq #0,d0
+ move.w (a1,d4.w),d0
+ lsl.l d1,d0
+ add.l #back_tiles,d0
+ move.l d0,sea_src2
+ ; the cell's place: chunk 2r - 1, row 0 and 7 one chunk only
+ move.w d6,d0
+ add.w d0,d0
+ subq.w #1,d0			; the first chunk
+ moveq #2,d4			; chunks
+ moveq #0,d5			; (source offset in a line: 0, or 8 for the right chunk)
+ tst.w d6
+ bne.s .r7
+ moveq #0,d0
+ moveq #1,d4
+ moveq #8,d5
+ bra.s .placed
+.r7:
+ cmp.w #7,d6
+ bne.s .placed
+ moveq #1,d4
+.placed:
+ move.w d4,sea_chunks
+ move.w d5,sea_soff
+ lsl.w #3,d0
+ move.w front_y,d2
+ add.w cur_top,d2
+ ext.l d2
+ lsl.l #8,d2
+ add.l ring_addr,d2
+ ext.l d0
+ add.l d0,d2
+ add.l #GAME_X,d2
+ move.l d2,obj_addr
+ move.l (sp)+,d0
+ bne.s .mixed
+ bsr sea_blank
+ bra.s .cell_done
+.mixed:
+ lea front_tiles-1,a0
+ add.l d0,a0
+ bsr sea_mixed
+.cell_done:
+ movem.l (sp)+,d6-d7
+.next:
+ addq.w #1,d6
+ cmp.w #8,d6
+ blo .row
+ addq.w #1,front_col
+ sub.w #32,front_y
+ dbf d7,.column
+.done:
+ rts
+
+; a blank front cell: the back layer's lines, plain copies (the cell's lines 0 .. n1 - 1 from sea_src1, the rest from
+; sea_src2), whole chunks
+sea_blank:
+ move.w sea_chunks,d4
+ lsl.w #2,d4			; words a line
+ move.w d4,BLT_COUNT.w
+ move.w #2,BLT_DST_XINC.w
+ move.w #$ffff,BLT_END1.w
+ move.w #$ffff,BLT_END2.w	; (sea_mixed sets it)
+ move.w #$ffff,BLT_END3.w
+ moveq #18,d0
+ sub.w d4,d0
+ sub.w d4,d0
+ move.w d0,BLT_SRC_YINC.w	; 16 - 2 * (words - 1)
+ move.w #STRIDE+2,d0
+ sub.w d4,d0
+ sub.w d4,d0
+ move.w d0,BLT_DST_YINC.w	; STRIDE - 2 * (words - 1)
+ move.l sea_src1,a2
+ add.w sea_soff,a2
+ move.l obj_addr,d2
+ move.w sea_n1,d1
+ wait_b
+ move.l a2,(a3)
+ move.l d2,(a4)
+ move.w d1,(a5)
+ move.b #$c0,(a6)
+ moveq #32,d0
+ sub.w d1,d0			; the lines of the second tile
+ beq.s .one
+ ext.l d1
+ lsl.l #8,d1
+ add.l d1,d2
+ move.l sea_src2,a2
+ add.w sea_soff,a2
+ wait_b
+ move.l a2,(a3)
+ move.l d2,(a4)
+ move.w d0,(a5)
+ move.b #$c0,(a6)
+.one:
+ move.w #8,BLT_DST_XINC.w	; (the pass's constant)
+ rts
+
+; a0 = a mixed front cell's baked tile: its sea runs (the lines with transparent pixels, the masks inverted).  The back
+; tiles' lines are chunks of 4 plane words, as the screen's: a run is one Blitter call per chunk (X count = the 4 plane
+; words, the three end masks the chunk's), split at the back tiles' border.
+sea_mixed:
+ moveq #0,d0
+ move.w 512(a0),d0
+ lea (a0,d0.l),a1		; the sea's runs
+ move.w #4,BLT_COUNT.w
+ move.w #2,BLT_DST_XINC.w
+ move.w #10,BLT_SRC_YINC.w	; (to the next line: 16 - 6)
+ move.w #STRIDE-6,BLT_DST_YINC.w
+.run:
+ move.w (a1)+,d1		; lines
+ beq .out
+ move.w (a1)+,d0		; first line * 16
+ move.w (a1)+,d2		; first line * 256
+ move.w (a1)+,run_m0		; masks
+ move.w (a1)+,run_m1
+ ext.l d2
+ add.l obj_addr,d2		; the run's first line
+ lsr.w #4,d0			; its first line in the cell
+ move.w d1,d3
+ add.w d0,d3			; its end
+ move.w sea_n1,d6
+ cmp.w d6,d0
+ bhs.s .second			; (all in the second back tile)
+ cmp.w d6,d3
+ bls.s .first			; (all in the first)
+ sub.w d0,d6			; split: the lines in the first tile
+ sub.w d6,d1			; (the rest)
+ move.w d1,-(sp)
+ move.w d6,d1
+ lsl.w #4,d0
+ move.l sea_src1,a2
+ add.w d0,a2
+ move.l d2,-(sp)
+ bsr.s .chunks
+ move.l (sp)+,d2
+ move.w (sp)+,d1
+ ext.l d6
+ lsl.l #8,d6
+ add.l d6,d2
+ move.l sea_src2,a2
+ bsr.s .chunks
+ bra.s .run
+.first:
+ lsl.w #4,d0
+ move.l sea_src1,a2
+ add.w d0,a2
+ bsr.s .chunks
+ bra.s .run
+.second:
+ sub.w d6,d0			; the line in the second tile
+ lsl.w #4,d0
+ move.l sea_src2,a2
+ add.w d0,a2
+ bsr.s .chunks
+ bra .run
+.out:
+ move.w #8,BLT_DST_XINC.w	; (the pass's constants)
+ rts
+; a2 = the back tile's line (chunk 0), d2 = the run's first destination line (the cell's first drawn chunk), d1 = lines
+.chunks:
+ cmp.w #1,sea_chunks
+ beq.s .one
+ move.w run_m0,d3
+ bsr.s .blit
+ addq.l #8,a2
+ addq.l #8,d2
+ move.w run_m1,d3
+ bsr.s .blit
+ subq.l #8,a2
+ subq.l #8,d2
+ rts
+.one:
+ move.w run_m0,d3
+ tst.w sea_soff
+ beq.s .blit			; (row 7: the left chunk)
+ move.w run_m1,d3		; (row 0: the right chunk)
+ addq.l #8,a2
+ bsr.s .blit
+ subq.l #8,a2
+ rts
+; d3 = the chunk's mask (transparent pixels of the front), a2 = source, d2 = destination, d1 = lines
+.blit:
+ tst.w d3
+ beq.s .none			; (the front is opaque there in all of the run)
+ move.w d3,BLT_END1.w
+ move.w d3,BLT_END2.w
+ move.w d3,BLT_END3.w
+ wait_b
+ move.l a2,(a3)
+ move.l d2,(a4)
+ move.w d1,(a5)
+ move.b #$c0,(a6)
+.none:
+ rts
+
+; front-follow: the front cells over the sprites of colours 10 and 11 again (masked, no damage: the twin lines hold them)
+front_over_behind:
+ lea spr_behind,a0
+ cmp.l spr_behind_end,a0
+ bhs .out
+ st front_nodmg
+ move.w #2,BLT_SRC_XINC.w	; (draw_front's constants)
+ move.w #8,BLT_DST_XINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ move.w #$ffff,BLT_END2.w
+ lea BLT_SRC_ADDR.w,a3
+ lea BLT_DST_ADDR.w,a4
+ lea BLT_COUNT+2.w,a5
+ lea BLT_CTRL.w,a6
+.sprite:
+ move.l a0,spr_ptr
+ movem.w (a0),d0-d1/d3-d4	; (code, colour, window line, window x)
+ ; the front cells under it: the rows of window x and x + 15, the map columns of window lines y and y + 15
+ move.w d3,ob_y
+ move.w d4,ob_x
+ moveq #0,d6
+.corner:
+ move.w ob_y,d3
+ btst #0,d6
+ beq.s .cy
+ add.w #15,d3
+.cy:
+ move.w ob_x,d4
+ btst #1,d6
+ beq.s .cx
+ add.w #15,d4
+.cx:
+ add.w #16,d4			; raw y
+ bmi .outside
+ cmp.w #256,d4
+ bge .outside
+ lsr.w #5,d4			; the map row
+ move.w cur_fx,d2
+ add.w #255,d2
+ sub.w d3,d2			; the front map line
+ move.w d2,d5
+ lsr.w #5,d2			; the map column
+ ; its first window line: y - (31 - (line & 31)); a cell starting above line -31 or below 255 is not visible (and would
+ ; reach beyond the band)
+ and.w #31,d5
+ eor.w #31,d5
+ sub.w d5,d3
+ cmp.w #-31,d3
+ blt .outside
+ cmp.w #255,d3
+ bgt .outside
+ ; not the same cell as an earlier corner of this sprite
+ move.w d6,d0
+ beq.s .new
+ lea ob_cells,a1
+ subq.w #1,d0
+.seen:
+ cmp.w (a1)+,d2
+ bne.s .other
+ cmp.w (a1),d4
+ beq.s .skip
+.other:
+ addq.l #2,a1
+ dbf d0,.seen
+.new:
+ move.w d6,d0
+ lsl.w #2,d0
+ lea ob_cells,a1
+ move.w d2,(a1,d0.w)
+ move.w d4,2(a1,d0.w)
+ moveq #0,d0
+ move.w d2,d0
+ and.w #2047,d0
+ lsl.w #3,d0
+ add.w d4,d0
+ lsl.l #2,d0
+ lea front_map,a1
+ move.l (a1,d0.l),d0
+ beq.s .skip
+ bclr #31,d0
+ sne front_full
+ lea front_tiles-1,a1
+ add.l d0,a1
+ move.w d3,front_y
+ lsl.w #5,d4
+ sub.w #16,d4
+ move.w d4,front_x
+ movem.l d6/a0,-(sp)
+ move.l a1,a0
+ bsr front_tile
+ movem.l (sp)+,d6/a0
+ bra.s .skip
+.outside:
+ move.w d6,d0			; (no cell: an entry that matches none)
+ lsl.w #2,d0
+ lea ob_cells,a1
+ move.w #-1,(a1,d0.w)
+ move.w #-1,2(a1,d0.w)
+.skip:
+ addq.w #1,d6
+ cmp.w #4,d6
+ blo .corner
+ move.l spr_ptr,a0
+ addq.l #8,a0
+ cmp.l spr_behind_end,a0
+ blo .sprite
+ sf front_nodmg
+.out:
  rts
 
 ; ---- sprites ----------------------------------------------------------------------------------------------------------
@@ -1171,7 +1761,7 @@ sprite_part:
  bsr generic_part
 .margins:
  move.w obj_chunk,d0
- bmi.s .outside
+ bmi .outside
  cmp.w #13,d0
  blt.s .out
  bgt.s .outside
@@ -1591,6 +2181,9 @@ chr_written: ds.b 1
 chr_dirty: ds.b 1
 cur_back: ds.b 1
 cover_ok: ds.b 1
+cur_ff: ds.b 1
+top_wrapped: ds.b 1
+front_nodmg: ds.b 1
 front_full: ds.b 1
 frame_ready: ds.b 1
  even
@@ -1602,6 +2195,7 @@ chr_list: ds.l 2*28*32
 chr_rows: ds.b 64
 ring_valid: ds.b 4
 ring_back: ds.b 4
+ring_mode: ds.b 4
 ring_top: ds.w 3
 ring_bx: ds.w 3
 ring_fy: ds.w 3
@@ -1610,7 +2204,20 @@ cover_fy: ds.w 1
 ring_off2: ds.w 1
 ring_addr: ds.l 1
 back_ptrs: ds.l 8
+front_buf: ds.b 8*16
 cur_bx: ds.w 1
+cur_fx: ds.w 1
+old_top: ds.w 1
+sea_n1: ds.w 1
+sea_chunks: ds.w 1
+sea_soff: ds.w 1
+sea_src1: ds.l 1
+sea_src2: ds.l 1
+ob_x: ds.w 1
+ob_y: ds.w 1
+ob_cells: ds.w 8
+run_m0: ds.w 1
+run_m1: ds.w 1
 cur_top: ds.w 1
 scroll_d: ds.w 1
 front_x: ds.w 1

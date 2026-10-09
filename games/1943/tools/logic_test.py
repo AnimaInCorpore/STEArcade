@@ -40,6 +40,8 @@ def main():
     ap.add_argument('--verbose', action='store_true')
     ap.add_argument('--twins', action='store_true', help='with --render: the twin lines of the window must hold the back layer alone')
     ap.add_argument('--trace', type=int)
+    ap.add_argument('--trace-at', default='draw_sprites,draw_front,draw_chars,sim_frame_done')
+    ap.add_argument('--trace-lines', type=lambda t: [int(x) for x in t.split(',')], default=[40])
     ap.add_argument('--watch', help='ring,line,chunk: report the writes and blits there (debug)')
     ap.add_argument('--save', help='with --render: write the first differing picture pair to this PNG')
     args = ap.parse_args()
@@ -170,11 +172,21 @@ def main():
             tw = (tw[..., 0].astype(np.uint16) << 8) | tw[..., 1]
             tw = (((tw[..., None] >> np.arange(15, -1, -1)) & 1) * (1 << np.arange(4))[None, None, :, None]).sum(2).reshape(256, 320)
             back = np.zeros((256, 320), np.int64)
-            if ref.layers & 32:
+            if mem.r8(sym['ring_mode'] + mem.r16(sym['draw_idx'])):
+                opaque, cols = front_layer()              # (front-follow: the front layer, 0 where it is transparent)
+                back[:, 48:272] = np.rot90(np.where(opaque, palmap[cols], 0)[16:240])
+            elif ref.layers & 32:
                 back[:, 48:272] = palmap[np.rot90(ref.video.render_raw(ref.mem, ref.sprites, ref.control & ~128, 32)[16:240])]
             if (tw != back).any():
                 ys, xs = np.nonzero(tw != back)
-                print(f'frame {frame}: the twin lines differ from the back layer in {len(ys)} pixels, first at window x {xs[0]-48} y {ys[0]}')
+                print(f'frame {frame}: the twin lines differ from the back layer in {len(ys)} pixels, first at window x {xs[0]-48} y {ys[0]}'
+                      f' (ring mode {mem.r8(sym["ring_mode"] + mem.r16(sym["draw_idx"]))}, top {top})')
+                if args.save:
+                    from PIL import Image
+                    rgb = np.frombuffer((build_dir('1943') / 'palette.bin').read_bytes(), '>u2')
+                    lv = lambda n: ((n & 7) << 1) | (n >> 3)
+                    cols = np.array([[lv((w >> sh) & 15) * 17 for sh in (8, 4, 0)] for w in rgb], np.uint8)
+                    Image.fromarray(np.hstack([cols[tw], cols[back], cols[got]])).save(args.save)
                 return False
         bad = got != want
         if bad.any():
@@ -240,6 +252,21 @@ def main():
         return True
 
     approx = [0]
+
+    def front_layer():
+        """the reference's front layer: opaque [raw y][raw x], colours"""
+        v, m = ref.video, np.frombuffer(bytes(ref.mem), np.uint8)
+        fx = int(m[0xd800]) | int(m[0xd801]) << 8
+        fy = int(m[0xd802])
+        yy, xx = np.indices((256, 256))
+        wx, wy = (xx + fx) & 65535, (yy + fy) & 255
+        idx = 2*((wx//32)*8 + wy//32)
+        attr = v.tilemap[idx+1]
+        code = v.tilemap[idx].astype(np.uint16) + ((attr.astype(np.uint16) & 1) << 8)
+        px = np.where(attr & 64, 31-(wx & 31), wx & 31)
+        py = np.where(attr & 128, 31-(wy & 31), wy & 31)
+        cols = v.lookup[128 + ((attr.astype(np.uint16) & 60) >> 2)*16 + v.front[code % len(v.front), py, px]]
+        return cols != 15, cols
 
     def port_order(raw):
         """the reference picture with the port's drawing order (back, sprites behind the front layer, front, the
@@ -345,24 +372,22 @@ def main():
         resume()
         if args.trace is not None and frame == args.trace:
             # (debug: the ring's line 40 after restore_damage)
-            rd = sym['restore_damage']
+            rd = sym['render_frame']
             while cpu.r_pc() != rd:
                 cpu.execute(1)
                 if cpu.r_pc() == TRAP1: sim.gemdos()
-            ret = mem.r32(cpu.r_reg(R.A7))
-            print('restore: list', hex(mem.r32(sym['dmg_start'])), 'end', hex(mem.r32(sym['ring_dmg_end'] + 4*mem.r16(sym['draw_idx']))))
-            while cpu.r_pc() != ret:
-                cpu.execute(1)
             idx = mem.r16(sym['draw_idx'])
             rb = mem.r32(sym['ring_base'] + 4*idx)
-            for y in (40, 80, 96, 112):
-                a_, b_ = mem.r_block(rb + y*256, 256), mem.r_block(rb + (y+320)*256, 256)
-                print('after restore, ring', idx, 'line', y, 'differs at bytes', [i for i in range(256) if a_[i] != b_[i]][:20])
+
             print('twin              :', mem.r_block(rb + 360*256 + 24, 32).hex())
-            for name in ('draw_sprites', 'draw_front', 'draw_chars', 'sim_frame_done'):
+            for name in args.trace_at.split(','):
                 while cpu.r_pc() != sym[name]:
                     cpu.execute(1)
-                print('at', name, mem.r_block(rb + 40*256 + 24, 32).hex())
+                    if cpu.r_pc() == sym['sim_frame_done'] and name != 'sim_frame_done':
+                        break
+                top = mem.r16(sym['cur_top'])
+                rb = mem.r32(sym['ring_base'] + 4*mem.r16(sym['draw_idx']))
+                print('at', name, 'top', top, 'mode', mem.r8(sym['cur_ff']), [mem.r_block(rb + (top + y)*256 + 24 + 8*5, 8).hex() for y in args.trace_lines])
         stop = run_to_stop()
         if stop != 'sim_frame_done':
             print(f'frame {frame}: stopped {stop}, target={mem.r16(sym["g_dispatch_pc"]):04x}, d7={cpu.r_reg(R.D7):08x}, bank={mem.r8(sym["g_bank"])}')

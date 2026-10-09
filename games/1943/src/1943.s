@@ -56,6 +56,7 @@ start:
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
+    st g_bank4
     moveq #0,d0
     bsr g_control_w
     lea G_Z80,a6
@@ -77,27 +78,24 @@ start:
     jmp Z0000
 
 ; Natural-PC dispatch: fixed table 128 KB, a 64 KB table per ROM bank with code.
+; (a3 is free for computed jumps: z80x.FAST)
 g_dispatch:
     move.w d7,g_dispatch_pc
     and.l #$ffff,d7
-    cmp.w #$8000,d7
+    lsl.l #2,d7
+    cmp.l #$8000*4,d7
     bhs.s .window
-    lsl.l #2,d7
-    move.l (a4,d7.l),-(sp)
-    rts
+    move.l (a4,d7.l),a3
+    jmp (a3)
 .window:
-    cmp.w #$c000,d7
-    blo.s .valid
+    cmp.l #$c000*4,d7
+    bhs.s .bad
+    move.l g_wdispatch,a3        ; (the bank's table - $8000 * 4)
+    move.l (a3,d7.l),a3
+    jmp (a3)
+.bad:
+    lsr.l #2,d7
     jmp z80_badpc
-.valid:
-    sub.w #$8000,d7
-    lsl.l #2,d7
-    move.l a0,-(sp)
-    move.l g_wdispatch,a0
-    move.l (a0,d7.l),d7
-    move.l (sp)+,a0
-    move.l d7,-(sp)
-    rts
 
 init_dispatch:
     lea g_fixed_dispatch,a0
@@ -118,6 +116,17 @@ init_dispatch:
     move.l (a3)+,a0
     bsr scatter
     dbf d3,.bank
+    lea bank_tabs,a0             ; per bank: the window's base, its dispatch table - $8000 * 4
+    lea g_dispatch_targets,a3
+    move.l #bank_rom+$8000,d0
+    moveq #7,d3
+.tabs:
+    move.l d0,(a0)+
+    add.l #$4000,d0
+    move.l (a3)+,d1
+    sub.l #$8000*4,d1
+    move.l d1,32-4(a0)
+    dbf d3,.tabs
     rts
 fill_dispatch:
     move.l d0,(a0)+
@@ -258,22 +267,22 @@ autoplay:
 
 ; The latches the program writes with ld (nn),a.  Called after the store with A in d0: every register and the
 ; CCR (the flags the translation may keep there) are kept.
-g_control_w:                    ; c804: bank (bits 2-4), sound reset, flip, characters on
-    move sr,-(sp)
-    movem.l d0/d7/a0,-(sp)
+g_control_w:                    ; c804: bank (bits 2-4), sound reset, flip, characters on (d7: scratch at the end of
+    move sr,-(sp)                ; a Z80 instruction)
     move.b d0,g_control
-    lsr.b #2,d0
-    and.l #7,d0
-    move.b d0,g_bank
-    move.l d0,d7
-    lsl.w #2,d7
-    lea g_dispatch_targets,a0
-    move.l (a0,d7.w),g_wdispatch
-    swap d0
-    lsr.l #2,d0                  ; (bank * $4000)
-    add.l #bank_rom+$8000,d0
-    move.l d0,g_winbase
-    movem.l (sp)+,d0/d7/a0
+    moveq #$1c,d7
+    and.b d0,d7                  ; bank * 4
+    cmp.b g_bank4,d7
+    beq.s .same
+    move.b d7,g_bank4
+    move.l a0,-(sp)
+    lea bank_tabs,a0
+    move.l (a0,d7.w),g_winbase
+    move.l 32(a0,d7.w),g_wdispatch
+    move.l (sp)+,a0
+    lsr.b #2,d7
+    move.b d7,g_bank
+.same:
     rtr
 g_dma:                          ; c806: the sprite list buffered (the 128 entries of 4 bytes, one per 32 bytes)
     move sr,-(sp)
@@ -536,6 +545,7 @@ frame_dirty: ds.b 1
 isr_stage: ds.b 1
 g_ireg: ds.b 1
 g_bank: ds.b 1
+g_bank4: ds.b 1
 g_control: ds.b 1
 g_layers: ds.b 1
 g_mcu_response: ds.b 1
@@ -560,6 +570,7 @@ crash_text: ds.b 512
 frame_counter: ds.l 1
 g_winbase: ds.l 1
 g_wdispatch: ds.l 1
+bank_tabs: ds.l 16
 g_dispatch_pc: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1

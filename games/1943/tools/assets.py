@@ -7,10 +7,12 @@ orientation.  Files in build/1943 (big-endian words):
     palmap.bin      arcade colour (256) -> STE index
     back_tiles.bin  the back layer's (code, attribute) pairs: 32 lines of 2 chunks (4 plane words each), 512 bytes
     back_map.bin    [column 0..2047][row 0..7] word: the baked tile's number
-    front_tiles.bin the front layer's non-blank pairs: 32 lines of 4 planes x 2 words (512 bytes), then its runs of
+    front_tiles.bin the front layer's non-blank pairs: 32 lines of 4 planes x 2 words (512 bytes), the offset of its
+                    sea's runs (a word, from the tile's start), then its runs of
                     lines with equal opaque masks (the transparent lines left out): those of FT_LINE lines and more, a
                     0 word, the shorter ones, a 0 word; a run: lines, first line * 16 (the source), first line * 256
-                    (the destination), the masks of the left and the right word
+                    (the destination), the masks of the left and the right word; then the sea's runs (the lines not
+                    fully opaque, the masks inverted: where the back layer shows through), a 0 word
     front_map.bin   [column][row] long: the offset of the baked tile in front_tiles.bin + 1, 0 = blank; bit 31: fully opaque
     spr_pix.bin     2048 sprites, 16 lines of 16 pens (4 bit packed, 8 bytes a line), the lines in blit order (spr_order.bin)
     spr_cmap.bin    16 colours x 16 pens -> STE index
@@ -182,12 +184,14 @@ def build():
                     pairs[key] = 0
                 else:
                     pairs[key] = len(data) + 1
+                    tile = len(data)
                     ste = np.where(opaque, mapping[colours], 0)
                     for line in ste:
                         for p in range(4):
                             for half in (0, 16):
                                 word = sum(((int(line[half + i]) >> p) & 1) << (15 - i) for i in range(16))
                                 data += struct.pack('>H', word)
+                    data += struct.pack('>H', 0)            # (the offset of the sea's runs, below)
                     masks = [(sum(int(opaque[t, i]) << (15 - i) for i in range(16)),
                               sum(int(opaque[t, 16 + i]) << (15 - i) for i in range(16))) for t in range(32)]
                     runs, t = [], 0
@@ -205,6 +209,16 @@ def build():
                             if (struct.unpack('>H', run[:2])[0] >= FT_LINE) == long_runs:
                                 data += run
                         data += struct.pack('>H', 0)
+                    struct.pack_into('>H', data, tile + 512, len(data) - tile)
+                    t = 0                                   # the sea's runs: the lines not fully opaque, inverted
+                    while t < 32:
+                        u = t
+                        while u < 32 and masks[u] == masks[t]:
+                            u += 1
+                        if masks[t] != (0xffff, 0xffff):
+                            data += struct.pack('>5H', u - t, 16 * t, 256 * t, masks[t][0] ^ 0xffff, masks[t][1] ^ 0xffff)
+                        t = u
+                    data += struct.pack('>H', 0)
             offsets[c, r] = pairs[key]
     (out / 'front_tiles.bin').write_bytes(bytes(data))
     (out / 'front_map.bin').write_bytes(offsets.astype('>u4').tobytes())
