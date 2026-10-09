@@ -2,18 +2,19 @@
 ; Conventions: see z80x.py (d0=A, d6=flags image, d5/d7 scratch)
 
 ; 8257 sprite DMA ($7D85 bit 0 written): $6900 -> $7000, $180 bytes (what dkong.py's do_dma
-; does).  a6 = Z80 block.  Keeps every register of the translated program.
+; does).  a6 = Z80 block.  Keeps every register of the translated program but the scratch
+; d5 / d7 / a3; 32 bytes a movem pair, the stores at fixed offsets (~1960 cycles, 2600 before).
 z80_dma:
-	movem.l	d1-d4/a1-a2,-(sp)
-	lea	$6900(a6),a1
-	lea	$7000(a6),a2
-	moveq	#$180/16-1,d1
-.copy:
-	movem.l	(a1)+,d2-d5
-	movem.l	d2-d5,(a2)
-	lea	16(a2),a2
-	dbf	d1,.copy
-	movem.l	(sp)+,d1-d4/a1-a2
+	movem.l	d1-d4/d6/a0-a2,-(sp)
+	lea	$6900(a6),a0
+	lea	$7000(a6),a1
+DMA_OFF	set	0
+	rept	$180/32
+	movem.l	(a0)+,d1-d7/a2
+	movem.l	d1-d7/a2,DMA_OFF(a1)
+DMA_OFF	set	DMA_OFF+32
+	endr
+	movem.l	(sp)+,d1-d4/d6/a0-a2
 	rts
 
 ; The dispatch table the translated code uses is in byte swapped pc order (a return
