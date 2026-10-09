@@ -3,19 +3,12 @@ KEY_ESC = $01
 PIC_TOP = 26
 TA_DATA = 98
 TA_NOPS = 84
-TA2_DATA = 78
-TA3_DATA = 176
-arm_border_timers macro
-    clr.b $fffffa19.w
-    clr.b $fffffa1b.w
-    move.b #228,$fffffa21.w
-    move.b #8,$fffffa1b.w
-    clr.b ta_state
-    move.b #TA_DATA,$fffffa1f.w
-    move.b #4,$fffffa19.w
-    st border_a
-    st border_b
-    endm
+PIC_LINES = 224
+BD_PALETTE = 1
+; Border removal and the palette on / off: engine/rt/borders.s.  Its events come early and sync themselves to the
+; video, so a Blitter pass may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces
+; (blit_go, there).
+    include "borders.s"
 BUSY = $80
 HOG = $40
 G_Z80 = g_block+$8000
@@ -372,7 +365,7 @@ hbl:
     rte
 vbl:
     ifnd SIM
-    arm_border_timers
+    borders_vbl
     endc
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
@@ -401,131 +394,27 @@ vbl:
     movem.l (sp)+,d0-d7/a0
     rte
 
-wait_borders:
-    ifnd SIM
-.again:
-    tst.b border_a
-    bne.s .again
-    cmp.b #6,$fffffa21.w
-    bhi.s .done
-    tst.b border_b
-    bne.s .again
-.done:
-    endc
-    rts
-
-; wait_heavy: a long HOG blit (the text layer) may start only in the visible area: after the top border is open and
-; at least 10 lines before the bottom border's Timer B event.  Started later, it would delay that event or the VBL
-; that arms Timer A, and the border would stay closed (a jump of the picture).  Short blits use wait_borders.
-wait_heavy:
-    ifnd SIM
-    ifd DEBUG
-    addq.l #1,dbg_heavy
-    endc
-.again:
-    tst.b border_a
-    bne.s .top                   ; the top border is not open yet
-    tst.b border_b
-    beq.s .low                   ; the bottom border is open already: wait for the next frame's top
-    cmp.b #10,$fffffa21.w
-    bls.s .near                  ; too close to the bottom border
-    endc
-    rts
-    ifnd SIM
-.top:
-    ifd DEBUG
-    addq.l #1,dbg_heavy_top
-    endc
-    bra.s .again
-.low:
-    ifd DEBUG
-    addq.l #1,dbg_heavy_low
-    endc
-    bra.s .again
-.near:
-    ifd DEBUG
-    addq.l #1,dbg_heavy_near
-    endc
-    bra.s .again
-    endc
-
-timer_a:
-	tst.b	ta_state
-	bne	timer_a_later
-	move	#$2100,sr		; Enable HBL
-	stop	#$2100			; Wait for HBL
-	move	#$2700,sr		; Stop all interrupts
-	clr.b	$fffffa19.w		; Stop Timer A
-	rept TA_NOPS
-	nop
-	endr
-	clr.b	$ffff820a.w		; Remove the top border
-	rept 9
-	nop
-	endr
-	move.b	#2,$ffff820a.w
-	move.b	#1,ta_state		; the next event: the palette on
-	move.b	#TA2_DATA,$fffffa1f.w
-	move.b	#4,$fffffa19.w
-	rte
-
-timer_a_later:
-	movem.l	d0-d7,-(sp)
-	clr.b	$fffffa19.w
-	cmp.b	#1,ta_state
-	bne.s	.off
-	movem.l	shown_pal,d0-d7
-	movem.l	d0-d7,$ffff8240.w
-	clr.b	border_a		; (blits may start now: a HOG blit before would delay the palette, the first line flickers)
-	move.b	#2,ta_state		; the next event: the palette off
-	move.b	#TA3_DATA,$fffffa1f.w
-	move.b	#7,$fffffa19.w
-	bra.s	.out
-.off:	movem.l	black_pal,d0-d7
-	movem.l	d0-d7,$ffff8240.w
-	move.b	#3,ta_state
-.out:	movem.l	(sp)+,d0-d7
-	rte
-
-; Bottom border removal (Timer B)
-
-timer_b:
-	movem.l	d0/a0,-(sp)
-	lea	$fffffa21.w,a0
-	move.b	(a0),d0
-.wait1:	cmp.b	(a0),d0
-	beq.s	.wait1
-	clr.b	$ffff820a.w
-	moveq	#2,d0
-.wait2:	nop
-	dbf	d0,.wait2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
-	move.b	(a0),d0
-.wait3:	cmp.b	(a0),d0
-	beq.s	.wait3
-	movem.l	(sp)+,d0/a0
-	clr.b	border_b
-	rte
+	borders_handlers
+	borders_blit_go
 
     ifd DEBUG
 ; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, background changes found by the rolling check (a writer
-; missing from gen.BG_WRITERS); then longs: wait_heavy calls and its spins waiting for the top border, after the bottom
-; border, near the bottom border (DEBUG: 64 / 88 / 112 cycles a spin), the text rows rebuilt, the frames a ring kept its text, the byte tables bake_pixels built
+; missing from gen.BG_WRITERS), the frames whose top border the VBL armed, the top border / palette on / bottom border
+; / palette off events that started too late (engine/rt/borders.s), 0; then longs: blit_go's passes run in pieces,
+; the text rows rebuilt, the frames a ring kept its text, the byte tables bake_pixels built
 dbg_counters:
     lea dbg_buf,a0
     move.w frame_counter+2,(a0)+
     move.w cnt_renders,(a0)+
     move.w cnt_ticks,(a0)+
     move.w bg_missed,(a0)+
-    move.l dbg_heavy,(a0)+
-    move.l dbg_heavy_top,(a0)+
-    move.l dbg_heavy_low,(a0)+
-    move.l dbg_heavy_near,(a0)+
+    move.w bd_fallbacks,(a0)+
+    move.w bd_late_top,(a0)+
+    move.w bd_late_on,(a0)+
+    move.w bd_late_low,(a0)+
+    move.w bd_late_off,(a0)+
+    clr.w (a0)+
+    move.l bd_pieced,(a0)+
     move.l dbg_text_rows,(a0)+
     move.l dbg_text_kept,(a0)+
     move.l dbg_byte_luts,(a0)+
@@ -622,9 +511,7 @@ old_fa1b: ds.b 1
 old_fa1d: ds.b 1
 old_fa1f: ds.b 1
 old_fa21: ds.b 1
-border_a: ds.b 1
-border_b: ds.b 1
-ta_state: ds.b 1
+	borders_vars
 quit_flag: ds.b 1
 vbl_pending: ds.b 1
 tick_phase: ds.b 1
@@ -671,10 +558,6 @@ bg_missed: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
 dbg_buf: ds.w 18
-dbg_heavy: ds.l 1
-dbg_heavy_top: ds.l 1
-dbg_heavy_low: ds.l 1
-dbg_heavy_near: ds.l 1
 dbg_text_rows: ds.l 1
 dbg_text_kept: ds.l 1
 dbg_byte_luts: ds.l 1

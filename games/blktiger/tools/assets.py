@@ -61,7 +61,7 @@ def programs(sprites):
             '\tmove.w (a0)+,d0', '\tmove.l (a1,d0.w),d0',
             '\tmove.w d0,(a3)', '\tswap d0', '\tmove.w d0,(a2)',
             '\tmove.w (a0)+,d3', '.row:', '\tmove.l (a0)+,d1',
-            '\tadd.l d1,(a4)', '\tjsr wait_borders', '\tmove.w #4,(a5)', '\tmove.w d6,(a6)',
+            '\tadd.l d1,(a4)', '\tmove.w #4,(a5)', '\tmove.w d6,(a6)',
             '\tdbf d3,.row', '\tdbf d2,.group', '.done:', '\trts']
     return '\n'.join(out)+'\n',bytes(orders),bytes(blanks)
 
