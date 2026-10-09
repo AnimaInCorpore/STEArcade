@@ -159,12 +159,25 @@ class BTEmitter(Emitter):
     def x_cpi(self, ins): self.block_win(super().x_cpi, ins)
     def x_cpir(self, ins): self.block_win(super().x_cpir, ins)
 
+    storing = False
+
+    def write8(self, op, src_ea):             # (z80x's write8 takes its address from read8: a store is not guarded)
+        self.storing = True
+        try:
+            return super().write8(op, src_ea)
+        finally:
+            self.storing = False
+
     def read8(self, op, io_read=True):
         pre, ea = Emitter.read8(self, op, io_read)
-        if op[0] == 'ind' and self.cur is not None and self.cur.pc in self.window_sites:
-            match = re.fullmatch(r'(-?\d+)?\(a6,(d\d)\.w\)', ea)
+        if op[0] == 'ind' and not self.storing and self.cur is not None and self.cur.pc in self.window_sites:
+            match = re.fullmatch(r'(-?\d+)?\(a6,(d\d|a2)\.w\)', ea)
             if match:
-                pre += self.win_check(match[2])
+                reg = match[2]
+                if reg == 'a2':                 # (IY with z80x.FAST: the low word of a2, whose upper word is not 0)
+                    pre += ['move.w a2,d5']
+                    reg = 'd5'
+                pre += self.win_check(reg)
                 ea = f'{match[1] or ""}(aW,{match[2]}.w)'
         return pre, ea
 
