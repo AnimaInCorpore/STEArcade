@@ -1,6 +1,6 @@
 """Translated Black Tiger kernel against the same cooperative reference schedule."""
 from pathlib import Path
-import argparse
+import argparse, re
 import random
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
@@ -30,6 +30,8 @@ def main():
     ap.add_argument('frames', nargs='?', type=int, default=1600)
     ap.add_argument('--seed',type=int)
     ap.add_argument('--walk',action='store_true',help='hold right and attack through the first stage')
+    ap.add_argument('--stage',type=int,help='start the game at this stage (0-7): the stage number $f3a1 set on both machines '
+                    'while the game sets up, the lives $f3a0 kept at 3 (the cheats of ref/cover.py seeds 4-11)')
     args = ap.parse_args()
     run = ROOT / 'run' / 'blktiger_sim'
     sim = Sim(str(run / 'BLKTIGER.PRG'), run_dir=run)
@@ -42,6 +44,31 @@ def main():
     mem.w32(sym['render_frame']+2,sym['text_scan'])
     ref = BlackTiger()
     block = sym['g_block']
+    # The translator merges `push rr / pop rr'` into a move (z80x: the stack word below SP is dead): the translated
+    # program never writes those two bytes.  The reference's bytes written by such a push are not compared until
+    # another instruction writes them.
+    merged = set()
+    for line in (build_dir('blktiger') / 'code_blktiger.s').read_text().splitlines():
+        hit = re.match(r'^Z([0-9A-F]{4,5}):\t\t; push .* \(merged\)', line)
+        if hit:
+            merged.add(int(hit[1], 16))
+    dead = set()
+    site = [0]
+    step0, write0 = ref.cpu.step, ref.cpu.wr8
+
+    def ref_step():
+        pc = ref.cpu.pc
+        site[0] = 0x10000 + ref.bank*0x4000 + pc-0x8000 if 0x8000 <= pc < 0xc000 else pc
+        return step0()
+
+    def ref_write(a, v):
+        if site[0] in merged:
+            dead.add(a)
+        else:
+            dead.discard(a)
+        return write0(a, v)
+
+    ref.cpu.step, ref.cpu.wr8 = ref_step, ref_write
 
     def run_to_stop():
         used = 0
@@ -75,6 +102,8 @@ def main():
             # Dead stack bytes still carry unused H/N flags; only the live kernel
             # state and saved task stacks have architectural significance.
             diff = [i for i,(a,b) in enumerate(zip(got,want)) if a != b]
+            if name == 'RAM':
+                diff = [i for i in diff if 0xd000+i not in dead]
             if diff:
                 print(frame,name,'diff',len(diff),[(hex(i),got[i],want[i]) for i in diff[:12]])
                 return False
@@ -137,6 +166,11 @@ def main():
             values = system, 255 ^ rng.choice([0,1,2,4,8,16,32,17,33,18,34]),255
         if args.walk and frame >= 1000:
             values = values[0], 255 ^ 1 ^ 16 ^ (32 if frame%90<15 else 0), 255
+        if args.stage is not None:
+            for addr, value, f0, f1 in ((0xf3a1, args.stage, 939, 1060), (0xf3a0, 3, 1000, args.frames)):
+                if f0 <= frame < f1:
+                    ref.mem[addr] = value
+                    mem.w8(block + addr - 0x8000, value)
         ref.inputs[:3] = values
         for i,value in enumerate(values):
             mem.w8(sym['bt_inputs']+i,value)

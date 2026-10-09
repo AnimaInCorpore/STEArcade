@@ -31,7 +31,7 @@ COVER = {
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8], 60000)],     # 5-8: with MAME's cheats (later stages)
-    "blktiger": [("ref/cover.py", [1, 2, 3], 20000)],
+    "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
