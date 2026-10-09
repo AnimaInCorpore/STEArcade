@@ -11,7 +11,7 @@ orientation.  Files in build/1943 (big-endian words):
                     lines with equal opaque masks (the transparent lines left out): those of FT_LINE lines and more, a
                     0 word, the shorter ones, a 0 word; a run: lines, first line * 16 (the source), first line * 256
                     (the destination), the masks of the left and the right word
-    front_map.bin   [column][row] long: the offset of the baked tile in front_tiles.bin + 1, 0 = blank
+    front_map.bin   [column][row] long: the offset of the baked tile in front_tiles.bin + 1, 0 = blank; bit 31: fully opaque
     spr_pix.bin     2048 sprites, 16 lines of 16 pens (4 bit packed, 8 bytes a line), the lines in blit order (spr_order.bin)
     spr_cmap.bin    16 colours x 16 pens -> STE index
     spr_code.s ...  the generated Blitter routines and endmask streams (games/1942/tools/spritegen.py)
@@ -198,6 +198,8 @@ def build():
                         if masks[t] != (0, 0):
                             runs.append(struct.pack('>5H', u - t, 16 * t, 256 * t, *masks[t]))
                         t = u
+                    if opaque.all():
+                        pairs[key] |= 1 << 31               # (fully opaque: bit 31 of front_map)
                     for long_runs in (True, False):         # (the runs drawn a plane at a time, then line by line)
                         for run in runs:
                             if (struct.unpack('>H', run[:2])[0] >= FT_LINE) == long_runs:
@@ -207,6 +209,7 @@ def build():
     (out / 'front_tiles.bin').write_bytes(bytes(data))
     (out / 'front_map.bin').write_bytes(offsets.astype('>u4').tobytes())
     nfront = sum(1 for o in pairs.values() if o)
+    assert max(pairs.values()) & 0x7fffffff < 1 << 24
     # sprites: screen oriented pens (pen 0 transparent), the rows in blit order, spritegen's routines and streams
     spr = np.array([v.sprites[code][:, ::-1].T for code in range(len(v.sprites))])   # [code][line t][pixel k]
     masks = np.zeros((len(spr), 16), np.uint32)

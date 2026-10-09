@@ -29,6 +29,9 @@ IDLE_PC = $00d4
     ifnd FRAMES
 FRAMES = 0
     endc
+    ifnd NOWAIT
+NOWAIT = 0
+    endc
     ifnd MAX_SKIPS
 MAX_SKIPS = 4                    ; frames skipped in a row while game ticks are pending (the game first)
     endc

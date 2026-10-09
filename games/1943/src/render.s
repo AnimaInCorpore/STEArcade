@@ -41,6 +41,9 @@ Z_SCROLL = G_Z80+$d800-$10000
 	ifd SIM
 wait_b	macro
 	endm
+	elseif NOWAIT
+wait_b	macro				; (measurements only: the borders may flicker)
+	endm
 	else
 wait_b	macro
 .a\@:	tst.b	border_a
@@ -245,7 +248,6 @@ ring_update:
  cmp.w #200,d7
  bhi .full
  move.w d0,scroll_d
- bsr restore_damage
  move.w ring_off2,d2
  lea ring_bx,a0
  move.w cur_bx,(a0,d2.w)
@@ -261,6 +263,8 @@ ring_update:
 .t2:
  move.w d1,(a0,d2.w)
  move.w d1,cur_top
+ bsr cover_setup
+ bsr restore_damage
  move.w scroll_d,d0
  beq.s .base
  bmi.s .down
@@ -293,6 +297,7 @@ ring_update:
  lea ring_top,a0
  clr.w (a0,d2.w)
  clr.w cur_top
+ bsr cover_setup			; (for the ring's horizontal front scroll)
  move.w #-RING_ABOVE,d1
  move.w #RING_ABOVE+256+32,d0
  bsr back_lines
@@ -394,7 +399,36 @@ back_line:
  move.l (a0)+,(a1)+
  rts
 
-; The damage list of the ring (dmg_start .. its end): copied back from the twin lines.
+; Before the damage of a ring is restored: whether the rectangles of fully opaque front tiles may be left where the new
+; frame's opaque tiles cover them (the front layer on, its horizontal scroll that of the ring's last visit).
+cover_setup:
+ sf cover_ok
+ moveq #0,d0
+ move.b Z_SCROLL+2,d0		; fy
+ move.w ring_off2,d2
+ lea ring_fy,a0
+ move.w (a0,d2.w),d1
+ move.w d0,(a0,d2.w)
+ btst #4,g_layers
+ beq.s .no
+ cmp.w d0,d1
+ bne.s .no
+ move.w d0,cover_fy
+ moveq #0,d0
+ move.b Z_SCROLL,d0
+ moveq #0,d1
+ move.b Z_SCROLL+1,d1
+ lsl.w #8,d1
+ or.w d0,d1
+ add.w #255,d1
+ move.w d1,cover_fx		; fx + 255: window line y shows front map line fx + 255 - y
+ st cover_ok
+.no:
+ rts
+
+; The damage list of the ring (dmg_start .. its end): copied back from the twin lines.  A rectangle of a fully opaque
+; front tile (words bit 15) is left when the new frame's front tiles at its first and last line are fully opaque too:
+; they draw over all of it.
 restore_damage:
  move.w draw_idx,d0
  lsl.w #2,d0
@@ -408,12 +442,44 @@ restore_damage:
  move.w #2,BLT_DST_XINC.w
  move.w #$0203,BLT_HOP_OP.w
  clr.b BLT_SKEW.w
- bra.s .test
+ bra .test
 .rect:
  move.l (a2)+,d0
  move.l (a2)+,d1
  move.w (a2)+,d2
  move.w (a2)+,d3
+ bclr #15,d2
+ beq .copy
+ tst.b cover_ok
+ beq .copy
+ move.l d0,d4
+ sub.l ring_addr,d4
+ move.l d4,d5
+ asr.l #8,d5			; its buffer line
+ sub.w cur_top,d5		; its window line in the new frame
+ bmi .copy			; (inside the window: the tiles there are drawn whole; above it, a tile may start
+ move.w d5,d6			; above the band and is not drawn)
+ add.w d3,d6
+ subq.w #1,d6			; its last
+ cmp.w #255,d6
+ bgt .copy
+ and.w #$ff,d4
+ sub.w #GAME_X,d4
+ add.w d4,d4			; x (8 bytes a chunk, 16 pixels)
+ add.w #16,d4
+ add.w cover_fy,d4
+ and.w #255,d4
+ lsr.w #5,d4			; the map row (raw y / 32)
+ lea front_map,a0
+ move.w cover_fx,d7
+ sub.w d5,d7			; the front map line at the first line
+ bsr.s .opaque
+ beq .copy
+ move.w cover_fx,d7
+ sub.w d6,d7
+ bsr.s .opaque
+ bne .test			; (covered: left)
+.copy:
  move.w d2,d4
  add.w d4,d4
  neg.w d4
@@ -428,24 +494,57 @@ restore_damage:
  move.b #$c0,BLT_CTRL.w
 .test:
  cmp.l a3,a2
- blo.s .rect
+ blo .rect
+ rts
+
+; d7 = a front map line, d4 = a map row: Z clear when that cell is fully opaque (bit 31 of front_map)
+.opaque:
+ lsr.w #5,d7
+ moveq #0,d5
+ move.w d7,d5
+ lsl.w #3,d5
+ add.w d4,d5
+ lsl.l #2,d5
+ btst #7,(a0,d5.l)
  rts
 
 ; d2 = the address of a rectangle's first line and chunk, d0 = its window line, d1 = lines (at most 16: short HOG
 ; bursts), d3 = words a line: into the damage list with its twin as the source (split at buffer line RING_H).
 ; Keeps all registers.
 add_damage:
- movem.l d0-d2/d4/a0,-(sp)
- add.w cur_top,d0		; (the buffer line)
+ move.l a0,-(sp)
+ move.w d0,-(sp)
  move.l dmg_ptr,a0
+ add.w cur_top,d0		; (the buffer line)
  cmp.w #RING_H,d0
  bge.s .lower
- move.w d0,d4
- add.w d1,d4
- cmp.w #RING_H,d4
- ble.s .upper
+ add.w d1,d0
+ cmp.w #RING_H,d0
+ bgt.s .split
+ move.l d2,(a0)+		; above line RING_H: the twin RING_H lines below
+ move.l d2,(a0)
+ add.l #RING_H*STRIDE,(a0)+
+ move.w d3,(a0)+
+ move.w d1,(a0)+
+ move.l a0,dmg_ptr
+ move.w (sp)+,d0
+ move.l (sp)+,a0
+ rts
+.lower:
+ move.l d2,(a0)+		; from line RING_H on: the twin RING_H lines above
+ move.l d2,(a0)
+ sub.l #RING_H*STRIDE,(a0)+
+ move.w d3,(a0)+
+ move.w d1,(a0)+
+ move.l a0,dmg_ptr
+ move.w (sp)+,d0
+ move.l (sp)+,a0
+ rts
+.split:
+ movem.l d1-d2/d4,-(sp)
+ sub.w d1,d0			; (the buffer line again)
  move.w #RING_H,d4
- sub.w d0,d4
+ sub.w d0,d4			; the lines above RING_H
  sub.w d4,d1
  move.l d2,(a0)+
  move.l d2,(a0)
@@ -455,23 +554,15 @@ add_damage:
  ext.l d4
  lsl.l #8,d4
  add.l d4,d2
- bra.s .lower
-.upper:
- move.l d2,(a0)+
- move.l d2,(a0)
- add.l #RING_H*STRIDE,(a0)+
- move.w d3,(a0)+
- move.w d1,(a0)+
- bra.s .done
-.lower:
  move.l d2,(a0)+
  move.l d2,(a0)
  sub.l #RING_H*STRIDE,(a0)+
  move.w d3,(a0)+
  move.w d1,(a0)+
-.done:
  move.l a0,dmg_ptr
- movem.l (sp)+,d0-d2/d4/a0
+ movem.l (sp)+,d1-d2/d4
+ move.w (sp)+,d0
+ move.l (sp)+,a0
  rts
 
 ; d2 = the address of a rectangle's first line and chunk, d0 = its first chunk (-3 .. 16), d4 = its chunks, d1 =
@@ -567,6 +658,8 @@ draw_front:
  lea front_map,a0
  move.l (a0,d0.l),d0
  beq.s .blank
+ bclr #31,d0			; (fully opaque)
+ sne front_full
  lea front_tiles-1,a0
  add.l d0,a0
  move.w d6,d1
@@ -643,6 +736,14 @@ front_tile:
  add.w d6,a0			; (the right word: the source 2 bytes on)
  move.w d4,d3
  lsl.w #2,d3			; words a line (damage)
+ tst.b front_full
+ beq.s .dmg
+ tst.w d5
+ bne.s .dmg
+ cmp.w #2,d4
+ bne.s .dmg
+ or.w #$8000,d3			; (fully opaque, both words: restore_damage may leave it)
+.dmg:
  move.w front_y,d0
  moveq #16,d1
  bsr add_damage
@@ -663,7 +764,7 @@ front_tile:
  move.l obj_addr,d6
 .prun:
  move.w (a1)+,d1		; lines
- beq.s .lines
+ beq .lines
  movem.w (a1)+,d0/d2-d4		; source offset, destination offset, masks
  move.w d3,BLT_END1.w
  move.w d4,BLT_END3.w
@@ -678,7 +779,7 @@ front_tile:
  addq.l #4,a2
  addq.l #2,d2
  endr
- bra.s .prun
+ bra .prun
 .lines:					; then those drawn a line at a time
  move.w #2,BLT_SRC_YINC.w	; (to the line's next plane)
  move.w #-6,BLT_DST_YINC.w
@@ -701,7 +802,7 @@ front_tile:
  move.b #$c0,(a6)
  add.l d7,d2
  dbf d1,.line
- bra.s .lrun
+ bra .lrun
 
 ; shifted or one word only: the run's masks cut to the chunks, the Blitter's increments per mode
 .general:
@@ -1489,6 +1590,8 @@ chr_full: ds.b 1
 chr_written: ds.b 1
 chr_dirty: ds.b 1
 cur_back: ds.b 1
+cover_ok: ds.b 1
+front_full: ds.b 1
 frame_ready: ds.b 1
  even
 chr_list_end: ds.l 1
@@ -1501,6 +1604,9 @@ ring_valid: ds.b 4
 ring_back: ds.b 4
 ring_top: ds.w 3
 ring_bx: ds.w 3
+ring_fy: ds.w 3
+cover_fx: ds.w 1
+cover_fy: ds.w 1
 ring_off2: ds.w 1
 ring_addr: ds.l 1
 back_ptrs: ds.l 8

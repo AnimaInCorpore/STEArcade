@@ -38,7 +38,9 @@ def main():
     ap.add_argument('--every', type=int, default=1, help='with --render: compare every n-th picture (all are drawn)')
     ap.add_argument('--cheat', type=int, help='MAME cheats on both machines: energy, invincibility, start at this stage')
     ap.add_argument('--verbose', action='store_true')
+    ap.add_argument('--twins', action='store_true', help='with --render: the twin lines of the window must hold the back layer alone')
     ap.add_argument('--trace', type=int)
+    ap.add_argument('--watch', help='ring,line,chunk: report the writes and blits there (debug)')
     ap.add_argument('--save', help='with --render: write the first differing picture pair to this PNG')
     args = ap.parse_args()
     run = ROOT / 'run' / '1943_sim'
@@ -155,6 +157,25 @@ def main():
         want = np.zeros((256, 320), np.int64)
         want[:, 48:272] = palmap[np.rot90(raw[16:240])]
         pictures[0] += 1
+        if args.twins:
+            # the twin lines of the window hold the back layer alone
+            top = mem.r16(sym['cur_top'])
+            ring = mem.r32(sym['ring_base'] + 4 * mem.r16(sym['draw_idx']))
+            lines = []
+            for y in range(256):
+                b = top + y
+                t = b + 320 if b < 320 else b - 320
+                lines.append(mem.r_block(ring + t * 256, 160))
+            tw = np.frombuffer(b''.join(lines), np.uint8).reshape(256, 20, 4, 2)
+            tw = (tw[..., 0].astype(np.uint16) << 8) | tw[..., 1]
+            tw = (((tw[..., None] >> np.arange(15, -1, -1)) & 1) * (1 << np.arange(4))[None, None, :, None]).sum(2).reshape(256, 320)
+            back = np.zeros((256, 320), np.int64)
+            if ref.layers & 32:
+                back[:, 48:272] = palmap[np.rot90(ref.video.render_raw(ref.mem, ref.sprites, ref.control & ~128, 32)[16:240])]
+            if (tw != back).any():
+                ys, xs = np.nonzero(tw != back)
+                print(f'frame {frame}: the twin lines differ from the back layer in {len(ys)} pixels, first at window x {xs[0]-48} y {ys[0]}')
+                return False
         bad = got != want
         if bad.any():
             # The port draws the sprites of colours 10 and 11 before the front layer, the others after it: where a
@@ -278,6 +299,28 @@ def main():
     if not compare(-1):
         return 1
     print('boot matched', flush=True)
+    if args.watch:
+        ring_n, line, chunk = (int(x) for x in args.watch.split(','))
+        lo = mem.r32(sym['ring_base'] + 4 * ring_n) + line * 256 + 24 + 8 * chunk
+        on_access0 = sim.on_access
+        def watch(mode, width, addr, value):
+            if mode == 'W' and lo <= (addr & 0xffffff) < lo + 8:
+                print(f'  write {addr:06x} = {value:x} from pc {cpu.r_pc() - sim.base:06x}')
+            return on_access0(mode, width, addr, value)
+        sim.mem.set_trace_func(watch)
+        blit0 = sim.blitter.run
+        def blit():
+            dst = sim.blitter.reg32(0xA32) & 0xFFFFFE
+            ycount = sim.blitter.reg16(0xA38)
+            dyi = sim.blitter.s16(sim.blitter.reg16(0xA30))
+            xcount = sim.blitter.reg16(0xA36)
+            if xcount and ycount:
+                span = abs(dyi) * ycount + 8 * xcount
+                if dst - span <= lo <= dst + span:
+                    print(f'  blit dst {dst - mem.r32(sym["ring_base"] + 4 * ring_n):x} x {xcount} y {ycount} yinc {dyi} src {sim.blitter.reg32(0xA24):06x} pc {cpu.r_pc() - sim.base:06x} frame {frame_now[0]}')
+            return blit0()
+        sim.blitter.run = blit
+    frame_now = [0]
     rng = random.Random(args.seed)
     values = (255, 255, 255)
     for frame in range(args.frames):
@@ -296,6 +339,7 @@ def main():
         mem.w8(sym['g_inputs'], values[0] & ~8 | vbl)
         mem.w8(sym['g_inputs']+1, values[1])
         mem.w8(sym['g_inputs']+2, values[2])
+        frame_now[0] = frame
         ref.run_frame_port()
         mem.w8(sym['vbl_pending'], 1)
         resume()
