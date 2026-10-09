@@ -93,8 +93,8 @@ class WinEmitter(Emitter):
     def x_ldir(self, ins):
         if ins.pc in self.window_sites:
             return self.block_win(super().x_ldir, ins)
-        # a1 / a2 (DE' / HL') are saved around a loop on address registers: 22 cycles a byte instead of 46
-        # (kept instead of the engine's: with the alternates in a0-a2 its set-up costs more on 1942's short copies)
+        # a1 / a2 (a2 = IY) are saved around a loop on address registers: 22 cycles a byte instead of 46
+        # (kept instead of the engine's: its set-up costs more on 1942's short copies, 24407 against 24254 cycles a tick)
         l = self.new_label()
         self.e("move.w d1,d5")
         self.e("ror.w #8,d5")              # the count (0 = 65536), BC is 0 afterwards
@@ -135,7 +135,7 @@ class WinEmitter(Emitter):
         self.e("movem.l (sp)+,a1-a2")
         self.e("add.w d5,d3")
         self.e("add.w d5,d2")
-        self.e("moveq #0,d1")
+        self.e("clr.w d1")                  # (a word: z80x.FAST keeps BC' in the upper word)
         self.flags(0, const_clear=z80x.H | z80x.N)
 
     def x_ldi(self, ins): self.block_win(super().x_ldi, ins)
@@ -168,8 +168,7 @@ def config():
                        iyaddr=IY_ADDR, fshadow=IY_ADDR + 2, io_read_redirect={}, write_hooks=[BANK_HOOK],
                        nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g_iff",
                        pv_force=PV_FORCE, bit_s=True,
-                       alt_af="upper")      # (z80x.FAST is 0.4% slower here: few IY / exx, more ld a,n and ex de,hl;
-                                            # scan_native writes d1-d3 as words, so FAST works too)
+                       **z80x.FAST)      # (xprof 1100-1500: 24254 cycles a tick, alt_af="upper" alone 24306; the engine's ldir 24407)
 
 
 def EXTRA_TABLE_ROOTS(img):
