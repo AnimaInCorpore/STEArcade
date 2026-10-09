@@ -27,3 +27,12 @@ stops with `KeyError: 'pe'` on a conditional RET/CALL on the parity flag (not tr
 The game itself is not deterministic across builds: its idle loop counts its spins (`inc ($6019)`), so the attract
 sequence and the demo play depend on how much CPU time a frame leaves.  Frame counts of two builds therefore show different
 game phases; what compares exactly is a frozen frame of one build against the reference renderer.
+
+## Translator speed (2026-10-08)
+
+`z80x.FAST` (no runtime change was needed: Donkey Kong has no `exx` / `ex af,af'`; `fullrun.py` reads IY from a2).
+`engine/xprof.py dkong` (1500 NMI frames of `fullrun.py`): translated code 5.2k -> 4.8k cycles a frame (1.08x): the
+code was lean (16 cycles a Z80 instruction, mostly memory moves), the gain is the direct returns and the flags.
+`tools/bench.py` knows the swapped BC and the 65536 entry dispatch table now (it failed 61 cases since BC was swapped);
+the engine's `engine/xbench.py` covers every opcode and memory layout.  Known, not from this change: `fullrun.py`
+stops at frame ~1030 (`z80_badjump`, d7 = $2BD) on the commit before it too; `port.py test dkong` runs 3000 frames.

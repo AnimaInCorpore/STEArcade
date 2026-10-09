@@ -119,3 +119,12 @@ scanline band (the HUD's colours are quantized with the playfield's); real hardw
 replacements for the kernel's hot routines, characters of the HUD rows drawn only when they change (static bands), pre-baked tiles for the
 common colour codes.
 
+## Translator speed (2026-10-08)
+
+`alt_af="upper"` (A' in d0's upper bits, F' in d6's upper word: `ex af,af'` is two swaps, a3 is free for `ret`), not
+the whole `z80x.FAST`: the kernel saves tasks' registers and `scan_native` / the window reads use a0-a3 as the
+alternate registers.  `scan_native` clears F with `clr.w d6` (a `moveq` would clear F').  `gen.py` goes through
+`translate.compile_code` (precise flag liveness over calls; the tasks started with `jp (hl)` and the hooks keep their
+exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -> 24.3k cycles a tick (1.16x).  The
+rest is spread thin: `ret`, `ldir` (by longs already), `push`/`pop af` around calls, `bit n,(ix+d)` with the exact S.
+Tests: `logic_test.py 6000`, `sprite_test.py`, `render_test.py seq 200 1 1200` pass; Hatari runs the attract mode.

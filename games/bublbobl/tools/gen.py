@@ -17,6 +17,7 @@ import argparse, glob, os, pickle, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import z80x, z80dis, discover
 from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
+from translate import compile_code
 from machine import load, skip_tests
 
 from paths import build_dir
@@ -103,8 +104,11 @@ class BBEmitter(Emitter):
             return "BK%04X" % pc
         return super().label_of(pc)
 
-    def push_ret(self, pc):
-        super().push_ret(real(pc))
+    def ret_value(self, pc):
+        return real(pc)
+
+    def direct_ok(self, rp):                  # (a return point in the window: which bank it is in, the ret cannot tell)
+        return rp in self.code and not (WIN_LO <= rp < WIN_HI) and real(rp) == rp
 
     def mem(self, addr, off=0, io_read=False):
         a = (addr + off) & 0xFFFF
@@ -136,26 +140,7 @@ class BBEmitter(Emitter):
         finally:
             self.win_src = None
 
-    def x_ldir(self, ins):
-        if ins.pc in self.window_sites:
-            return self.block_win(super().x_ldir, ins)
-        # a1 / a2 (DE' / HL') are saved around a loop on address registers: 22 cycles a byte instead of 46
-        l = self.new_label()
-        self.e("move.w d1,d5")
-        self.e("ror.w #8,d5")              # the count (0 = 65536), BC is 0 afterwards
-        self.e("movem.l a1-a2,-(sp)")
-        self.e("lea (a6,d3.w),a1")
-        self.e("lea (a6,d2.w),a2")
-        self.e("move.w d5,d7")
-        self.e("subq.w #1,d7")
-        self.lines.append(l + ":")
-        self.e("move.b (a1)+,(a2)+")
-        self.e("dbf d7,%s" % l)
-        self.e("movem.l (sp)+,a1-a2")
-        self.e("add.w d5,d3")
-        self.e("add.w d5,d2")
-        self.e("moveq #0,d1")
-        self.flags(0, const_clear=z80x.H | z80x.N)
+    def x_ldir(self, ins): self.block_win(super().x_ldir, ins)     # (z80x: on address registers, by longs where it can)
     def x_ldi(self, ins): self.block_win(super().x_ldi, ins)
     def x_ldd(self, ins): self.block_win(super().x_ldd, ins)
     def x_lddr(self, ins): self.block_win(super().x_lddr, ins)
@@ -205,10 +190,10 @@ def configs():
     hooks = [(0xFB40, 0xFB40, "bb_bank", None)]
     main = z80x.Config(prefix="Z", table="g1_dispatch", token_sym="g1_ret", mode="signed", block=0x10000,
                        iyaddr=IY_MAIN, fshadow=IY_MAIN + 2, io_read_redirect={}, write_hooks=hooks,
-                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff")
+                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", **z80x.FAST)
     sub = z80x.Config(prefix="Y", table="g2_dispatch", token_sym="g2_ret", mode="long", block=0x10000,
                       ram_sym="g_ram", iyaddr=IY_SUB, fshadow=IY_SUB + 2, io_read_redirect={}, write_hooks=[],
-                      nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff")
+                      nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", **z80x.FAST_LONG)
     return main, sub
 
 
@@ -224,21 +209,10 @@ def translate(rom, roots, dyn, cfg, emitter_cls=Emitter, decode=None, hooks=(), 
         discover.decode = saved
     # (bank entry 1 holds data only: what a static walk finds there is not code)
     code = {pc: i for pc, i in code.items() if not (WIN_LO <= pc < 0x10000) and not (virt(WIN_LO, 1) <= pc < virt(WIN_LO, 2) and cfg.prefix == "Z")}
-    live_in, live_out = compute_liveness(code)
-    em = emitter_cls(code, live_in, live_out, cfg=cfg, **kw)
-    em.hooks = set(hooks)
     joins = set(roots) | set(hooks)
     for nxt, targets in tables.values():
         joins |= set(targets)
-    for pc, ins in code.items():
-        if ins.flow in ("call", "ccall", "rst"):
-            joins.add(pc + ins.length)
-        for op in ins.ops:
-            if op[0] == "imm" and op[1] in code:
-                joins.add(op[1])
-    em.analyze(joins)
-    em.live_in, em.live_out = compute_liveness(code, em.ccr_users)
-    em.emit_all()
+    em = compile_code(code, joins, cfg, hooks, emitter=emitter_cls, **kw)
     return code, tables, em
 
 
@@ -283,10 +257,10 @@ def generate():
         for p in pcs:
             tables_out.append("\tdc.w $%04X\n\tdc.l %s%04X" % (p, prefix, labelof(p)))
 
-    entries("g1_entries_fixed", [p for p in sorted(code) if p < WIN_LO] , "Z", lambda p: p)
+    entries("g1_entries_fixed", [p for p in sorted(code) if p < WIN_LO and p not in em.no_entry], "Z", lambda p: p)
     tables_out.append("\tdc.w $%04X\n\tdc.l %s\n\tdc.w $FFFF" % (TOKEN, cfg_main.token_sym))
     for e in range(4):
-        pcs = [p for p in range(WIN_LO, WIN_HI) if virt(p, e) in code]
+        pcs = [p for p in range(WIN_LO, WIN_HI) if virt(p, e) in code and virt(p, e) not in em.no_entry]
         entries("g1_entries_bank%d" % e, pcs, "Z", lambda p, e=e: virt(p, e))
         tables_out.append("\tdc.w $FFFF")
     reports.append({"instructions": len(code), "unsupported": em.unsupported, "stubs": len(em.stubs),
@@ -303,7 +277,8 @@ def generate():
         out.append("Y%04X:\tmove.w #$%04X,d7\n\tjmp z80_badpc" % (p, p))
     tables_out.append("g2_entries:")
     for p in sorted(scode):
-        tables_out.append("\tdc.w $%04X\n\tdc.l Y%04X" % (p, p))
+        if p not in sem.no_entry:
+            tables_out.append("\tdc.w $%04X\n\tdc.l Y%04X" % (p, p))
     tables_out.append("\tdc.w $%04X\n\tdc.l %s\n\tdc.w $FFFF" % (TOKEN, cfg_sub.token_sym))
     reports.append({"instructions": len(scode), "unsupported": sem.unsupported})
     return "\n".join(out + tables_out) + "\n", reports

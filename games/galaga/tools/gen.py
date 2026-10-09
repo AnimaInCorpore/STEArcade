@@ -30,13 +30,15 @@ def configs():
     return [
         z80x.Config(prefix="Z", table="g1_dispatch", token_sym="g1_ret", mode="signed", block=0x10000,
                     iyaddr=IY[0], fshadow=IY[0] + 2, io_read_redirect={}, write_hooks=hooks1,
-                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", hl_tables=True),
+                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", hl_tables=True,
+                    **z80x.FAST),
         z80x.Config(prefix="Y", table="g2_dispatch", token_sym="g2_ret", mode="long", block=0x10000,
                     ram_sym="g_ram", iyaddr=IY[1], fshadow=IY[1] + 2, io_read_redirect={}, write_hooks=[],
-                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", hl_tables=True),
+                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", hl_tables=True,
+                    **z80x.FAST_LONG),
         z80x.Config(prefix="X", table="g3_dispatch", token_sym="g3_ret", mode="long", block=0x10000,
                     ram_sym="g3_ram", iyaddr=IY[2], fshadow=IY[2] + 2, io_read_redirect={}, write_hooks=[],
-                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False),
+                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, **z80x.FAST_LONG),
     ]
 
 

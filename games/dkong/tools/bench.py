@@ -24,7 +24,7 @@ from z80dis import decode, Ins
 from paths import ROOT, ENGINE, VASM, VLINK, build_dir
 
 CODE = 0x10000
-TABLE = 0x20000
+TABLE = 0x80000      # (the swapped dispatch table, 256 KB)
 BLOCK = 0x40000
 STACK = 0x0F000
 STOPLBL = "Zstop"
@@ -96,6 +96,7 @@ class Bench:
         code = {ins.pc: ins}
         em = z80x.Emitter(code, live_in={ins.pc: 0}, live_out={ins.pc: live})
         em.emit_ins(ins.pc, live_out_override=live)
+        self.a3_free = em.a3_free
         if em.unsupported:
             return None
         nxt = ins.pc + ins.length
@@ -125,7 +126,7 @@ class Bench:
         stops = {sym["Z%04X" % l] for l in labels} | {sym["Zdisp"]}
         # dispatch table: everything goes to Zdisp
         disp = sym["Zdisp"]
-        tbl = b"".join(disp.to_bytes(4, "big") for _ in range(TABLE_ENTRIES))
+        tbl = disp.to_bytes(4, "big") * 65536          # the swapped table (z80_init_dispatch): 65536 entries
         mem.w_block(TABLE, tbl)
         rnd = random.Random(seed)
         ptr = pointer_regs(ins)
@@ -228,7 +229,7 @@ class Bench:
         R = self.R
         w = cpu.w_reg
         w(R.D0, rnd.randrange(1 << 32) & 0xFFFFFF00 | st["a"])
-        w(R.D1, (rnd.randrange(1 << 16) << 16) | st["bc"])
+        w(R.D1, (rnd.randrange(1 << 16) << 16) | z80x.swap16(st["bc"]))      # BC is kept byte swapped (z80x.SWAPPED)
         w(R.D2, (rnd.randrange(1 << 16) << 16) | st["de"])
         w(R.D3, (rnd.randrange(1 << 16) << 16) | st["hl"])
         w(R.D4, (rnd.randrange(1 << 16) << 16) | st["ix"])
@@ -238,7 +239,7 @@ class Bench:
         d6 = ((f & 0x80) >> 4) | ((f & 0x40) >> 4) | (f & 1) | ((f & 0x10) << 1) | ((f & 0x02) << 5)
         d6 |= rnd.choice([0, 0x10]) | rnd.choice([0, 2])      # X and V garbage
         w(R.D6, d6 | (rnd.randrange(256) << 8))
-        w(R.A0, (rnd.randrange(1 << 16) << 16) | st["bc_"])
+        w(R.A0, (rnd.randrange(1 << 16) << 16) | z80x.swap16(st["bc_"]))    # (exx swaps d1 with a0)
         w(R.A1, (rnd.randrange(1 << 16) << 16) | st["de_"])
         w(R.A2, (rnd.randrange(1 << 16) << 16) | st["hl_"])
         w(R.A3, (rnd.randrange(1 << 24) << 8) | st["a_"])
@@ -261,21 +262,22 @@ class Bench:
             if got != exp:
                 errs.append("%s: got %X expected %X" % (name, got, exp))
         cmp("A", r(R.D0) & 0xFF, zc.a)
-        cmp("BC", r(R.D1) & 0xFFFF, zc.bc)
+        cmp("BC", z80x.swap16(r(R.D1) & 0xFFFF), zc.bc)
         cmp("DE", r(R.D2) & 0xFFFF, zc.de)
         cmp("HL", r(R.D3) & 0xFFFF, zc.hl)
         cmp("IX", r(R.D4) & 0xFFFF, zc.ix)
         cmp("IY", mem.r16(BLOCK + IYADDR), zc.iy)
         cmp("SP", (r(R.A5) - BLOCK) & 0xFFFF, zc.sp)
-        cmp("BC'", r(R.A0) & 0xFFFF, (zc.b_ << 8) | zc.c_)
+        cmp("BC'", z80x.swap16(r(R.A0) & 0xFFFF), (zc.b_ << 8) | zc.c_)
         cmp("DE'", r(R.A1) & 0xFFFF, (zc.d_ << 8) | zc.e_)
         cmp("HL'", r(R.A2) & 0xFFFF, (zc.h_ << 8) | zc.l_)
-        cmp("A'", r(R.A3) & 0xFF, zc.a_)
+        if not self.a3_free:
+            cmp("A'", r(R.A3) & 0xFF, zc.a_)
         # next pc
         if stop_pc == disp:
-            got_pc = (r(R.D7) & 0xFFFFFFFF) >> 2 if False else None
+            got_pc = z80x.swap16(((r(R.D7) & 0xFFFFFFFF) >> 2) & 0xFFFF) if False else None
             # d7 holds pc*4 after `lsl.l #2` ; the stop is hit after `rts` pops the table entry
-            got_pc = (r(R.D7) & 0xFFFFFFFF) >> 2
+            got_pc = z80x.swap16(((r(R.D7) & 0xFFFFFFFF) >> 2) & 0xFFFF)
         else:
             got_pc = None
             for l in labels:

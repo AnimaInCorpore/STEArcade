@@ -164,3 +164,13 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   the first formation phase, the others within noise) - about 2% of the render, less than
   the 5-10k cycles a frame estimated.  Planes cannot be skipped in the sprite blit itself:
   it overwrites the destination, and all 16 sprite colour quads use plane 3.
+
+## Translator speed (2026-10-08)
+
+CPU1 `z80x.FAST`, CPU2 / CPU3 `z80x.FAST_LONG`; `g_ctrl06` reads DE' from the upper word of d2 (it read a1).  The
+clears (`ld (hl),n; ldir` over $37F bytes) are long fills now, the cost of the half registers (`ld d,(hl)` 48 -> 34
+cycles, `ld a,c` 30 -> 16) and of `adc` / `rl` (the carry into X without a branch) went down.  `engine/xprof.py galaga`
+(game frames 800-1200, attract): translated code 47.6k -> 27.6k cycles a game frame (1.73x).  There is no lock-step test
+of Galaga's translated code against the reference (`ref/galaga5.py` checks the reference only); the change was checked
+with `engine/xdiff.py galaga <the old build>`: the arcade's RAM is the same at all 400 game frames (interrupts on a
+clock of translated instructions, so a faster build is not ahead in the foreground).

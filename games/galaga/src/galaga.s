@@ -789,8 +789,9 @@ g_ctrl06:
 	bne	.loop
 	btst	#0,ctrl06_mode
 	beq	.loop
-	move.w	a1,d7			; the handler's `ldi` wrote through de' (a1 after
-	subq.w	#1,d7			; its exx back), one past the byte
+	move.l	d2,d7			; the handler's `ldi` wrote through de' (after its exx back the upper
+	swap	d7			; word of d2: z80x.FAST keeps the alternate registers there),
+	subq.w	#1,d7			; one past the byte
 	move.b	(a6,d7.w),d7
 	bsr	n51_write
 	bra	.loop

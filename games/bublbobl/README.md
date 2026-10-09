@@ -14,9 +14,8 @@ a static translation of the programs, and a runtime around them.
   ($8000-$BFFF) onto four 16 KB banks.  Window code is translated per bank (virtual pc `$10000 + $4000 * bank +
   offset`), a jump from fixed code into the window goes through a stub that picks the bank's label, `ret` and
   `jp (hl)` through the dispatch table of the current bank (`a4` follows the bank register `$FB40`).  Reads of the
-  window as data use `g_winbase` (the translator keeps A' BC' DE' HL' in a3 a0 a1 a2, so there is no address
-  register left: the wrapper saves a0 around the instruction); the sites are those the coverage runs and
-  `tools/window_audit.py` found.
+  window as data use `g_winbase` (through a0, saved around the instruction by the wrapper; with `z80x.FAST` a0 is
+  free now, the save could go); the sites are those the coverage runs and `tools/window_audit.py` found.
 * **Sub CPU** (1.4k instructions): the same shared RAM (`g_ram`), "long" memory model.
 * **MCU** (`engine/m6801x.py`, 940 instructions): the firmware translated 6801 -> 68000, the self-test that
   can never pass on the board skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write)
@@ -196,3 +195,14 @@ Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), tes
 check of coin / start in Hatari (the scancodes: `5` coin 1, `1` start 1, `6` coin 2, `2` start 2, arrows, space
 = jump, alt = bubble), per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
 per bank weight are kept, the rest map to the nearest).
+
+## Translator speed (2026-10-08)
+
+Main CPU `z80x.FAST` (A' F' and BC' DE' HL' in the upper words of d0 / d6 and d1-d3, IY in a2), sub CPU
+`z80x.FAST_LONG`; the window stubs' `move.l ...,a3` no longer clobbers A'.  `gen.py` goes through `translate.compile_code`
+(its own copy of the pipeline is gone) and uses the engine's `ldir`; its return points in the window are left out of
+the direct returns (`direct_ok`: a stack word cannot tell the bank).  `engine/xprof.py bublbobl` (frames 500-800 of
+the logic test's input script, per game frame, the main CPU's idle loop `$01ED` apart): translated code 70.3k -> 55.4k
+cycles (1.27x).  What is left: `ret` / `call` (~15%), the 360 byte copy at `$04B6` (odd source, even destination: bytes,
+~5k), the MCU (5.3k, `m6801x.py` untouched).  Tests: `logic_test.py 700`, `render_test.py seq 1500 20`, `mcu_test.py`,
+`align_test.py` all pass; Hatari runs the attract mode.

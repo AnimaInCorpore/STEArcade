@@ -7,8 +7,8 @@ Pipeline (same shape as F030CT's tools/smkx):
 
 Machine conventions of the generated code
 -----------------------------------------
-  d0.b  A                      a0..a2  BC' DE' HL'  (exx = exg)
-  d1.w  BC                     a3.b    A'            (ex af,af' = exg d0,a3)
+  d0.b  A                      a0..a2  BC' DE' HL'  (exx = exg), or free (Config.alt_regs)
+  d1.w  BC                     a3.b    A'            (ex af,af' = exg d0,a3), or free (Config.alt_af)
   d2.w  DE                     a4      dispatch table (Z80 pc*4 -> 68k address)
   d3.w  HL                     a5      Z80 SP, a real pointer into the block
   d4.w  IX                     a6      Z80 memory block (32 KiB, base of $0000)
@@ -17,6 +17,13 @@ Machine conventions of the generated code
         (V/PV, X, Y are not tracked)
   d7    scratch 1
   IY and F' live in the block at IYADDR / FSHADOW (little used)
+
+The register map can be changed per program (Config, see Emitter.regmap):
+  alt_af="upper":   A' in bits 16-23 of d0, F' in the upper word of d6: ex af,af' = swap d0 / swap d6,
+                    and a3 is free for the computed jumps (ret, jp (hl): 50 cycles instead of 66)
+  alt_regs="upper": BC' DE' HL' in the upper words of d1-d3: exx = three swaps ("signed" mode only, the
+                    "long" mode needs the upper words 0); a0-a2 are free then
+  iy_reg="a2":      IY in an address register (the low word) instead of the block ("signed" mode only)
 
 The Z80 flags live in d6 between instructions, never in the 68k CCR, so an
 instruction that doesn't touch flags may clobber the CCR freely.  A flag
@@ -67,8 +74,14 @@ class Config:
     def __init__(self, prefix="Z", table="z80_dispatch", token_sym="z80_nmi_ret", mode="signed",
                  block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
-                 table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False):
+                 table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
+                 alt_af="a3", alt_regs="areg", iy_reg=None):
         self.prefix = prefix
+        self.alt_af = alt_af            # "a3" | "upper" (see the module docs)
+        self.alt_regs = alt_regs        # "areg" | "upper"
+        self.iy_reg = iy_reg            # None (the block) | "a0".."a2"
+        if mode == "long" and (alt_regs == "upper" or iy_reg):
+            raise ValueError("the long mode keeps the upper words of the registers 0")
         self.bit_s = bit_s              # BIT sets S as the CPU does (the flags a task saves on its stack are exact; one more instruction)
         self.pv_force = set(pv_force)   # and/or/xor pcs whose parity must reach d6 bit 7 although the liveness does not see the reader (across ex af,af')
         self.table = table
@@ -85,6 +98,10 @@ class Config:
         self.rst28_tables = rst28_tables
         self.hl_tables = hl_tables
         self.iff_sym = iff_sym          # a byte the runtime reads for the IRQ gate (ei / di)
+
+# the fast register maps (module docs): a "signed" mode program, a "long" mode program
+FAST = dict(alt_af="upper", alt_regs="upper", iy_reg="a2")
+FAST_LONG = dict(alt_af="upper")
 
 CC_NAMES = ["nz", "z", "nc", "c", "po", "pe", "p", "m"]
 CC_68K = {"nz": "ne", "z": "eq", "nc": "cc", "c": "cs", "p": "pl", "m": "mi"}
@@ -174,11 +191,88 @@ def flow_uses(ins, ijmp_flags=False):
     return 0
 
 
-def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=()):
+SP_WRITERS = {"inc sp", "dec sp", "ld sp,hl", "ld sp,ix", "ld sp,iy"}
+
+
+def ret_targets(code, foreign=(), rst28_tables=True):
+    """ret pc -> the return points it goes to, for the rets of well-behaved functions only (the flag liveness then
+    follows the ret to them instead of taking every flag as read).  A function is the code reached from a call
+    target without entering calls; it is well-behaved when its stack is balanced on every path (no pop of the
+    return address, no ex (sp) of it, SP not set), and its rets are not reached from an entry other than a call
+    target (`foreign`: the interrupt and reset entries, jump table targets, code addresses the program holds)."""
+    rps = {}
+    for pc, ins in code.items():
+        if ins.flow in ("call", "ccall", "rst") and ins.target in code:
+            if ins.flow == "rst" and ins.target == 0x28 and rst28_tables:
+                continue
+            rps.setdefault(ins.target, set()).add(pc + ins.length)
+
+    def walk(entry):
+        depth, rets, ok = {}, set(), True
+        todo = [(entry, 0)]
+        while todo:
+            pc, dep = todo.pop()
+            if pc not in code:
+                ok = False
+                continue
+            if pc in depth:
+                ok &= depth[pc] == dep
+                continue
+            if len(depth) > 8000:
+                return rets, False
+            depth[pc] = dep
+            ins = code[pc]
+            mn, fl, nxt = ins.mn, ins.flow, pc + ins.length
+            if mn == "push":
+                dep += 1
+            elif mn == "pop":
+                if dep == 0:
+                    ok = False
+                    continue
+                dep -= 1
+            elif mn == "ex" and ins.ops[0][0] == "ind" and dep == 0:
+                ok = False
+            elif mn in ("reti", "retn") or ins.text in SP_WRITERS or (mn == "ld" and ins.ops[0] == ("r16", "sp")):
+                ok = False
+            if fl in ("ret", "cret"):
+                if mn == "ret":
+                    rets.add(pc)
+                    ok &= dep == 0
+                if fl == "cret":
+                    todo.append((nxt, dep))
+                continue
+            if fl in ("seq", "call", "ccall", "rst"):
+                if fl == "rst" and ins.target == 0x28 and rst28_tables:
+                    continue
+                todo.append((nxt, dep))
+            if fl in ("jmp", "jcc") and ins.target is not None:
+                todo.append((ins.target, dep))
+            if fl == "jcc":
+                todo.append((nxt, dep))
+        return rets, ok
+
+    out, bad = {}, set()
+    for tgt, points in rps.items():
+        rets, ok = walk(tgt)
+        for r in rets:
+            if ok:
+                out.setdefault(r, set()).update(points)
+            else:
+                bad.add(r)
+    for f in foreign:
+        if f in code:
+            bad |= walk(f)[0]
+    return {r: s for r, s in out.items() if r not in bad}
+
+
+def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=(), ret_succ=None):
     """live_in / live_out per pc (bitmask of tracked flags).  ccr_users: conditional jumps
     that read the 68k condition codes instead of d6 (Emitter.analyze), no use of d6.  flags_at: pcs where the
-    flags in d6 must be exact (a hook that delivers an interrupt, whose handler saves them)."""
+    flags in d6 must be exact (a hook that delivers an interrupt, whose handler saves them).  ret_succ (from
+    ret_targets): the rets whose return points are known; then a call passes the flags to its callee (no longer read
+    by the call itself) and those rets to their return points."""
     succs = {}
+    callee = {}
     for pc, ins in code.items():
         nxt = pc + ins.length
         fl = ins.flow
@@ -191,8 +285,12 @@ def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=()):
             s = [ins.target, nxt]
         elif fl in ("call", "ccall", "rst"):
             s = [nxt] if not (fl == "rst" and ins.target == 0x28) else []
+            if ret_succ is not None and ins.target in code and not (fl == "rst" and ins.target == 0x28):
+                callee[pc] = ins.target
         elif fl == "cret":
             s = [nxt]
+        if ret_succ is not None and pc in ret_succ:
+            s = s + sorted(ret_succ[pc])
         succs[pc] = [x for x in s if x in code]
     uses = {}
     defs = {}
@@ -200,7 +298,10 @@ def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=()):
         u, d = uses_defs(ins)
         if pc in ccr_users:
             u = 0
-        uses[pc] = u | flow_uses(ins, ijmp_flags) | (CCRF if pc in flags_at else 0)
+        fu = flow_uses(ins, ijmp_flags)
+        if pc in callee or (ret_succ is not None and pc in ret_succ):
+            fu = 0
+        uses[pc] = u | fu | (CCRF if pc in flags_at else 0)
         defs[pc] = d
     live_in = {pc: 0 for pc in code}
     live_out = {pc: 0 for pc in code}
@@ -215,6 +316,8 @@ def compute_liveness(code, ccr_users=(), ijmp_flags=False, flags_at=()):
             ins = code[pc]
             if ins.flow in ("call", "ccall", "rst"):
                 lo &= ~(H | N | PV)      # H/N/PV are not preserved across calls
+                if pc in callee:
+                    lo |= live_in[callee[pc]]       # what the callee reads
             li = uses[pc] | (lo & ~defs[pc])
             if li != live_in[pc] or lo != live_out[pc]:
                 live_in[pc] = li
@@ -270,6 +373,58 @@ def ccr_kill(line):
     return CCRF
 
 
+import re as _re
+_MOVE_B = _re.compile(r"^move\.b\s+(d[0-7]),")
+_CORE = _re.compile(r"^(add|addq|addx|sub|subq|subx|and|andi|or|ori|eor|eori|neg|lsl|lsr|asl|asr|rol|ror|roxl|roxr|tst)"
+                    r"\.b\s+(?:[^,]*,)?(d[0-7])$")
+_REG_WRITERS = {"exg", "movem", "movep", "dbf", "dbra"}
+
+
+def _dst(ops):
+    """the destination operand of a 68000 line's operands"""
+    depth, cut = 0, -1
+    for i, ch in enumerate(ops):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            cut = i
+    return ops[cut + 1:].strip().lower()
+
+
+def ccr_step(line, valid, zreg):
+    """(valid, zreg) after one 68000 line.  valid: the Z80 flags the CCR holds; zreg: the data register whose
+    byte the Z80's S and Z describe (the result of the last flag op), whether the CCR shows them or not.  A move.b
+    or tst.b of zreg sets N and Z from that byte: S and Z are in the CCR again (C is not)."""
+    s = line.strip()
+    if not s or s.endswith(":") or s.startswith(";"):
+        return valid, zreg
+    parts = s.split(None, 1)
+    mn = parts[0].split(".")[0].lower()
+    ops = parts[1].split(";")[0].strip() if len(parts) > 1 else ""
+    k = ccr_kill(s)
+    if zreg:
+        if (mn == "move" or mn == "tst") and parts[0].lower().endswith(".b"):
+            src = ops.split(",", 1)[0].strip().lower()
+            if src == zreg and (mn == "tst" or _dst(ops) != zreg):
+                return (valid & ~C) | S | Z, zreg
+        if _dst(ops) == zreg or (mn in _REG_WRITERS and zreg in ops) or mn in ("bsr", "jsr"):
+            zreg = None                         # (a runtime routine may change any register)
+    return valid & ~k, zreg
+
+
+def core_reg(line):
+    """the data register an ALU line leaves its byte result in (its N and Z describe it), or None"""
+    if line is None:
+        return None
+    s = line.strip().split(";")[0].strip()
+    if s.startswith("cmp"):
+        return None
+    m = _CORE.match(s)
+    return m.group(2) if m else None
+
+
 # --------------------------------------------------------------------------
 # emitter
 # --------------------------------------------------------------------------
@@ -310,17 +465,36 @@ class Emitter:
         self.hooks = set()   # test builds: pcs that first call z80_hook (d7 = pc)
         # a3 holds A' only if the program uses ex af,af'; otherwise it is free for the
         # computed jumps
-        self.a3_free = not any(ins.mn == "ex af,af'" for ins in code.values())
+        self.alt_af_upper = self.cfg.alt_af == "upper"
+        self.alt_upper = self.cfg.alt_regs == "upper"
+        self.iyr = self.cfg.iy_reg
+        self.a3_free = self.alt_af_upper or not any(ins.mn == "ex af,af'" for ins in code.values())
         self.after_label = {}   # pc -> label to put after its code (inc sp pairs)
         self.ccr_in = {}        # pc -> Z80 flags the CCR holds at the instruction (analyze)
         self.ccr_users = set()  # conditional jumps that branch on the CCR, no load from d6
         self.transfer = None    # collecting (keep, gen) per pc during analyze
         self.core_at = None     # where the current instruction's flag op ended, what it provided
         self.core_provided = 0
+        self.joins = set()      # (analyze) pcs entered other than by the straight flow
+        self.no_entry = set()   # pcs that must not be entered (merges): no table entry (z80_badpc)
+        self.merged = set()     # of those, the ones whose label is not in the code (emitted as a stub)
+        self.raw_af = set()     # push af / pop af pairs that keep the flags in the d6 format (pair_af)
+
+    def regmap(self):
+        """where the registers that are not plain data registers are kept (for the tests)"""
+        return {"alt_af": "upper" if self.alt_af_upper else "none" if self.a3_free else "a3",
+                "alt_regs": "upper" if self.alt_upper else "areg" if any(i.mn == "exx" for i in self.code.values()) else "none",
+                "iy": self.iyr or "mem"}
+
+    def free_aregs(self):
+        """address registers the translated code may use as scratch"""
+        out = ["a0", "a1", "a2"] if self.alt_upper or not any(i.mn == "exx" for i in self.code.values()) else []
+        return [r for r in out if r != self.iyr]
 
     # ---- CCR validity ----------------------------------------------------
     def analyze(self, joins):
         """Compute ccr_in / ccr_users; joins: pcs where nothing is known about the CCR."""
+        self.joins = set(joins)
         saved = (self.lines, self.uid, self.refs, self.unsupported, self.after_label)
         self.lines, self.refs, self.unsupported, self.after_label = [], set(), [], {}
         self.transfer = {}
@@ -345,7 +519,7 @@ class Emitter:
             for t in s:
                 if t in preds:
                     preds[t].append(pc)
-        ccr_in = {pc: 0 for pc in self.code}
+        state = {pc: (0, None) for pc in self.code}         # (valid flags, zreg) at the start
         order = sorted(self.code)
         changed = True
         while changed:
@@ -353,14 +527,17 @@ class Emitter:
             for pc in order:
                 if pc in joins or not preds[pc]:
                     continue
-                v = CCRF
+                v, z = CCRF, "?"
                 for p in preds[pc]:
-                    keep, gen = transfer[p]
-                    v &= (ccr_in[p] & keep) | gen
-                if v != ccr_in[pc]:
-                    ccr_in[pc] = v
+                    pv, pz = self.ccr_out(transfer[p], state[p])
+                    v &= pv
+                    z = pz if z == "?" or z == pz else None
+                z = z if z != "?" else None
+                if (v, z) != state[pc]:
+                    state[pc] = (v, z)
                     changed = True
-        self.ccr_in = ccr_in
+        self.ccr_in = {pc: s[0] for pc, s in state.items()}
+        ccr_in = self.ccr_in
         self.ccr_users = set()
         for pc, ins in self.code.items():
             if ins.flow in ("jcc", "ccall", "cret") and ins.ops and ins.ops[0][0] == "cc":
@@ -369,19 +546,30 @@ class Emitter:
                     self.ccr_users.add(pc)
 
     def record_transfer(self, pc, start):
-        """(keep, gen) of the instruction's code: CCR flags valid after = (before & keep) | gen."""
-        lines = self.lines[start:]
+        """what ccr_out needs of the instruction's code: its lines, where its flag op ended, what it provided"""
         _, defs = uses_defs(self.code[pc])
         if self.core_at is None:
-            keep = CCRF & ~(defs & CCRF)
-            for l in lines:
-                keep &= ~ccr_kill(l)
-            self.transfer[pc] = (keep, 0)
-            return
-        gen = self.core_provided & CCRF
-        for l in self.lines[self.core_at:]:
-            gen &= ~ccr_kill(l)
-        self.transfer[pc] = (0, gen)
+            self.transfer[pc] = (tuple(self.lines[start:]), False, None, 0, defs)
+        else:
+            core = self.lines[self.core_at - 1] if self.core_at > start else None
+            self.transfer[pc] = (tuple(self.lines[self.core_at:]), True, core_reg(core), self.core_provided & CCRF, defs)
+
+    @staticmethod
+    def ccr_out(rec, st):
+        """(valid, zreg) after an instruction's code, from (valid, zreg) before it"""
+        lines, has_core, core, provided, defs = rec
+        if lines is None:
+            return 0, None                      # (an unsupported instruction)
+        if has_core:                            # the flag op: what it provided, its result register
+            v, z = provided, core if provided & (S | Z) else None
+        else:
+            v, z = st
+            v &= ~(defs & CCRF)
+            if defs & (S | Z):
+                z = None
+        for l in lines:
+            v, z = ccr_step(l, v, z)
+        return v, z
 
     # ---- small helpers -------------------------------------------------
     def new_label(self):
@@ -434,9 +622,14 @@ class Emitter:
             if n in HALF:
                 reg, hi = self.half(n)
                 if hi:
-                    return ["move.w %s,d7" % reg, "lsr.w #8,d7"], "d7"
+                    # the high byte through the 68000 stack: the word pushed, its first byte popped (a byte
+                    # move on a7 steps by 2): 16 cycles instead of 26 for move.w / lsr.w #8.  The ea must be
+                    # used exactly once.
+                    return ["move.w %s,-(a7)" % reg], "(a7)+"
                 return [], reg
             if n in ("iyh", "iyl"):      # IY lives in the block, big-endian word
+                if self.iyr:
+                    return (["move.w %s,-(a7)" % self.iyr], "(a7)+") if n == "iyh" else (["move.w %s,d7" % self.iyr], "d7")
                 return [], self.mem(self.cfg.iyaddr, 0 if n == "iyh" else 1)
             raise Unsupported("8-bit register %s" % n)
         if k == "imm":
@@ -452,6 +645,8 @@ class Emitter:
             if b == "ix":
                 return [], self.ind("d4", d)
             if b == "iy":
+                if self.iyr:
+                    return [], ("%d(a6,%s.w)" % (d, self.iyr)) if d else "(a6,%s.w)" % self.iyr
                 return self.clean("d5") + ["move.w %s,d5" % self.mem(self.cfg.iyaddr)], self.ind("d5", d)
             raise Unsupported("indirect %s" % b)
         if k == "ind16":
@@ -467,16 +662,23 @@ class Emitter:
             if n == "a":
                 return ["move.b %s,d0" % src_ea]
             if n in ("iyh", "iyl"):
+                if self.iyr:
+                    if n == "iyl":
+                        return ["move.w %s,d5" % self.iyr, "move.b %s,d5" % src_ea, "movea.w d5,%s" % self.iyr]
+                    return ["move.w %s,d5" % self.iyr, "ror.w #8,d5", "move.b %s,d5" % src_ea, "ror.w #8,d5",
+                            "movea.w d5,%s" % self.iyr]
                 return ["move.b %s,%s" % (src_ea, self.mem(self.cfg.iyaddr, 0 if n == "iyh" else 1))]
             reg, hi = self.half(n)
             if not hi:
                 return ["move.b %s,%s" % (src_ea, reg)]
             if src_ea.startswith("#"):
                 v = int(src_ea[1:].replace("$", "0x"), 16) & 0xFF
-                return ["andi.w #$00FF,%s" % reg, "ori.w #%s,%s" % (hx(v << 8), reg)]
-            if src_ea != "d7":
-                out.append("move.b %s,d7" % src_ea)
-            out += ["lsl.w #8,d7", "andi.w #$00FF,%s" % reg, "or.w d7,%s" % reg]
+                return ["andi.w #$00FF,%s" % reg] + (["ori.w #%s,%s" % (hx(v << 8), reg)] if v else [])
+            if src_ea == "(a7)+":
+                out.append("move.b (a7)+,d7")
+                src_ea = "d7"
+            # through the 68000 stack: 24 cycles from a register instead of 38 (lsl.w #8 / andi / or)
+            out += ["move.w %s,-(a7)" % reg, "move.b %s,(a7)" % src_ea, "move.w (a7)+,%s" % reg]
             return out
         pre, ea = self.read8(op, io_read=False)
         return pre + ["move.b %s,%s" % (src_ea, ea)]
@@ -511,6 +713,9 @@ class Emitter:
                 self.e("eor.b d6,d7")
                 self.e("and.b #%s,d7" % hx(m, 2))
                 self.e("eor.b d7,d6")
+                r = core_reg(self.lines[self.core_at - 1]) if self.core_at else None
+                if r and need & (S | Z) and not passthru & (H | N | PV):
+                    self.e("tst.b %s" % r)      # (the merge spoilt the CCR: N Z of the result again = S Z)
         for f in (H, N):
             if const_set & f and lo & f:
                 self.e("ori.b #%s,d6" % hx(1 << D6BIT[f], 2))
@@ -520,14 +725,11 @@ class Emitter:
             hcomp()
 
     def ctoc(self, setz=False):
-        """Load the CCR with X=C=Z80 carry (and Z set if setz) from d6."""
-        l = self.new_label()
-        self.e("moveq #%d,d7" % (4 if setz else 0))
-        self.e("btst #0,d6")
-        self.e("beq.s %s" % l)
-        self.e("moveq #%d,d7" % (0x15 if setz else 0x11))
-        self.lines.append(l + ":")
-        self.e("move d7,ccr")
+        """Load the CCR with X = C = the Z80 carry from d6 (and Z set, for addx / subx).  The shift of
+        (d6 & 1) by one: the bit goes into X and C, the result is 0 (Z set): 16 cycles, no branch."""
+        self.e("moveq #1,d7")
+        self.e("and.b d6,d7")
+        self.e("lsr.b #1,d7")
 
     def load_cc(self, cc):
         if self.cur.pc in self.ccr_users:
@@ -535,16 +737,111 @@ class Emitter:
         self.e("move d6,ccr")
 
     # ---- instruction dispatch --------------------------------------------
+    # ---- the second pass: instructions merged over labels nothing enters ------------------------------
+    #
+    # Code may be merged across a Z80 instruction's label only when the program cannot arrive there other than by
+    # the straight flow: not a join (entries, return points, jump table targets, code addresses held as numbers),
+    # not the target of a jump or call, not a hook.  The labels inside such a merge lose their dispatch table
+    # entry (no_entry: the table generators put z80_badpc there), so a jump the analysis did not see stops loudly.
+
+    def boundaries(self):
+        b = set(self.joins) | set(self.hooks)
+        for pc, ins in self.code.items():
+            if ins.flow in ("jmp", "jcc", "call", "ccall", "rst") and ins.target is not None:
+                b.add(ins.target)
+        return b
+
+    def pair_af(self, bnd):
+        """push af ... pop af in straight code that nothing between them enters, with the slot read by nothing
+        else: the pair keeps the flags in the d6 format (2 moves each instead of the conversions, 112 cycles
+        saved; H N P/V come back exact instead of 0, so the pop's must not be live: they are not, then)."""
+        out = set()
+        for pc, ins in self.code.items():
+            if ins.mn != "push" or ins.ops[0] != ("r16", "af") or pc in self.hooks:
+                continue
+            depth, q, inner = 0, pc + ins.length, []
+            while len(inner) < 64:
+                i2 = self.code.get(q)
+                if i2 is None or q in bnd or i2.flow != "seq" or "sp" in i2.text:
+                    break
+                if i2.mn == "push":
+                    depth += 1
+                elif i2.mn == "pop":
+                    if depth == 0:
+                        if i2.ops[0] == ("r16", "af") and not self.live_out[q] & (H | N | PV):
+                            out |= {pc, q}
+                            self.no_entry |= set(inner) | {q}
+                        break
+                    depth -= 1
+                inner.append(q)
+                q += i2.length
+        return out
+
+    def emit_copy(self, pc, push, pop):
+        """push rr / pop rr': rr' = rr (the stack word below SP is dead)"""
+        s, d = push.ops[0][1], pop.ops[0][1]
+        self.cur = push
+        self.lines.append("%s%04X:\t\t; %s / %s (merged)" % (self.cfg.prefix, pc, push.text, pop.text))
+        if s == d:
+            return
+        src = self.nat16(s, 7)
+        if d in SWAPPED:
+            self.e("move.w %s,%s" % (src, REG16[d]))
+            self.e("ror.w #8,%s" % REG16[d])
+        elif d in REG16:
+            self.e("move.w %s,%s" % (src, REG16[d]))
+        elif d == "iy" and self.iyr:
+            self.e("movea.w %s,%s" % (src, self.iyr))
+        elif d == "iy":
+            self.e("move.w %s,%s" % (src, self.mem(self.cfg.iyaddr)))
+        else:
+            raise Unsupported("pop %s" % d)
+
     def emit_all(self, order=None):
         pcs = sorted(self.code) if order is None else order
-        for i, pc in enumerate(pcs):
-            self.emit_ins(pc)
+        bnd = self.boundaries()
+        self.raw_af = self.pair_af(bnd)
+        i = 0
+        while i < len(pcs):
+            pc = pcs[i]
             ins = self.code[pc]
+            nxt = pc + ins.length
+            n2 = self.code.get(nxt)
+            step = 1
+            if (ins.mn == "push" and n2 is not None and n2.mn == "pop" and nxt not in bnd and pc not in self.hooks
+                    and i + 1 < len(pcs) and pcs[i + 1] == nxt and "af" not in (ins.ops[0][1], n2.ops[0][1])
+                    and "sp" not in (ins.ops[0][1], n2.ops[0][1])):
+                self.emit_copy(pc, ins, n2)
+                self.no_entry.add(nxt)
+                self.merged.add(nxt)
+                ins, pc, step = n2, nxt, 2
+            else:
+                self.emit_ins(pc)
             if ins.flow in ("seq", "jcc", "ccall", "cret"):
                 nxt = pc + ins.length
-                follow = pcs[i + 1] if i + 1 < len(pcs) else None
+                follow = pcs[i + step] if i + step < len(pcs) else None
                 if follow != nxt and not (self.lines and self.lines[-1].strip().startswith("jmp z80_unsupported")):
                     self.jmp_to(nxt)
+            i += step
+        # the labels of merged instructions: a stub each, for table generators that list every pc (an entry there
+        # was not foreseen by the analysis: it stops loudly)
+        if self.merged:
+            self.lines.append("; --- merged into the instruction before: not entered")
+            for pc in sorted(self.merged):
+                self.lines.append("%s%04X:\tmove.w #%s,d7\n\tjmp z80_badpc" % (self.cfg.prefix, pc, hx(pc)))
+        # a jump to the label right behind it; a tst.b R right before a move.b R (which sets N Z the same)
+        out = []
+        for k, line in enumerate(self.lines):
+            s = line.strip()
+            if s.startswith("bra ") and k + 1 < len(self.lines) and self.lines[k + 1].startswith(s[4:] + ":"):
+                continue
+            if s.startswith("tst.b d"):
+                nxt = next((l.strip() for l in self.lines[k + 1:] if l.strip() and not l.strip().endswith(":")
+                            and not l.strip().startswith(";") and ":" not in l.split(";")[0]), "")
+                if nxt.startswith("move.b %s," % s[6:]):
+                    continue
+            out.append(line)
+        self.lines = out
 
     def emit_ins(self, pc, live_out_override=None, with_label=True):
         ins = self.code[pc]
@@ -574,7 +871,7 @@ class Emitter:
             self.e("move.w #%s,d7" % hx(pc))
             self.e("jmp z80_unsupported")
             if self.transfer is not None:
-                self.transfer[pc] = (0, 0)
+                self.transfer[pc] = (None, False, None, 0, ALLF)
             return
         if self.transfer is not None:
             self.record_transfer(pc, start)
@@ -630,7 +927,7 @@ class Emitter:
                 raise Unsupported("ld (sp)")
             if dst == ("r8", "a") and ks == "imm":
                 v = src[1]
-                if v < 128:
+                if v < 128 and not self.alt_af_upper:
                     self.e("moveq #%d,d0" % v)
                 else:
                     self.e("move.b #%s,d0" % hx(v, 2))
@@ -673,6 +970,8 @@ class Emitter:
         if name in REG16:
             return REG16[name]
         if name == "iy":
+            if self.iyr:
+                return self.iyr
             for l in self.clean("d%d" % scratch):
                 self.e(l)
             self.e("move.w %s,d%d" % (self.mem(self.cfg.iyaddr), scratch))
@@ -696,14 +995,17 @@ class Emitter:
             v = swap16(v)
         if name in REG16:
             r = REG16[name]
-            if v < 128:
+            if v < 128 and not (self.alt_upper and r in ("d1", "d2", "d3")):
                 self.e("moveq #%d,%s" % (v, r))
             else:
                 self.e("move.w #%s,%s" % (hx(v), r))
         elif name == "sp":
             self.e("lea %s,a5" % self.mem(v))
         elif name == "iy":
-            self.e("move.w #%s,%s" % (hx(v), self.mem(self.cfg.iyaddr)))
+            if self.iyr:
+                self.e("movea.w #%s,%s" % (hx(v), self.iyr))
+            else:
+                self.e("move.w #%s,%s" % (hx(v), self.mem(self.cfg.iyaddr)))
         else:
             raise Unsupported("ld %s,imm" % name)
 
@@ -736,7 +1038,10 @@ class Emitter:
             self.e("move.b %s,d7" % hi)
             self.e("lsl.w #8,d7")
             self.e("move.b %s,d7" % lo)
-            self.e("move.w d7,%s" % self.mem(self.cfg.iyaddr))
+            if self.iyr:
+                self.e("movea.w d7,%s" % self.iyr)
+            else:
+                self.e("move.w d7,%s" % self.mem(self.cfg.iyaddr))
         else:
             raise Unsupported("ld %s,(nn)" % name)
 
@@ -749,6 +1054,9 @@ class Emitter:
             r = "d7"
         else:
             r = self.reg16(name, 7)
+            if r.startswith("a"):                 # (IY in an address register: no byte moves from it)
+                self.e("move.w %s,d7" % r)
+                r = "d7"
         if addr % 2 == 0:
             if name in SWAPPED:
                 self.e("move.w %s,%s" % (r, lo))
@@ -803,7 +1111,7 @@ class Emitter:
                 else:
                     self.e("%s.l #1,a5" % op)
             elif n == "iy":
-                self.e("%s.w #1,%s" % (op, self.mem(self.cfg.iyaddr)))
+                self.e("%s.w #1,%s" % (op, self.iyr or self.mem(self.cfg.iyaddr)))
             else:
                 raise Unsupported("inc %s" % n)
             return
@@ -816,9 +1124,14 @@ class Emitter:
             elif n in HALF:
                 reg, hi = self.half(n)
                 if hi:
-                    self.e("ror.w #8,%s" % reg)
-                    post = ["ror.w #8,%s" % reg]
-                ea = reg
+                    if not self.lo & (S | Z | H | N):
+                        self.e("%s.w #$0100,%s" % ("add" if isinc else "sub", reg))     # (no flags wanted)
+                        return
+                    self.e("move.w %s,-(a7)" % reg)       # on the 68000 stack: the byte is its first
+                    post = ["move.w (a7)+,%s" % reg]
+                    ea = "(a7)"
+                else:
+                    ea = reg
             else:
                 raise Unsupported(n)
         else:
@@ -1015,7 +1328,7 @@ class Emitter:
             self.e("sub.l a6,d5")
             sreg = "d5"
         elif sn == "iy":
-            self.e("move.w %s,d5" % self.mem(self.cfg.iyaddr))
+            self.e("move.w %s,d5" % (self.iyr or self.mem(self.cfg.iyaddr)))
             sreg = "d5"
         else:
             sreg = self.nat16(sn, 7 if dn == "iy" else 5)
@@ -1024,10 +1337,16 @@ class Emitter:
         if dn == "iy":
             if sreg == "d5":
                 raise Unsupported("add iy,sp/iy")
-            self.e("move.w %s,d5" % self.mem(self.cfg.iyaddr))
+            if self.iyr and not self.lo & (C | N):
+                self.e("adda.w %s,%s" % (sreg, self.iyr))     # (the low word is the sum; no flags wanted)
+                return
+            self.e("move.w %s,d5" % (self.iyr or self.mem(self.cfg.iyaddr)))
             self.e("add.w %s,d5" % sreg)
             self.flags(C, const_clear=N)
-            self.e("move.w d5,%s" % self.mem(self.cfg.iyaddr))
+            if self.iyr:
+                self.e("movea.w d5,%s" % self.iyr)
+            else:
+                self.e("move.w d5,%s" % self.mem(self.cfg.iyaddr))
             return
         self.e("add.w %s,%s" % (sreg, REG16[dn]))
         self.flags(C, const_clear=N)
@@ -1064,9 +1383,13 @@ class Emitter:
             else:
                 reg, hi = self.half(n)
                 if hi:
-                    self.e("ror.w #8,%s" % reg)
-                    post = ["ror.w #8,%s" % reg]
-                ea = reg
+                    self.e("move.w %s,-(a7)" % reg)       # the byte from the 68000 stack into d5 and back
+                    self.e("move.b (a7),d5")
+                    store = "move.b d5,(a7)"
+                    post = ["move.w (a7)+,%s" % reg]
+                    ea = "d5"
+                else:
+                    ea = reg
         else:
             if dst[0] == "ind" and dst[1] == "iy":
                 raise Unsupported("rotate (iy+d)")
@@ -1144,6 +1467,10 @@ class Emitter:
     # ---- stack ------------------------------------------------------------------------
     def x_push(self, ins):
         n = ins.ops[0][1]
+        if n == "af" and ins.pc in self.raw_af:
+            self.e("move.b d0,-(a5)")
+            self.e("move.b d6,-(a5)")           # (the d6 format: pair_af)
+            return
         if n == "af":
             self.e("move.b d6,d7")
             self.e("andi.b #$0C,d7")
@@ -1167,6 +1494,10 @@ class Emitter:
 
     def x_pop(self, ins):
         n = ins.ops[0][1]
+        if n == "af" and ins.pc in self.raw_af:
+            self.e("move.b (a5)+,d6")           # (the d6 format: pair_af)
+            self.e("move.b (a5)+,d0")
+            return
         if n == "af":
             self.e("move.b (a5)+,d7")
             self.e("move.b (a5)+,d0")
@@ -1181,12 +1512,17 @@ class Emitter:
         if n not in SWAPPED:
             self.e("ror.w #8,%s" % r)
         if n == "iy":
-            self.e("move.w d5,%s" % self.mem(self.cfg.iyaddr))
+            self.e("movea.w d5,%s" % self.iyr if self.iyr else "move.w d5,%s" % self.mem(self.cfg.iyaddr))
 
     def x_ex(self, ins):
         a, b = ins.ops
         if a == ("r16", "de") and b == ("r16", "hl"):
-            self.e("exg d2,d3")
+            if self.alt_upper:                  # (the words only: DE' and HL' stay)
+                self.e("move.w d2,d7")
+                self.e("move.w d3,d2")
+                self.e("move.w d7,d3")
+            else:
+                self.e("exg d2,d3")
             return
         if a[0] == "ind" and a[1] == "sp" and b[0] == "r16" and b[1] in ("hl", "ix"):
             r = REG16[b[1]]              # swap the register with the word on the stack
@@ -1200,28 +1536,142 @@ class Emitter:
         raise Unsupported("ex")
 
     def x_ex_af_afp(self, ins):
+        if self.alt_af_upper:
+            self.e("swap d0")
+            self.e("swap d6")
+            return
         self.e("exg d0,a3")
         self.e("move.w d6,d7")
         self.e("move.w %s,d6" % self.mem(self.cfg.fshadow))
         self.e("move.w d7,%s" % self.mem(self.cfg.fshadow))
 
     def x_exx(self, ins):
+        if self.alt_upper:
+            self.e("swap d1")
+            self.e("swap d2")
+            self.e("swap d3")
+            return
         self.e("exg d1,a0")
         self.e("exg d2,a1")
         self.e("exg d3,a2")
 
     # ---- block ops --------------------------------------------------------------------------
     def x_ldir(self, ins):
-        l = self.new_label()
-        self.e("move.w d1,d7")
-        self.e("ror.w #8,d7")              # the count, BC is 0 afterwards
-        self.lines.append(l + ":")
-        self.e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
-        self.e("addq.w #1,d3")
-        self.e("addq.w #1,d2")
-        self.e("subq.w #1,d7")
-        self.e("bne.s %s" % l)
-        self.e("moveq #0,d1")
+        """BC bytes (hl)+ -> (de)+, on two address registers: a fill (de = hl + 1) writes the byte by longs, a copy of
+        the same parity that does not overlap forward goes by longs, anything else by bytes (8 a turn).  A copy
+        across the ends of the 68000 block (the $8000 split of the "signed" mode, the $FFFF wrap) and BC = 0 go
+        the indexed way, a byte a turn."""
+        regs = self.free_aregs()
+        save = len(regs) < 2
+        s, d = ("a1", "a0") if save else (regs[0], regs[1])
+        L = {k: self.new_label() for k in ("slow", "fin", "done", "fill", "bytes", "bytes1", "even", "tail",
+                                           "lw", "b8", "b1", "bl", "fe", "fl", "ft", "ftl", "l2")}
+        lab = lambda k: self.lines.append(L[k] + ":")
+        e = self.e
+        e("move.w d1,d5")
+        e("ror.w #8,d5")                        # the count, BC is 0 afterwards
+        e("beq %s" % L["slow"])                 # (0 = 65536)
+        for r in ("d3", "d2"):                  # the last byte on the same side of the block's ends
+            e("move.w d5,d7")
+            e("subq.w #1,d7")
+            e("add.w %s,d7" % r)
+            e("%s %s" % ("bvs" if self.cfg.mode == "signed" else "bcs", L["slow"]))
+        if save:
+            e("movem.l a0-a1,-(sp)")
+        e("lea %s,%s" % (self.ind("d3"), s))
+        e("lea %s,%s" % (self.ind("d2"), d))
+        e("move.w d5,-(a7)")                    # (the count, for the end)
+        e("move.w d2,d7")
+        e("sub.w d3,d7")                        # destination - source
+        e("subq.w #1,d7")
+        e("beq %s" % L["fill"])
+        e("addq.w #1,d7")
+        e("cmp.w d5,d7")
+        e("blo.s %s" % L["bytes"])              # the destination inside the source's range: bytes, in order
+        e("move.w d3,d7")
+        e("eor.w d2,d7")
+        e("btst #0,d7")
+        e("bne.s %s" % L["bytes"])              # different parity: bytes
+        e("btst #0,d3")
+        e("beq.s %s" % L["even"])
+        e("move.b (%s)+,(%s)+" % (s, d))        # both odd: a byte first
+        e("subq.w #1,d5")
+        e("beq %s" % L["done"])
+        lab("even")
+        e("move.w d5,d7")
+        e("lsr.w #2,d7")
+        e("beq.s %s" % L["tail"])
+        e("subq.w #1,d7")
+        lab("lw")
+        e("move.l (%s)+,(%s)+" % (s, d))
+        e("dbf d7,%s" % L["lw"])
+        lab("tail")
+        e("and.w #3,d5")
+        e("beq.s %s" % L["done"])
+        lab("bytes")                            # d5 >= 1 bytes
+        e("move.w d5,d7")
+        e("lsr.w #3,d7")
+        e("beq.s %s" % L["b1"])
+        e("subq.w #1,d7")
+        lab("b8")
+        for _ in range(8):
+            e("move.b (%s)+,(%s)+" % (s, d))
+        e("dbf d7,%s" % L["b8"])
+        lab("b1")
+        e("and.w #7,d5")
+        e("beq.s %s" % L["done"])
+        e("subq.w #1,d5")
+        lab("bl")
+        e("move.b (%s)+,(%s)+" % (s, d))
+        e("dbf d5,%s" % L["bl"])
+        e("bra.s %s" % L["done"])
+        lab("fill")                             # (hl) into the count bytes at de, by longs
+        e("move.b (%s),d7" % s)
+        e("movea.w d5,%s" % s)                  # (the count; the source is not needed any more)
+        e("move.b d7,d5")
+        e("lsl.w #8,d5")
+        e("move.b d7,d5")
+        e("move.w d5,d7")
+        e("swap d5")
+        e("move.w d7,d5")                       # the byte in all four
+        e("move.w %s,d7" % s)
+        e("btst #0,d2")
+        e("beq.s %s" % L["fe"])
+        e("move.b d5,(%s)+" % d)
+        e("subq.w #1,d7")
+        e("beq.s %s" % L["done"])
+        lab("fe")
+        e("movea.w d7,%s" % s)
+        e("lsr.w #2,d7")
+        e("beq.s %s" % L["ft"])
+        e("subq.w #1,d7")
+        lab("fl")
+        e("move.l d5,(%s)+" % d)
+        e("dbf d7,%s" % L["fl"])
+        lab("ft")
+        e("move.w %s,d7" % s)
+        e("and.w #3,d7")
+        e("beq.s %s" % L["done"])
+        e("subq.w #1,d7")
+        lab("ftl")
+        e("move.b d5,(%s)+" % d)
+        e("dbf d7,%s" % L["ftl"])
+        lab("done")
+        e("move.w (a7)+,d5")
+        if save:
+            e("movem.l (sp)+,a0-a1")
+        e("add.w d5,d3")
+        e("add.w d5,d2")
+        e("bra.s %s" % L["fin"])
+        lab("slow")                             # the indexed way (any addresses)
+        lab("l2")
+        e("move.b %s,%s" % (self.ind("d3"), self.ind("d2")))
+        e("addq.w #1,d3")
+        e("addq.w #1,d2")
+        e("subq.w #1,d5")
+        e("bne.s %s" % L["l2"])
+        lab("fin")
+        e("clr.w d1")
         self.flags(0, const_clear=H | N)
 
     def x_ldi(self, ins):
@@ -1256,7 +1706,7 @@ class Emitter:
         self.e("subq.w #1,d2")
         self.e("subq.w #1,d7")
         self.e("bne.s %s" % l)
-        self.e("moveq #0,d1")
+        self.e("clr.w d1")
         self.flags(0, const_clear=H | N)
 
     def x_cpi(self, ins):
@@ -1301,18 +1751,71 @@ class Emitter:
 
     # ---- control flow -----------------------------------------------------------------------------
     def jmp_to(self, pc):
-        self.e("jmp %s" % self.label_of(pc))
+        self.e("bra %s" % self.label_of(pc))       # (vasm: bra.s / bra.w, or a jmp when it is out of range)
 
     # The return address goes on the Z80 stack as a word, which read back is the byte
     # swapped pc; a4 is the dispatch table in that order (z80_init_dispatch), 65536 entries.
 
     def push_ret(self, pc):
-        self.e("move.w #%s,-(a5)" % hx(swap16(pc)))
+        self.e("move.w #%s,-(a5)" % hx(swap16(self.ret_value(pc))))
 
-    def dispatch_ret(self):
+    def dispatch_ret(self, pc=None):
+        """ret: the word on the stack is compared with the return points of the function the ret is in (up to
+        MAX_RET_CANDS, see ret_candidates) and a match jumps there directly (30 cycles instead of 50); anything else
+        (a token, a return address the program made itself) goes through the table."""
         self.e("moveq #0,d7")
         self.e("move.w (a5)+,d7")
+        for rp in self.ret_cands().get(pc, ()):
+            self.e("cmp.w #%s,d7" % hx(swap16(self.ret_value(rp))))
+            self.e("beq %s" % self.label_of(rp))
         self.dispatch_d7()
+
+    MAX_RET_CANDS = 3
+
+    def ret_value(self, pc):
+        """the Z80 pc a call to return to pc pushes (the banked ports: the real address)"""
+        return pc
+
+    def direct_ok(self, rp):
+        """whether a ret may jump to the return point rp directly (not a banked address)"""
+        return rp in self.code
+
+    def ret_cands(self):
+        """ret pc -> the return points it is likely to go to: the instructions after the calls of every function
+        (call target) whose code, followed without entering calls, reaches the ret.  Only a guess (the ret checks the
+        stack word): functions are not marked in the Z80 code, and a program may return elsewhere."""
+        if getattr(self, "_ret_cands", None) is not None:
+            return self._ret_cands
+        code = self.code
+        rps = {}
+        for pc, ins in code.items():
+            if ins.flow in ("call", "ccall") and ins.target in code:
+                rps.setdefault(ins.target, set()).add(pc + ins.length)
+        cands = {}
+        for tgt, points in rps.items():
+            seen, todo = set(), [tgt]
+            while todo and len(seen) < 4000:
+                pc = todo.pop()
+                if pc in seen or pc not in code:
+                    continue
+                seen.add(pc)
+                ins = code[pc]
+                fl, nxt = ins.flow, pc + ins.length
+                if ins.mn == "ret":
+                    cands.setdefault(pc, set()).update(points)
+                if fl in ("seq", "call", "ccall", "rst", "cret"):
+                    if not (fl == "rst" and ins.target == 0x28 and self.cfg.rst28_tables):
+                        todo.append(nxt)
+                if fl in ("jmp", "jcc") and ins.target is not None:
+                    todo.append(ins.target)
+                if fl == "jcc":
+                    todo.append(nxt)
+        self._ret_cands = {}
+        for pc, pts in cands.items():
+            pts = sorted(p for p in pts if self.direct_ok(p))
+            if 0 < len(pts) <= self.MAX_RET_CANDS:
+                self._ret_cands[pc] = pts
+        return self._ret_cands
 
     def dispatch_d7(self):
         """jump to the code of the swapped Z80 pc in d7 (upper word clear)."""
@@ -1389,10 +1892,10 @@ class Emitter:
             cc = ops[0][1]
             skip = self.new_label()
             self.branch(cc, skip, inv=True)
-            self.dispatch_ret()
+            self.dispatch_ret(ins.pc)
             self.lines.append(skip + ":")
             return
-        self.dispatch_ret()
+        self.dispatch_ret(ins.pc)
 
     def x_retn(self, ins):
         self.dispatch_ret()

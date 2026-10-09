@@ -17,8 +17,8 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
 4. **Coverage** (`ref/cover*.py`, random input, several seeds; `port.py cover <game>`): the program counters seen executing,
    the I/O and banked-window sites.  Discovery adds jump tables (`rst $28` tables, `ld hl,T ... jp (hl)`) and
    what static recursive descent finds; anything coverage found but discovery missed is a hook or a table.
-5. **Translate** (`tools/gen.py` of the game, config in `engine/z80x.py`): memory model, hooks for I/O writes and
-   yields, window/bank handling for banked ROMs.  `port.py test <game>`: lock-step against the reference (RAM every frame).
+5. **Translate** (`tools/gen.py` of the game, config in `engine/z80x.py`, pipeline `translate.compile_code`): memory
+   model, register map (`z80x.FAST`, see below), hooks for I/O writes and yields, window/bank handling for banked ROMs.  `port.py test <game>`: lock-step against the reference (RAM every frame).
 6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input, border removal, hooks.
 7. **Renderer**: exact against the reference bitmap through the colour table first (`render_test.py` style:
    copy the reference RAM in, call `render_frame`, compare pixels), fast second.
@@ -161,6 +161,34 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
   (it reads the same streams: no masks are computed at runtime).  A routine must not use `d4-d7` / `a2-a6` for anything else: the
   decoding of the sprite list once used `d4` and drew garbage that only showed with several entries - test with the whole list, not only
   with single parts.  The simulator's Blitter must write the advanced addresses back for read-modify-write code (`Sim(ram_kib=16384)`).
+
+## The translator's register maps and second pass (all ports, 2026-10-08)
+
+The translated code got 1.08-1.73 times faster (`architecture.md`, "Translator").  What a port has to do to get it, and
+the rules its runtime must keep:
+
+* **gen.py**: go through `translate.compile_code()` (or `generate_program()`), not a copy of the steps: it does the flag
+  liveness over calls, the CCR analysis and the second pass.  Give the configs `**z80x.FAST` (signed memory model) or
+  `**z80x.FAST_LONG` (long model); `alt_af="upper"` alone where the runtime uses a0-a3 (1942).  Table generators
+  leave out `em.no_entry` (z80_badpc there); a generator that lists every pc still assembles (the merged labels have stubs).
+* **Runtime, d0 and d6**: A' is in bits 16-23 of d0, F' in the upper word of d6.  Code that runs inside the translated
+  context (hooks, `bsr` targets of write hooks, native replacements like 1942's `scan_native`) writes them as bytes /
+  words only: `clr.w d6`, not `moveq #0,d6`.  Interrupt handlers that save registers with `movem.l` are fine.
+* **Runtime, d1-d3 with FAST**: the upper words hold BC' DE' HL'.  A runtime that reads an alternate register reads the
+  upper word (Galaga's `g_ctrl06`: DE' is `move.l d2,d7; swap d7`, it was `move.w a1,d7`).  IY is in a2 (its low word).
+* **a0-a2 with FAST** are the translated code's scratch registers (`ldir` uses two of them); a runtime routine called
+  from translated code may use them too, but must not expect them to keep anything between instructions.
+* **The Z80 stack below SP is dead**: merged `push rr; pop rr'` does not write the word.  A lock-step test compares the
+  stack above SP only (Donkey Kong's `fullrun.py` already did).
+* **An interrupt's `push af` saves d6**, which need not hold the interrupted code's flags at that moment (they may be in
+  the CCR; the 68000's own interrupt restores them).  The pushed byte is not state: compare it in a test only where the
+  translation makes the flags exact (1942: hooks, `jp (hl)`).
+* **Unforeseen entries stop loudly**: a computed jump to a pc the analysis did not count as an entry (joins: entries,
+  return points, jump table targets, code addresses held as numbers) now ends at `z80_badpc` with the pc in d7 when the
+  pc is inside a merge.  The cure is the same as for the CCR analysis: make it a join (a table root or a hook).
+* **Check a change of the translator** with `engine/xbench.py` (all opcodes and random sequences in every memory layout),
+  the ports' lock-step tests, and for Galaga `engine/xdiff.py` against the build before the change.  `engine/xprof.py
+  <game>` says where the cycles go per Z80 instruction form.
 
 ## Whole-object drawing (all ports)
 

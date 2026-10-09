@@ -115,7 +115,7 @@ class Lock:
     def regs68(self):
         r = self.cpu.r_reg
         return {"a": r(R.D0) & 0xFF, "bc": z80x.swap16(r(R.D1)), "de": r(R.D2) & 0xFFFF, "hl": r(R.D3) & 0xFFFF,
-                "ix": r(R.D4) & 0xFFFF, "iy": self.mem.r16(BLOCK + 0x7FF0),
+                "ix": r(R.D4) & 0xFFFF, "iy": r(R.A2) & 0xFFFF,          # (z80x.FAST: IY in a2)
                 "sp": (r(R.A5) - BLOCK) & 0xFFFF}
 
     def compare(self, tag):

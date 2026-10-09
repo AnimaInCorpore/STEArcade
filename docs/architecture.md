@@ -53,30 +53,121 @@ registers kept 0, static accesses to $8000 and up through an absolute symbol).
 Instructions added for Galaga: `ldi`/`ldd`/`lddr`/`cpi`, `jp pe/po` right after them
 (P/V = BC != 0, the only parity use), `rld`, `ex (sp),hl`, `halt` (runtime `z80_halt`:
 wait for the next interrupt), `ld a,r` (runtime `z80_rnd`, a shift register the reference
-reproduces), the IX/IY halves.  Registers:
-d0 = A, d1 = BC, d2 = DE, d3 = HL, d4 = IX, d6 = flags image, a5 = Z80 SP (a pointer),
-a6 = the 32 KB Z80 block, a4 = the dispatch table; d5/d7 scratch.  The things that made
-the game logic cheap (it was 19% of a frame, 12% now):
+reproduces), the IX/IY halves.  `translate.compile_code()` is the common pipeline (flag liveness, CCR analysis,
+emission); every port's gen.py goes through it.
+
+### Registers
+
+d0 = A, d1 = BC (byte swapped), d2 = DE, d3 = HL, d4 = IX, d6 = flags image, a5 = Z80 SP (a pointer),
+a6 = the Z80 block, a4 = the dispatch table, d5/d7 scratch.  Where A' F' BC' DE' HL' and IY live is set per program
+(`z80x.Config`, `Emitter.regmap()`):
+
+| Config | A' / F' | BC' DE' HL' | IY | used by |
+|---|---|---|---|---|
+| default | a3 / a block word | a0-a2 (`exx` = 3 `exg`) | a block word | (old builds) |
+| `alt_af="upper"` | bits 16-23 of d0 / upper word of d6: `ex af,af'` = `swap d0; swap d6` (8 cycles, was 34) | | | all |
+| `z80x.FAST` (signed mode) | as above | upper words of d1-d3: `exx` = 3 `swap` | a2 (the low word, `(d,a6,a2.w)`) | DK, Galaga CPU1, Bubble Bobble main |
+| `z80x.FAST_LONG` (long mode) | as above | a0-a2 (the long mode needs the upper words 0) | the block | Galaga CPU2/3, Bubble Bobble sub |
+
+1942 uses `alt_af="upper"` only: its kernel keeps tasks' registers, and its runtime (`scan_native`, the window reads)
+uses a0-a3 as they are.  With A' out of a3, a3 is free in every program: a computed jump is
+`move.l (a4,d7.l),a3; jmp (a3)` (50 cycles instead of 66 for `move.l ...,-(sp); rts`).  The rules a runtime must keep
+(see `porting-guide.md`): no long writes to d0/d6 (`moveq` clears A' / F'), with `FAST` none to d1-d3 either, and
+a0-a2 are scratch for the translated code (`ldir`), not for the runtime between instructions.
+
+### What makes the translated code cheap
 
 * The Z80 stack is always word aligned (the program sets SP to $6C00 and pushes words),
   so `call`/`ret`/`push`/`pop` are word moves.  A word read from the stack is the byte
   swapped pc, and the dispatch table (`z80_dispatch_sw`, 65536 longs, built at start by
-  `z80_init_dispatch` from the compact table) is in that order: `ret` is
-  `move.w (a5)+,d7; lsl.l #2,d7; move.l (a4,d7.l),a3; jmp (a3)`, 50 cycles instead of 139
-  (a3 is free because the program never uses `ex af,af'`).  The one place where the
+  `z80_init_dispatch` from the compact table) is in that order.  The one place where the
   stack is odd in between, `inc sp; inc sp`, is one `addq.l #2` (the NMI pushes a word
   and crashed on the odd pointer).
+* **Direct returns** (`Emitter.ret_cands`): a `ret` compares the word on the stack with the return points of the
+  function(s) it belongs to (the instructions after the calls of every call target whose code reaches the ret
+  without entering calls; up to three) and jumps there directly, 30 cycles; anything else (an interrupt token, a
+  return address the program made itself) goes through the table as before.  It is only a guess, checked at run time.
 * BC is kept byte swapped (B in the low byte): B is the register the game works with
   (`djnz` is `subq.b #1,d1; bne`, 14 cycles instead of 44; `ld b,(hl)` one move), the pair
   is rare, and the swapped order is the order of the bytes on the stack and in memory.
+* **High bytes** (H, D, C, IXH) go through the 68000 stack: `move.w d3,-(a7); move.b (a7)+,d0` reads H in 16 cycles
+  (`lsr.w #8` alone is 22: a byte move on a7 steps by 2, and an interrupt in between pushes below a7).  Writes are
+  `move.w r,-(a7); move.b x,(a7); move.w (a7)+,r` (24 instead of 38), `inc h` without live flags is `add.w #$100,d3`.
+* **`ldir`** runs on two address registers: a fill (`de = hl + 1`, the `ld (hl),n; ldir` idiom) writes the byte by
+  longs, a copy of the same parity that does not overlap forward goes by longs, anything else by bytes, 8 a turn.  A
+  copy across the ends of the 68000 block (the $8000 split of the signed mode, the $FFFF wrap) and BC = 0 take the old
+  indexed loop.  Galaga's clears went from 46 to ~3 cycles a byte.
+* **Carry into X** for `adc`/`sbc`/`rl`/`rr`: `moveq #1,d7; and.b d6,d7; lsr.b #1,d7` (X = C = the carry, Z set: what
+  `addx`/`subx` need), 16 cycles without a branch (was ~40).
+* Z80 jumps are `bra` (vasm makes them `bra.s`/`.w`, or a `jmp` when out of range).
+
+### Flags
+
 * Flags in the condition codes: a flag producing instruction leaves S Z C in the CCR, and a
   conditional jump that directly follows it branches on that instead of `move d6,ccr`
   (12 cycles).  `Emitter.analyze` is a forward must-analysis over the code (nothing known
   at the entries, the return points and the targets of computed jumps); the jumps that
   can read the CCR are no longer uses of d6, so a producer whose flags are only read
   that way stores nothing.  Note that a 68000 `move` or `tst` clears C: only address
-  register operations, the bit instructions and branches keep the flags.  620 loads
-  became 192, 669 stores 481.
+  register operations, the bit instructions and branches keep the flags.
+* The analysis also knows which data register's byte the Z80's S and Z describe (the result of the last flag op,
+  `ccr_step`): a `move.b` or `tst.b` of it sets N and Z from the same byte, so `dec a; ld (hl),a; jr nz` branches on the
+  CCR.  Where a producer that sets only S/Z must keep a live C (a merge into d6, which spoils the CCR) a `tst.b` of the
+  result (4 cycles) brings S and Z back.
+* **Precise liveness over calls** (`z80x.ret_targets`): a call no longer reads all flags; it passes them to the callee
+  (whose own liveness says what it reads), and the rets of well-behaved functions pass them on to their return points.
+  A function is well-behaved when its stack is balanced on every path (no pop of the return address, no `ex (sp)` of it,
+  SP not set) and its rets are reached only from call targets (not from the reset or interrupt entries, jump tables, or
+  code addresses the program holds); every other ret still counts as reading S Z C.  Bubble Bobble: 49% of the main
+  CPU's rets qualify, 95% of the sub CPU's; flag stores -17%, merges -26%.
+
+### The second pass: merges over labels nothing enters
+
+The code of consecutive instructions is merged where the program cannot arrive between them other than by the
+straight flow: not a join, not a jump or call target, not a hook (`Emitter.boundaries`).  The labels inside a merge
+are in `em.no_entry` and get `z80_badpc` in the dispatch tables (a merged label that is not emitted gets a stub that
+does the same), so an entry the analysis did not foresee stops loudly instead of running half-transformed code.
+
+* `push rr; pop rr'` (the register copy idiom) is one move (the stack word below SP is not written: dead).
+* `push af ... pop af` in straight code with the slot read by nothing else keeps the flags in the d6 format (two moves
+  each instead of the conversions to and from the Z80 F byte, -112 cycles a pair; `pair_af`).
+* A `bra` to the label right behind it and a `tst.b R` right before a `move.b R,...` are dropped.
+
+### Tests and measurements of the translator
+
+* `engine/xbench.py`: every Z80 opcode (operand bytes random) and random straight-line sequences with forward jumps
+  and push/pop pairs, compiled through `compile_code` like a program, against `engine/z80.py` on Musashi, in the memory
+  layouts of the ports (`dk`, `signed`, `long` and the `+` variants with the fast register maps).  Registers, memory
+  (but the dead stack below SP), the next pc and the live flags must match.  Known by design: S after `bit` without
+  `Config.bit_s`, H after `ccf`, P/V only for `jp pe/po` right after `ldi`/`cpi`.  `python engine/xbench.py --seq 1000`
+  takes ~5 minutes for all six layouts (34k single cases, 6k sequences).
+* `engine/xprof.py <game>`: a `--sim` build stepped instruction by instruction, each 68000 instruction charged to the
+  Z80 instruction it was translated from: cycles per *game frame* (one round of the arcade's interrupts, so a faster
+  build is not charged more work per VBL), by instruction form, by 68000 instruction, hottest pcs.  Donkey Kong runs
+  through its lock-step harness (`fullrun.py`).  Idle loops are counted apart (`IDLE`).
+* `engine/xdiff.py galaga <old.PRG> <old.map>`: two builds side by side (separate processes: Musashi keeps the CPU in
+  globals), the arcade's RAM compared at every game frame.  The interrupts come on a clock of translated instructions
+  (and when no Z80 code runs for two frames), so both builds are interrupted at the same points of the Z80 programs:
+  Galaga's main CPU draws text in its foreground, and a faster build is otherwise legitimately ahead.  The stacks are
+  not compared (an interrupt's `push af` saves d6, which need not hold the interrupted code's flags: they may be in
+  the CCR).  This is Galaga's translation test (its `galaga5.py` checks the reference only).
+
+Measured 2026-10-08 (`xprof`, translated code per game frame, Musashi cycles; Bubble Bobble without its idle loop):
+
+| port | before | after | |
+|---|---|---|---|
+| Galaga (both CPUs, frames 800-1200, attract) | 47.6k | 27.6k | 1.73x |
+| Bubble Bobble (main, sub, MCU; frames 500-800, play) | 70.3k | 55.4k | 1.27x |
+| 1942 (ticks 1100-1500, play) | 28.1k | 24.3k | 1.16x |
+| Donkey Kong (NMI, 1500 frames of fullrun.py) | 5.2k | 4.8k | 1.08x |
+
+The gain is where the old code was weak: Galaga's `ldir` clears (37% of its cycles), the `ret` dispatch with A' in a3,
+the high bytes.  Donkey Kong's code was lean already (16 cycles a Z80 instruction, mostly memory moves that cannot get
+cheaper).  Not done, by expected gain: inlining small leaf functions (call + ret = ~65 cycles; ~8% for Bubble Bobble),
+the MCU translator `m6801x.py` (9% of Bubble Bobble's translated cycles, untouched), keeping the Z80 stack words in
+68000 order so `push`/`pop` of DE/HL/IX need no `ror.w #8` (3-5%; but code that reads the stack as memory would break),
+`FAST` for 1942 (its runtime's `scan_native` and window code would have to give up a0-a3).  A factor of 2 for every
+port is not in reach of the translation alone; the renderers are the larger part of most frames anyway.
 
 ## Runtime schedule (all ports)
 

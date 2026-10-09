@@ -494,7 +494,7 @@ scan_native:
 	move.w	#$1000,d1			; (C in the high byte)
 	move.w	#$F000,d3
 	moveq	#4,d2
-	moveq	#0,d6
+	clr.w	d6				; (F; the upper word is F', z80x alt_af="upper")
 	jmp	Z009A
 .found:	move.w	d1,d5				; the number of the record
 	lsl.w	#8,d5				; C
@@ -504,7 +504,7 @@ scan_native:
 	move.w	d5,d1
 	move.w	d7,d3				; HL
 	moveq	#4,d2
-	moveq	#0,d6
+	clr.w	d6
 	jmp	Z009C
 
 ; The token on the Z80 stack returns here: after RST 08 comes RST 10, after that the idle loop goes on.
