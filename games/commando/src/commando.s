@@ -1,4 +1,4 @@
-; Commando World for Atari STE; translated main CPU, sound omitted.
+; Commando World for Atari STE; translated main CPU, the sound effects on the YM2149 (sfx.s), no music.
 MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
 MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
 
@@ -82,6 +82,7 @@ start:
 	bsr	init_video
 	stage	$0f0
 	bsr	init_render
+	bsr	sfx_init
 	stage	$00f
 	ifd DEBUG
 	bsr	dbg_dump
@@ -239,6 +240,14 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+
+	moveq	#8,d0			; the YM2149 silent (the volumes of its three channels)
+.silence:
+	move.b	d0,$ffff8800.w
+	clr.b	$ffff8802.w
+	addq.b	#1,d0
+	cmp.b	#11,d0
+	blo.s	.silence
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -405,6 +414,7 @@ z80_hook:
 	movem.l (sp)+,d0-d7/a0-a6
 	rts
 .deliver:
+	bsr sfx_tick			; (the sound driver's four IRQs of the tick: the latch of the tick before)
 	movem.l (sp)+,d0-d7/a0-a6
 	; Drop just the hook continuation; preserve the native task/call stack.
 	addq.l #4,sp
@@ -842,6 +852,7 @@ z80_unsupported:
 	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
 	include "commando_render.s"
+	include "sfx.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch list in the data section).
