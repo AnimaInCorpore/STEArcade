@@ -164,6 +164,47 @@ class GameEmitter(Emitter):
         raise Unsupported('1943 has no mapped output ports')
 
 
+def skips(rom, target, cache={}):
+    """The return offsets of a function that returns past its caller's next bytes: `pop hl; inc hl` (k times); `jp (hl)`
+    on a path from `target` (calls stepped over).  The object allocators (06EC and its relatives) return normally on a
+    failure and to the call + 3 + 3 on success (the 3 bytes after the call are `ret; nop; nop` or a `jp`)."""
+    if target in cache:
+        return cache[target]
+    found, seen, work = set(), set(), [target]
+    while work and len(seen) < 400:
+        pc = work.pop()
+        while pc not in seen and (pc < 0x8000 or pc >= VBASE):
+            seen.add(pc)
+            ins = decode(rom, pc)
+            if ins.mn == 'pop' and ins.ops == [('r16', 'hl')]:
+                k, q = 0, pc + ins.length
+                while rom[q] == 0x23:
+                    k, q = k + 1, q + 1
+                if k and rom[q] == 0xe9:
+                    found.add(k)
+            nxt = pc + ins.length
+            if ins.mn in ('ret', 'reti', 'retn') and not ins.ops or ins.mn == 'jp' and ins.ops and ins.ops[0][0] == 'ind':
+                break
+            if ins.mn in ('jp', 'jr') and len(ins.ops) == 1:
+                pc = ins.target
+                continue
+            if ins.mn in ('jp', 'jr', 'djnz') and ins.target is not None:
+                work.append(ins.target)
+            pc = nxt
+    cache[target] = found
+    return found
+
+
+def skip_returns(rom, code):
+    """the continuations after the calls of such functions"""
+    out = set()
+    for pc, ins in code.items():
+        if ins.mn == 'call' and ins.target is not None:
+            for k in skips(rom, ins.target):
+                out.add(pc + ins.length + k)
+    return out
+
+
 def generate(extra_roots=()):
     rom = image()
     require_coverage('1943', [f'cover{s}.pkl' for s in (1, 2, 3)])
@@ -181,7 +222,12 @@ def generate(extra_roots=()):
     saved = discover.decode
     discover.decode = decode
     try:
-        code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
+        while True:
+            code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
+            missing = skip_returns(rom, code) - set(code)
+            if not missing:
+                break
+            roots.update(missing)
     finally:
         discover.decode = saved
     code = {pc: ins for pc, ins in code.items() if pc < 0x8000 or pc >= VBASE}

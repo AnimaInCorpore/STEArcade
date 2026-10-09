@@ -1,19 +1,21 @@
 # 1943: The Battle of Midway
 
-Target: a playable Atari STE port, registered as `1943`. The main-Z80 reference
-machine, i8751 firmware interpreter, graphics renderer, ROM preparation and
-bank-aware coverage are implemented. The bank-aware Z80-to-68000 generator is implemented;
-no playable STE executable is available yet.
+Atari STE port (4 MB) of the `1943` set (Euro), registered as `1943`: the main Z80 translated to 68000 code, the
+i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter renderer.  Sound is not implemented.
 
 ```sh
 python port.py prepare 1943                 # auto: US archive if present, otherwise Euro
 python port.py prepare 1943 --set 1943       # explicitly choose the available Euro set
 python port.py prepare 1943 --set 1943u      # requires the US Rev C program ROMs
-python port.py test 1943                    # ROMs, graphics and 700 reference frames
+python port.py cover 1943                   # 20 coverage runs (seeds 6-20: MAME's cheats, one stage each)
+python port.py build 1943                   # assets + translation -> run/1943/1943.PRG (--sim: the Musashi build)
+python port.py test 1943                    # ROMs, graphics, reference, lock-step logic and pictures
+python port.py run 1943                     # Hatari (tools/hatari.sh)
 python port.py mame 1943                    # pixel checks at frames 100, 700 and 1500
-python port.py cover 1943 1                 # bank-aware execution/read/write coverage
-venv/bin/python games/1943/tools/gen.py      # emit 68000 code from prepared ROMs and coverage
 ```
+
+Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2),
+**Escape** quits.  Joystick port 1 plays player 1.
 
 Both sets have 38 ROMs. Manifests come from the local MAME driver. The supplied
 `1943.zip` plus `assets/roms/bm.7k` verifies completely as the Euro set.
@@ -53,16 +55,66 @@ set matches at frames 100, 700 and 1500 with **zero differing pixels**.
 This establishes video equivalence at those states; it does not establish
 cycle-by-cycle CPU/MCU equivalence or STE performance.
 
-See [hardware notes](docs/hardware-notes.md). A 1,800-frame seeded coverage run reached 3,700+ bank/PC pairs; static discovery
-and generation produced 7,688 instructions across fixed code and banks 0/1,
-with zero unsupported instructions. This is generation, not yet a validated
-68000 executable. The next work is lock-step logic checks, the STE runtime and Blitter renderer, then Hatari
-playability and timing checks. `build` and `run` report that the runtime is pending.
+See [hardware notes](docs/hardware-notes.md).
 
-## Translator (2026-10-09)
+## Translation and schedule
 
-`tools/gen.py` goes through `translate.compile_code` with `z80x.FAST`, the engine's window wrapper and `ldir`, and the
-banked return rules of Black Tiger (`ret_value`, `direct_ok`).  There is no runtime yet: it generates (7688
-instructions, none unsupported) and assembles, nothing more is tested.  The runtime to come must keep the rules of
-`docs/porting-guide.md` ("The translator's register maps"): no long writes to d0-d3 / d6 in code called from the
-translated program, IY is in a2, a0-a1 are scratch.
+`tools/gen.py` (`translate.compile_code`, `z80x.FAST`, the banked window rules of Black Tiger): 14,103 instructions
+from the fixed ROM and banks 0, 1, 4, 6, none unsupported.  Besides the coverage roots, discovery adds the
+continuations of the object allocators (`06EC` and relatives: `pop hl; inc hl` x3; `jp (hl)` returns to the call + 6
+on success, `skips()`); random play reached one (bank 0 `A000`) that no coverage run had seen.
+
+The program is Capcom's task kernel (as Black Tiger): the scheduler at `00B6` runs the ready tasks of the table at
+`EF80` and loops at `00D4` when none is ready.  `src/1943.s` hooks `00D4`: it draws the frame, then delivers a tick:
+the line 144 IRQ (SYSTEM bit 3, the VBL, clear), the MCU's INT1, the line 240 IRQ (bit 3 set), each run to its
+return to `00D4` with a token on the Z80 stack, then the tasks they woke.  `tools/machine.py run_frame_port` is the
+same schedule.  Six ticks per five VBLs (59.6 Hz arcade), at most `MAX_SKIPS` frames skipped in a row.  The latches
+`C804` (bank, flip, characters on), `C806` (the sprite list buffered: 128 entries of 4 bytes), `C807` (MCU command)
+and `D806` (layer enables) are write hooks that keep every register and the CCR.
+
+`src/mcu.s` interprets the i8751 firmware with exactly the instructions of `tools/mcu.py` (a jump table per opcode,
+anything else stops at `z80_unsupported`); the P3 bit 6 falling edge latches the reply, PSW's parity is made exact
+where PSW is read.
+
+## Renderer (`src/render.s`)
+
+The screen is the raw 256 x 224 picture rotated: 224 x 256, screen x = raw y - 16, y = 255 - raw x.  The back layer
+(the sea, 32 x 32 tiles from the ROM map) scrolls vertically at half the speed of the front layer (clouds, islands,
+ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
+
+* **Three display rings, virtual screens with twin lines** (the Commando port's scheme): ring line l and l + 320 hold
+  the same picture of the back layer, so the 256 window lines and 32 guard lines above and below are contiguous
+  wherever the window is.  Back layer lines are drawn once, as they scroll into the band (each a line of 8 baked
+  tiles into all its copies; `back_line`); a change of the layer's enable or a jump draws the band whole.
+* **Everything else is drawn every frame and listed as damage**, copied back from the twin lines at the ring's next
+  visit: the sprites of colours 10 and 11 (behind the front layer), the front layer (whole 32 x 32 baked tiles, blank
+  ones skipped, one Blitter call per run of lines with equal opaque masks and plane, the masks shifted to the
+  horizontal scroll), the other sprites (the generated routines and endmask streams of
+  `games/1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (`movep.l`, a list rebuilt when the
+  character RAM changes).  What an object draws into the 48 pixel margins beside the window is cleared.
+* **Colours**: one 16 colour palette, Oklab k-means over the colours of every stage weighted by how often they show
+  (`ref/palette_stats.py` -> `docs/palette_stats.json`, `docs/palette.json`).  Tiles of both layers are baked at
+  build time (`tools/assets.py`: 396 back, 583 front tiles); sprites and characters are baked on first use into a
+  pool with hashed caches.
+* **Not exact**: where a sprite of colour 10/11 comes earlier in the list than an overlapping sprite of another
+  colour, the arcade shows the first (or the front layer over it), the port the second.  The test recognises such
+  pictures by rendering the reference in the port's order.
+
+## Tests
+
+`port.py test 1943` builds the simulator version and runs `tools/logic_test.py`: the translated program on Musashi
+against the reference's port schedule, RAM, video latches, sprite buffer, latches, MCU reply and MCU RAM compared at
+every tick; with `--render` each picture the renderer finished is compared with the reference renderer through the
+palette map (the margins must be black).  `--cheat n` plays stage n with MAME's cheats, `--seed n` random inputs.
+Results (2026-10-09): 3000 ticks of attract and play, random play with seeds 1 and 2 (8000 ticks each), every stage
+0-14 with cheats (4000-5000 ticks): logic exact, pictures exact.
+
+## Speed (2026-10-09, first measurement)
+
+`tools/perf_test.py 1500 1300 --profile` (Musashi, play): a tick's logic about 110k cycles (translated Z80 37k, the
+MCU interpreter about 62k), a frame about 340k (front tiles 124k, characters 73k, sprites 61k, damage 48k).  Hatari
+(DEBUG + AUTOPLAY build, 4000 VBLs): 31.9 ticks a second (53% of the arcade), 6.4 frames drawn a second.
+
+## Not done
+
+Sound; the flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; the speed.

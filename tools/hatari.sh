@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run a port in the F030Arcade Hatari (the pinned, corrected build); optionally press keys, grab screenshots and
 # dump memory at given times.
-#   tools/hatari.sh <game> [item@seconds ...]          game: dkong | galaga | bublbobl | 1942 | commando | blktiger | gunsmoke
+#   tools/hatari.sh <game> [item@seconds ...]          game: dkong | galaga | bublbobl | 1942 | 1943 | commando | blktiger | gunsmoke
 #   items (in time order):  shot@60                    screenshot  -> $OUT/<game>_60.png
 #                           key:5@20                   key press (Hatari key name: 5 = coin 1, 1 = start 1, Left, space ...)
 #                           hold:5@20                  key held for 0.7 s (down:KEY / up:KEY: held until up)   wait@90: just keep running
@@ -20,10 +20,11 @@ case $GAME in
   dkong)    PRG=${PRG:-DKONG.PRG} ;;
   bublbobl) PRG=${PRG:-BUBBLE.PRG} ;;
   1942)     PRG=${PRG:-1942.PRG} ;;
+  1943)     PRG=${PRG:-1943.PRG} ;;
   blktiger) PRG=${PRG:-BLKTIGER.PRG} ;;
   commando) PRG=${PRG:-COMMANDO.PRG} ;;
   gunsmoke) PRG=${PRG:-GUNSMOKE.PRG} ;;
-  *) echo "unknown game $GAME (dkong | galaga | bublbobl | 1942 | commando | blktiger | gunsmoke)"; exit 1 ;;
+  *) echo "unknown game $GAME (dkong | galaga | bublbobl | 1942 | 1943 | commando | blktiger | gunsmoke)"; exit 1 ;;
 esac
 RUN=${RUN:-$ROOT/run/$GAME}
 mkdir -p "$OUT"; rm -f "$RUN/CRASH.TXT" "$OUT/cmd.fifo"

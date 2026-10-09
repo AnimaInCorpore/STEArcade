@@ -72,3 +72,38 @@ class Game1943:
     def render_rgb(self, rotated=False):
         if self.video is None: self.video = Video(self.set_name)
         return self.video.render_rgb(self.mem, self.sprites, self.control, self.layers, rotated)
+
+    # The cooperative STE schedule (the runtime's z80_hook does the same): the scheduler at IDLE_PC found no ready task.
+    IDLE_PC = 0x00d4
+    booted = False
+
+    def run_to_idle(self, limit=4000000):
+        for _ in range(limit):
+            if self.cpu.pc == self.IDLE_PC:
+                return
+            self.cpu.ei_delay = False
+            self.cpu.step()
+        raise RuntimeError(f'1943 did not idle: PC={self.cpu.pc:04x}, bank={self.bank}')
+
+    def irq_port(self, scanline):
+        """One held IRQ taken at the idle point, its handler run to the return to IDLE_PC (it does not switch tasks)."""
+        self.scanline = scanline
+        if not self.cpu.irq():
+            raise RuntimeError('Interrupts disabled at the 1943 idle point')
+        self.irq_count += 1
+        self.run_to_idle()
+
+    def run_frame_port(self):
+        """A tick: the line 144 IRQ (VBL bit clear), the MCU's INT1, the line 240 IRQ (VBL bit set), then the tasks
+        the handlers made ready, to the next idle point.  The tasks see the VBL bit clear."""
+        if not self.booted:
+            self.scanline = 16
+            self.run_to_idle()
+            self.booted = True
+        self.irq_port(144)
+        self.mcu.vblank()
+        self.irq_port(240)
+        self.scanline = 16
+        self.cpu.step()                       # (the idle loop's jr, then the scheduler's next round)
+        self.run_to_idle()
+        self.frame += 1
