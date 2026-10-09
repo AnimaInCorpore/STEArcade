@@ -141,6 +141,12 @@ class Driver:
             a = self.sym["g_inputs"]
             self.mem.w8(a, values[0] & ~8 | self.mem.r8(a) & 8)
             self.mem.w8(a + 1, values[1])
+            stage = os.environ.get("X1943_STAGE")        # (MAME's cheats as in its logic_test.py --cheat)
+            if stage is not None:
+                block = self.sym["g_block"] + 0x8000 - 0x10000
+                for addr, value, f0 in ((0xE450, int(stage), 700), (0xF206, 0x40, 0), (0xF214, 2, 0)):
+                    if f0 <= self.f and (addr != 0xE450 or self.f < 1100):
+                        self.mem.w8(block + addr, value)
         if self.game in KERNEL and pc == self.sym["sim_wait"] and self.game != "1942":
             self.mem.w8(self.sym["vbl_pending"], 1)
             self.resume()

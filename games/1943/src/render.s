@@ -123,6 +123,7 @@ init_video:
  cmp.w #1024,d0
  blo.s .offset
  st chr_full
+ move.w #-1,mode_cnt_col
  bsr cache_clear
  move.w #0,shown_idx
  move.w #1,prev_idx
@@ -507,11 +508,18 @@ choose_mode:
  move.b g_layers,d0
  and.b #$30,d0
  cmp.b #$30,d0
- bne.s .out
+ bne .out
  tst.b Z_SCROLL+2
- bne.s .out
+ bne .out
  move.w cur_fx,d1
  lsr.w #5,d1			; the first front column
+ move.w mode_cnt_col,d0		; (the counts of the same window: kept)
+ cmp.w d1,d0
+ bne.s .count
+ movem.w mode_cnt,d4-d5
+ bra.s .counted
+.count:
+ move.w d1,mode_cnt_col
  moveq #0,d4			; opaque cells
  moveq #0,d5			; blank cells
  lea front_map,a1
@@ -535,6 +543,8 @@ choose_mode:
  dbf d2,.cell
  addq.w #1,d1
  dbf d3,.column
+ movem.w d4-d5,mode_cnt
+.counted:
  move.w draw_idx,d2
  lea ring_valid,a0
  tst.b (a0,d2.w)
@@ -857,42 +867,53 @@ draw_front:
  lea BLT_DST_ADDR.w,a4
  lea BLT_COUNT+2.w,a5
  lea BLT_CTRL.w,a6
+ lea front_xs,a0		; the rows' window x: raw y (32r - fy) & 255, - 16
+ moveq #0,d2
+ move.b Z_SCROLL+2,d2
+ neg.w d2
+ moveq #7,d0
+.xs:
+ move.w d2,d1
+ and.w #255,d1
+ sub.w #16,d1
+ move.w d1,(a0)+
+ add.w #32,d2
+ dbf d0,.xs
  moveq #8,d7			; nine columns
 .column:
  cmp.w #-32,front_y
  ble.s .done			; (rx > 255: off the window)
- moveq #0,d6			; row
-.row:
  moveq #0,d0
  move.w front_col,d0
  and.w #2047,d0
- lsl.w #3,d0
- add.w d6,d0
- lsl.l #2,d0
+ lsl.l #5,d0
  lea front_map,a0
- move.l (a0,d0.l),d0
- beq.s .blank
+ add.l d0,a0			; the column's 8 cells
+ lea front_xs,a1
+ moveq #7,d6
+.row:
+ move.l (a0)+,d0
+ bne.s .tile
+ addq.l #2,a1
+ dbf d6,.row
+ bra.s .next
+.tile:
+ movem.l a0-a1,-(sp)
  bclr #31,d0			; (fully opaque)
  sne front_full
  lea front_tiles-1,a0
  add.l d0,a0
- move.w d6,d1
- lsl.w #5,d1
- moveq #0,d2
- move.b Z_SCROLL+2,d2
- sub.w d2,d1
- and.w #255,d1			; raw y of the tile's first pixel
- sub.w #16,d1			; window x
- move.w d1,front_x
+ move.w (a1),front_x
  bsr front_tile
  cmp.w #224-16,front_x
- ble.s .blank
+ ble.s .one
  sub.w #256,front_x		; (wraps at raw y 256)
  bsr front_tile
-.blank:
- addq.w #1,d6
- cmp.w #8,d6
- blo.s .row
+.one:
+ movem.l (sp)+,a0-a1
+ addq.l #2,a1
+ dbf d6,.row
+.next:
  addq.w #1,front_col
  sub.w #32,front_y
  dbf d7,.column
@@ -2221,6 +2242,9 @@ run_m1: ds.w 1
 cur_top: ds.w 1
 scroll_d: ds.w 1
 front_x: ds.w 1
+front_xs: ds.w 8
+mode_cnt_col: ds.w 1
+mode_cnt: ds.w 2
 front_y: ds.w 1
 front_col: ds.w 1
 obj_chunk: ds.w 1

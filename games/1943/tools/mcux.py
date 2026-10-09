@@ -96,6 +96,8 @@ def emit(rom, code):
         else:
             out.append(f'\tmove.b {addr}(a0),{dst}')
 
+    targets = {rel(pc, 2, b[1]) for pc, b in code.items() if b[0] in (0x70, 0x80) or 0xd8 <= b[0] <= 0xdf} | \
+              {b[1] * 256 + b[2] for b in code.values() if b[0] == 0x02} | set(ENTRIES)
     for pc in sorted(code):
         b = code[pc]
         op = b[0]
@@ -151,16 +153,16 @@ def emit(rom, code):
             out.extend(['\tmoveq #0,d1', '\tmove.b $83(a0),d1', '\tlsl.w #8,d1', '\tmove.b $82(a0),d1',
                         '\tmoveq #0,d2', '\tmove.b d0,d2', '\tadd.l d2,d1', '\tmove.b (a1,d1.l),d0'])
         elif op == 0x9a:
-            # A = A - R2 - CY: CY = the 68000's borrow, OV its overflow, AC = bit 4 of a ^ b ^ result
-            def skip_set(bit, flag):
-                out.extend([f'\tbtst #{bit},d5', f'\tbeq.s .s{pc:04x}_{flag}', f'\tbset #{flag},d7', f'.s{pc:04x}_{flag}:'])
-            out.extend(['\tmove.b 2(a0),d2', f'\tmove.b {PSW}(a0),d7', '\tmove.b d7,d5', '\tadd.b d5,d5',
-                        '\tmove.b d0,d1', '\tsubx.b d2,d1', '\tmove sr,d5', '\tand.b #$3b,d7'])
-            skip_set(0, 7)
-            skip_set(1, 2)
-            out.extend(['\teor.b d1,d2', '\teor.b d0,d2', '\tmove.b d2,d5'])
-            skip_set(4, 6)
-            out.extend([f'\tmove.b d7,{PSW}(a0)', '\tmove.b d1,d0'])
+            # A = A - R2 - CY: CY = the 68000's borrow, OV its overflow (mcu_cvtab: the CCR's C and V as PSW bits),
+            # AC = bit 4 of a ^ b ^ result.  Right after clr C the carry is 0: a plain sub.
+            out.extend(['\tmove.b 2(a0),d2', f'\tmove.b {PSW}(a0),d7', '\tmove.b d0,d1'])
+            if code.get(pc - 1, b'')[:1] == b'\xc3' and pc not in targets:
+                out.append('\tsub.b d2,d1')
+            else:
+                out.extend(['\tmove.b d7,d5', '\tadd.b d5,d5', '\tsubx.b d2,d1'])
+            out.extend(['\tmove sr,d5', '\tand.w #3,d5', '\tlea mcu_cvtab,a3', '\tand.b #$3b,d7', '\tor.b (a3,d5.w),d7',
+                        '\teor.b d1,d2', '\teor.b d0,d2', '\tand.b #$10,d2', '\tlsl.b #2,d2', '\tor.b d2,d7',
+                        f'\tmove.b d7,{PSW}(a0)', '\tmove.b d1,d0'])
         elif op == 0x70:
             out.extend(['\ttst.b d0', f'\tbne M{rel(pc, 2, b[1]):04X}'])
         elif 0xd8 <= op <= 0xdf:

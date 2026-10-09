@@ -261,6 +261,21 @@ autoplay:
     and.b #~2,d1
 .p1:
     move.b d1,g_inputs+1
+    ifd STAGE
+    ; (MAME's cheats, as logic_test.py --cheat: infinite energy, invincibility, the stage selected while the game starts)
+    move.b #$40,G_Z80+$f206-$10000
+    move.b #2,G_Z80+$f214-$10000
+    moveq #0,d0
+    move.w cnt_ticks,d0
+    divu #3000,d0
+    swap d0
+    cmp.w #700,d0
+    blo.s .no_stage
+    cmp.w #1100,d0
+    bhs.s .no_stage
+    move.b #STAGE,G_Z80+$e450-$10000
+.no_stage:
+    endc
     movem.l (sp)+,d0-d1
     rts
     endc

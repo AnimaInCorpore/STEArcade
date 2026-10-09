@@ -77,6 +77,8 @@ mcu_parity:
     or.b d2,$d0(a0)
     rts
 
+mcu_cvtab:                         ; the 68000's C (bit 0) and V (bit 1) as the 8051's CY (bit 7) and OV (bit 2)
+    dc.b 0,$80,$04,$84
 mcu_partab:
     rept 256
 PB set REPTN
