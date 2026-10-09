@@ -138,6 +138,11 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   redraws every cell.
 - Boot: the main CPU's RAM test is skipped (`--full-selftest` keeps it), the grid screen
   and the handshake wait ($3719 loops, ~200 frames) remain.
+- Frame rate without the FIFO (Windows): `python port.py build galaga --debug -D RATE=500 --frames 9000
+  --out <dir>/GALAGA.PRG`, Hatari `--fast-forward true --run-vbls 9600`: `cnt_vbl` and `cnt_render` (words) every
+  500 VBLs in `RATE.BIN`, written at the quit; renders per VBL * 50 = fps.  Measured 2026-10-09 (attract mode and
+  demo, 10 s steps): 13.4-15.2 fps with the formation, up to 50 in the title phases, 27.2 from 20 s on; the build
+  before the translator speed-up 10.2-13.7 / 49 / 24.5 (the phases fall differently in the two runs).
 - Frame rate (VBLs vs renders from the debug counters, 10 s steps from 20 s, the attract
   mode with its demo play): with the starfield 25 fps in the title phases and 7-14 fps with
   the formation (14.3 average); `-D NOSTARS=1` (no erase_stars/draw_stars): 48-49 fps in the

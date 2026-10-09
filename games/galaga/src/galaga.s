@@ -355,7 +355,46 @@ restore_hardware:
 	move	#$2300,sr
 	rts
 
+	ifd RATE
+
+; Measurement (-D RATE=N --debug --frames M): cnt_vbl and cnt_render every N VBLs,
+; written to RATE.BIN when the program quits (renders per VBL = the frame rate / 50).
+
+dump_rate:
+	move.l	rate_ptr,d0
+	bne.s	.some
+	rts
+.some:
+	sub.l	#rate_buf,d0
+	move.l	d0,d7
+	clr	-(sp)			; Fcreate
+	pea	rate_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	rate_buf		; Fwrite
+	move.l	d7,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)		; Fclose
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+
+rate_name:
+	dc.b	"RATE.BIN",0
+	even
+
+	endc
+
 quit:
+	ifd RATE
+	bsr	dump_rate
+	endc
 	bsr	restore_hardware
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -469,6 +508,24 @@ vbl:
 .no_swap:
 
 	addq.l	#1,frame_counter
+
+	ifd RATE
+	addq	#1,rate_count		; every RATE VBLs: the VBL and render counters
+	cmp	#RATE,rate_count
+	blo.s	.no_rate
+	clr	rate_count
+	move.l	rate_ptr,a0
+	move.l	a0,d0
+	bne.s	.rate_on
+	lea	rate_buf,a0		; the first sample
+.rate_on:
+	cmp.l	#rate_end,a0
+	bhs.s	.no_rate
+	move	cnt_vbl,(a0)+
+	move	cnt_render,(a0)+
+	move.l	a0,rate_ptr
+.no_rate:
+	endc
 
 	tst.b	quit_flag
 	bne	quit
@@ -1360,6 +1417,12 @@ cnt_acia:	ds.w	1
 cnt_vbl:	ds.w	1
 cnt_skip:	ds.w	1
 cnt_render:	ds.w	1
+	ifd RATE
+rate_count:	ds.w	1
+rate_ptr:	ds.l	1
+rate_buf:	ds.l	1024
+rate_end:
+	endc
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16
