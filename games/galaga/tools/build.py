@@ -1,6 +1,6 @@
 """Build GALAGA.PRG:  python build.py [--frames N] [--debug] [--sim] [-D NAME=VALUE] [--out file]
--> run/galaga/GALAGA.PRG (+ the six CPU ROM files)"""
-import argparse, os, shutil, sys
+-> run/galaga/GALAGA.PRG (the CPU ROMs are embedded: build/galaga/rom_cpu*.rom)"""
+import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import gen, assets
 from paths import build_dir, run_dir
@@ -26,14 +26,15 @@ def main():
         for u in rep["unsupported"][:10]:
             print("   %04X %-24s %s" % u)
     assets.build()
+    rd = lambda f: open(os.path.join(ROMDIR, f), "rb").read()
+    for name, files in (("rom_cpu1", ROMS[:4]), ("rom_cpu2", ROMS[4:5]), ("rom_cpu3", ROMS[5:6])):
+        (build_dir("galaga") / (name + ".rom")).write_bytes(b"".join(rd(f) for f in files))
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     defs = list(a.defines)
     if a.frames: defs.append("FRAMES=%d" % a.frames)
     if a.debug: defs.append("DEBUG=1")
     if a.sim: defs.append("SIM=1")
     assemble_link("galaga", "galaga.s", "galaga", a.out, defs)
-    for f in ROMS:
-        shutil.copy(os.path.join(ROMDIR, f), os.path.join(os.path.dirname(a.out), f))
     print("built", a.out, os.path.getsize(a.out), "bytes")
 
 

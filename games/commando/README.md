@@ -9,8 +9,7 @@ and joystick input on an unexpanded 8 MHz, 4 MB Atari STE. Graphics use a fixed
     python3 port.py test commando
     python3 port.py mame commando
 
-The program and its unmodified data ROM are `run/commando/COMMANDO.PRG` and
-`run/commando/MAIN.ROM`. Both must remain in the same working directory.
+The program is `run/commando/COMMANDO.PRG`; the main CPU ROM is embedded in it.
 Controls: **5** inserts a coin, **1** starts, **arrows** move, **Space/Ctrl** fire,
 **Alt** throws a grenade, and **Esc** exits. Joystick port 1 also controls player 1.
 Wait for startup before inserting a coin. Player 2 uses joystick port 0; **6**

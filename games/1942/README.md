@@ -15,7 +15,7 @@ Build and run from the repository root (needs the venv of the quick start; `pyth
 seeds 5-8 play with MAME's cheats, see "Later stages" below):
 
     python port.py cover 1942
-    python port.py build 1942              # -> run/1942/1942.PRG (+ the five ROM files)
+    python port.py build 1942              # -> run/1942/1942.PRG (the ROMs embedded)
     python port.py test 1942               # lock-step against the reference, renderer against the reference
     tools/hatari.sh 1942 shot@30           # (or the Windows scripts, see below)
 

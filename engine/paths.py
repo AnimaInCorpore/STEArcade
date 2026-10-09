@@ -3,7 +3,7 @@
     engine/            shared translator, simulator, runtime pieces      (this folder)
     games/<game>/      src/ (68000 source), tools/ (generator, build, tests), ref/ (analysis scripts)
     build/<game>/      generated code, assets, coverage data, maps       (not in git)
-    run/<game>/        the .PRG and the ROM files it loads               (not in git)
+    run/<game>/        the .PRG (the ROMs are embedded)                  (not in git)
     assets/roms/       ROM archives; extracted/ holds the unpacked files
 """
 import os, sys

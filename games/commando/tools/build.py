@@ -1,6 +1,6 @@
-"""Build COMMANDO.PRG for an unexpanded 4 MB Atari STE."""
+"""Build COMMANDO.PRG for an unexpanded 4 MB Atari STE (the main CPU ROM is embedded: build/commando/maincpu.rom)."""
 from pathlib import Path
-import argparse,sys,shutil
+import argparse,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'engine'))
 from paths import ROOT,build_dir
 from toolchain import assemble_link
@@ -22,6 +22,5 @@ def main():
     defs=a.defines+(['SIM=1'] if a.sim else [])+(['DEBUG=1'] if a.debug else [])
     if a.frames:defs.append(f'FRAMES={a.frames}')
     assemble_link('commando','commando.s',tag,str(run/'COMMANDO.PRG'),defs)
-    shutil.copy(build_dir('commando')/'maincpu.rom',run/'MAIN.ROM')
     print('Built',run/'COMMANDO.PRG')
 if __name__=='__main__':main()

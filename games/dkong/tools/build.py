@@ -1,6 +1,6 @@
 """Build DKONG.PRG:  python build.py [--frames N] [--debug] [--sim] [-D NAME=VALUE] [--out file]
-->  run/dkong/DKONG.PRG (+ the four CPU ROM files)"""
-import argparse, os, shutil, sys
+->  run/dkong/DKONG.PRG (the CPU ROMs are embedded: build/dkong/rom_cpu.rom)"""
+import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import gen, assets, sound_convert
 from paths import EXTRACTED, build_dir, run_dir
@@ -25,6 +25,7 @@ def main():
     print("translated:", rep["instructions"], "instructions, unsupported:", len(rep["unsupported"]))
     assets.build()
     sound_convert.ensure()             # dk_sound.s: the 8035 clips (MAME recordings, see sound_capture.py)
+    (build_dir("dkong") / "rom_cpu.rom").write_bytes(b"".join((EXTRACTED / "dkong" / f).read_bytes() for f in ROMS))
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     defs = list(a.defines)
     if a.frames: defs.append("FRAMES=%d" % a.frames)
@@ -34,8 +35,6 @@ def main():
     if a.dumpbank: defs += ["DUMPAT=-1", "DUMPBANK=%d" % a.dumpbank]
     if a.nosprites: defs.append("NOSPRITES=1")
     assemble_link("dkong", "dkong.s", "dkong", a.out, defs)
-    for f in ROMS:
-        shutil.copy(EXTRACTED / "dkong" / f, os.path.join(os.path.dirname(a.out), f))
     print("built", a.out, os.path.getsize(a.out), "bytes")
 
 

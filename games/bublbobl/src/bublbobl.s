@@ -22,7 +22,7 @@
 ; one's copy + $8000 (g_win + $4000 * bank + $8000), a4 = the current bank's dispatch table.
 ; (a0-a3 hold A' BC' DE' HL' for the translated code: nothing is left for the window.)
 ;
-; Needs a78-06-1.51 a78-05-1.52 a78-08.37 a78-01.17 in the current folder.
+; The CPU ROMs a78-06-1.51 a78-05-1.52 a78-08.37 a78-01.17 are embedded, the boot tests patched (rom_table).
 ;
 ; ------------------------------------------------------------------------------
 
@@ -80,8 +80,6 @@ start:
 	dbf	d0,.mark
 
 	bsr	load_roms
-	tst.l	d0
-	bne	rom_error
 
 	bsr	init_cells
 	bsr	init_hardware
@@ -160,63 +158,25 @@ start:
 	jmp	Z0000
 
 ; ------------------------------------------------------------------------------
-; ROM loading (GEMDOS)
+; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
+; translated code reads them
 ; ------------------------------------------------------------------------------
 
 load_roms:
-	lea	rom_names,a3
-	lea	rom_places,a2
-	lea	rom_sizes,a4
-	moveq	#3,d6
-
-.next:
-	clr	-(sp)			; Fopen, read only
-	pea	(a3)
-	move	#$3d,-(sp)
-	trap	#1
-	addq	#8,sp
-	tst	d0
-	bmi.s	.fail
-
-	move	d0,d7
-	move.l	(a2)+,-(sp)		; Fread
-	move.l	(a4)+,-(sp)
-	move	d7,-(sp)
-	move	#$3f,-(sp)
-	trap	#1
-	lea	12(sp),sp
-	move.l	-4(a4),d1
-	cmp.l	d1,d0
-	bne.s	.fail
-
-	move	d7,-(sp)		; Fclose
-	move	#$3e,-(sp)
-	trap	#1
-	addq	#4,sp
-
-.skip:
-	tst.b	(a3)+
-	bne.s	.skip
-
-	dbf	d6,.next
-
-	moveq	#0,d0
+	lea	rom_table,a2
+.next:	move.l	(a2)+,d0		; source, 0 = the end
+	beq.s	.done
+	move.l	d0,a0
+	move.l	(a2)+,a1		; destination
+	move.l	(a2)+,d0		; bytes, a multiple of 4
+	lsr.l	#2,d0
+	subq.l	#1,d0
+.copy:	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bpl.s	.copy
+	bra.s	.next
+.done:
 	rts
-
-.fail:
-	moveq	#1,d0
-	rts
-
-rom_error:
-	pea	rom_error_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-	clr	-(sp)
-	trap	#1
 
 init_cells:
 	rts
@@ -1465,22 +1425,17 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_names:
-	dc.b	"a78-06-1.51",0
-	dc.b	"a78-05-1.52",0
-	dc.b	"a78-08.37",0
-	dc.b	"a78-01.17",0
+rom_table:				; source, destination, bytes
+	dc.l	rom_main,G_ROM1,$8000
+	dc.l	rom_banks,g_win,$10000
+	dc.l	rom_sub,g_block,$8000
+	dc.l	rom_mcu,mcu_rom,$1000
+	dc.l	0
+rom_main:	incbin	"rom_main.rom"
+rom_banks:	incbin	"rom_banks.rom"
+rom_sub:	incbin	"rom_sub.rom"
+rom_mcu:	incbin	"rom_mcu.rom"
 	even
-rom_sizes:
-	dc.l	$8000,$10000,$8000,$1000
-rom_places:
-	dc.l	G_ROM1,g_win,g_block,mcu_rom
-
-rom_error_text:
-	dc.b	13,10
-	dc.b	"Bubble Bobble: cannot read the arcade CPU ROM files",13,10
-	dc.b	"a78-06-1.51 a78-05-1.52 a78-08.37 a78-01.17",13,10
-	dc.b	"They have to be in the current folder. Press a key.",13,10,0
 
 bad_text:
 	dc.b	13,10

@@ -29,7 +29,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
                        helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
     docs/              architecture.md, porting-guide.md, reference/ (68000 and Z80 manuals)
     assets/roms/       ROM archives; extracted/<game>/ holds the unpacked files (assets/roms/README.md)
-    build/ run/        generated code, assets, coverage data / the .PRG with its ROM files (not in git)
+    build/ run/        generated code, assets, coverage data / the .PRG (ROMs embedded) (not in git)
     legacy/            superseded material, not built or tested (legacy/README.md): the Falcon030 plan, the old
                        Blitter-renderer branch, scratch scripts of the pre-restructure layout
     port.py            build / test / run / cover / mame for every game

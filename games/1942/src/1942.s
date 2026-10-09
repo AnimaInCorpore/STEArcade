@@ -26,7 +26,7 @@
 ; the video RAM and RAM at $C000-$EFFF).  The ROM bank window $8000-$BFFF of the block is unused: the
 ; translated code reads the window through g_winbase (the current bank's copy + $8000, see gen.py).
 ;
-; Needs srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7 in the current folder.
+; The CPU ROMs srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7 are embedded (rom_table).
 ;
 ; ------------------------------------------------------------------------------
 
@@ -146,8 +146,6 @@ start:
 
 	stage	$f00
 	bsr	load_roms
-	tst.l	d0
-	bne	rom_error
 	stage	$ff0
 
 	bsr	init_hardware
@@ -194,69 +192,30 @@ start:
 	jmp	Z0000
 
 ; ------------------------------------------------------------------------------
-; ROM loading (GEMDOS)
+; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
+; translated code reads them
 ; ------------------------------------------------------------------------------
 
 load_roms:
-	lea	g_win,a0		; the banks' copies: 3 ROMs, padded with $FF (the board reads FF there)
+	lea	g_win,a0		; the banks: 3 ROMs, padded with $FF (the board reads FF there)
 	move.l	#$10000/4-1,d0
 	moveq	#-1,d1
 .fill:	move.l	d1,(a0)+
 	dbf	d0,.fill
-
-	lea	rom_names,a3
-	lea	rom_places,a2
-	lea	rom_sizes,a4
-	moveq	#4,d6
-
-.next:
-	clr	-(sp)			; Fopen, read only
-	pea	(a3)
-	move	#$3d,-(sp)
-	trap	#1
-	addq	#8,sp
-	tst	d0
-	bmi.s	.fail
-
-	move	d0,d7
-	move.l	(a2)+,-(sp)		; Fread
-	move.l	(a4)+,-(sp)
-	move	d7,-(sp)
-	move	#$3f,-(sp)
-	trap	#1
-	lea	12(sp),sp
-	move.l	-4(a4),d1
-	cmp.l	d1,d0
-	bne.s	.fail
-
-	move	d7,-(sp)		; Fclose
-	move	#$3e,-(sp)
-	trap	#1
-	addq	#4,sp
-
-.skip:
-	tst.b	(a3)+
-	bne.s	.skip
-
-	dbf	d6,.next
-
-	moveq	#0,d0
+	lea	rom_table,a2
+.next:	move.l	(a2)+,d0		; source, 0 = the end
+	beq.s	.done
+	move.l	d0,a0
+	move.l	(a2)+,a1		; destination
+	move.l	(a2)+,d0		; bytes, a multiple of 4
+	lsr.l	#2,d0
+	subq.l	#1,d0
+.copy:	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bpl.s	.copy
+	bra.s	.next
+.done:
 	rts
-
-.fail:
-	moveq	#1,d0
-	rts
-
-rom_error:
-	pea	rom_error_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-	clr	-(sp)
-	trap	#1
 
 ; The dispatch table (byte swapped pc order, 65536 longs): a1 = the table, a2 = the list of
 ; (pc.w, label.l) ending with $FFFF
@@ -1103,23 +1062,13 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_names:
-	dc.b	"srb-03.m3",0
-	dc.b	"srb-04.m4",0
-	dc.b	"srb-05.m5",0
-	dc.b	"srb-06.m6",0
-	dc.b	"srb-07.m7",0
+rom_table:				; source, destination, bytes
+	dc.l	rom_fixed,G_Z80,$8000
+	dc.l	rom_banks,g_win,$C000
+	dc.l	0
+rom_fixed:	incbin	"rom_fixed.rom"
+rom_banks:	incbin	"rom_banks.rom"
 	even
-rom_sizes:
-	dc.l	$4000,$4000,$4000,$2000,$4000
-rom_places:
-	dc.l	G_Z80,G_Z80+$4000,g_win,g_win+$4000,g_win+$8000
-
-rom_error_text:
-	dc.b	13,10
-	dc.b	"1942: cannot read the arcade CPU ROM files",13,10
-	dc.b	"srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7",13,10
-	dc.b	"They have to be in the current folder. Press a key.",13,10,0
 	even
 
 ; ------------------------------------------------------------------------------

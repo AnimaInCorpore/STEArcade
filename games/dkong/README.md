@@ -12,7 +12,7 @@ emulator and MAME, 50 fps in play (see "Measuring" in `docs/architecture.md`).
 
     python3 -m venv venv && venv/bin/pip install numpy pillow machine68k      # once, in the repository root
     python port.py cover dkong          # coverage + palette pens the translator seeds from (~15 min on 8 cores)
-    python port.py build dkong          # -> run/dkong/DKONG.PRG (+ the four CPU ROM files)
+    python port.py build dkong          # -> run/dkong/DKONG.PRG (the ROMs embedded: nothing else needed)
     python port.py run dkong shot@30    # Hatari (F030Arcade build), screenshot at 30 s
 
 The coverage and pens runs reproduce the committed logs (`ref/*.log`) exactly (3766/4949 PCs, 155/115/154 pens).

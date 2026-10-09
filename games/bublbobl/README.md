@@ -26,7 +26,7 @@ a static translation of the programs, and a runtime around them.
   tests, the delay loop, the sub CPU's ROM checksum.  The game checksums `$0001-$0EDC` of its ROM while it runs
   (one byte per frame, `$484B`); a dead byte of the old RAM test (`$C5`) makes the sum the original's.  A second
   check (`$0AE3`, every 4th byte of `$0004-$0C04`) crashes on a mismatch; none of the bytes it reads is patched.
-  `tools/build.py` writes the patched ROM files next to the program.
+  `tools/build.py` embeds the patched ROMs in the program.
 
 Schedule (`src/bublbobl.s`): at every VBL the MCU's IRQ1 handler, then the main CPU's interrupt handler and the sub
 CPU's, each to completion, then the frame is drawn behind them (the VBL nests into the renderer: the game
@@ -88,7 +88,7 @@ differs only in the two main-CPU ROMs and has not been run through the translato
 Paths relative to `games/bublbobl/`; from the repository root `python port.py test bublbobl` runs the sequence below.
 
     python port.py build bublbobl --sim              # run/bublbobl_sim, with the hooks the tests use
-    python port.py build bublbobl                    # run/bublbobl/BUBBLE.PRG (+ the patched ROM files)
+    python port.py build bublbobl                    # run/bublbobl/BUBBLE.PRG (the patched ROMs embedded)
     venv/bin/python tools/mcu_test.py 2600           # translated MCU vs the 6801 reference, every IRQ
     venv/bin/python tools/logic_test.py 700          # whole game (Musashi) vs the reference, RAM every frame
     venv/bin/python tools/render_test.py seq 1500 20 # renderer vs the reference bitmap, consecutive frames

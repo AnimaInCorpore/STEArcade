@@ -6,8 +6,8 @@
 ; this file is the machine around it: STE video (320 x 256 with top and bottom
 ; border removed), double buffering, tile and sprite drawing, input, sound (sound.s).
 ;
-; Needs the four CPU ROM files c_5et_g.bin c_5ct_g.bin c_5bt_g.bin c_5at_g.bin
-; in the current folder.
+; The four CPU ROMs (c_5et_g.bin c_5ct_g.bin c_5bt_g.bin c_5at_g.bin) are embedded:
+; rom_table, build/dkong/rom_cpu.rom.
 ;
 ; ------------------------------------------------------------------------------
 
@@ -87,8 +87,6 @@ start:
 	stage	$f00
 
 	bsr	load_roms
-	tst.l	d0
-	bne	rom_error
 
 	stage	$ff0
 	bsr	init_hardware
@@ -129,65 +127,25 @@ start:
 	jmp	Z0000
 
 ; ------------------------------------------------------------------------------
-; ROM loading (GEMDOS)
+; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
+; translated code reads them
 ; ------------------------------------------------------------------------------
 
 load_roms:
-	lea	rom_names,a3
-	lea	z80_block,a4
-	moveq	#3,d6
-
-.next:
-	clr	-(sp)			; Fopen, read only
-	pea	(a3)
-	move	#$3d,-(sp)
-	trap	#1
-	addq	#8,sp
-	tst	d0
-	bmi.s	.fail
-
-	move	d0,d7
-	pea	(a4)			; Fread 4096 bytes
-	move.l	#$1000,-(sp)
-	move	d7,-(sp)
-	move	#$3f,-(sp)
-	trap	#1
-	lea	12(sp),sp
-	cmp.l	#$1000,d0
-	bne.s	.fail
-
-	move	d7,-(sp)		; Fclose
-	move	#$3e,-(sp)
-	trap	#1
-	addq	#4,sp
-
-	lea	$1000(a4),a4
-
-.skip:
-	tst.b	(a3)+
-	bne.s	.skip
-
-	dbf	d6,.next
-
-	moveq	#0,d0
+	lea	rom_table,a2
+.next:	move.l	(a2)+,d0		; source, 0 = the end
+	beq.s	.done
+	move.l	d0,a0
+	move.l	(a2)+,a1		; destination
+	move.l	(a2)+,d0		; bytes, a multiple of 4
+	lsr.l	#2,d0
+	subq.l	#1,d0
+.copy:	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bpl.s	.copy
+	bra.s	.next
+.done:
 	rts
-
-.fail:
-	moveq	#1,d0
-	rts
-
-rom_error:
-	pea	rom_error_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-
-	clr	-(sp)
-	trap	#1
 
 ; ------------------------------------------------------------------------------
 ; Hardware
@@ -941,17 +899,11 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_names:
-	dc.b	"c_5et_g.bin",0
-	dc.b	"c_5ct_g.bin",0
-	dc.b	"c_5bt_g.bin",0
-	dc.b	"c_5at_g.bin",0
-
-rom_error_text:
-	dc.b	13,10
-	dc.b	"Donkey Kong: cannot read the arcade CPU ROM files",13,10
-	dc.b	"c_5et_g.bin c_5ct_g.bin c_5bt_g.bin c_5at_g.bin",13,10
-	dc.b	"They have to be in the current folder. Press a key.",13,10,0
+rom_table:				; source, destination, bytes
+	dc.l	rom_cpu,z80_block,$4000
+	dc.l	0
+rom_cpu:	incbin	"rom_cpu.rom"
+	even
 
 bad_text:
 	dc.b	13,10,"Donkey Kong: the translated program reached an unknown address.",13,10

@@ -115,8 +115,6 @@ start:
 
 	stage	$f00
 	bsr	load_roms
-	tst.l	d0
-	bne	rom_error
 	stage	$ff0
 
 	bsr	init_hardware
@@ -162,69 +160,25 @@ start:
 	jmp	Z0000
 
 ; ------------------------------------------------------------------------------
-; ROM loading (GEMDOS)
+; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
+; translated code reads them
 ; ------------------------------------------------------------------------------
 
 load_roms:
-	lea	rom_names,a3
-	lea	rom_places,a2
-	lea	rom_sizes,a4
-	moveq	#0,d6
-
-.next:
-	clr	-(sp)			; Fopen, read only
-	pea	(a3)
-	move	#$3d,-(sp)
-	trap	#1
-	addq	#8,sp
-	tst	d0
-	bmi.s	.fail
-
-	move	d0,d7
-	move.l	(a2)+,-(sp)		; Fread
-	move.l	(a4)+,-(sp)
-	move	d7,-(sp)
-	move	#$3f,-(sp)
-	trap	#1
-	lea	12(sp),sp
-	move.l	-4(a4),d1
-	cmp.l	d1,d0
-	bne.s	.fail
-
-	move	d7,-(sp)		; Fclose
-	move	#$3e,-(sp)
-	trap	#1
-	addq	#4,sp
-
-.skip:
-	tst.b	(a3)+
-	bne.s	.skip
-
-	dbf	d6,.next
-
-	lea G_Z80+$8000,a0
-	lea g_block,a1
-	move.w #$4000/4-1,d0
-.relocate:
-	move.l (a0)+,(a1)+
-	dbf d0,.relocate
-	moveq #0,d0
+	lea	rom_table,a2
+.next:	move.l	(a2)+,d0		; source, 0 = the end
+	beq.s	.done
+	move.l	d0,a0
+	move.l	(a2)+,a1		; destination
+	move.l	(a2)+,d0		; bytes, a multiple of 4
+	lsr.l	#2,d0
+	subq.l	#1,d0
+.copy:	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bpl.s	.copy
+	bra.s	.next
+.done:
 	rts
-
-.fail:
-	moveq	#1,d0
-	rts
-
-rom_error:
-	pea	rom_error_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-	clr	-(sp)
-	trap	#1
 
 ; The dispatch table (byte swapped pc order, 65536 longs): a1 = the table, a2 = the list of
 ; (pc.w, label.l) ending with $FFFF
@@ -996,15 +950,11 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_names:
-	dc.b "MAIN.ROM",0
-	even
-rom_sizes:
-	dc.l $C000
-rom_places:
-	dc.l G_Z80
-rom_error_text:
-	dc.b "Commando: MAIN.ROM must be in the current folder",13,10,0
+rom_table:				; source, destination, bytes
+	dc.l	rom_main,G_Z80,$C000
+	dc.l	rom_main+$8000,g_block,$4000	; (the banked part, also where the code reads it)
+	dc.l	0
+rom_main:	incbin	"maincpu.rom"		; (tools/prepare.py)
 	even
 
 ; ------------------------------------------------------------------------------

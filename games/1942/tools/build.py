@@ -1,6 +1,6 @@
 """Build 1942.PRG:  python build.py [--frames N] [--debug] [--sim] [-D NAME=VALUE] [--out file]
--> run/1942/1942.PRG, run/1942_sim/1942.PRG with --sim (+ the ROM files it loads)"""
-import argparse, os, shutil, sys
+-> run/1942/1942.PRG, run/1942_sim/1942.PRG with --sim (the CPU ROMs are embedded: build/1942/rom_*.rom)"""
+import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import gen, assets
 from machine import ROMDIR
@@ -28,14 +28,15 @@ def main():
     print("translated: %d instructions, unsupported %d, window sites %d" % (rep["instructions"], len(rep["unsupported"]), rep["window_sites"]))
     for u in rep["unsupported"][:10]:
         print("   %04X %-24s %s" % u)
+    rd = lambda f: open(os.path.join(ROMDIR, f), "rb").read()
+    (build / "rom_fixed.rom").write_bytes(rd(ROMS[0]) + rd(ROMS[1]))                     # $0000-$7FFF
+    (build / "rom_banks.rom").write_bytes(rd(ROMS[2]) + rd(ROMS[3]) + b"\xff" * 0x2000 + rd(ROMS[4]))   # banks 0-2
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     defs = list(a.defines)
     if a.frames: defs.append("FRAMES=%d" % a.frames)
     if a.debug: defs.append("DEBUG=1")
     if a.sim: defs.append("SIM=1")
     assemble_link("1942", "1942.s", tag, a.out, defs)
-    for f in ROMS:
-        shutil.copy(os.path.join(ROMDIR, f), os.path.join(os.path.dirname(a.out), f))
     print("built", a.out, os.path.getsize(a.out), "bytes")
 
 

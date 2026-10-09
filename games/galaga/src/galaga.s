@@ -22,7 +22,7 @@
 ; below), the sub CPU's with a6 = its ROM and long offsets (the RAM above).  The
 ; registers $6800-$7FFF (switches, latches, 06XX) are cells in each CPU's ROM half.
 ;
-; Needs gg1_1b.3p gg1_2b.3m gg1_3.2m gg1_4b.2l gg1_5b.3f gg1_7b.2c in the current folder.
+; The CPU ROMs gg1_1b.3p gg1_2b.3m gg1_3.2m gg1_4b.2l gg1_5b.3f gg1_7b.2c are embedded (rom_table).
 ;
 ; ------------------------------------------------------------------------------
 
@@ -105,8 +105,6 @@ start:
 	lea	own_stack_top,sp
 
 	bsr	load_roms
-	tst.l	d0
-	bne	rom_error
 
 	bsr	init_cells
 	bsr	init_hardware
@@ -159,61 +157,25 @@ start:
 	jmp	Z0000
 
 ; ------------------------------------------------------------------------------
-; ROM loading (GEMDOS): 6 files of 4 KB
+; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
+; translated code reads them
 ; ------------------------------------------------------------------------------
 
 load_roms:
-	lea	rom_names,a3
-	lea	rom_places,a2
-	moveq	#5,d6
-
-.next:
-	clr	-(sp)			; Fopen, read only
-	pea	(a3)
-	move	#$3d,-(sp)
-	trap	#1
-	addq	#8,sp
-	tst	d0
-	bmi.s	.fail
-
-	move	d0,d7
-	move.l	(a2)+,-(sp)		; Fread 4096 bytes
-	move.l	#$1000,-(sp)
-	move	d7,-(sp)
-	move	#$3f,-(sp)
-	trap	#1
-	lea	12(sp),sp
-	cmp.l	#$1000,d0
-	bne.s	.fail
-
-	move	d7,-(sp)		; Fclose
-	move	#$3e,-(sp)
-	trap	#1
-	addq	#4,sp
-
-.skip:
-	tst.b	(a3)+
-	bne.s	.skip
-
-	dbf	d6,.next
-
-	moveq	#0,d0
+	lea	rom_table,a2
+.next:	move.l	(a2)+,d0		; source, 0 = the end
+	beq.s	.done
+	move.l	d0,a0
+	move.l	(a2)+,a1		; destination
+	move.l	(a2)+,d0		; bytes, a multiple of 4
+	lsr.l	#2,d0
+	subq.l	#1,d0
+.copy:	move.l	(a0)+,(a1)+
+	subq.l	#1,d0
+	bpl.s	.copy
+	bra.s	.next
+.done:
 	rts
-
-.fail:
-	moveq	#1,d0
-	rts
-
-rom_error:
-	pea	rom_error_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
-	clr	-(sp)
-	trap	#1
 
 ; The I/O cells: the DIP switches as the program reads them (one bit of each bank per
 ; address), in both CPUs' halves; the latches 0.
@@ -1332,22 +1294,15 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_names:
-	dc.b	"gg1_1b.3p",0
-	dc.b	"gg1_2b.3m",0
-	dc.b	"gg1_3.2m",0
-	dc.b	"gg1_4b.2l",0
-	dc.b	"gg1_5b.3f",0
-	dc.b	"gg1_7b.2c",0
+rom_table:				; source, destination, bytes
+	dc.l	rom_cpu1,G_ROM1,$4000
+	dc.l	rom_cpu2,g_block,$1000
+	dc.l	rom_cpu3,g3_rom,$1000
+	dc.l	0
+rom_cpu1:	incbin	"rom_cpu1.rom"
+rom_cpu2:	incbin	"rom_cpu2.rom"
+rom_cpu3:	incbin	"rom_cpu3.rom"
 	even
-rom_places:
-	dc.l	G_ROM1,G_ROM1+$1000,G_ROM1+$2000,G_ROM1+$3000,g_block,g3_rom
-
-rom_error_text:
-	dc.b	13,10
-	dc.b	"Galaga: cannot read the arcade CPU ROM files",13,10
-	dc.b	"gg1_1b.3p gg1_2b.3m gg1_3.2m gg1_4b.2l gg1_5b.3f gg1_7b.2c",13,10
-	dc.b	"They have to be in the current folder. Press a key.",13,10,0
 
 bad_text:
 	dc.b	13,10,"Galaga: the translated program reached an unknown address.",13,10

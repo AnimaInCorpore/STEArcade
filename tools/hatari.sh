@@ -8,7 +8,7 @@
 #                           dbg:COMMAND@50             a debugger command (dbg:profile on, dbg:profile save /tmp/p.txt ...)
 #                           dump:0xADDR:0xSIZE@50      memory dump (debugger savebin) -> $OUT/<game>_<s>_<ADDR>.bin
 #   no items: run interactively.   A CRASH.TXT written by the program is printed.
-# The program is started from run/<game>/ (it loads its ROM files from there).  $OUT defaults to /tmp/hrun.
+# The program is started from run/<game>/ (its GEMDOS drive: CRASH.TXT and dumps go there).  $OUT defaults to /tmp/hrun.
 set -e
 GAME=${1:-galaga}; shift || true
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
