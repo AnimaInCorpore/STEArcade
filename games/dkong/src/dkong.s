@@ -4,7 +4,7 @@
 ;
 ; The arcade Z80 program is translated to 68000 code by tools/gen.py (engine/z80x.py);
 ; this file is the machine around it: STE video (320 x 256 with top and bottom
-; border removed), double buffering, tile and sprite drawing, input.
+; border removed), double buffering, tile and sprite drawing, input, sound (sound.s).
 ;
 ; Needs the four CPU ROM files c_5et_g.bin c_5ct_g.bin c_5bt_g.bin c_5at_g.bin
 ; in the current folder.
@@ -250,6 +250,8 @@ init_hardware:
 	bset	#6,$fffffa09.w		; ACIA (keyboard, joysticks)
 	bset	#6,$fffffa15.w
 
+	bsr	init_sound
+
 	; IKBD: joystick event reporting, mouse off.
 
 	ifnd SIM
@@ -265,6 +267,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	bsr	stop_sound
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -430,9 +433,34 @@ vbl:
 
 	move.b	in0_kbd,d0
 	or.b	in0_joy,d0
+	ifd AUTOSTART			; test: from 8 s after the start, walk right and jump every 64 frames
+	move.l	frame_counter,d1
+	sub.l	#AUTOSTART+400,d1
+	bmi.s	.no_walk
+	or.b	#$01,d0
+	and	#63,d1
+	cmp	#4,d1
+	bhs.s	.no_walk
+	or.b	#$10,d0
+.no_walk:
+	endc
 	move.b	d0,$7e00(a6)
 	clr.b	$7e80(a6)
-	move.b	in2_kbd,$7f00(a6)
+	move.b	in2_kbd,d1
+	ifd AUTOSTART			; test: a coin at frame AUTOSTART, start 1 a second later
+	move.l	frame_counter,d0
+	sub.l	#AUTOSTART,d0
+	cmp.l	#4,d0
+	bhs.s	.no_coin
+	or.b	#$80,d1
+.no_coin:
+	sub.l	#50,d0
+	cmp.l	#4,d0
+	bhs.s	.no_start
+	or.b	#$04,d1
+.no_start:
+	endc
+	move.b	d1,$7f00(a6)
 	move.b	#$80,$7f80(a6)		; DSW0: upright, 3 lives, 7000 bonus, 1 coin 1 credit
 
 	; Z80 NMI.
@@ -455,6 +483,7 @@ vbl_render:
 	move.b	$fffffa25.w,frame_nmi_end
 	endc
 	lea	z80_block,a6
+	bsr	sound_update
 	ifd DEBUG
 	move.l	draw_screen_address,a0
 	move	frame_counter+2,(a0)
@@ -898,6 +927,7 @@ z80_unsupported:
 
 	include "render.s"
 	include "sprites.s"
+	include "sound.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated Z80 program (also defines the dispatch table in the data section).

@@ -2,7 +2,7 @@
 ->  run/dkong/DKONG.PRG (+ the four CPU ROM files)"""
 import argparse, os, shutil, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
-import gen, assets
+import gen, assets, sound_convert
 from paths import EXTRACTED, build_dir, run_dir
 from toolchain import assemble_link
 
@@ -24,6 +24,7 @@ def main():
     (build_dir("dkong") / "dk_code.s").write_text(text)
     print("translated:", rep["instructions"], "instructions, unsupported:", len(rep["unsupported"]))
     assets.build()
+    sound_convert.ensure()             # dk_sound.s: the 8035 clips (MAME recordings, see sound_capture.py)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     defs = list(a.defines)
     if a.frames: defs.append("FRAMES=%d" % a.frames)
