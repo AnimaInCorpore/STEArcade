@@ -9,7 +9,7 @@ RING_H = 320
 RING_ABOVE = 16
 RING_LINES = RING_ABOVE+2*RING_H+16
 RING_SIZE = RING_LINES*STRIDE
-DMG_MAX = 320				; damage rectangles a frame (12 bytes: destination, source, words, lines)
+DMG_MAX = 400				; damage rectangles a frame (12 bytes: destination, source, words, lines)
 BLT_SRC_XINC = $ffff8a20
 BLT_SRC_YINC = $ffff8a22
 BLT_SRC_ADDR = $ffff8a24
@@ -172,7 +172,6 @@ clear_margins:
 .column:
  move.w d0,d1
 .segment:
- wait_borders
  move.l a0,BLT_DST_ADDR.w
  move.w #32,BLT_COUNT+2.w
  move.b #$80,BLT_CTRL.w
@@ -795,7 +794,7 @@ restore_damage:
  move.w #2,BLT_DST_XINC.w
  move.w #$0203,BLT_HOP_OP.w
  clr.b BLT_SKEW.w
- bra.s .test
+ bra .test
 .rect:
  move.l (a2)+,d0
  move.l (a2)+,d1
@@ -805,17 +804,16 @@ restore_damage:
  add.w d4,d4
  neg.w d4
  add.w #STRIDE+2,d4
- wait_borders
  move.w d4,BLT_SRC_YINC.w
  move.w d4,BLT_DST_YINC.w
  move.w d2,BLT_COUNT.w
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go			; (up to 8 x 16 words: in pieces)
 .test:
  cmp.l a3,a2
- blo.s .rect
+ blo .rect
  rts
 
 ; d2 = the address of a rectangle's first line and chunk, d0 = its buffer line, d1 = lines, d3 = words a line: added to
@@ -882,7 +880,6 @@ draw_tile:
  bsr destination
  moveq #3,d3
 .plane:
- wait_borders
  move.l a1,BLT_SRC_ADDR.w
  move.l d2,BLT_DST_ADDR.w
  move.w #16,BLT_COUNT+2.w
@@ -906,18 +903,30 @@ destination:
  add.l d0,d2
  rts
 
-; Draw complete sprite parts in original priority order, after explicit C806 latch.
+; Draw complete sprite parts in original priority order, after explicit C806 latch.  The Blitter registers no sprite
+; routine changes are set once.
 draw_sprites:
- lea sprite_buffer+$17c,a0
- move.l a0,spr_ptr
+ move.w #2,BLT_SRC_XINC.w
+ move.w #2,BLT_SRC_YINC.w
+ move.w #8,BLT_DST_XINC.w
+ move.w #$ffff,BLT_END2.w
+ move.w #$0203,BLT_HOP_OP.w
+ lea sprite_buffer+$180,a0
+.next:
+ subq.l #4,a0
+ cmp.l #sprite_buffer,a0
+ bhs.s .loop
+ rts
 .loop:
- move.l spr_ptr,a0
+ moveq #0,d4
+ move.b 2(a0),d4			; x + 16: 0 (the hidden sprites) and 240 .. 255 are outside
+ beq.s .next
+ cmp.b #240,d4
+ bhs.s .next
  moveq #0,d1
  move.b 1(a0),d1			; attribute: bank 6-7 (3 = none), colour 4-5, flips 2-3, x bit 8 in bit 0
- move.w d1,d2
- and.w #$c0,d2
- cmp.w #$c0,d2
- beq.s .next
+ cmp.b #$c0,d1
+ bhs.s .next
  moveq #0,d3
  move.b 3(a0),d3
  btst #0,d1
@@ -930,15 +939,9 @@ draw_sprites:
  ble.s .next
  cmp.w #256,d3
  bge.s .next
- moveq #0,d4
- move.b 2(a0),d4
  sub.w #16,d4			; x
- cmp.w #-16,d4
- ble.s .next
- cmp.w #224,d4
- bge.s .next
- move.w d3,dest_y
- move.w d4,dest_x
+ move.w d1,d2			; the shape: bank, code, flips
+ and.w #$c0,d2
  moveq #0,d0
  move.b (a0),d0
  lsl.w #2,d2
@@ -948,74 +951,86 @@ draw_sprites:
  lsr.w #2,d5
  and.w #3,d5
  or.w d5,d2
- move.w d2,spr_pcode
- lsl.w #8,d1
+ move.w d2,spr_pcode		; (generic_part)
+ ext.l d2
+ lsl.l #4,d2
+ moveq #15,d5
+ and.w d4,d5
+ or.w d5,d2
+ lsl.l #3,d2
+ lea spr_code_tab,a2		; its code for this shift; none: blank, nothing to draw
+ add.l d2,a2
+ tst.l (a2)
+ beq .next
+ lsl.w #8,d1			; the baked planes (get_object's hit path)
  or.w d1,d0
+ move.w d0,d5
+ lsr.w #4,d5
+ eor.w d0,d5
+ and.w #$fff,d5
+ lsl.w #3,d5
+ lea cache+32768,a1
+ add.w d5,a1
+ moveq #1,d6
+ swap d6
+ move.w d0,d6
+ cmp.l (a1),d6
+ bne.s .bake
+ move.l 4(a1),a1
+ move.l a1,d6
+ bne.s .baked
+.bake:
  moveq #1,d1
- bsr get_object
- bsr sprite_part
-.next:
- subq.l #4,spr_ptr
- cmp.l #sprite_buffer,spr_ptr
- bhs .loop
- rts
-
-sprite_part:
- bsr destination
- move.l dmg_ptr,a0		; damage: 16 lines of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
- move.w dest_y,d0
+ bsr get_object_bake
+.baked:
+ move.l a0,-(sp)
+ move.w d3,d2			; the destination chunk (destination)
+ ext.l d2
+ lsl.l #8,d2			; (STRIDE)
+ add.l draw_base,d2
+ move.w d4,d0
+ asr.w #4,d0
+ lsl.w #3,d0
+ add.w #GAME_X,d0
+ ext.l d0
+ add.l d0,d2			; damage: 16 lines of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
+ move.w d3,d0
  add.w cur_top,d0
  moveq #4,d3
  moveq #15,d1
- and.w dest_x,d1
+ and.w d4,d1
  beq.s .one
  moveq #8,d3
 .one:
+ move.l dmg_ptr,a0
+ moveq #16,d1
  cmp.w #RING_H-16,d0
  bgt.s .lower
  move.l d2,(a0)+
- move.l d2,d1
- add.l #RING_H*STRIDE,d1
+ move.l d2,d7
+ add.l #RING_H*STRIDE,d7
  bra.s .store
 .lower:
  cmp.w #RING_H,d0
  blt.s .split
  move.l d2,(a0)+
- move.l d2,d1
- sub.l #RING_H*STRIDE,d1
+ move.l d2,d7
+ sub.l #RING_H*STRIDE,d7
 .store:
- move.l d1,(a0)+
+ move.l d7,(a0)+
  move.w d3,(a0)+
- move.w #16,(a0)+
+ move.w d1,(a0)+
  move.l a0,dmg_ptr
  bra.s .damaged
 .split:
- moveq #16,d1
  bsr add_damage
 .damaged:
- move.w dest_x,d3
- move.w #2,BLT_SRC_XINC.w
- move.w #2,BLT_SRC_YINC.w
- move.w #8,BLT_DST_XINC.w
- move.w #$ffff,BLT_END2.w
- move.w #$0203,BLT_HOP_OP.w
  move.l a1,BLT_SRC_ADDR.w
  move.l d2,BLT_DST_ADDR.w
- moveq #0,d0
- move.w spr_pcode,d0
- lsl.l #4,d0
- move.w d3,d1
- and.w #15,d1
- or.w d1,d0
- lsl.l #3,d0
- lea spr_code_tab,a0
- move.l (a0,d0.l),a1
- move.l 4(a0,d0.l),a0
- move.l a1,d0
- beq .out
- move.w d2,d0
- cmp.w #$efe0,d0
- bhi generic_part
+ move.l (a2),a1
+ move.l 4(a2),a0
+ cmp.w #$efe0,d2
+ bhi .generic
  lea BLT_END1.w,a2
  lea BLT_END3.w,a3
  lea BLT_DST_ADDR+2.w,a4
@@ -1025,10 +1040,14 @@ sprite_part:
  move.w #-264,d5
  moveq #4,d6
  move.w #$c0,d7
- wait_borders
  jsr (a1)
-.out:
- rts
+ move.l (sp)+,a0
+ bra .next
+.generic:
+ move.w d4,d3
+ bsr generic_part
+ move.l (sp)+,a0
+ bra .next
 
 ; Crossing a 64KB boundary uses full addresses; masks still come from baked streams.
 generic_part:
@@ -1072,7 +1091,6 @@ generic_part:
  subq.w #1,d1
 .row:
  adda.w (a0)+,a1
- wait_borders
  move.l a1,BLT_DST_ADDR.w
  move.w #4,BLT_COUNT+2.w
  move.b #$c0,BLT_CTRL.w
@@ -1209,7 +1227,7 @@ draw_foreground:
  move.l a1,fg_list_end
  sf fg_dirty
 .draw:
- lea fg_rows,a3			; damage: each character row's chunks, in two halves of 4 lines (short Blitter bursts)
+ lea fg_rows,a3			; damage: each character row's chunks, in four pieces of 2 lines
  moveq #0,d6
 .row:
  moveq #0,d4
@@ -1233,10 +1251,16 @@ draw_foreground:
  add.w d4,d2
  add.l #GAME_X,d2
  add.w cur_top,d0
- moveq #4,d1
+ moveq #2,d1
  bsr add_damage
- add.l #4*STRIDE,d2
- addq.w #4,d0
+ add.l #2*STRIDE,d2
+ addq.w #2,d0
+ bsr add_damage
+ add.l #2*STRIDE,d2
+ addq.w #2,d0
+ bsr add_damage
+ add.l #2*STRIDE,d2
+ addq.w #2,d0
  bsr add_damage
 .no_row:
  addq.w #1,d6
@@ -1373,7 +1397,6 @@ bg_col: ds.w 1
 bg_row: ds.w 1
 bg_index: ds.w 1
 fg_index: ds.w 1
-spr_ptr: ds.l 1
 spr_key: ds.w 1
 spr_pcode: ds.w 1
 chr_pcode: ds.w 1

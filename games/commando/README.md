@@ -62,6 +62,33 @@ checks that every change of the two RAMs comes with its flag). A frame went from
 246k to 213k Musashi cycles; `tools/bench.sh`: 55.1 game ticks (93% of the
 arcade) and 27.1 drawn frames a second.
 
+2026-10-09, sprite pass: the sprite loop keeps its entry pointer in a register,
+rejects the hidden entries (x = 0) first, sets the Blitter registers no sprite
+routine changes once a frame, and does the cache lookup (get_object's hit path),
+the destination and the damage inline; a shape that is blank at its shift is
+skipped before the lookup.
+`perf_test.py 2500 900` (play): a frame 189k -> 161k Musashi cycles.
+`tools/bench.ps1` (the Windows counterpart of `bench.sh`, same build and counters):
+26.5 -> 30.1 drawn frames and 55.4 -> 56.9 game ticks a second (the 6000 VBLs
+include the boot; the scripted game unfolds differently with any timing change,
+so compare runs of one build or use `perf_test.py`). A Hatari profile in play (VBL 4900-5200) puts the translated
+Z80 code at 31% of the CPU, the sprite pass (loop, generated routines, 64 KB
+parts) at 34%, the damage restore at 14% (nearly all of it Blitter time) and the
+characters at 8%. Damage cut to each shape's opaque rows and chunks saved as much
+Blitter time as the lookup cost the CPU, and was left out.
+
+2026-10-09, borders without waiting (`engine/rt/borders.s`, shared by the Blitter
+ports): a HOG blit holds the CPU and its interrupts, and the old guards made every
+blit near the VBL or a timer event wait. Now each event comes early and syncs itself
+to the video: Timer B fires 2 lines before its line (palette on, bottom border,
+palette off) and polls its counter down to that line's end; the bottom border event
+starts Timer A for the next frame's top border (a line-exact point, so a late VBL no
+longer moves it), which fires ~3 lines early and picks its HBL by reading Timer A.
+No blit waits; a restore rectangle longer than 32 words runs in pieces (`blit_go`).
+The palette switches are line-exact now. The DEBUG build counts events that started
+too late; `bench.ps1` prints them (0 in 6000 VBLs) and 55.7 game ticks, 27.3 drawn
+frames a second.
+
 Validation:
 
 * All 22 ROM files pass the checked-in MAME CRC32/SHA1 manifest.
