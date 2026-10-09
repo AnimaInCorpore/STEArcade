@@ -841,7 +841,9 @@ times_name:
 WRITE_FILE = 1
 	endc
 	ifd TIMES
+	ifnd WRITE_FILE
 WRITE_FILE = 1
+	endc
 	endc
 	ifd WRITE_FILE
 
