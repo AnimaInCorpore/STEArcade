@@ -47,6 +47,7 @@ class Renderer:
         mem,sym=self.mem,self.sym
         mem.w_block(sym['g_block']+0x5000,bytes(m.mem[0xd000:]))
         mem.w8(sym['pal_dirty'],1)        # (the game's palette writers set it)
+        mem.w8(sym['text_compare'],1)     # (the game's text writers mark their rows: every row compared)
         if bytes(m.bg)!=getattr(self,'last_bg',None):
             # (the game's bg_flush flags a changed map for the renderer)
             self.last_bg=bytes(m.bg);mem.w_block(sym['g_bg'],self.last_bg);mem.w8(sym['map_dirty'],1)

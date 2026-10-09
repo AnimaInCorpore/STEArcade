@@ -8,6 +8,7 @@ STRIDE = 384
 RING_LINES = 544
 TEXT_RUNS = 8                    ; runs a text row (at most 7: four blanks split a run)
 TEXT_ROW_POOL = 2048             ; strip bytes a text row (at most about 2000)
+TEXT_CELLS = 1280                ; text cells a ring records (with repeats: runs sharing a cell)
 RING_SIZE = STRIDE*RING_LINES
 GUARD = 16*STRIDE
 COLS = 48
@@ -190,6 +191,7 @@ render_frame:
     bsr penmap_update
     bsr clean_update
     bsr strip_unmask
+    bsr text_prepare
     bsr ring_restore
     bsr sprite_pass
     bsr front_pass
@@ -672,9 +674,12 @@ ring_restore:
     lea cell_offsets,a6
     move.l clean_base,d4
     move.l work_base,d5
+    lea restored_tag,a2
+    move.b frame_tag,d1
 .cell:
     move.w (a3)+,d6
     clr.b (a4,d6.w)
+    move.b d1,(a2,d6.w)          ; (the text pass redraws the runs over restored cells)
     add.w d6,d6
     clr.w (a5,d6.w)
     add.w d6,d6
@@ -1354,6 +1359,7 @@ text_scan:
     tst.b text_relist
     beq.s .listed
     clr.b text_relist
+    addq.w #1,text_gen
     lea run_list,a0              ; the rows' runs one after the other in draw_list
     lea draw_list,a1
     lea text_runs,a2
@@ -1537,8 +1543,7 @@ text_row_build:
 
 character_pass:
     btst #7,g_control
-    bne .done
-    bsr text_scan
+    bne .off
     move.w #2,$ffff8a20.w
     move.w #2,$ffff8a22.w
     move.w #-1,$ffff8a28.w
@@ -1560,13 +1565,14 @@ character_pass:
     move.w (a3)+,d3              ; bytes a line
     move.l (a3)+,a2              ; the mask block
     movem.l d0-d3/d7/a2-a3,-(sp)
-    ; damage: words x>>4 .. +N, lines y .. y+7
+    ; the cells: words x>>4 .. +N, lines y .. y+7 (text_cell: recorded, or checked when the ring keeps its text)
+    clr.b text_hit
     move.w d0,object_x
     move.w d1,object_y
     bsr object_cell
     move.w d2,d5
 .mark_top:
-    bsr mark_ring
+    bsr text_cell
     addq.w #1,d6
     dbf d5,.mark_top
     move.w object_y,d0
@@ -1577,11 +1583,16 @@ character_pass:
     sub.w d2,d6
     move.w d2,d5
 .mark_bottom:
-    bsr mark_ring
+    bsr text_cell
     addq.w #1,d6
     dbf d5,.mark_bottom
 .one_row:
     movem.l (sp)+,d0-d3/d7/a2-a3
+    tst.b text_keep
+    beq.s .draw
+    tst.b text_hit
+    beq .skip                    ; kept: none of its cells restored or drawn over this frame
+.draw:
     moveq #0,d4
     move.w d1,d4
     mulu #STRIDE,d4
@@ -1622,7 +1633,119 @@ character_pass:
     add.w d3,a1
     addq.l #2,d4
     dbf d6,.plane
+.skip:
     dbf d7,.run
+.done:
+    tst.b text_keep
+    bne.s .kept
+    move.w ring_index,d1         ; the ring's text record: what it shows, the cells it covers
+    lea ring_txt_count,a0
+    move.l txt_list_ptr,d0
+    sub.l txt_list_base,d0
+    lsr.l #1,d0
+    move.l d0,(a0,d1.w)
+    lea ring_txt_key1,a0
+    move.w scroll_x,d0
+    swap d0
+    move.w scroll_y,d0
+    move.l d0,(a0,d1.w)
+    bsr text_key2
+    tst.b txt_overflow
+    beq.s .whole
+    move.b #2,d0                 ; (the list full, the rest in the damage list: restored, never kept)
+.whole:
+    lea ring_txt_key2,a0
+    move.l d0,(a0,d1.w)
+.kept:
+.off:
+    rts
+
+; text_key2: d0 = text_gen, view_flip, 1 (what a ring's text was drawn from; the low byte: a record, keepable)
+text_key2:
+    move.w text_gen,d0
+    swap d0
+    move.b view_flip,d0
+    lsl.w #8,d0
+    move.b #1,d0
+    rts
+
+; text_prepare (before ring_restore): the text layer's rows; whether this ring keeps the text it shows (the same text,
+; scroll and flip as when it was drawn there) - else its old text cells are restored and the text drawn whole.
+text_prepare:
+    addq.b #1,frame_tag
+    clr.b text_keep
+    btst #7,g_control
+    bne.s .redo
+    bsr text_scan
+    move.w ring_index,d1
+    lea ring_txt_key1,a0
+    move.w scroll_x,d0
+    swap d0
+    move.w scroll_y,d0
+    cmp.l (a0,d1.w),d0
+    bne.s .redo
+    bsr text_key2
+    lea ring_txt_key2,a0
+    cmp.l (a0,d1.w),d0
+    bne.s .redo
+    st text_keep
+    ifd DEBUG
+    addq.l #1,dbg_text_kept
+    endc
+    rts
+.redo:
+    move.w ring_index,d1
+    lea ring_txt_lists,a2
+    tst.w d1
+    beq.s .ring0
+    lea TEXT_CELLS*2(a2),a2
+.ring0:
+    move.l a2,txt_list_base
+    move.l a2,txt_list_ptr
+    lea TEXT_CELLS*2(a2),a0
+    move.l a0,txt_list_end
+    clr.b txt_overflow
+    lea ring_txt_key2,a0
+    tst.b 3(a0,d1.w)
+    bne.s .restore               ; (1: a record, 2: one that overflowed, 0: none)
+    rts
+.restore:
+    clr.l (a0,d1.w)
+    lea ring_txt_count,a0
+    move.l (a0,d1.w),d5
+    subq.w #1,d5
+    bmi.s .restored
+.old:
+    move.w (a2)+,d6              ; the old text cells to this ring's damage list
+    bsr mark_ring
+    dbf d5,.old
+.restored:
+    rts
+
+; text_cell, cell d6 of a text run: drawing whole, the cell recorded for the ring (mark_ring when the list is full);
+; keeping, text_hit set when the cell was restored or drawn over (a sprite: its flag in this ring's list) this frame.
+text_cell:
+    tst.b text_keep
+    bne.s .check
+    move.l txt_list_ptr,a0
+    cmp.l txt_list_end,a0
+    bhs.s .full
+    move.w d6,(a0)+
+    move.l a0,txt_list_ptr
+    rts
+.full:
+    st txt_overflow
+    bra mark_ring
+.check:
+    lea restored_tag,a0
+    move.b frame_tag,d0
+    cmp.b (a0,d6.w),d0
+    beq.s .hit
+    move.l cur_flags,a0
+    tst.b (a0,d6.w)
+    beq.s .done
+.hit:
+    st text_hit
 .done:
     rts
 
@@ -1816,6 +1939,20 @@ run_list: ds.b TEXT_RUNS*12*28
 text_runs: ds.w 28
 text_roll: ds.w 1
 text_relist: ds.b 1
+text_keep: ds.b 1                ; this frame: the ring keeps its text, only runs over restored cells drawn
+text_hit: ds.b 1
+txt_overflow: ds.b 1
+frame_tag: ds.b 1
+    even
+text_gen: ds.w 1
+txt_list_base: ds.l 1
+txt_list_ptr: ds.l 1
+txt_list_end: ds.l 1
+ring_txt_key1: ds.l 2            ; per ring: the scroll its text was drawn at
+ring_txt_key2: ds.l 2            ; text_gen, flip, valid
+ring_txt_count: ds.l 2
+ring_txt_lists: ds.w 2*TEXT_CELLS
+restored_tag: ds.b CELLS         ; the frame_tag of the last restore of each cell
     even
 draw_list: ds.b TEXT_RUNS*12*28
 text_force: ds.b 1
