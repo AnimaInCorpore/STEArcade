@@ -117,8 +117,8 @@ frames drawn a second, VBLs between two ticks, CPU idle.  The first 300 VBLs are
 | | game ticks / s | frames drawn / s |
 |---|---|---|
 | before (one tick per drawn frame), the heavy scene (stage 1, many sprites) | about 40 (67% of the arcade) | about 40 |
-| now, the same scene | 57.2 (full speed) | 33.9 |
-| now, stages skipped every 600 frames | 57.5 (full speed) | 42.7 |
+| now, the same scene | 57.8 (full speed) | 35.3 |
+| now, stages skipped every 600 frames | 57.6 (full speed) | 43.6 |
 
 What was lost before: (1) a double buffer that blocked the renderer while the finished ring waited for the VBL (the CPU idled for a tenth
 of its time), (2) one tick per drawn frame, so every slow frame slowed the game, (3) the characters redrawn at every ring visit (the
