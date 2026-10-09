@@ -1,12 +1,13 @@
 """Galaga: the STE runtime's schedule (run_frame_port) against the interleaved reference
-over a scripted game.  python ref/galaga5.py [frames] [outdir]"""
+over a scripted game.  python ref/galaga5.py [frames] [outdir]   (outdir: build/galaga)"""
 import os, sys
 sys.path[:0] = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import numpy as np
 from machine import Galaga, save_png
+from paths import build_dir
 
 frames = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
-out = sys.argv[2] if len(sys.argv) > 2 else "."
+out = sys.argv[2] if len(sys.argv) > 2 else str(build_dir("galaga"))
 
 
 def script(m, f):

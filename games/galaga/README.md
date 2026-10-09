@@ -37,7 +37,8 @@ and clears $9A00-$9AFF), `ref/galaga3.py` (sprites changed per frame mean 4.9, 9
 tiles 1.5; every I/O access is a static address except the NMI handler's `ldi` through
 hl' and the video latch through hl), `ref/galaga4.py` (13 colours plus black are drawn,
 so the STE palette has two entries for the stars), `ref/galaga5.py` (the port's schedule,
-below, against the interleaved reference: same game, stars one scroll step apart),
+below, against the interleaved reference: same game, stars one scroll step apart, up to about frame 2000; once the
+scripted player shoots the two drift into different games: frame 2500 scores 1110 / 1030),
 `ref/cover.py` (coverage pickles for the translation, `build/galaga/`).
 
 Schedule of the port (`run_frame_port` in tools/machine.py is the model): the main CPU's program

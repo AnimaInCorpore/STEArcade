@@ -48,7 +48,7 @@ TESTS = {
                  ("tools/logic_test.py", ["4000", "--walk"], None),
                  ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None)],
     "dkong": [("tools/fullrun.py", ["{n}"], 3000)],
-    "galaga": [("ref/galaga5.py", ["{n}", "/tmp"], 3000)],
+    "galaga": [("ref/galaga5.py", ["{n}"], 3000)],
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 700),
