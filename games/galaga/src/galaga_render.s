@@ -349,9 +349,11 @@ chars_over:
 	lea	ga_char_blank,a3
 	move	#MARK_ROWS-1,d7
 .row:
-	move.l	(a4),d0
-	or.b	4(a4),d0
+	tst.l	(a4)		; (an or.b of byte 4 into the long tests its low byte only)
+	bne.s	.marked
+	tst.b	4(a4)
 	beq.s	.next_row
+.marked:
 	moveq	#0,d6			; byte of the row (8 cells each)
 	moveq	#0,d4			; the byte's first cell * 2
 .byte:
