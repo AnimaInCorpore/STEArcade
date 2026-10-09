@@ -64,29 +64,38 @@ gets past round 1's boss.
 
 * **Background**: 32 x 32 tiles from the map ROM (2048 columns of 8 tiles), a function of
   the scroll registers alone: D800/D801 along the screen's vertical axis, D802 the map
-  rows' horizontal offset. Three display buffers are virtual screens with twin lines;
-  the twin period is 320 (a band of 288 lines plus 32 for the overhang of whole 32-line
-  tiles), with 32 lines above and below for the twins of tiles that cross line 320.
-  Each buffer draws the tile rows that scrolled into its band since it was last drawn.
-* **D802 slides** (the game moves it 0 -> 48 a pixel a frame at each round's poster, then
-  back to 0 in one step): when D802 grew by 1-15 since a buffer was drawn, the Blitter
-  moves the window's chunks of the band's lines and their twins left in place (skew with
-  FXSR, 8 lines a burst per plane), and only the window's last word column is drawn from
-  the tiles that reach the new pixels (`shift_ring`, `draw_strip`). A slide frame costs
-  441k cycles instead of 821k (a band redraw). The step back, background on/off and
-  jumps of more than 200 lines still redraw the band (1-1.8M cycles).
-* **The screen shows 48 pixels on each side of the 224-pixel window**: tiles and
-  sprites drawn whole into the margins would be visible there, so each tile that
-  reaches a side clears the two chunks there and each sprite over a side clears its 16
-  lines of the side chunk (the damage list restores the chunk from its black twin).
+  rows' horizontal offset. Both axes scroll in hardware. Vertically, three display buffers
+  are virtual screens with twin lines (Commando's method); the twin period is 320 (a band
+  of 288 lines plus 32 for the overhang of whole 32-line tiles), with 32 lines above and
+  below for the twins of tiles that cross line 320. Each buffer draws the tile rows that
+  scrolled into its band since it was last drawn, and blacks the side bars of those line
+  pairs (they may hold what an earlier window position drew there).
+* **D802 in hardware** (Black Tiger's method): the tiles stay where they are on the
+  512-pixel lines (map row k at x = 32 + 32k, and 256 further for the wrap), and D802 moves
+  the Shifter's window: the video address by chunks, `$ffff8265` by pixels, the line
+  width `$ffff820f` 4 words less when the fine scroll is not 0. The game slides D802 0 ->
+  48 a pixel a frame at each round's poster and jumps back to 0: a buffer whose window
+  moved draws only the columns that came into it (a word of each tile a blit, FXSR and
+  skew) and blacks the columns that went into the side bars (`hw_strips`). A slide frame
+  costs 238k cycles (821k with a band redraw, 441k with the earlier in-place shift of the
+  buffer). D802 above 192 (never seen) moves the tiles instead, and a change there redraws.
+  Background on/off and jumps of more than 200 lines redraw the band (about 1M cycles).
+* **The screen shows 48 pixels on each side of the 224-pixel window**: whole tiles and
+  sprites drawn into the side bars would be visible there, so each tile that reaches a
+  side clears its part there and each sprite over a side clears its 16 lines of 16 pixels
+  (masked: the window's edges are anywhere in a word); the damage list restores them from
+  their black twins. `render_test.py` checks the bars.
 * **Sprites** (128, entry 0 on top, 2048 codes, a y flip that mirrors on the screen):
   `tools/assets.py` generates the Blitter routines and mask streams of
   `games/1942/tools/spritegen.py` for the shapes (code, flip) the coverage drew most,
   within 900 KB: 1074 of the 1818 shapes seen, 96.5% of the draws. All 2008 shapes would
   take 2.85 MB. The other shapes go through `any_part`: the same Blitter calls, a row at
   a time, the end masks made from the shape's opaque rows (stored with the baked sprite).
-* **Text**: Commando's list of visible characters drawn with `movep.l`; the
-  transparent pens of a colour are those the lookup PROM marks $4F.
+* **Text**: a strip per text row (15 chunks of 8 lines and the opaque pixels as a plane),
+  composed with `movep.l` from the baked characters when the row changes, drawn at the
+  window's pixel offset with the Blitter: NOT mask AND screen, then the four planes ORed
+  in (8 blits a row, only its chunks with characters); `movep.l` alone could only write at
+  8-pixel steps. The transparent pens of a colour are those the lookup PROM marks $4F.
 * **Baking**: tiles, sprites and characters are kept as pixel-value bit planes; a miss
   of the hashed cache makes the 16 pen masks of each row and a generated routine per
   colour bank ORs them into the four STE planes. One pool per kind.
@@ -103,10 +112,10 @@ Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
 ## Speed (2026-10-09)
 
 `tools/bench.ps1` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
-included): 54.2 game ticks a second (91% of the arcade's 59.6) and 28.1 drawn frames a
+included): 53.4 game ticks a second (90% of the arcade's 59.6) and 29.5 drawn frames a
 second. `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
-84-380k cycles (median 84k in round 1, 243k in round 3, 381k in round 7), a frame of a
-D802 slide 441k, a full redraw 1-1.8M.
+84-380k cycles (median 89k in round 1, 251k in round 3), a frame of a D802 slide 238k, a
+full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.8M).
 
 ## Validation
 
@@ -122,10 +131,11 @@ D802 slide 441k, a full redraw 1-1.8M.
 * `render_test.py`: pixel exact through the colour map in consecutive play (rounds 1, 3,
   7, the ending), spaced samples (rounds 6, 9), a sweep of S and D802 over their range,
   and whole sprites at the window's edges; the side bars stay black; consecutive frames
-  through the D802 slides of rounds 1 and 7.
+  through the D802 slides of rounds 1 and 7 (the window at every pixel offset 0-48).
 * Hatari (F030Arcade build, STE, 4 MB, TOS 2.06): attract mode, coin, start, the round
-  poster with its sideways slide, play.
+  poster with its sideways slide (screenshots in the middle of it: the fine scroll), play;
+  27 screenshots without colour in the side bars or a dropped picture.
 
-Not done: sound, the flip screen (the DIP switch is upright), the service mode. The D802
-slide could get cheaper still: the twin copies are shifted every time a buffer is drawn,
-though only a restore or a wrap of the window reads them.
+Not done: sound, the flip screen (the DIP switch is upright), the service mode. The last
+line of the picture is sometimes black from a varying x on: Timer A's palette off comes
+in that line (seen in Hatari screenshots before and after the hardware scrolling).

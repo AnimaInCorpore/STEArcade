@@ -130,19 +130,20 @@ def main():
         mem.set_trace_mode(False)
         idx = mem.r16(sym['draw_idx'])
         base = mem.r32(sym['draw_base'])
-        mine = planar(mem, base, 256, 24, 14)
+        wx = mem.r16(sym['cur_wx'])                 # the window's first pixel on the buffer's lines (48 + the hardware offset)
+        full = planar(mem, base, 256, 0, 32)
+        mine = full[:, wx:wx + 224]
         want = mapping[video.render_raw(m)[16:240].T[::-1]]
         if edge:
             code, edge_x, edge_y = edge
-            got = planar(mem, base + edge_y * 256, 16, 0, 32)[:, 48 + edge_x:48 + edge_x + 16]
+            got = planar(mem, base + edge_y * 256, 16, 0, 32)[:, wx + edge_x:wx + edge_x + 16]
             shape = video.sprites[code].T[::-1]
             opaque = shape != 0
             if edge_y in (-8, 248):             # (above / below the window: the whole sprite is in the guard lines)
                 assert np.array_equal(got[opaque], mapping[384 + 3 * 16 + shape.astype(int)][opaque]),                     'the whole sprite was clipped'
         # the side bars (the 48 pixels on each side of the window that the screen shows) must stay black
-        sides = planar(mem, base, 256, 0, 20)
-        if sides[:, :48].any() or sides[:, 272:320].any():
-            where = np.argwhere(np.hstack((sides[:, :48], sides[:, 272:320])))
+        if full[:, wx - 48:wx].any() or full[:, wx + 224:wx + 272].any():
+            where = np.argwhere(np.hstack((full[:, wx - 48:wx], full[:, wx + 224:wx + 272])))
             raise RuntimeError(f'frame {target}: colour beside the window at (line, x of the 96 side pixels) '
                                f'{where[:4].tolist()} .. {where[-2:].tolist()}, {len(where)} pixels')
         diff = np.count_nonzero(mine != want)

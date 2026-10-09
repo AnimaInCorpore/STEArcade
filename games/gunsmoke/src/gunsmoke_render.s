@@ -2,20 +2,29 @@
 ;
 ; Background: 32 x 32 tiles from the map ROM (bgtiles: 2048 columns of 8 tiles, a word each: code, attribute), a pure
 ; function of the scroll registers D800/D801 (S: map line M = S + 255 - r) and D802 (the map row k of a tile is at
-; screen x = 32k - 16 - D802, modulo 256).  As in Commando the three display buffers are virtual screens shown at the
-; scroll position by the video address: buffer line l and l+RING_H hold the same background, so the band of 288 lines
-; (the 256 shown and 16 guard lines on each side for whole sprites) is contiguous wherever the window is.  Whole tiles
-; at the band's edges reach up to 31 lines beyond it, into the 32 spare line pairs (RING_H = 288 + 32); a tile is
-; drawn at its line, its twin RING_H below and, when it crosses line RING_H, RING_H above, hence 32 lines above and below.
-; Each buffer draws only the tile rows that scrolled into its band since it was drawn last; a new D802, background on/off
-; or a jump of more than 200 lines draws the band whole.  Tiles that reach beside the window clear the two chunks there.
+; screen x = 32k - 16 - D802, modulo 256).  Both axes scroll in hardware.  Vertically, as in Commando, the three display
+; buffers are virtual screens shown at the scroll position by the video address: buffer line l and l+RING_H hold the
+; same background, so the band of 288 lines (the 256 shown and 16 guard lines on each side for whole sprites) is
+; contiguous wherever the window is.  Whole tiles at the band's edges reach up to 31 lines beyond it, into the 32 spare
+; line pairs (RING_H = 288 + 32); a tile is drawn at its line, its twin RING_H below and, when it crosses line RING_H,
+; RING_H above, hence 32 lines above and below.  Horizontally, as in Black Tiger, the tiles stay where they are on the
+; 512-pixel lines (map row k at x = 32 + 32k and 256 to the right) and D802 moves the Shifter's window: the video
+; address by chunks, $ffff8265 by pixels (the line width $ffff820f 4 words less then); the window starts at buffer
+; x 48 + D802 (cur_wx).  D802 above HW_MAX moves the tiles by the rest instead (never seen in the game).
+; Each buffer draws the tile rows that scrolled into its band since it was drawn last, with the side bars of the line
+; pairs that came into it black, and, when its window moved, the columns that came into the window (only those
+; columns of the tiles) and black where the side bars went (hw_strips).  A change of the tiles' offset, background
+; on/off or a jump of more than 200 lines draws the band whole.  The screen shows 48 pixels on each side of the
+; window: they stay black (a tile or a sprite drawn whole over a side clears its part there).
 ;
-; Sprites and characters are drawn whole over it; what they covered is a damage list per buffer, copied back from the
-; twin lines the next time that buffer is drawn.  Graphics are baked into STE planes on first use (a hashed cache per
-; kind) from their pixel-value planes through a routine per colour bank (assets.py: the pens' masks ORed into the
-; planes by the 16 colour palette).
+; Sprites are drawn whole at the window's position, text as a strip per text row (composed with movep.l when the row
+; changes, drawn with the Blitter at the window's pixel offset: NOT mask AND screen, then the planes ORed in); what they
+; covered is a damage list per buffer, copied back from the twin lines the next time that buffer is drawn.  Graphics
+; are baked into STE planes on first use (a hashed cache per kind) from their pixel-value planes through a routine per
+; colour bank (assets.py: the pens' masks ORed into the planes by the 16 colour palette).
 STRIDE = 256
-GAME_X = 24
+GAME_X = 24				; (the window's first chunk when D802 is 0)
+HW_MAX = 192				; D802 up to this moves the Shifter's window (the 512-pixel lines hold it and its bars)
 RING_H = 320
 RING_ABOVE = 32
 RING_LINES = RING_ABOVE+2*RING_H+32
@@ -38,6 +47,9 @@ BLT_SKEW = $ffff8a3d
 Z_TEXT = G_Z80-$3000			; D000 codes, D400 attributes
 Z_SCROLL = G_Z80-$2800			; D800 / D801: S, D802: the map rows' offset
 
+STRIP_WORDS = 15			; a text row's strip: 15 chunks (14 and a 0 one) of 8 lines, then its opaque plane
+STRIP_MASK = 8*STRIP_WORDS*8
+STRIP_ROW = STRIP_MASK+8*STRIP_WORDS*2
 TILE_POOL = $30000			; baked objects: tiles 512 bytes, sprites 160, characters 64
 SPR_POOL = $20000
 CHR_POOL = $8000
@@ -53,6 +65,7 @@ init_video:
  add.l #RING_SIZE,d0
  move.l d0,ring_base+8
  move.b #48,$ffff820f.w
+ clr.b $ffff8265.w
  move.l ring_base,d0
  sub.l #PIC_TOP*STRIDE,d0
  bsr show_address
@@ -92,31 +105,6 @@ init_render:
  move.l #spr_pool,pool_ptr+4
  move.l #chr_pool,pool_ptr+8
  st fg_full
- st band_rows
- lea fg_offsets,a0		; cell: column c = cell / 32 (x = 8c - 16), row r = cell & 31 (y = 248 - 8r)
- moveq #0,d0
-.offset:
- move.w d0,d1
- and.w #31,d1
- lsl.w #3,d1
- neg.w d1
- add.w #248,d1
- mulu #STRIDE,d1
- move.w d0,d2
- lsr.w #5,d2
- subq.w #2,d2
- move.w d2,d3
- asr.w #1,d2
- lsl.w #3,d2
- ext.l d2
- add.l d2,d1
- and.w #1,d3
- add.w d3,d1
- add.l #GAME_X,d1
- move.l d1,(a0)+
- addq.w #1,d0
- cmp.w #1024,d0
- blo.s .offset
  move.w #0,shown_idx
  move.w #1,prev_idx
  rts
@@ -133,6 +121,14 @@ vbl_video:
  move.w d1,shown_idx
  move.l flip_addr,d0
  bsr show_address
+ move.b flip_fine,d0		; the fine scroll; the Shifter then reads a chunk more a line: the line width 4 words less
+ move.b d0,$ffff8265.w
+ move.b #48,d1
+ tst.b d0
+ beq.s .width
+ subq.b #4,d1
+.width:
+ move.b d1,$ffff820f.w
 .out:
  movem.l (sp)+,d0-d7
  rts
@@ -174,8 +170,16 @@ render_frame:
  lsl.w #2,d0
  lea ring_dmg_end,a0
  move.l dmg_ptr,(a0,d0.w)
- move.l draw_base,d0
+ move.l draw_base,d0		; the video address: PIC_TOP lines above, the chunk of the window's offset
  sub.l #PIC_TOP*STRIDE,d0
+ moveq #0,d1
+ move.w cur_hw,d1
+ move.b d1,d2
+ and.b #15,d2
+ move.b d2,flip_fine
+ lsr.w #4,d1
+ lsl.w #3,d1
+ add.l d1,d0
  move.l d0,flip_addr
  move.w draw_idx,d0
  addq.b #1,d0
@@ -186,8 +190,10 @@ render_frame:
 ; Background
 ; ------------------------------------------------------------------------------
 
-; Bring the buffer draw_idx up to the scroll: restore the damage of its last frame, move its window by the scroll since,
-; draw the tiles of the map lines that came into its band.  draw_base = the window's first line.
+; Bring the buffer draw_idx up to the scroll: restore the damage of its last frame; when the hardware window moved
+; (D802), draw the columns that came into it and black those that went into the side bars (hw_strips); move its window
+; by the vertical scroll since and draw the tiles of the map lines that came into its band.  draw_base = the window's
+; first line (x 0 of the buffer).
 ring_update:
  move.w draw_idx,d0
  move.w d0,d1
@@ -205,9 +211,20 @@ ring_update:
  lsl.w #8,d1
  move.b Z_SCROLL,d1
  move.w d1,cur_S
- moveq #0,d1
+ moveq #0,d1			; D802: the window's offset hw (up to HW_MAX), the rest (soft) moves the tiles
  move.b Z_SCROLL+2,d1
  move.w d1,cur_sy
+ moveq #0,d0
+ cmp.w #HW_MAX,d1
+ bls.s .hw
+ move.w d1,d0
+ sub.w #HW_MAX,d0
+ move.w #HW_MAX,d1
+.hw:
+ move.w d1,cur_hw
+ move.w d0,cur_soft
+ add.w #48,d1
+ move.w d1,cur_wx
  move.b Z_LAYERS,d1
  and.b #16,d1
  move.b d1,cur_bg
@@ -219,12 +236,10 @@ ring_update:
  cmp.b (a0,d2.w),d1
  bne .full
  move.w ring_off2,d2
- lea ring_sy,a0
- move.w cur_sy,d1
- sub.w (a0,d2.w),d1		; D802 since: 1-15 more (the map slides left) shifts the buffer, other changes redraw
- move.w d1,shift_d
- cmp.w #15,d1
- bhi .full			; (unsigned: a step back too)
+ lea ring_soft,a0
+ move.w cur_soft,d1
+ cmp.w (a0,d2.w),d1
+ bne .full
  lea ring_S,a0
  move.w cur_S,d0
  sub.w (a0,d2.w),d0		; the scroll since: map lines
@@ -236,13 +251,21 @@ ring_update:
  bhi .full
  move.w d0,scroll_d
  bsr restore_damage
- tst.w shift_d
- beq.s .no_shift
- bsr shift_ring
  move.w ring_off2,d2
- lea ring_sy,a0
- move.w cur_sy,(a0,d2.w)
-.no_shift:
+ lea ring_hw,a0
+ move.w (a0,d2.w),d0
+ cmp.w cur_hw,d0
+ beq.s .same_hw
+ move.w d0,old_hw
+ move.w cur_hw,(a0,d2.w)
+ move.w cur_S,new_S		; (the strips go over the band as it was drawn: the old S and top)
+ lea ring_S,a0
+ move.w (a0,d2.w),cur_S
+ lea ring_top,a0
+ move.w (a0,d2.w),cur_top
+ bsr hw_strips
+ move.w new_S,cur_S
+.same_hw:
  move.w ring_off2,d2
  lea ring_S,a0
  move.w cur_S,(a0,d2.w)
@@ -264,18 +287,24 @@ ring_update:
  move.w cur_S,d1		; forward: map lines S+272-d .. S+271 (the band's top)
  add.w #272,d1
  sub.w d0,d1
+ move.w cur_top,d2		; (their line pairs: from top - 16)
+ sub.w #16,d2
  bra.s .band
 .back:
  neg.w d0			; back: S-16 .. S-16-d-1 (the band's bottom)
  move.w cur_S,d1
  sub.w #16,d1
+ move.w cur_top,d2		; (from top + 272 - d)
+ add.w #272,d2
+ sub.w d0,d2
 .band:
+ movem.w d0-d1,-(sp)
+ move.w d0,d1			; the line pairs that came into the band: their side bars black (they may hold what an
+ move.w d2,d0			; earlier window drew there)
+ bsr class_bars
+ movem.w (sp)+,d0-d1
  bsr draw_band
 .done:
- tst.w shift_d
- beq.s .no_strip
- bsr draw_strip
-.no_strip:
  move.l ring_addr,d0
  moveq #0,d1
  move.w cur_top,d1
@@ -285,234 +314,268 @@ ring_update:
  move.l dmg_start,dmg_ptr
  rts
 .full:
- clr.w shift_d
  move.w draw_idx,d2
  lea ring_valid,a0
  st (a0,d2.w)
  lea ring_bg,a0
  move.b cur_bg,(a0,d2.w)
  move.w ring_off2,d2
- lea ring_sy,a0
- move.w cur_sy,(a0,d2.w)
+ lea ring_hw,a0
+ move.w cur_hw,(a0,d2.w)
+ lea ring_soft,a0
+ move.w cur_soft,(a0,d2.w)
  lea ring_S,a0
  move.w cur_S,(a0,d2.w)
  lea ring_top,a0
  clr.w (a0,d2.w)
  clr.w cur_top
- move.l ring_addr,a0		; the side chunks of the whole buffer black (the damage list is dropped)
- lea -RING_ABOVE*STRIDE(a0),a0
- moveq #RING_LINES/32-1,d0
- bsr clear_margins
  move.w cur_S,d1
  sub.w #16,d1
  move.w #288,d0
  bsr draw_band
+ moveq #0,d0			; the side bars of all line pairs black (the damage list is dropped)
+ move.w #RING_H,d1
+ bsr class_bars
  bra .done
 
-; D802 grew by shift_d (1-15) since the buffer was drawn: the window's chunks move left by that many pixels (Blitter,
-; skew 16 - shift_d with FXSR, in place: each destination word is written after the source word right of it was read),
-; 16 lines at a time per plane.  Only the lines that must hold the background are moved: the band of the buffer's
-; window (from line 0) and the twins of the band's lines.  What comes in on the right is the margin's black: draw_strip.
-shift_ring:
- move.w #$ffff,BLT_END1.w
- move.w #$ffff,BLT_END2.w
- move.w #$ffff,BLT_END3.w
- move.w #8,BLT_SRC_XINC.w
- move.w #STRIDE-14*8,BLT_SRC_YINC.w	; (15 source words a line: FXSR)
- move.w #8,BLT_DST_XINC.w
- move.w #STRIDE-13*8,BLT_DST_YINC.w
- move.w #14,BLT_COUNT.w
- move.w #$0203,BLT_HOP_OP.w
- moveq #16,d0
- sub.w shift_d,d0
- or.b #$80,d0			; FXSR
- move.b d0,BLT_SKEW.w
- move.w ring_off2,d2
- lea ring_top,a0
- move.w (a0,d2.w),d4		; the band: b0 = top - 16 .. b1 = top + 271
+; d0 = a line pair (any integer, modulo RING_H), d1 = pairs (1 .. RING_H): the side bars of the window cur_wx black
+; on both lines of each pair.
+class_bars:
+ tst.w d1
+ ble .out
+ ext.l d0
+ divs #RING_H,d0
+ swap d0				; (the remainder)
+ tst.w d0
+ bpl.s .pos
+ add.w #RING_H,d0
+.pos:
+ move.w d0,d2
+ add.w d1,d2
+ cmp.w #RING_H,d2
+ ble.s .one
+ movem.w d0-d2,-(sp)		; [c0, RING_H) and [0, c0 + n - RING_H)
+ move.w #RING_H,d1
+ sub.w d0,d1
+ bsr.s .interval
+ movem.w (sp)+,d0-d2
+ sub.w #RING_H,d2
+ move.w d2,d1
+ moveq #0,d0
+.one:
+.interval:			; pairs d0 .. d0 + d1 - 1
+ movem.w d0-d1,-(sp)
+ bsr.s .lines
+ movem.w (sp)+,d0-d1
+ add.w #RING_H,d0
+.lines:				; lines d0 .. d0 + d1 - 1: both bars
+ movem.w d0-d1,-(sp)
+ move.l ring_addr,d2
+ ext.l d0
+ lsl.l #8,d0
+ add.l d0,d2
+ move.l d2,-(sp)
+ move.w cur_wx,d4
+ sub.w #48,d4
+ move.w cur_wx,d5
+ bsr clear_span
+ move.l (sp)+,d2
+ move.w 2(sp),d1
+ move.w cur_wx,d4
+ add.w #224,d4
  move.w d4,d5
- sub.w #16,d4
- add.w #271,d5
- move.w d4,d0			; the band from line 0
+ add.w #48,d5
+ bsr clear_span
+ movem.w (sp)+,d0-d1
+.out:
+ rts
+
+; The window moved from 48 + old_hw to cur_wx (buffer pixels) since the buffer was drawn: over the band (cur_S, cur_top
+; as drawn) and the twins of its lines, the columns the new window has and the old one had not get the background
+; (draw_band with strip_x0 .. strip_x1: only those columns of the tiles), and the side bars of the new window that
+; were not the old one's turn black.  Equal widths: each difference is one interval.
+hw_strips:
+ move.w old_hw,d6
+ add.w #48,d6			; o
+ move.w cur_wx,d7		; n
+ cmp.w d6,d7
+ blt.s .left
+ move.w d6,d0			; right: [max(n, o + 224), n + 224)
+ add.w #224,d0
+ cmp.w d7,d0
+ bge.s .r1
+ move.w d7,d0
+.r1:
+ move.w d7,d1
+ add.w #224,d1
+ bsr.s .enter
+ move.w d7,d4			; the left bar: [max(o, n - 48), n)
+ sub.w #48,d4
+ cmp.w d6,d4
+ bge.s .r2
+ move.w d6,d4
+.r2:
+ move.w d7,d5
+ bsr band_clear
+ move.w d6,d4			; the right bar: [max(n + 224, o + 272), n + 272)
+ add.w #272,d4
+ move.w d7,d0
+ add.w #224,d0
+ cmp.w d0,d4
+ bge.s .r3
+ move.w d0,d4
+.r3:
+ move.w d7,d5
+ add.w #272,d5
+ bra band_clear
+.left:
+ move.w d7,d0			; left: [n, min(n + 224, o))
+ move.w d7,d1
+ add.w #224,d1
+ cmp.w d6,d1
+ ble.s .l1
+ move.w d6,d1
+.l1:
+ bsr.s .enter
+ move.w d7,d4			; the left bar: [n - 48, min(n, o - 48))
+ sub.w #48,d4
+ move.w d6,d5
+ sub.w #48,d5
+ cmp.w d7,d5
+ ble.s .l2
+ move.w d7,d5
+.l2:
+ bsr band_clear
+ move.w d7,d4			; the right bar: [n + 224, min(n + 272, o + 224))
+ add.w #224,d4
+ move.w d6,d5
+ add.w #224,d5
+ move.w d7,d0
+ add.w #272,d0
+ cmp.w d0,d5
+ ble.s .l3
+ move.w d0,d5
+.l3:
+ bra band_clear
+.enter:				; d0 .. d1: the columns that came into the window
+ cmp.w d1,d0
+ bge.s .none
+ movem.l d6-d7,-(sp)
+ move.w d0,strip_x0
+ move.w d1,strip_x1
+ st strip_mode
+ move.w cur_S,d1
+ sub.w #16,d1
+ move.w #288,d0
+ bsr draw_band
+ sf strip_mode
+ movem.l (sp)+,d6-d7
+.none:
+ rts
+
+; d4 .. d5 (buffer pixels, d5 exclusive): black over the band (cur_top, from line 0) and the twins of its lines.
+; Keeps d6, d7.
+band_clear:
+ cmp.w d5,d4
+ bge.s .out
+ move.w cur_top,d0		; the band: top - 16 .. top + 271
+ sub.w #16,d0
  bpl.s .r1
  moveq #0,d0
 .r1:
- move.w d5,d1
- bsr.s shift_lines
- move.w d4,d0			; the twins of its lines below RING_H: + RING_H
- add.w #RING_H,d0
- move.w d5,d1
+ move.w cur_top,d1
+ add.w #271,d1
+ bsr.s .range
+ move.w cur_top,d0		; the twins of its lines below RING_H: + RING_H
+ add.w #RING_H-16,d0
+ move.w cur_top,d1
+ add.w #271,d1
  cmp.w #RING_H-1,d1
  ble.s .r2
  move.w #RING_H-1,d1
 .r2:
  add.w #RING_H,d1
- bsr.s shift_lines
- move.w d5,d1			; of those from RING_H: - RING_H
- sub.w #RING_H,d1
+ bsr.s .range
+ move.w cur_top,d1		; of those from RING_H: - RING_H
+ add.w #271-RING_H,d1
  bmi.s .out
  moveq #0,d0
- bsr.s shift_lines
+.range:				; lines d0 .. d1
+ movem.l d4-d7,-(sp)
+ sub.w d0,d1
+ addq.w #1,d1
+ move.l ring_addr,d2
+ ext.l d0
+ lsl.l #8,d0
+ add.l d0,d2
+ bsr clear_span
+ movem.l (sp)+,d4-d7
 .out:
  rts
 
-; d0 .. d1: buffer lines of the buffer ring_addr moved by shift_ring's set-up (keeps d4, d5).
-shift_lines:
- sub.w d0,d1			; lines - 1
- move.l ring_addr,a1
+; d2 = a line's address (x 0), d1 = lines, d4 .. d5 = buffer pixels (d5 exclusive): black, plane by plane with the end
+; masks of the first and the last word, 32 lines a burst.
+clear_span:
+ cmp.w d5,d4
+ bge .out
+ move.w d4,d0			; the first word and END1
+ asr.w #4,d0
+ move.w d5,d3			; the last word and END3
+ subq.w #1,d3
+ asr.w #4,d3
+ sub.w d0,d3			; words - 1
+ lsl.w #3,d0
  ext.l d0
- lsl.l #8,d0
- add.l d0,a1
- lea GAME_X(a1),a1
- moveq #3,d3
+ add.l d0,d2
+ and.w #15,d4
+ moveq #-1,d0
+ lsr.w d4,d0
+ subq.w #1,d5
+ and.w #15,d5
+ moveq #15,d6
+ sub.w d5,d6
+ moveq #-1,d5
+ lsl.w d6,d5
+ tst.w d3
+ bne.s .wide
+ and.w d5,d0
+.wide:
+ move.w d0,BLT_END1.w
+ move.w #$ffff,BLT_END2.w
+ move.w d5,BLT_END3.w
+ move.w #8,BLT_DST_XINC.w
+ move.w d3,d0
+ lsl.w #3,d0
+ neg.w d0
+ add.w #STRIDE,d0
+ move.w d0,BLT_DST_YINC.w
+ addq.w #1,d3
+ move.w d3,BLT_COUNT.w
+ clr.w BLT_HOP_OP.w
+ clr.b BLT_SKEW.w
+ moveq #3,d4
 .plane:
- move.l a1,a0
- move.w d1,d2
+ move.l d2,a0
+ move.w d1,d3
 .burst:
- moveq #7,d0			; up to 8 lines a burst (HOG: under 2 scanlines)
- cmp.w d0,d2
+ moveq #32,d0
+ cmp.w d0,d3
  bge.s .n
- move.w d2,d0
+ move.w d3,d0
 .n:
- sub.w d0,d2
- addq.w #1,d0
+ sub.w d0,d3
  wait_borders
- move.l a0,BLT_SRC_ADDR.w
  move.l a0,BLT_DST_ADDR.w
  move.w d0,BLT_COUNT+2.w
  move.b #$c0,BLT_CTRL.w
  ext.l d0
  lsl.l #8,d0
  add.l d0,a0
- subq.w #1,d2
- bpl.s .burst
- addq.l #2,a1
- dbf d3,.plane
- rts
-
-; After shift_ring: the tiles of the map rows that reach the shift_d pixels at the window's right edge, over the band.
-draw_strip:
- moveq #0,d3			; the rows (bits)
- moveq #0,d5
- move.w #224,d4
- sub.w shift_d,d4
-.k:
- move.w d5,d2			; x = ((32k + 16 - D802) & 255) - 32, as draw_cell
- lsl.w #5,d2
- add.w #16,d2
- sub.w cur_sy,d2
- and.w #255,d2
- sub.w #32,d2
- cmp.w #-32,d2
- beq.s .next
- cmp.w #223,d2
- bgt.s .next
- add.w #31,d2
- cmp.w d4,d2
- blt.s .next
- bset d5,d3
-.next:
- addq.w #1,d5
- cmp.w #8,d5
- blo.s .k
- move.b d3,band_rows
- st strip_mode
- move.w cur_S,d1
- sub.w #16,d1
- move.w #288,d0
- bsr draw_band
- st band_rows
- sf strip_mode
- rts
-
-; draw_strip's part of the tile a1 (dest_x, dest_y): the window's last chunk (x 208-223), where it is in the tile and in
-; the shift_d pixels at the right edge; one word a line per plane, taken from the baked tile's two words with FXSR and
-; skew (o = 208 - x: the words o / 16 and the one after it, shifted left by o & 15).
-strip_blit:
- move.w #208,d0
- sub.w dest_x,d0		; o, -15 .. 31
- move.w d0,d1
- asr.w #4,d1			; the first source word
- and.w #15,d0
- bne.s .shifted
- subq.w #1,d1			; (no shift: the second word read is the one)
-.shifted:
- neg.w d0
- and.w #15,d0
- or.b #$80,d0			; FXSR, skew (16 - o & 15) & 15
- move.b d0,BLT_SKEW.w
- add.w d1,d1
- lea (a1,d1.w),a2		; the source
- move.w #224,d2			; the pixels: from max(x, 224 - shift_d) to min(x + 31, 223)
- sub.w shift_d,d2
- move.w dest_x,d0
- cmp.w d2,d0
- ble.s .lo
- move.w d0,d2
-.lo:
- sub.w #208,d2
- add.w #31,d0
- cmp.w #223,d0
- ble.s .hi
- move.w #223,d0
-.hi:
- sub.w #208,d0
- moveq #-1,d3
- lsr.w d2,d3			; from pixel d2
- moveq #-1,d1
- moveq #15,d2
- sub.w d0,d2
- lsl.w d2,d1			; to pixel d0
- and.w d1,d3
- move.w d3,BLT_END1.w
- move.w #2,BLT_SRC_XINC.w
- move.w #2,BLT_SRC_YINC.w
- move.w #STRIDE,BLT_DST_YINC.w
- move.w #1,BLT_COUNT.w
- move.w #$0203,BLT_HOP_OP.w
- bsr destination_line
- add.l #GAME_X+13*8,d2
- moveq #3,d3
-.plane:
- wait_borders
- move.l a2,BLT_SRC_ADDR.w
- move.l d2,BLT_DST_ADDR.w
- move.w #32,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
- lea 128(a2),a2
+ tst.w d3
+ bne.s .burst
  addq.l #2,d2
- dbf d3,.plane
- rts
-
-; a0 = a line, d0 = segments of 32 lines - 1: the two chunks on each side of the window are cleared, 32 lines at a time.
-clear_margins:
- bsr.s margin_setup
- move.l a0,a1
- lea GAME_X-16(a0),a0
- bsr.s .column
- lea GAME_X+112(a1),a0
-.column:
- move.w d0,d1
-.segment:
- wait_borders
- move.l a0,BLT_DST_ADDR.w
- move.w #32,BLT_COUNT+2.w
- move.b #$80,BLT_CTRL.w
-.wait:
- btst #7,BLT_CTRL.w
- bne .wait
- lea 32*STRIDE(a0),a0
- dbf d1,.segment
- rts
-margin_setup:
- move.w #$ffff,BLT_END1.w
- move.w #$ffff,BLT_END2.w
- move.w #$ffff,BLT_END3.w
- move.w #2,BLT_DST_XINC.w
- move.w #STRIDE-14,BLT_DST_YINC.w
- move.w #8,BLT_COUNT.w
- clr.w BLT_HOP_OP.w
- clr.b BLT_SKEW.w
+ dbf d4,.plane
+.out:
  rts
 
 ; d1 = the first map line (a word, modulo 65536), d0 = lines: the tiles of the map columns that hold them.
@@ -526,10 +589,7 @@ draw_band:
 .column:
  moveq #0,d5
 .row:
- btst d5,band_rows		; (the map rows to draw: all, but draw_strip's)
- beq.s .skip
  bsr draw_cell
-.skip:
  addq.w #1,d5
  cmp.w #8,d5
  blo.s .row
@@ -542,7 +602,8 @@ draw_band:
  rts
 
 ; d6 = the map column j, d5 = the row k: the tile, if it reaches the band (screen rows -16 .. 271), at its buffer line,
-; the twin and (when it crosses line RING_H) the line RING_H above.  Keeps all registers.
+; the twin and (when it crosses line RING_H) the line RING_H above; in each of its two places on the line (the map
+; row k at x = 32 + 32k + 256n - soft) that reaches the window (strip_mode: strip_x0 .. strip_x1).  Keeps all registers.
 draw_cell:
  movem.l d0-d7/a0-a6,-(sp)
  move.w cur_S,d1		; the tile's top row: S + 224 - 32j
@@ -554,15 +615,6 @@ draw_cell:
  ble .out
  cmp.w #272,d1
  bge .out
- move.w d5,d2			; x = ((32k - 16 - D802 + 32) & 255) - 32
- lsl.w #5,d2
- add.w #16,d2
- sub.w cur_sy,d2
- and.w #255,d2
- sub.w #32,d2
- cmp.w #-32,d2
- beq .out
- move.w d2,dest_x
  add.w cur_top,d1
  bpl.s .p
  add.w #RING_H,d1
@@ -572,9 +624,38 @@ draw_cell:
  sub.w #RING_H,d1
 .q:
  move.w d1,cell_line
+ move.w cur_wx,d3		; the columns wanted: the window, or the strip
+ move.w d3,d4
+ add.w #224,d4
+ tst.b strip_mode
+ beq.s .want
+ move.w strip_x0,d3
+ move.w strip_x1,d4
+.want:
+ move.w d5,d2			; x = 32 + 32k - soft (n = 0), + 256 (n = 1)
+ lsl.w #5,d2
+ add.w #32,d2
+ sub.w cur_soft,d2
+ sub.l a1,a1			; (the tile: baked on its first place)
+ bsr.s .place
+ add.w #256,d2
+ bsr.s .place
+.out:
+ movem.l (sp)+,d0-d7/a0-a6
+ rts
+.place:
+ cmp.w d4,d2			; x < end and x + 32 > start
+ bge .no
+ move.w d2,d0
+ add.w #32,d0
+ cmp.w d3,d0
+ ble .no
+ move.w d2,dest_x
+ move.l a1,d0
+ bne.s .baked
  lea tile_black,a1
  tst.b cur_bg
- beq.s .draw
+ beq.s .baked
  move.w d6,d0			; the map word: code, attribute (bit 0: code bit 8, 2-5: colour, 6-7: flips)
  lsl.w #3,d0
  add.w d5,d0
@@ -586,7 +667,8 @@ draw_cell:
  move.w d1,d0
  moveq #0,d1
  bsr get_object
-.draw:
+.baked:
+ movem.l d2-d4,-(sp)
  move.l ring_addr,draw_base
  move.w cell_line,dest_y
  bsr tile_twice
@@ -595,42 +677,138 @@ draw_cell:
  move.w d0,dest_y
  bsr tile_twice
  cmp.w #RING_H-32,cell_line
- ble.s .out
+ ble.s .two
  move.w cell_line,d0
  sub.w #RING_H,d0
  move.w d0,dest_y
  bsr tile_twice
-.out:
- movem.l (sp)+,d0-d7/a0-a6
+.two:
+ movem.l (sp)+,d2-d4
+.no:
  rts
 
-; The tile a1 at dest_x / dest_y, and black in the side chunks it reaches.  Keeps a1.
+; The tile a1 at dest_x / dest_y: whole, and black in the side bars it reaches; or (strip_mode) only its columns in
+; strip_x0 .. strip_x1 (part_blit).  Keeps a1.
 tile_twice:
  move.l a1,-(sp)
  tst.b strip_mode
  beq.s .whole
- bsr strip_blit
+ bsr part_blit
  bra.s .out
 .whole:
  bsr draw_tile
- move.w dest_x,d0
- bmi.s .left
- cmp.w #192,d0
- ble.s .out
- move.l #GAME_X+112,d1
- bra.s .clear
-.left:
- moveq #GAME_X-16,d1
-.clear:
- bsr margin_setup
  bsr destination_line
- add.l d1,d2
- wait_borders
- move.l d2,BLT_DST_ADDR.w
- move.w #32,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ move.w dest_x,d4		; the left bar: [max(x, wx - 48), wx)
+ move.w cur_wx,d5
+ cmp.w d5,d4
+ bge.s .right
+ move.w d5,d0
+ sub.w #48,d0
+ cmp.w d0,d4
+ bge.s .l
+ move.w d0,d4
+.l:
+ moveq #32,d1
+ move.l d2,-(sp)
+ bsr clear_span
+ move.l (sp)+,d2
+.right:
+ move.w cur_wx,d4		; the right bar: [wx + 224, min(x + 32, wx + 272))
+ add.w #224,d4
+ move.w dest_x,d5
+ add.w #32,d5
+ move.w cur_wx,d0
+ add.w #272,d0
+ cmp.w d0,d5
+ ble.s .r
+ move.w d0,d5
+.r:
+ moveq #32,d1
+ bsr clear_span
 .out:
  move.l (sp)+,a1
+ rts
+
+; The columns strip_x0 .. strip_x1 of the tile a1 at dest_x / dest_y, word by word: each destination word takes the
+; tile's two words around it (FXSR, skew) under the mask of its pixels in both; 4 planes x 32 lines.
+part_blit:
+ move.w strip_x0,d6		; x0 = max(strip_x0, x), x1 = min(strip_x1, x + 32)
+ move.w dest_x,d0
+ cmp.w d0,d6
+ bge.s .a
+ move.w d0,d6
+.a:
+ move.w strip_x1,d7
+ add.w #32,d0
+ cmp.w d0,d7
+ ble.s .b
+ move.w d0,d7
+.b:
+ cmp.w d7,d6
+ bge .out
+ move.w #2,BLT_SRC_XINC.w
+ move.w #2,BLT_SRC_YINC.w
+ move.w #STRIDE,BLT_DST_YINC.w
+ move.w #1,BLT_COUNT.w
+ move.w #$0203,BLT_HOP_OP.w
+ bsr destination_line
+ move.l d2,a3			; the line
+ move.w d6,d5
+ and.w #$fff0,d5		; the destination word's first pixel
+.word:
+ move.w d6,d0			; p0 = max(x0, w), p1 = min(x1, w + 16): the mask
+ cmp.w d5,d0
+ bge.s .c
+ move.w d5,d0
+.c:
+ move.w d5,d1
+ add.w #16,d1
+ cmp.w d7,d1
+ ble.s .d
+ move.w d7,d1
+.d:
+ sub.w d5,d0
+ sub.w d5,d1
+ moveq #-1,d2
+ lsr.w d0,d2
+ moveq #16,d0
+ sub.w d1,d0
+ moveq #-1,d1
+ lsl.w d0,d1
+ and.w d1,d2
+ move.w d2,BLT_END1.w
+ move.w d5,d0			; o = w - x: the tile's words o / 16 and the next, shifted left by o & 15
+ sub.w dest_x,d0
+ move.w d0,d1
+ asr.w #4,d1
+ and.w #15,d0
+ bne.s .shifted
+ subq.w #1,d1
+.shifted:
+ neg.w d0
+ and.w #15,d0
+ or.b #$80,d0			; FXSR
+ move.b d0,BLT_SKEW.w
+ add.w d1,d1
+ lea (a1,d1.w),a2
+ move.w d5,d0
+ asr.w #4,d0
+ lsl.w #3,d0
+ lea (a3,d0.w),a4
+ moveq #3,d3
+.plane:
+ wait_borders
+ move.l a2,BLT_SRC_ADDR.w
+ move.l a4,BLT_DST_ADDR.w
+ move.w #32,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ lea 128(a2),a2
+ addq.l #2,a4
+ dbf d3,.plane
+ add.w #16,d5
+ cmp.w d7,d5
+ blt .word
+.out:
  rts
 
 ; a1 = 4 planes x 32 rows x 2 words, the whole tile at dest_x / dest_y.
@@ -663,13 +841,12 @@ draw_tile:
  dbf d3,.plane
  rts
 
-; d2 = the destination chunk of dest_x / dest_y (floor x / 16; guard positions are signed).
+; d2 = the destination chunk of dest_x (buffer pixels) / dest_y.
 destination:
  bsr.s destination_line
  move.w dest_x,d0
  asr.w #4,d0
  lsl.w #3,d0
- add.w #GAME_X,d0
  ext.l d0
  add.l d0,d2
  rts
@@ -790,7 +967,9 @@ draw_sprites:
  cmp.w #224,d4
  bge .next
  move.w d3,dest_y
- move.w d4,dest_x
+ move.w d4,spr_sx
+ add.w cur_wx,d4
+ move.w d4,dest_x		; (buffer pixels)
  move.w d1,d2			; the code: + 256 * bank (bank 3: + the sprite bank)
  lsr.w #6,d2
  cmp.w #3,d2
@@ -818,29 +997,22 @@ draw_sprites:
  moveq #1,d1
  bsr get_object
  bsr sprite_part
- move.w dest_x,d0		; a sprite over a side of the window: the side chunk it reaches black again (the screen
- bmi.s .left			; shows 48 pixels on each side; the damage list restores the chunk from its black twin)
+ move.w spr_sx,d0		; a sprite over a side of the window: its 16 pixels beside it black again (the screen shows
+ bmi.s .left			; the side bars; the damage list restores them from their black twins)
  cmp.w #208,d0
- ble .next
- move.l #GAME_X+112,d1
+ ble.s .next
+ move.w cur_wx,d4
+ add.w #224,d4
  bra.s .side
 .left:
- moveq #GAME_X-8,d1
+ move.w cur_wx,d4
+ sub.w #16,d4
 .side:
+ move.w d4,d5
+ add.w #16,d5
  bsr destination_line
- add.l d1,d2
- move.w #$ffff,BLT_END1.w
- move.w #$ffff,BLT_END2.w
- move.w #$ffff,BLT_END3.w
- move.w #2,BLT_DST_XINC.w
- move.w #STRIDE-6,BLT_DST_YINC.w
- move.w #4,BLT_COUNT.w
- clr.w BLT_HOP_OP.w
- clr.b BLT_SKEW.w
- wait_borders
- move.l d2,BLT_DST_ADDR.w
- move.w #16,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ moveq #16,d1
+ bsr clear_span
 .next:
  subq.l #4,spr_ptr
  cmp.l #sprite_buffer,spr_ptr
@@ -1109,58 +1281,39 @@ draw_foreground:
  lea fg_raw,a3
  bra .full
 .same:
- tst.b fg_dirty
+ tst.b fg_dirty			; the rows whose cells changed: their strips again
  beq.s .draw
-.list:
- lea fg_rows,a3			; (the first and last chunk of each character row: $ff = none)
- moveq #-1,d1
- moveq #15,d0
-.no_rows:
- move.l d1,(a3)+
- dbf d0,.no_rows
- lea fg_rows,a3
- lea fg_ptr+2*4*32,a0		; (columns 0 and 1 and 30 and 31 are outside the window)
- lea fg_list,a1
- lea fg_offsets+2*4*32,a2
- moveq #64,d3
- move.w #28*32-1,d0
-.gather:
- move.l (a0)+,d1
- beq.s .empty
- move.l (a2),(a1)+
- move.l d1,(a1)+
- move.w d3,d4
- and.w #31,d4
- move.w d3,d5
- lsr.w #5,d5
- subq.w #2,d5
- lsr.w #1,d5
- cmp.b #$ff,(a3,d4.w)
- bne.s .known
- move.b d5,(a3,d4.w)
-.known:
- move.b d5,32(a3,d4.w)
-.empty:
- addq.l #4,a2
- addq.w #1,d3
- dbf d0,.gather
- move.l a1,fg_list_end
  sf fg_dirty
+ moveq #0,d6
+.compose:
+ lea fg_row_dirty,a0
+ tst.b (a0,d6.w)
+ beq.s .clean
+ clr.b (a0,d6.w)
+ bsr fg_compose
+.clean:
+ addq.w #1,d6
+ cmp.w #32,d6
+ blo.s .compose
 .draw:
  tst.b Z_LATCH			; (bit 7: the text layer on)
  bpl .off
- lea fg_rows,a3			; damage: each character row's chunks, in four bursts of 2 lines (HOG Blitter: short)
+ move.w cur_wx,d7
+ and.w #15,d7			; the skew: the window's pixel offset in its first word
  moveq #0,d6
 .row:
+ lea fg_rows,a3
  moveq #0,d4
- move.b (a3,d6.w),d4
+ move.b (a3,d6.w),d4		; the first and the last chunk with characters
  cmp.b #$ff,d4
- beq.s .no_row
+ beq .no_row
  moveq #0,d3
  move.b 32(a3,d6.w),d3
- sub.w d4,d3
- addq.w #1,d3
- lsl.w #2,d3			; words a line
+ sub.w d4,d3			; source words - 1
+ tst.w d7
+ beq.s .aligned
+ addq.w #1,d3			; (shifted: a word more, the next strip word is 0)
+.aligned:
  move.w d6,d0
  lsl.w #3,d0
  neg.w d0
@@ -1169,10 +1322,17 @@ draw_foreground:
  move.w d0,d2
  lsl.l #8,d2
  add.l draw_base,d2
- lsl.w #3,d4
- add.w d4,d2
- add.l #GAME_X,d2
+ move.w d4,d1			; the destination: the word of the window's pixel 16 * first
+ lsl.w #4,d1
+ add.w cur_wx,d1
+ asr.w #4,d1
+ lsl.w #3,d1
+ add.w d1,d2
+ move.l d2,a4
+ movem.l d0/d2-d3,-(sp)		; damage: the row's words, in four bursts of 2 lines (HOG Blitter: short)
  add.w cur_top,d0
+ addq.w #1,d3
+ lsl.w #2,d3
  moveq #2,d1
  moveq #3,d5
 .burst:
@@ -1180,32 +1340,140 @@ draw_foreground:
  add.l #2*STRIDE,d2
  addq.w #2,d0
  dbf d5,.burst
+ movem.l (sp)+,d0/d2-d3
+ moveq #-1,d0			; the Blitter: end masks (the first word: the bits from the strip), increments, skew
+ lsr.w d7,d0
+ move.w d0,BLT_END1.w
+ move.w #$ffff,BLT_END2.w
+ move.w #$ffff,BLT_END3.w
+ move.w #8,BLT_DST_XINC.w
+ move.w d3,d0
+ lsl.w #3,d0
+ neg.w d0
+ add.w #STRIDE,d0
+ move.w d0,BLT_DST_YINC.w
+ move.w d3,d0
+ addq.w #1,d0
+ move.w d0,BLT_COUNT.w
+ move.b d7,BLT_SKEW.w
+ move.w d6,d0			; the row's strip
+ mulu #STRIP_ROW,d0
+ lea fg_strips,a2
+ add.l d0,a2
+ move.w #2,BLT_SRC_XINC.w	; the mask: NOT mask AND screen, each plane
+ move.w d3,d0
+ add.w d0,d0
+ neg.w d0
+ add.w #STRIP_WORDS*2,d0
+ move.w d0,BLT_SRC_YINC.w
+ move.w #$0204,BLT_HOP_OP.w
+ move.w d4,d0
+ add.w d0,d0
+ lea STRIP_MASK(a2),a1
+ add.w d0,a1
+ move.l a4,a0
+ moveq #3,d5
+.mask:
+ wait_borders
+ move.l a1,BLT_SRC_ADDR.w
+ move.l a0,BLT_DST_ADDR.w
+ move.w #8,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ addq.l #2,a0
+ dbf d5,.mask
+ move.w #8,BLT_SRC_XINC.w	; the planes: OR
+ move.w d3,d0
+ lsl.w #3,d0
+ neg.w d0
+ add.w #STRIP_WORDS*8,d0
+ move.w d0,BLT_SRC_YINC.w
+ move.w #$0207,BLT_HOP_OP.w
+ move.w d4,d0
+ lsl.w #3,d0
+ lea (a2,d0.w),a1
+ move.l a4,a0
+ moveq #3,d5
+.planes:
+ wait_borders
+ move.l a1,BLT_SRC_ADDR.w
+ move.l a0,BLT_DST_ADDR.w
+ move.w #8,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ addq.l #2,a1
+ addq.l #2,a0
+ dbf d5,.planes
 .no_row:
  addq.w #1,d6
  cmp.w #32,d6
- blo.s .row
- move.l draw_base,d1
- lea fg_list,a2
- move.l fg_list_end,a3
- bra.s .test
-.char:
- move.l (a2)+,a1
- add.l d1,a1
- move.l (a2)+,a0
- rept 8
- movep.l (REPTN*STRIDE)(a1),d0
- and.l (a0)+,d0
- or.l (a0)+,d0
- movep.l d0,(REPTN*STRIDE)(a1)
- endr
-.test:
- cmp.l a3,a2
- blo.s .char
+ blo .row
 .off:
+ rts
+
+; d6 = a text row: its strip made again from its baked characters (fg_ptr), with movep.l at byte positions: 8 lines of
+; STRIP_WORDS chunks (the 224 pixels of the window and a 0 chunk for the shifted blits), then the opaque pixels as one
+; plane; fg_rows gets the first and the last chunk with characters ($ff: none).  Keeps d6.
+fg_compose:
+ move.w d6,d0
+ mulu #STRIP_ROW,d0
+ lea fg_strips,a2
+ add.l d0,a2
+ move.l a2,a0
+ move.w #STRIP_ROW/4-1,d0
+.clear:
+ clr.l (a0)+
+ dbf d0,.clear
+ moveq #-1,d4			; the first chunk ($ff), the last
+ moveq #0,d5
+ moveq #2,d3			; the column c (x = 8c - 16)
+.cell:
+ move.w d3,d0
+ lsl.w #5,d0
+ add.w d6,d0
+ lsl.w #2,d0
+ lea fg_ptr,a0
+ move.l (a0,d0.w),d0
+ beq .empty
+ move.l d0,a0
+ move.w d3,d1
+ subq.w #2,d1
+ move.w d1,d2
+ lsr.w #1,d1			; the chunk
+ and.w #1,d2			; the byte in it
+ cmp.b d1,d4
+ bls.s .known
+ move.b d1,d4
+.known:
+ move.b d1,d5
+ move.w d1,d0
+ lsl.w #3,d0
+ add.w d2,d0
+ lea (a2,d0.w),a1
+ add.w d1,d1
+ add.w d1,d2
+ lea STRIP_MASK(a2),a3
+ add.w d2,a3
+ rept 8
+ move.l (a0)+,d1		; the keep mask
+ move.l (a0)+,d0		; the plane bytes
+ movep.l d0,REPTN*STRIP_WORDS*8(a1)
+ not.b d1
+ move.b d1,REPTN*STRIP_WORDS*2(a3)
+ endr
+.empty:
+ addq.w #1,d3
+ cmp.w #30,d3
+ blo .cell
+ lea fg_rows,a0
+ move.b d4,(a0,d6.w)
+ move.b d5,32(a0,d6.w)
  rts
 
 ; d6 = the cell: fg_ptr[cell] = its baked character or 0 (blank, or outside the window).  Keeps d6.
 fg_cell:
+ move.w d6,d0			; (its row's strip is made again)
+ and.w #31,d0
+ lea fg_row_dirty,a0
+ st (a0,d0.w)
  move.w d6,d4
  add.w d4,d4
  add.w d4,d4
@@ -1675,22 +1943,28 @@ cur_bg: ds.b 1
 fg_list_end: ds.l 1
 fg_raw: ds.b 2048
 fg_ptr: ds.l 1024
-fg_offsets: ds.l 1024
-fg_list: ds.l 2*28*32
 fg_rows: ds.b 64
+fg_row_dirty: ds.b 32
+fg_strips: ds.b 32*STRIP_ROW
 ring_valid: ds.b 4
 ring_bg: ds.b 4
 ring_top: ds.w 3
 ring_S: ds.w 3
-ring_sy: ds.w 3
+ring_hw: ds.w 3
+ring_soft: ds.w 3
 ring_off2: ds.w 1
 ring_addr: ds.l 1
 cur_S: ds.w 1
 cur_sy: ds.w 1
+cur_hw: ds.w 1
+cur_soft: ds.w 1
+cur_wx: ds.w 1
+old_hw: ds.w 1
+new_S: ds.w 1
+strip_x0: ds.w 1
+strip_x1: ds.w 1
 cur_top: ds.w 1
 scroll_d: ds.w 1
-shift_d: ds.w 1
-band_rows: ds.b 1
 strip_mode: ds.b 1
  even
 band_last: ds.w 1
@@ -1712,6 +1986,7 @@ dest_y: ds.w 1
 tile_ctrl: ds.w 1
 spr_ptr: ds.l 1
 spr_shape_n: ds.w 1
+spr_sx: ds.w 1
 spr_pcode: ds.w 1
 draw_idx: ds.w 1
 shown_idx: ds.w 1
@@ -1719,6 +1994,8 @@ prev_idx: ds.w 1
 ring_base: ds.l 3
 draw_base: ds.l 1
 flip_addr: ds.l 1
+flip_fine: ds.b 1
+ even
 shown_pal: ds.w 16
 tile_pool: ds.b TILE_POOL
 spr_pool: ds.b SPR_POOL

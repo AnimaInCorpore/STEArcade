@@ -293,3 +293,9 @@ Also seen in Black Tiger (2026-10-09):
   draw the rest with the same Blitter calls a row at a time, end masks from the stored opaque rows.
 * **Cheats that patch code** (MAME's start round of Gun.Smoke changes an instruction's operand) need the same patch in
   the translated instruction for a lock-step test; setting the value in RAM after a tick is too late.
+* **Horizontal hardware scroll next to the vertical virtual screens** (Gun.Smoke's D802): keep the tiles at fixed buffer
+  x and move the Shifter's window (video address + `$ffff8265`, line width 4 words less with a fine scroll).  Then the
+  window's edges are anywhere in a word: side bar clears need end masks (plane by plane), and text cannot use `movep`
+  at the screen (8-pixel steps): compose a strip per text row and blit it shifted (mask pass, plane pass).  A line pair
+  that comes into the band must get black side bars: it may hold what an earlier window position drew there (a test
+  with 25 spaced frames passed, one with 40 found it).
