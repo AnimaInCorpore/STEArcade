@@ -17,6 +17,7 @@ CELLS = COLS*ROWS
 WIN_COLS = 17                    ; the cells the 256-pixel view can touch
 WIN_ROWS = 15                    ; and the 224 lines
 TILE_ENTRIES = 512
+TILE_SETS = TILE_ENTRIES/4
 SPRITE_ENTRIES = 256
 BLT_SRC_ADDR = $ffff8a24
 BLT_DST_ADDR = $ffff8a32
@@ -291,10 +292,97 @@ penmap_update:
     tst.b (a0)+
     beq.s .unchanged
     st epoch_changed
-    addq.b #1,(a1)
-    bne.s .unchanged
-    ; Epoch wrap must not resurrect stale cache entries.
-    movem.l d0/a0-a1,-(sp)
+    bsr epoch_lookup
+.unchanged:
+    addq.l #1,a1
+    dbf d0,.epochs
+    rts
+
+; epoch_lookup: colour 63-d0 has a new pen mapping -> its epoch (a1): the number it had when the colour last
+; showed the same mapping (its last PEN_HISTORY mappings: flashes and cycles find their baked tiles again),
+; else a new one.  Keeps all registers.
+PEN_LOG = 3
+PEN_HISTORY = 1<<PEN_LOG
+epoch_lookup:
+    movem.l d0-d3/a0-a4,-(sp)
+    moveq #63,d1
+    sub.w d0,d1                  ; the colour
+    lea pen_map,a2
+    move.w d1,d2
+    lsl.w #4,d2
+    add.w d2,a2                  ; its 16 pens now
+    lea pen_hist,a3
+    move.w d1,d2
+    lsl.w #4,d2
+    lsl.w #PEN_LOG,d2
+    add.w d2,a3                  ; its mappings (16 bytes each)
+    lea pen_hist_id,a4
+    move.w d1,d2
+    lsl.w #1+PEN_LOG,d2
+    add.w d2,a4                  ; their numbers ($100 | epoch, 0: empty)
+    moveq #PEN_HISTORY-1,d3
+.find:
+    move.w (a4)+,d2
+    beq.s .next
+    move.l (a3),d0
+    cmp.l (a2),d0
+    bne.s .next
+    move.l 4(a3),d0
+    cmp.l 4(a2),d0
+    bne.s .next
+    move.l 8(a3),d0
+    cmp.l 8(a2),d0
+    bne.s .next
+    move.l 12(a3),d0
+    cmp.l 12(a2),d0
+    bne.s .next
+    move.b d2,(a1)               ; seen before: its tiles may still be in the caches
+    bra.s .done
+.next:
+    lea 16(a3),a3
+    dbf d3,.find
+    lea pen_next,a0              ; a new mapping: a new number
+    move.b (a0,d1.w),d2
+    addq.b #1,d2
+    move.b d2,(a0,d1.w)
+    move.b d2,(a1)
+    bne.s .store
+    bsr epoch_wrap
+.store:
+    lea pen_slot,a0
+    moveq #0,d3
+    move.b (a0,d1.w),d3
+    addq.b #1,d3
+    and.b #PEN_HISTORY-1,d3
+    move.b d3,(a0,d1.w)
+    lea pen_hist,a3
+    move.w d1,d0
+    lsl.w #4,d0
+    lsl.w #PEN_LOG,d0
+    add.w d0,a3
+    move.w d3,d0
+    lsl.w #4,d0
+    add.w d0,a3
+    move.l (a2)+,(a3)+
+    move.l (a2)+,(a3)+
+    move.l (a2)+,(a3)+
+    move.l (a2)+,(a3)+
+    lea pen_hist_id,a4
+    move.w d1,d0
+    lsl.w #1+PEN_LOG,d0
+    add.w d0,a4
+    add.w d3,d3
+    and.w #$ff,d2
+    or.w #$100,d2
+    move.w d2,(a4,d3.w)
+.done:
+    movem.l (sp)+,d0-d3/a0-a4
+    rts
+
+; epoch_wrap: a colour's numbers start again: the caches and every colour's mapping history are forgotten
+; (a number must not find tiles or a mapping from before).
+epoch_wrap:
+    movem.l d0-d1/a0,-(sp)
     lea clean_tags,a0
     move.w #CELLS-1,d0
     moveq #-1,d1
@@ -306,10 +394,12 @@ penmap_update:
 .clear:
     clr.l (a0)+
     dbf d0,.clear
-    movem.l (sp)+,d0/a0-a1
-.unchanged:
-    addq.l #1,a1
-    dbf d0,.epochs
+    lea pen_hist_id,a0
+    move #64*PEN_HISTORY/2-1,d0
+.forget:
+    clr.l (a0)+
+    dbf d0,.forget
+    movem.l (sp)+,d0-d1/a0
     rts
 
 ; cell_key: physical cell d4 = column, d5 = row -> d2 cache key (0: no background),
@@ -808,15 +898,42 @@ strip_mask:
 tile_get:
     movem.l d0-d7/a0-a6,-(sp)
     move.l d2,cache_key
-    move.w d1,d3                 ; (512 entries: the code with the colour)
-    lsl.w #5,d3
+    move.w d1,d3                 ; (TILE_SETS sets of 4: the code with the colour and its palette epoch, so that
+    lsl.w #5,d3                  ; the versions of a tile for a colour's recent mappings stay apart)
     eor.w d0,d3
-    and.w #TILE_ENTRIES-1,d3
+    move.l d2,d4
+    rol.l #8,d4
+    and.w #$ff,d4
+    mulu #37,d4
+    eor.w d4,d3
+    and.w #TILE_SETS-1,d3
+    lsl.w #2,d3                  ; the set's first entry
     move.w d3,d4
     lsl.w #2,d4
     lea tile_cache_tags,a0
-    cmp.l (a0,d4.w),d2
-    beq .hit
+    add.w d4,a0
+    cmp.l (a0)+,d2
+    beq .way
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .way
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .way
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .way
+    and.w #-4,d3                 ; a miss: the set's ways in turn
+    move.w d3,d4
+    lsr.w #2,d4
+    lea tile_victim,a0
+    moveq #3,d5
+    and.b (a0,d4.w),d5
+    addq.b #1,(a0,d4.w)
+    add.w d5,d3
+    move.w d3,d4
+    lsl.w #2,d4
+    lea tile_cache_tags,a0
     move.l d2,(a0,d4.w)
     mulu #192,d3
     lea tile_cache,a1
@@ -848,6 +965,7 @@ tile_get:
     move.w #16,bake_rows
     bsr bake_pixels
     bra.s .done
+.way:
 .hit:
     mulu #192,d3
     lea tile_cache,a1
@@ -1902,6 +2020,10 @@ bake_byte: ds.b 1
 bake_half: ds.b 1
     even
 palette_epoch: ds.b 64
+pen_next: ds.b 64                 ; per colour: the last epoch number given
+pen_slot: ds.b 64                 ; per colour: the history slot written last
+pen_hist_id: ds.w 64*PEN_HISTORY
+pen_hist: ds.b 64*PEN_HISTORY*16
 palette_dirty: ds.b 64
 bake_lut: ds.l 48
 bake_calls: ds.l 1
@@ -1971,6 +2093,8 @@ row_y: ds.w 1
 text_row: ds.w 1
 pal_roll: ds.w 1
 tile_cache_tags: ds.l TILE_ENTRIES
+tile_victim: ds.b TILE_SETS
+    even
 sprite_cache_tags: ds.l SPRITE_ENTRIES
 char_cache_tags: ds.l 128
 tile_cache: ds.b TILE_ENTRIES*192
