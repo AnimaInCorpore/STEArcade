@@ -13,7 +13,7 @@ Main CPU (mode "signed", a6 = the main ROM at Z80 0, the RAM at 8000-FFFF below 
 Sub CPU (mode "long"): the same shared RAM (g_ram) through the absolute symbol.
 Coverage from ref/cover.py (build/bublbobl/bb_cover_*.pkl).
 """
-import argparse, glob, os, pickle, sys
+import argparse, glob, os, pickle, re, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import z80x, z80dis, discover
 from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
@@ -177,12 +177,26 @@ class BBEmitter(Emitter):
     def x_cpi(self, ins): self.block_win(super().x_cpi, ins)
     def x_cpir(self, ins): self.block_win(super().x_cpir, ins)
 
+    storing = False
+
+    def write8(self, op, src_ea):             # (z80x's write8 takes its address from read8: a store is not guarded)
+        self.storing = True
+        try:
+            return super().write8(op, src_ea)
+        finally:
+            self.storing = False
+
     def read8(self, op, io_read=True):
         pre, ea = super().read8(op, io_read)
-        if op[0] == "ind" and self.cur is not None and self.cur.pc in self.window_sites and ea.startswith("(a6,"):
-            reg = ea[len("(a6,"):-1]                 # e.g. d3.w
-            pre = pre + self.win_check(reg.split(".")[0])
-            ea = "(aW,%s)" % reg
+        if op[0] == "ind" and not self.storing and self.cur is not None and self.cur.pc in self.window_sites:
+            m = re.fullmatch(r"(-?\d+)?\(a6,(d\d|a2)\.w\)", ea)     # (hl) / (de) / (bc), (ix+d) and (iy+d) with z80x.FAST
+            if m:
+                reg = m.group(2)
+                if reg == "a2":                 # (IY: the low word of a2; a cmp.w on a2 would compare the whole long)
+                    pre = pre + ["move.w a2,d5"]
+                    reg = "d5"
+                pre = pre + self.win_check(reg)
+                ea = "%s(aW,%s.w)" % (m.group(1) or "", m.group(2))
         return pre, ea
 
     def emit_ins(self, pc, live_out_override=None, with_label=True):
