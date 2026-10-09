@@ -23,7 +23,7 @@ def main():
     frames = int(sys.argv[2]) if len(sys.argv)>2 else 20000
     rng = random.Random(seed)
     m = Game1943()
-    pcs, reads, writes, twrites = set(), set(), set(), set()
+    pcs, reads, writes, twrites, wdata = set(), set(), set(), set(), set()
     site = [(-1, 0)]
     old_step, old_read, old_write = m.cpu.step, m.rd8, m.wr8
     def step():
@@ -32,7 +32,10 @@ def main():
         pcs.add(site[0])
         return old_step()
     def read(addr):
-        if 0x8000 <= addr < 0xc000: reads.add(site[0])
+        if 0x8000 <= addr < 0xc000:
+            reads.add(site[0])
+            if not 0 <= addr - site[0][1] < 4:  # (not the instruction's own bytes: a data read of the window)
+                wdata.add(site[0])
         return old_read(addr)
     def write(addr, value):
         if addr in (0xc800,0xc804,0xc806,0xc807,0xd806): writes.add((*site[0],addr))
@@ -58,7 +61,7 @@ def main():
         if frame%500 == 0: print(f'frame {frame}: {len(pcs)} bank/PC pairs',flush=True)
     out = build_dir('1943') / f'cover{seed}.pkl'
     with out.open('wb') as f:
-        pickle.dump(dict(pcs=pcs,wread=reads,writes=writes,twrites=twrites,seed=seed,frames=frames,set=m.set_name),f)
+        pickle.dump(dict(pcs=pcs,wread=reads,wdata=wdata,writes=writes,twrites=twrites,seed=seed,frames=frames,set=m.set_name),f)
     print(out)
 
 

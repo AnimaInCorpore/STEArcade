@@ -211,7 +211,7 @@ def skip_returns(rom, code):
 def generate(extra_roots=()):
     rom = image()
     require_coverage('1943', [f'cover{s}.pkl' for s in (1, 2, 3)])
-    pcs, wread, twrites = set(), set(), set()
+    pcs, wread, twrites, wdata = set(), set(), set(), set()
     for path in BUILD.glob('cover*.pkl'):
         with path.open('rb') as f:
             d = pickle.load(f)
@@ -221,6 +221,8 @@ def generate(extra_roots=()):
             pcs.add(virt(pc, bank) if bank >= 0 else pc)
         for bank, pc in d.get('wread', ()):
             wread.add(virt(pc, bank) if bank >= 0 else pc)
+        for bank, pc in d.get('wdata', ()):
+            wdata.add(virt(pc, bank) if bank >= 0 else pc)
         for bank, pc in d.get('twrites', ()):
             twrites.add(virt(pc, bank) if bank >= 0 else pc)
     roots = {0, 0x38, 0x66, IDLE, *extra_roots}
@@ -243,8 +245,12 @@ def generate(extra_roots=()):
                                    (0xc807,0xc807,"g_mcu_w",None),
                                    (0xd806,0xd806,"g_layer_w",None)],
                       rst28_tables=False, bit_s=True, **z80x.FAST)
-    # Every indirect read is guarded: coverage must not decide memory semantics.
-    sites = {pc for pc, ins in code.items() if any(o[0]=='ind' for o in ins.ops) or ins.mn in ('ldir','lddr','ldi','ldd','cpi','cpir')}
+    # The indirect reads that may read the banked window get its guard: the block instructions, every site the coverage
+    # saw reading the window (data, not its own bytes) and every site it never ran.  A site it ran only with other
+    # addresses reads the block directly (a miss would show in logic_test.py: the reference reads the bank).
+    blocks = ('ldir', 'lddr', 'ldi', 'ldd', 'cpi', 'cpir')
+    sites = {pc for pc, ins in code.items() if ins.mn in blocks or
+             any(o[0] == 'ind' for o in ins.ops) and (pc in wdata or pc not in pcs)}
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
@@ -270,6 +276,7 @@ def generate(extra_roots=()):
         out += ['\tdc.w $ffff']
     out += ['g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
+              'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
     out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_window_dispatch{b}' if b in banks else 'g_invalid_dispatch' for b in range(8)),
