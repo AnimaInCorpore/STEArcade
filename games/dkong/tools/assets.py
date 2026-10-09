@@ -227,6 +227,18 @@ def build():
     lines.append("tile_mark_bit:\t\t; tile -> bit of its cell in that byte")
     for i in range(0, 1024, 16):
         lines.append("\tdc.b " + ",".join(str(x) for x in mark_bit[i:i + 16]))
+    # a palette bank change draws only the tiles that look different in the new bank: the pens a tile code uses
+    # (bit 0-2 = pen 1-3) against the pens whose palette index the change moves, per colour code
+    lines.append("dk_tile_pens:\t\t; tile code -> pens it uses (bit 0-2 = pen 1-3)")
+    pens = [sum(1 << (p - 1) for p in (1, 2, 3) if (gfx.tiles[code] == p).any()) for code in range(256)]
+    for i in range(0, 256, 16):
+        lines.append("\tdc.b " + ",".join(str(x) for x in pens[i:i + 16]))
+    lines.append("dk_bank_change:\t\t; (old bank * 4 + new bank) * 16 + colour code -> pens whose palette index changes")
+    for old in range(4):
+        for new in range(4):
+            lines.append("\tdc.b " + ",".join(str(sum(1 << (p - 1) for p in (1, 2, 3)
+                                                      if penmap[(old * 16 + c) * 4 + p] != penmap[(new * 16 + c) * 4 + p]))
+                                              for c in range(16)))
     lines.append("\tcnop 0,2")
     lines.append("tile_off:")
     for i in range(0, 1024, 8):

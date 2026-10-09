@@ -270,9 +270,11 @@ reuse and variable-width blits where they can be applied without new colour copi
 
 The 1 KB tile map is compared with a shadow every frame (the 224 visible longs, eight
 per turn); changed tiles go into the background screen at once and into a queue for each
-draw screen.  A palette bank change redraws everything (three times 1024 tiles, about ten
-frames); the arcade does that at level starts and in the title screen's colour wipe, where
-the game shows a still picture anyway.
+draw screen.  A palette bank change (level starts, the title wipe, the title logo's colour
+cycle: 48 changes in 96 frames) draws only the visible tiles that look different in the new
+bank: `dk_tile_pens` (the pens a tile code uses) against `dk_bank_change` (per old and new
+bank and colour code, the pens whose palette index moves), both from `assets.py`.  In the
+logo cycle that is about 160 of 896 tiles; the first frame draws all of them.
 
 ## Border removal
 
@@ -291,6 +293,9 @@ not removed) for none.
   on; the program starts about 300 VBLs later.
 * `--dumpat N`: at frame N write Z80 memory `$6000-$7FFF` to `DUMP.BIN` and freeze the game;
   the screen can then be compared with `games/dkong/tools/machine.py render_raw()` of the same memory.
+  `--dumpbank N`: the same at the Nth palette bank change (frame numbers of two builds show
+  different game phases; 20 and 21 are in the title logo's colour cycle).  With TIMES, give
+  `--frames` more than the run reaches: the frame count goes on while the game stands still.
 * `-D TIMES=1 --debug --frames N`: MFP Timer D (81 us ticks) is started at every VBL and
   its count recorded when the NMI and when the drawing end, with the skipped-VBL count
   and the palette bank; `TIMES.BIN` is written when the program quits after N frames
@@ -305,6 +310,14 @@ Measured on 2026-10-07 (2400 frames of attract mode and demo play, 50 Hz frame =
 play frames 50-80%, the busiest play frames 96-119% (6 of 2400), 0.5% of the frames run
 into the next VBL; before this round the average was 75% and 9% of the VBLs were skipped.
 Level starts and the title wipe redraw every tile and take about ten frames each.
+
+Measured on 2026-10-09 (4096 frames, coverage of `port.py cover dkong`, after the
+translator speed-up and the selective bank redraw): average 35% (Z80 NMI 9%, drawing 26%),
+2.6% of the frames run into the next VBL.  The title logo's colour cycle (96 frames,
+1.6 s on the arcade) lost 618 VBLs when every bank change redrew all tiles, now 148 (2 at
+a change, 1 the frame after, for the other draw screen; the game's own code takes 32% of
+a frame there).  The rest are the start, the title wipe (0 -> 2: nearly every tile) and
+single level starts.  The game runs one NMI per 50 Hz VBL: 5/6 of the arcade's speed.
 
 
 ## Whole-object drawing (all ports)

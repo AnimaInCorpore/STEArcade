@@ -470,7 +470,7 @@ vbl_render:
 	move.b	frame_nmi_end,(a0)+
 	move.b	$fffffa25.w,(a0)+
 	move.b	cnt_skip+1,(a0)+
-	move.b	old_bank+1,(a0)+	; palette bank (a change redraws every tile)
+	move.b	old_bank+1,(a0)+	; palette bank (a change redraws the tiles it recolours)
 	cmp.l	#frame_times_end,a0
 	bhs.s	.times_full
 	move.l	a0,frame_times_ptr
@@ -478,7 +478,13 @@ vbl_render:
 	endc
 
 	ifd DUMPAT
+	ifd DUMPBANK
+	tst.b	freeze_flag
+	bne.s	.no_dump
+	cmp	#DUMPBANK,bank_changes
+	else
 	cmp.l	#DUMPAT,frame_counter
+	endc
 	bne.s	.no_dump
 	bsr	dump_state
 	st	freeze_flag

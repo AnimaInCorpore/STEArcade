@@ -46,4 +46,4 @@ worst = sorted(range(n), key=lambda i: -ticks[i])[:12]
 print("longest frames (index: total = NMI + drawing, percent; bank):")
 print("  " + ", ".join("%d: %.0f = %.0f + %.0f; %d" % (i, pct(ticks[i]), pct(nmi[i]), pct(ticks[i] - nmi[i]), banks[i]) for i in worst))
 changes = sum(1 for i in range(1, n) if banks[i] != banks[i - 1])
-print("palette bank changes (every tile drawn again): %d" % changes)
+print("palette bank changes (the tiles they recolour drawn again): %d" % changes)

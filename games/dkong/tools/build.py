@@ -17,6 +17,7 @@ def main():
     ap.add_argument("--nosprites", action="store_true")
     ap.add_argument("-D", dest="defines", action="append", default=[], help="extra assembler define NAME=VALUE")
     ap.add_argument("--dumpat", type=int, default=0)
+    ap.add_argument("--dumpbank", type=int, default=0, help="dump and freeze at the Nth palette bank change instead")
     ap.add_argument("--out", default=str(run_dir("dkong") / "DKONG.PRG"))
     a = ap.parse_args()
     text, rep, em = gen.generate()
@@ -29,6 +30,7 @@ def main():
     if a.debug: defs.append("DEBUG=1")
     if a.sim: defs.append("SIM=1")
     if a.dumpat: defs.append("DUMPAT=%d" % a.dumpat)
+    if a.dumpbank: defs += ["DUMPAT=-1", "DUMPBANK=%d" % a.dumpbank]
     if a.nosprites: defs.append("NOSPRITES=1")
     assemble_link("dkong", "dkong.s", "dkong", a.out, defs)
     for f in ROMS:

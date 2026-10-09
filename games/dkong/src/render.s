@@ -42,13 +42,30 @@ render_frame:
 	add	d1,d1
 	or	d1,d0
 
-	cmp	old_bank,d0
+	move	old_bank,d1
+	cmp	d1,d0
 	beq.s	.same_bank
 
 	move	d0,old_bank
-	lsl	#4,d0
-	move	d0,bank16
-	st	force_scan
+	move	d0,d2
+	lsl	#4,d2
+	move	d2,bank16
+	tst	d1
+	bpl.s	.change
+	st	force_scan		; the first frame: every tile
+	bra.s	.same_bank
+
+.change:
+	lsl	#2,d1			; the pens this change moves, per colour code
+	add	d0,d1
+	lsl	#4,d1
+	lea	dk_bank_change,a0
+	add	d1,a0
+	move.l	a0,bank_mask
+	st	bank_scan
+	ifd DUMPBANK
+	addq	#1,bank_changes
+	endc
 
 .same_bank:
 	ifnd NOSPRITES
@@ -91,7 +108,9 @@ scan_tiles:
 	lea	tile_off,a2
 
 	tst.b	force_scan
-	bne.s	.forced
+	bne	.forced
+	tst.b	bank_scan
+	bne	.bank_scan
 
 	; The tiles of the 28 visible rows ($7440 - $77BF), eight longs per turn.
 
@@ -117,7 +136,7 @@ scan_tiles:
 .c7:	cmpm.l	(a0)+,(a1)+
 	bne.s	.diff7
 .c8:	dbf	d7,.scan
-	bra.s	.finished
+	bra	.finished
 
 .diff0:	bsr.s	.diff
 	bra.s	.c1
@@ -151,7 +170,7 @@ scan_tiles:
 	cmp.b	(a1),d1
 	beq.s	.same
 	move.b	d1,(a1)
-	bsr.s	.queue
+	bsr	.queue
 
 .same:
 	addq.l	#1,a1
@@ -159,15 +178,59 @@ scan_tiles:
 	dbf	d3,.byte
 	rts
 
+; A palette bank change: the visible tiles whose code changed, or that use a pen the
+; change gives another palette index (the others look the same in both banks).
+
+.bank_scan:
+	clr.b	bank_scan
+	move.l	a6,-(sp)
+	lea	$40(a0),a0
+	lea	$40(a1),a1
+	lea	tile_cc+$40,a2
+	lea	dk_tile_pens,a3
+	move.l	bank_mask,a6
+	moveq	#$40,d0
+	moveq	#0,d1
+	moveq	#0,d2
+	move	#224*4-1,d7
+
+.bank_one:
+	move.b	(a0)+,d1
+	move.b	(a2)+,d2		; colour code
+	cmp.b	(a1),d1
+	bne.s	.bank_code
+	move.b	(a6,d2.w),d2
+	and.b	(a3,d1.w),d2
+	beq.s	.bank_next
+	bra.s	.bank_queue
+
+.bank_code:
+	move.b	d1,(a1)
+
+.bank_queue:
+	movem.l	a2/a3,-(sp)
+	lea	tile_off,a2
+	move.l	bg_address,a3
+	bsr	.queue
+	movem.l	(sp)+,a2/a3
+
+.bank_next:
+	addq.l	#1,a1
+	addq	#1,d0
+	dbf	d7,.bank_one
+	move.l	(sp)+,a6
+	bra	.finished
+
 .forced:
 	clr.b	force_scan
+	clr.b	bank_scan
 	moveq	#0,d0
 	move	#1023,d3
 
 .force_one:
 	move.b	(a0)+,d1
 	move.b	d1,(a1)+
-	bsr.s	.queue
+	bsr	.queue
 	addq	#1,d0
 	dbf	d3,.force_one
 
@@ -301,6 +364,11 @@ list_count:	ds.w	2
 old_bank:	ds.w	1
 bank16:		ds.w	1
 force_scan:	ds.b	1
+bank_scan:	ds.b	1
 	even
+bank_mask:	ds.l	1		; dk_bank_change row of the last change
+	ifd DUMPBANK
+bank_changes:	ds.w	1
+	endc
 dirty_lists:	ds.w	2048*2
 	section text,code
