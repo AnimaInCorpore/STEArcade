@@ -99,20 +99,30 @@ gets past round 1's boss.
 * **Baking**: tiles, sprites and characters are kept as pixel-value bit planes; a miss
   of the hashed cache makes the 16 pen masks of each row and a generated routine per
   colour bank ORs them into the four STE planes. One pool per kind.
-* **Timers**: `wait_borders` also keeps HOG blits away from Timer A's palette switches
-  (the picture's first lines were black when the palette came on late) and from the last
-  lines before the VBL: after the palette off, Timer A runs once more (`VBL_SOON_DATA`)
-  and marks them. A blit across the VBL delays the top border routine, the border stays
-  closed and the picture drops by 29 lines (2 of 14 Hatari screenshots of the round
-  posters before; a DEBUG build counts the VBLs that found the mark: 5999 of 6001). Text
-  damage is restored in 2-line bursts.
+* **Timers and HOG blits**: a HOG pass holds the CPU and its interrupts. Across the VBL or
+  near Timer A's top border event it made the border stay closed (the picture dropped by
+  29 lines for a frame), near a palette switch the palette came late. As in Black Tiger
+  and 1943 (`wait_heavy`), a pass starts whole only in the visible area: after the
+  palette is on and at least 10 lines before the bottom border's Timer B event. In the
+  rest of the frame (the lower border, the VBL, the top border: about a third of it)
+  `blit_go` runs the pass in pieces of at most 16 words instead of waiting (the Blitter
+  keeps its addresses, a piece is under half a line, the CPU takes its interrupts
+  between pieces), each after `wait_light`: not in the last 2-3 lines before a timer
+  event, nothing between the top border and the palette on. Sprite rows are short passes
+  themselves. The wait for the visible area alone cost 12% of the time (26 frames a
+  second); the pieces cost nothing measurable. `-D PIECES=1` makes the simulator build run
+  every pass in pieces, so `render_test.py` checks them. Two timing details: the top
+  border routine keeps its instruction timing (`ta_pad`: 20 cycles less made the palette
+  come on in the line above the picture), and the VBL writes the video counter too (the
+  STE loads the base into it before the VBL: without it a frame showed the previous
+  buffer's address under the new fine scroll, 3 pixels off, as Black Tiger found).
 
 Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
 
 ## Speed (2026-10-09)
 
 `tools/bench.ps1` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
-included): 53.4 game ticks a second (90% of the arcade's 59.6) and 29.5 drawn frames a
+included): 54.0 game ticks a second (91% of the arcade's 59.6) and 27.8 drawn frames a
 second. `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
 84-380k cycles (median 89k in round 1, 251k in round 3), a frame of a D802 slide 238k, a
 full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.8M).
@@ -134,7 +144,8 @@ full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.
   through the D802 slides of rounds 1 and 7 (the window at every pixel offset 0-48).
 * Hatari (F030Arcade build, STE, 4 MB, TOS 2.06): attract mode, coin, start, the round
   poster with its sideways slide (screenshots in the middle of it: the fine scroll), play;
-  27 screenshots without colour in the side bars or a dropped picture.
+  57 screenshots (6 in the middle of the slide) without a dropped or shifted picture,
+  colour in the side bars or in the line above the picture.
 
 Not done: sound, the flip screen (the DIP switch is upright), the service mode. The last
 line of the picture is sometimes black from a varying x on: Timer A's palette off comes

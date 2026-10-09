@@ -34,5 +34,11 @@ if (-not (Test-Path "$bench\COUNTERS.BIN")) { "no COUNTERS.BIN"; exit 1 }
 $b = [IO.File]::ReadAllBytes("$bench\COUNTERS.BIN")
 $vbl = $b[0] * 256 + $b[1]; $renders = $b[2] * 256 + $b[3]; $ticks = $b[4] * 256 + $b[5]
 "VBLs $vbl, frames drawn $renders, ticks $ticks"
-if ($b.Length -ge 14) { "near-VBL mark in time at {0} VBLs, missing at {1}" -f ($b[10] * 256 + $b[11]), ($b[12] * 256 + $b[13]) }
+if ($b.Length -ge 18) {
+  $top = [BitConverter]::ToUInt32(@($b[9], $b[8], $b[7], $b[6]), 0); $low = [BitConverter]::ToUInt32(@($b[13], $b[12], $b[11], $b[10]), 0)
+  $near = [BitConverter]::ToUInt32(@($b[17], $b[16], $b[15], $b[14]), 0)
+  $cyc = $top * 52 + $low * 60 + $near * 80
+  "Blitter waits: {0} spins before the palette on, {1} after the bottom border, {2} near it: {3:N0} cycles, {4:N1}% of the time" -f $top, $low, $near, $cyc, ($cyc / ($vbl * 160256) * 100)
+  if ($b.Length -ge 22) { "passes run in pieces (the closed time): {0}" -f [BitConverter]::ToUInt32(@($b[21], $b[20], $b[19], $b[18]), 0) }
+}
 "game ticks {0:N1} /s (arcade 59.6) = {1:N0}% speed;  frames drawn {2:N1} /s" -f ($ticks / $vbl * 50), ($ticks / $vbl * 50 / 59.6 * 100), ($renders / $vbl * 50)

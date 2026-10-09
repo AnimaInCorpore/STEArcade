@@ -121,6 +121,11 @@ vbl_video:
  move.w d1,shown_idx
  move.l flip_addr,d0
  bsr show_address
+ ifnd SIM			; (as Black Tiger: the STE loads the base into the video counter before the VBL, so the
+ move.b flip_addr+1,$ffff8205.w	; base alone would show the frame one VBL later, under the fine scroll written now)
+ move.b flip_addr+2,$ffff8207.w
+ move.b flip_addr+3,$ffff8209.w
+ endc
  move.b flip_fine,d0		; the fine scroll; the Shifter then reads a chunk more a line: the line width 4 words less
  move.b d0,$ffff8265.w
  move.b #48,d1
@@ -564,10 +569,9 @@ clear_span:
  move.w d3,d0
 .n:
  sub.w d0,d3
- wait_borders
  move.l a0,BLT_DST_ADDR.w
  move.w d0,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  ext.l d0
  lsl.l #8,d0
  add.l d0,a0
@@ -797,11 +801,10 @@ part_blit:
  lea (a3,d0.w),a4
  moveq #3,d3
 .plane:
- wait_borders
  move.l a2,BLT_SRC_ADDR.w
  move.l a4,BLT_DST_ADDR.w
  move.w #32,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  lea 128(a2),a2
  addq.l #2,a4
  dbf d3,.plane
@@ -830,12 +833,12 @@ draw_tile:
  move.w #$0203,BLT_HOP_OP.w
  bsr destination
  moveq #3,d3
+ move.b tile_ctrl+1,BLT_SKEW.w
 .plane:
- wait_borders
  move.l a1,BLT_SRC_ADDR.w
  move.l d2,BLT_DST_ADDR.w
  move.w #32,BLT_COUNT+2.w
- move.w tile_ctrl,BLT_CTRL.w
+ bsr blit_go
  lea 128(a1),a1
  addq.l #2,d2
  dbf d3,.plane
@@ -881,14 +884,13 @@ restore_damage:
  add.w d4,d4
  neg.w d4
  add.w #STRIDE+2,d4
- wait_borders
  move.w d4,BLT_SRC_YINC.w
  move.w d4,BLT_DST_YINC.w
  move.w d2,BLT_COUNT.w
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
 .test:
  cmp.l a3,a2
  blo.s .rect
@@ -1091,7 +1093,7 @@ sprite_part:
  move.w #-264,d5
  moveq #4,d6
  move.w #$c0,d7
- wait_borders
+ wait_light			; (the routine's rows are short passes: the light guard)
  jsr (a1)
 .out:
  rts
@@ -1138,7 +1140,7 @@ generic_part:
  subq.w #1,d1
 .row:
  adda.w (a0)+,a1
- wait_borders
+ wait_light
  move.l a1,BLT_DST_ADDR.w
  move.w #4,BLT_COUNT+2.w
  move.b #$c0,BLT_CTRL.w
@@ -1172,7 +1174,7 @@ any_part:
  moveq #16,d7
  sub.w d3,d7
  lsl.w d7,d1
- wait_borders
+ wait_light
  move.w d0,BLT_END1.w
  move.w d1,BLT_END3.w
  move.l a1,BLT_SRC_ADDR.w
@@ -1374,11 +1376,10 @@ draw_foreground:
  move.l a4,a0
  moveq #3,d5
 .mask:
- wait_borders
  move.l a1,BLT_SRC_ADDR.w
  move.l a0,BLT_DST_ADDR.w
  move.w #8,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  addq.l #2,a0
  dbf d5,.mask
  move.w #8,BLT_SRC_XINC.w	; the planes: OR
@@ -1394,11 +1395,10 @@ draw_foreground:
  move.l a4,a0
  moveq #3,d5
 .planes:
- wait_borders
  move.l a1,BLT_SRC_ADDR.w
  move.l a0,BLT_DST_ADDR.w
  move.w #8,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ bsr blit_go
  addq.l #2,a1
  addq.l #2,a0
  dbf d5,.planes

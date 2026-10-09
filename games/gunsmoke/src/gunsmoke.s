@@ -15,9 +15,14 @@ FRAMES = 0
 	endc
 
 ; Border removal as in Commando: Timer A in the middle of the scanline before the top border removes the top border,
-; Timer B at the last standard line the bottom one.  A Blitter pass (HOG, at most about 3.5 lines) must not run while
-; one of them or a palette switch of Timer A is due (wait_borders): a late palette switch blacks out the picture's first
-; lines.
+; Timer B at the last standard line the bottom one.  A HOG Blitter pass holds the CPU and its interrupts: started
+; near one of these events, or near the VBL that arms Timer A, it delays it, the border stays closed and the picture
+; jumps (or the first lines stay black when the palette comes on late).  So a pass starts only in the visible area,
+; as in Black Tiger and 1943 (wait_heavy there): after the palette is on (border_a is cleared then) and at least 10
+; lines before the bottom border's Timer B event, never after the bottom border opened (until the next frame's palette
+; on): the palette off, the VBL and the top border lie outside every pass (wait_borders).  A pass that would wait
+; runs in pieces of at most 16 words instead (blit_go, the Blitter keeps its addresses between them), each after
+; wait_light; the sprites' rows are such short passes by themselves.
 
 	ifnd TA_DATA
 TA_DATA = 98
@@ -31,9 +36,6 @@ TA_NOPS = 84
 ; TA3_DATA to the palette off; the numbers of Commando, which has the same picture).
 
 PIC_TOP = 10
-	ifnd VBL_SOON_DATA
-VBL_SOON_DATA = 8			; Timer A counts (/200) from the palette off to the last lines before the VBL
-	endc
 	ifnd TA2_DATA
 TA2_DATA = 28
 	endc
@@ -42,9 +44,6 @@ TA3_DATA = 200
 	endc
 
 arm_border_timers	macro
-	ifd DEBUG
-	move.b	ta_state,ta_at_vbl
-	endc
 	clr.b	$fffffa19.w		; (a Timer A that is still counting would take the new data only at its next underflow)
 	clr.b	$fffffa1b.w
 	move.b	#199+29,$fffffa21.w	; Timer B data
@@ -59,29 +58,59 @@ arm_border_timers	macro
 	ifd SIM
 wait_borders	macro
 	endm
+wait_light	macro
+	endm
 	else
 	ifd NOWAIT
 wait_borders	macro
 	endm
+wait_light	macro
+	endm
 	else
-wait_borders	macro
-.a\@:	tst.b	border_a		; the top border is due
-	bne.s	.w\@
-	cmp.b	#1,ta_state		; the palette goes on (about 9 lines after the top border)
-	beq.s	.w\@
-	cmp.b	#4,ta_state		; the VBL comes (a blit across it delays the top border: the picture drops)
-	beq.s	.w\@
-	cmp.b	#2,ta_state		; the palette goes off within 4 counts of Timer A (/200: about 5 lines)
-	bne.s	.b\@
-	cmp.b	#4,$fffffa1f.w
-	bls.s	.w\@
-.b\@:	cmp.b	#6,$fffffa21.w		; the bottom border within 6 lines
+; wait_light: a short HOG pass (under 16 words: a sprite row, a piece of blit_go; the CPU takes its interrupts
+; between two passes, so an event comes at most that late) keeps away only from the last lines before a timer event:
+; Timer A's top border (/50: 8 counts, 3 lines), its palette off (/200: 2 counts), Timer B's bottom border (2 lines);
+; from the top border to the palette on (9 lines) none starts at all (a pass there made the palette come on a part of
+; a line early in Hatari: pixels in the line above the picture).  The VBL needs no guard: a late VBL starts Timer A by as little later.
+wait_light	macro
+.a\@:	tst.b	border_a
+	beq.s	.b\@
+	cmp.b	#1,ta_state
+	bhi.s	.c\@
+	beq.s	.on\@
+	cmp.b	#8,$fffffa1f.w		; (ta_state 0: the top border)
+	bls.s	.a\@
+	bra.s	.c\@
+.on\@:	bra.s	.a\@			; (from the top border to the palette on: nothing, as in Black Tiger)
+.b\@:	cmp.b	#2,ta_state
+	bne.s	.c\@
+	cmp.b	#2,$fffffa1f.w
+	bls.s	.a\@
+.c\@:	cmp.b	#2,$fffffa21.w
 	bhi.s	.d\@
 	tst.b	border_b
-	beq.s	.d\@
-.w\@:
+	bne.s	.a\@
+.d\@:
+	endm
+wait_borders	macro
+.a\@:	tst.b	border_a		; the palette is not on yet (from the VBL on)
+	bne.s	.top\@
+	tst.b	border_b		; the bottom border is open: wait for the next frame's palette on
+	beq.s	.low\@
+	cmp.b	#10,$fffffa21.w		; the bottom border within 10 lines
+	bhi.s	.d\@
 	ifd DEBUG
-	addq.l	#1,dbg_wait		; (spins: a loop is 36 cycles)
+	addq.l	#1,dbg_wait_near
+	endc
+	bra.s	.a\@
+.top\@:
+	ifd DEBUG
+	addq.l	#1,dbg_wait_top
+	endc
+	bra.s	.a\@
+.low\@:
+	ifd DEBUG
+	addq.l	#1,dbg_wait_low
 	endc
 	bra.s	.a\@
 .d\@:
@@ -419,14 +448,6 @@ vbl:
 	endc
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
-	ifd DEBUG
-	cmp.b	#4,ta_at_vbl		; (the near-VBL mark came in time / not)
-	bne.s	.late
-	addq.w	#1,dbg_soon
-	bra.s	.counted
-.late:	addq.w	#1,dbg_late
-.counted:
-	endc
 	bsr	vbl_video
 	move.b	in_sys,Z_SYSTEM		; (the program only reads them)
 	move.b	in_p1,Z_SYSTEM+1
@@ -500,8 +521,20 @@ z80_hook:
 	addq.b	#1,render_skips
 	cmp.b	#MAX_SKIP,render_skips
 	bls.s	.check
+	ifnd SIM
+	tst.b	border_a		; (a tick is due and the Blitter may not start now: wait_borders would spin through
+	bne.s	.blocked		; the lower border and the top of the next frame; the tick first, it needs no Blitter)
+	tst.b	border_b
+	bne.s	.render
+.blocked:
+	cmp.b	#2,render_defers
+	bhs.s	.render
+	addq.b	#1,render_defers
+	bra.s	.check
+	endc
 .render:
 	clr.b	render_skips
+	clr.b	render_defers
 	clr.b	frame_dirty
 	bsr	render_frame
 	ifd SIM
@@ -556,7 +589,7 @@ timer_a:
 	nop
 	endr
 	move.b	#2,$ffff820a.w
-	clr.b	border_a
+	clr.b	ta_pad			; (20 cycles where border_a was cleared before: TA2_DATA's palette on is tuned to this)
 	move.b	#1,ta_state		; the next event: the palette on
 	move.b	#TA2_DATA,$fffffa1f.w
 	move.b	#4,$fffffa19.w
@@ -569,19 +602,14 @@ timer_a_later:
 	bne.s	.off
 	movem.l	shown_pal,d0-d7
 	movem.l	d0-d7,$ffff8240.w
+	clr.b	border_a		; (Blitter passes may start now)
 	move.b	#2,ta_state		; the next event: the palette off
 	move.b	#TA3_DATA,$fffffa1f.w
 	move.b	#7,$fffffa19.w
 	bra.s	.out
-.off:	cmp.b	#2,ta_state
-	bne.s	.soon
-	movem.l	black_pal,d0-d7
+.off:	movem.l	black_pal,d0-d7
 	movem.l	d0-d7,$ffff8240.w
-	move.b	#3,ta_state		; the next event: the VBL is near
-	move.b	#VBL_SOON_DATA,$fffffa1f.w
-	move.b	#7,$fffffa19.w
-	bra.s	.out
-.soon:	move.b	#4,ta_state		; (wait_borders starts no blit until the VBL)
+	move.b	#3,ta_state
 .out:	movem.l	(sp)+,d0-d7
 	rte
 
@@ -883,6 +911,73 @@ sim_render_ret:				; render_test.py calls render_frame with this as the return a
 	bra.s	sim_render_ret
 	endc
 
+; Start the Blitter pass set up in its registers (the lines in its Y count, HOG): whole in the visible area, else in
+; pieces of at most 16 words with wait_light before each (the closed time is used, no event comes late).  Keeps all
+; registers.
+blit_go:
+	ifd SIM
+	ifnd PIECES			; (-D PIECES: the simulator runs every pass in pieces, the render tests check them)
+	move.b	#$c0,BLT_CTRL.w
+	rts
+	else
+	movem.l	d0-d2,-(sp)
+	move.w	BLT_COUNT+2.w,d0
+	moveq	#16,d1
+	move.w	BLT_COUNT.w,d2
+	divu	d2,d1
+	tst.w	d1
+	bne.s	.sn
+	moveq	#1,d1
+.sn:	move.w	d1,d2
+	cmp.w	d0,d2
+	bls.s	.sgo
+	move.w	d0,d2
+.sgo:	move.w	d2,BLT_COUNT+2.w
+	move.b	#$c0,BLT_CTRL.w
+	sub.w	d2,d0
+	bne.s	.sn
+	movem.l	(sp)+,d0-d2
+	rts
+	endc
+	else
+	ifd NOWAIT
+	move.b	#$c0,BLT_CTRL.w
+	rts
+	else
+	tst.b	border_a		; (wait_borders' conditions)
+	bne.s	.pieces
+	tst.b	border_b
+	beq.s	.pieces
+	cmp.b	#10,$fffffa21.w
+	bls.s	.pieces
+	move.b	#$c0,BLT_CTRL.w
+	rts
+.pieces:
+	movem.l	d0-d2,-(sp)
+	ifd DEBUG
+	addq.l	#1,dbg_pieced
+	endc
+	move.w	BLT_COUNT+2.w,d0	; the lines
+	moveq	#16,d1			; the lines a piece: 16 words / the words a line, at least 1
+	move.w	BLT_COUNT.w,d2
+	divu	d2,d1
+	tst.w	d1
+	bne.s	.n
+	moveq	#1,d1
+.n:	move.w	d1,d2
+	cmp.w	d0,d2
+	bls.s	.go
+	move.w	d0,d2
+.go:	wait_light
+	move.w	d2,BLT_COUNT+2.w
+	move.b	#$c0,BLT_CTRL.w
+	sub.w	d2,d0
+	bne.s	.n
+	movem.l	(sp)+,d0-d2
+	rts
+	endc
+	endc
+
 ; The Z80 halt: not used by the program (the translator emits the call for a halt in data it took for code).
 
 z80_halt:
@@ -892,17 +987,19 @@ z80_halt:
 	rts
 
 	ifd DEBUG
-; COUNTERS.BIN (words): VBLs, renders, the ticks the Z80 handled (isr_count); (long) Blitter waits; (words) VBLs
-; with the near-VBL mark set in time, VBLs without it
+; COUNTERS.BIN (words): VBLs, renders, the ticks the Z80 handled (isr_count); (longs) wait_borders' spins before the
+; palette on, after the bottom border, near the bottom border (DEBUG: 52 / 60 / 80 cycles a spin); blit_go's passes
+; run in pieces
 
 dbg_counters:
 	lea	dbg_buf,a0
 	move.w	frame_counter+2,(a0)+
 	move.w	dbg_renders,(a0)+
 	move.w	isr_count,(a0)+
-	move.l	dbg_wait,(a0)+
-	move.w	dbg_soon,(a0)+
-	move.w	dbg_late,(a0)+
+	move.l	dbg_wait_top,(a0)+
+	move.l	dbg_wait_low,(a0)+
+	move.l	dbg_wait_near,(a0)+
+	move.l	dbg_pieced,(a0)+
 	clr	-(sp)
 	pea	dbg_name2
 	move	#$3c,-(sp)
@@ -910,7 +1007,7 @@ dbg_counters:
 	addq	#8,sp
 	move	d0,d6
 	pea	dbg_buf
-	move.l	#14,-(sp)
+	move.l	#22,-(sp)
 	move	d6,-(sp)
 	move	#$40,-(sp)
 	trap	#1
@@ -991,6 +1088,8 @@ ta_state:	ds.b	1
 vbl_pending:	ds.b	1		; the arcade's vertical blanks that have come (a counter: the VBL adds, the idle hook takes one)
 vbl_phase:	ds.b	1		; (every 5th VBL adds a second one: 60 ticks a second)
 render_skips:	ds.b	1		; the ticks since the last frame was drawn
+render_defers:	ds.b	1		; drawing put off for a tick in the Blitter's closed time (at most 2 in a row)
+ta_pad:		ds.b	1
 frame_dirty:	ds.b	1		; the tasks of the last tick have run: draw
 frame_ready:	ds.b	1		; a frame is drawn, to be shown at the VBL (its ring + 1)
 g_bank:		ds.b	1
@@ -1008,9 +1107,6 @@ in_p2:		ds.b	1
 	even
 isr_count:	ds.w	1
 dbg_renders:	ds.w	1
-dbg_soon:	ds.w	1
-dbg_late:	ds.w	1
-ta_at_vbl:	ds.b	1
 	even
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
@@ -1020,7 +1116,10 @@ frame_counter:	ds.l	1
 g_winbase:	ds.l	1		; the current ROM bank's copy + $8000
 g_wdispatch:	ds.l	1		; the current bank's dispatch table
 dbg_buf:	ds.l	16
-dbg_wait:	ds.l	1
+dbg_wait_top:	ds.l	1
+dbg_wait_low:	ds.l	1
+dbg_wait_near:	ds.l	1
+dbg_pieced:	ds.l	1
 
 	ds.l	1024
 own_stack_top:

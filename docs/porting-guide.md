@@ -286,8 +286,11 @@ Also seen in Black Tiger (2026-10-09):
 * **HOG blits also delay Timer A's palette switches** (the picture's first lines black when the palette came on late):
   `wait_borders` waits while the palette-on event is pending and just before palette-off; text restores in 2-line bursts.
   **And the VBL itself**: a HOG blit across it delays the VBL handler that arms Timer A, the top border stays closed and
-  the picture drops for a frame (Gun.Smoke's in-place band shift, 144 bursts a frame, made it visible).  Timer A runs once
-  more after the palette off and marks the last lines before the VBL; `wait_borders` starts no blit then.
+  the picture drops for a frame.  Black Tiger's and 1943's `wait_heavy` (a long pass starts only between the palette on
+  and 10 lines before the bottom border) is safe; Gun.Smoke runs a pass that would wait there in pieces of 16 words
+  instead (`blit_go`: the Blitter keeps its addresses; the CPU takes its interrupts between pieces), which keeps HOG and
+  loses no time (waiting had cost 12%).  Changing the top border routine's instructions moves the palette switches
+  (Timer A is restarted at its end): keep its cycle count.
 * **Generated sprite code is large for big sprite sets**: 2008 shapes (x 16 shifts) would take 2.85 MB.  Generate the
   routines and streams for the shapes coverage drew most within a budget (1074 shapes, 96.5% of the draws, 830 KB) and
   draw the rest with the same Blitter calls a row at a time, end masks from the stored opaque rows.
