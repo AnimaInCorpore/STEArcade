@@ -313,19 +313,24 @@ entry_loop:
 	bra	entry_next
 
 .changed:
+	; Phase A left every record of a changed entry without a rectangle: the parts that
+	; exist get the entry and are drawn, the others stay as they are.
 	move.l	entry_ptr,a6
-	move.l	(a6),S_ENTRY(a4)	; all four records get the entry
-	move	4(a6),S_FLAGS(a4)
-	move.l	(a6),SLOT_SIZE+S_ENTRY(a4)
-	move	4(a6),SLOT_SIZE+S_FLAGS(a4)
-	move.l	(a6),2*SLOT_SIZE+S_ENTRY(a4)
-	move	4(a6),2*SLOT_SIZE+S_FLAGS(a4)
-	move.l	(a6),3*SLOT_SIZE+S_ENTRY(a4)
-	move	4(a6),3*SLOT_SIZE+S_FLAGS(a4)
+	moveq	#0,d0			; the parts the size flags give (most entries: one)
+	move.b	4(a6),d0
+	lsr.b	#2,d0
+	and	#3,d0
+	lea	part_masks,a0
+	move.b	(a0,d0.w),part_bits
 	move.l	any_ptr,a0
 	clr.b	(a0)
 	moveq	#3,d7
 .parts_c:
+	btst	d7,part_bits
+	beq.s	.part_none_c
+	move.l	entry_ptr,a6		; (record 0, part 0, always: the entry compared)
+	move.l	(a6),S_ENTRY(a4)
+	move	4(a6),S_FLAGS(a4)
 	move	d7,-(sp)
 	bsr	draw_part
 	move	(sp)+,d7
@@ -351,77 +356,39 @@ entry_next:
 ; Pointers as in the line macros; a6 is free until the lines.
 
 draw_part:
-	moveq	#3,d6
-	sub	d7,d6			; part number
-	move	d6,d5
-	and	#1,d5			; x part
-	lsr	#1,d6			; y part
+	; (entry_loop calls it for the parts the size flags give only)
 	moveq	#0,d2
 	move.b	S_FLAGS(a4),d2		; flags: flip x, flip y, size x, size y
-	move	d2,d0
-	lsr	#2,d0
-	and	#1,d0			; size x
-	cmp	d5,d0
-	blt	.no_part		; (x part 1 only if double width)
-	move	d2,d0
-	lsr	#3,d0
-	and	#1,d0			; size y
-	cmp	d6,d0
-	blt	.no_part
+	moveq	#15,d6
+	and	d2,d6
+	lsl	#2,d6
+	addq	#3,d6
+	sub	d7,d6			; (flags & 15) * 4 + part number
+	lsl	#3,d6
+	lea	ga_part_tab,a6
+	add	d6,a6			; graphics offset, flip y, x / size y / y offsets
 
-	; code of the part: sprite + [[0,1],[2,3]][y ^ (sizey * flipy)][x ^ (sizex * flipx)]
-	move	d2,d0
-	lsr	#3,d0
-	and	#1,d0
-	move	d2,d1
-	lsr	#1,d1
-	and	d0,d1			; sizey & flipy
-	eor	d6,d1			; y index
+	; code of the part: v = (sprite + graphics offset) & $7f, * 2 + flip y
+	moveq	#0,d1
+	move.b	(a4),d1			; code
+	add.b	(a6),d1
+	and	#$7f,d1
 	add	d1,d1
-	move	d2,d0
-	lsr	#2,d0
-	and	#1,d0
-	move	d2,d3
-	and	d0,d3			; sizex & flipx
-	eor	d5,d3
-	add	d3,d1			; gfx offset 0..3
-	moveq	#0,d0
-	move.b	(a4),d0			; code
-	and	#$7f,d0
-	add	d1,d0
-	and	#$7f,d0
-	move	d2,d1
-	and	#2,d1			; flip y -> bit 1
-	lsr	#1,d1
-	add	d0,d0
-	add	d1,d0			; v = code * 2 + flip y
-	move	d0,d1			; d1 = v
+	add.b	1(a6),d1		; d1 = v
 
 	; position: raw sx = x | xhigh << 8 - 40 + 16 * xpart; raw sy = (256 - y + 1 - 16 * sizey) & 255 - 32 + 16 * ypart
-	moveq	#0,d3
-	move.b	2(a4),d3		; x low
-	move.b	S_FLAGS+1(a4),d0	; x high
-	and	#3,d0
-	lsl	#8,d0
-	or	d0,d3
+	moveq	#3,d3
+	and.b	S_FLAGS+1(a4),d3	; x high
+	lsl	#8,d3
+	move.b	2(a4),d3		; | x low
 	sub	#40,d3
-	lsl	#4,d5
-	add	d5,d3			; raw sx = display top line (v0)
-	move	#257,d0
-	moveq	#0,d5
-	move.b	3(a4),d5
-	sub	d5,d0			; 256 - y + 1
-	move	d2,d5
-	lsr	#3,d5
-	and	#1,d5
-	lsl	#4,d5
-	sub	d5,d0			; - 16 * sizey
-	and	#255,d0
-	sub	#32,d0
-	lsl	#4,d6
-	add	d6,d0			; raw sy
+	add	2(a6),d3		; raw sx = display top line (v0)
+	moveq	#1,d0			; (257 - y - 16 * size y) & 255, in the low byte
+	sub.b	3(a4),d0
+	sub.b	4(a6),d0
 	neg	d0
-	add	#208,d0			; u0 = 208 - sy: left display column
+	add	#240,d0
+	sub	6(a6),d0		; u0 = 208 - raw sy: left display column
 	cmp	#-16,d0
 	ble	.no_part
 	cmp	#224,d0
@@ -652,10 +619,18 @@ draw_part:
 	move.l	d0,S_RECT(a4)
 	rts
 
+; per (size y, size x): bit 3 - part of the parts that exist (part 0 top left, 1 right of
+; it with double width, 2 below with double height), tested against the record counter d7
+	section data,data
+part_masks:	dc.b	%1000,%1100,%1010,%1111
+	section text,code
+
 ; ------------------------------------------------------------------------------
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
+part_bits:	ds.b	1
+	even
 slot_state:	ds.b	2*256*SLOT_SIZE
 slot_base:	ds.l	1
 entry_ptr:	ds.l	1

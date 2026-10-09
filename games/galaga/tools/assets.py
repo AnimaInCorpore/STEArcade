@@ -233,6 +233,18 @@ def build():
     for i in range(0, 256, 8):
         lines.append("\tdc.b " + ",".join("%d,%d" % s for s in spans[i:i + 8]))
     lines.append("\tcnop 0,2")
+    # draw_part: per (flags & 15, part) what the flags make of the part, 8 bytes: graphics offset 0-3 of the
+    # 2 x 2 sprite (MAME's [[0,1],[2,3]][y ^ sizey*flipy][x ^ sizex*flipx]), flip y, 16 * x part (word),
+    # 16 * size y, 0, 16 * y part (word)
+    lines.append("ga_part_tab:\t\t; (flags & 15) * 4 + part (0 top left, 1 right, 2 below, 3 diagonal)")
+    for flags in range(16):
+        fx, fy, sx, sy = flags & 1, (flags >> 1) & 1, (flags >> 2) & 1, (flags >> 3) & 1
+        row = []
+        for part in range(4):
+            xp, yp = part & 1, part >> 1
+            off = 2 * (yp ^ (sy & fy)) + (xp ^ (sx & fx))
+            row.append("%d,%d,0,%d,%d,0,0,%d" % (off, fy, 16 * xp, 16 * sy, 16 * yp))
+        lines.append("\tdc.b " + ",".join(row))
     lines.append("ga_chars:\tincbin \"ga_chars.bin\"")
     lines.append("\tcnop 0,2")
     lines.append("ga_spr_masks:\tincbin \"ga_spr_masks.bin\"")

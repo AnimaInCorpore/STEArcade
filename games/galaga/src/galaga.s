@@ -540,6 +540,10 @@ vbl:
 
 	tst.b	in_turn			; a booting CPU's registers are live: no handlers
 	bne	vbl_render
+	ifd FREEZEAT
+	cmp.l	#FREEZEAT,frame_counter	; test: the game stands still from VBL FREEZEAT on,
+	bhs	vbl_render		; the renderer goes on (screens of two builds compared)
+	endc
 
 	; Main CPU IRQ (IM 1: rst $38) with the interrupted registers, if enabled.  Its
 	; register state afterwards is dropped: the handler restores every Z80 register

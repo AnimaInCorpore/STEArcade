@@ -138,6 +138,13 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   redraws every cell.
 - Boot: the main CPU's RAM test is skipped (`--full-selftest` keeps it), the grid screen
   and the handshake wait ($3719 loops, ~200 frames) remain.
+- Sprite path (2026-10-09, Hatari's profiler, VBL 3500-3800, the formation): 242.7k -> 208.0k cycles a render, 81 ->
+  93 renders in the 300 VBLs.  entry_loop calls draw_part only for the parts the size flags give (`part_masks`) and
+  copies the entry only into the records it draws (phase A has already taken the rectangles of a changed entry);
+  draw_part takes the part's graphics offset, flip y and offsets from `ga_part_tab` (assets.py) instead of the bit
+  arithmetic.  Checked with `-D FREEZEAT=N -D NOSTARS=1` (from VBL N the game's interrupts stop, the renderer goes
+  on): both screens against `render_raw()` of the frozen arcade RAM, 0 pixels at N = 2200 and 3600.  N = 5200 (the
+  boss row over "HIGH SCORE") differs by 60-120 pixels before and after the change.
 - Frame rate without the FIFO (Windows): `python port.py build galaga --debug -D RATE=500 --frames 9000
   --out <dir>/GALAGA.PRG`, Hatari `--fast-forward true --run-vbls 9600`: `cnt_vbl` and `cnt_render` (words) every
   500 VBLs in `RATE.BIN`, written at the quit; renders per VBL * 50 = fps.  Measured 2026-10-09 (attract mode and
