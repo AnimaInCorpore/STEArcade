@@ -166,10 +166,11 @@ render_frame:
 .chosen:
  move.w d0,draw_idx
  bsr ring_update
- move.b g_layers,d0
- btst #6,d0
+ btst #6,g_layers
  beq.s .no_sprites1
- st spr_pass
+ bsr sprite_lists
+ lea spr_behind,a0
+ move.l spr_behind_end,a1
  bsr draw_sprites		; (colours 10 and 11: behind the front layer)
 .no_sprites1:
  btst #4,g_layers
@@ -178,7 +179,8 @@ render_frame:
 .no_front:
  btst #6,g_layers
  beq.s .no_sprites2
- sf spr_pass
+ lea spr_front,a0
+ move.l spr_front_end,a1
  bsr draw_sprites
 .no_sprites2:
  tst.b g_control
@@ -542,6 +544,14 @@ draw_front:
  move.w d0,front_y		; the first column's line: 224 - rx, rx = -(fx & 31)
  lsr.w #5,d1
  move.w d1,front_col
+ move.w #2,BLT_SRC_XINC.w	; (the Blitter's constants of the front tiles)
+ move.w #8,BLT_DST_XINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ move.w #$ffff,BLT_END2.w
+ lea BLT_SRC_ADDR.w,a3
+ lea BLT_DST_ADDR.w,a4
+ lea BLT_COUNT+2.w,a5
+ lea BLT_CTRL.w,a6
  moveq #8,d7			; nine columns
 .column:
  cmp.w #-32,front_y
@@ -582,11 +592,43 @@ draw_front:
 .done:
  rts
 
-; a0 = a baked front tile, front_x / front_y = its window position (whole: up to 31 lines beyond the window).
+; a0 = a baked front tile (32 lines of 4 planes x 2 words, then its runs: those drawn a plane at a time, those drawn a
+; line at a time, see tools/assets.py), front_x / front_y = its window position (whole: up to 31 lines beyond the
+; window).  A plane at a time: one Blitter call per plane, Y count = the run's lines; a line at a time: one call per
+; line, Y count = the 4 planes, the source advancing by itself.  An unshifted tile at the window's edge draws only its
+; chunk inside; a shifted one that reaches beside the window is drawn whole and what it drew there cleared.
+; a3-a6 = the Blitter's source, destination, Y count and control registers (draw_front).
+FT_LINE = 4				; (as in tools/assets.py: runs of fewer lines go line by line)
 front_tile:
  movem.l d6-d7/a0,-(sp)
  move.w front_x,d0
- asr.w #4,d0
+ asr.w #4,d0			; the first chunk
+ moveq #15,d5
+ and.w front_x,d5		; shift
+ beq.s .unshifted
+ cmp.w #14,d0			; shifted: 3 chunks
+ bge .out
+ cmp.w #-3,d0
+ ble .out
+ moveq #3,d4
+ moveq #0,d6			; (source offset: both words)
+ bra.s .placed
+.unshifted:
+ moveq #2,d4
+ moveq #0,d6
+ cmp.w #-1,d0
+ blt .out
+ bgt.s .l
+ moveq #1,d4			; chunk -1: its right word only
+ moveq #2,d6
+ moveq #0,d0
+ bra.s .placed
+.l:
+ cmp.w #13,d0
+ blt.s .placed
+ bgt .out
+ moveq #1,d4			; chunk 13: its left word only
+.placed:
  move.w d0,obj_chunk
  lsl.w #3,d0
  move.w front_y,d2
@@ -596,15 +638,9 @@ front_tile:
  add.l ring_addr,d2
  ext.l d0
  add.l d0,d2
- add.l #GAME_X,d2		; d2 = the first chunk of its first line
+ add.l #GAME_X,d2		; d2 = the first drawn chunk of its first line
  move.l d2,obj_addr
- moveq #15,d5
- and.w front_x,d5		; shift
- moveq #2,d4			; chunks
- tst.w d5
- beq.s .w
- moveq #3,d4
-.w:
+ add.w d6,a0			; (the right word: the source 2 bytes on)
  move.w d4,d3
  lsl.w #2,d3			; words a line (damage)
  move.w front_y,d0
@@ -613,141 +649,257 @@ front_tile:
  add.l #16*STRIDE,d2
  add.w #16,d0
  bsr add_damage
- ; the Blitter: one call per run and plane, Y count = the run's lines
- move.w #2,BLT_SRC_XINC.w
- move.w #2,BLT_SRC_YINC.w
- move.w #8,BLT_DST_XINC.w
- move.w #$0203,BLT_HOP_OP.w
- move.w #$ffff,BLT_END2.w
- move.w d4,BLT_COUNT.w		; X count = chunks (one word of each)
+ lea 512(a0),a1
+ sub.w d6,a1			; the runs
+ move.w d4,BLT_COUNT.w		; X count = the chunks (a word of each)
+ tst.w d5
+ bne .general
+ cmp.w #2,d4
+ bne .general
+ ; unshifted, both words: the runs drawn a plane at a time
+ clr.b BLT_SKEW.w
+ move.w #14,BLT_SRC_YINC.w	; (to the plane's next line: 16 - 2)
+ move.w #STRIDE-8,BLT_DST_YINC.w
+ move.l obj_addr,d6
+.prun:
+ move.w (a1)+,d1		; lines
+ beq.s .lines
+ movem.w (a1)+,d0/d2-d4		; source offset, destination offset, masks
+ move.w d3,BLT_END1.w
+ move.w d4,BLT_END3.w
+ lea (a0,d0.w),a2
+ add.l d6,d2
+ rept 4
+ wait_b
+ move.l a2,(a3)
+ move.l d2,(a4)
+ move.w d1,(a5)
+ move.b #$c0,(a6)
+ addq.l #4,a2
+ addq.l #2,d2
+ endr
+ bra.s .prun
+.lines:					; then those drawn a line at a time
+ move.w #2,BLT_SRC_YINC.w	; (to the line's next plane)
+ move.w #-6,BLT_DST_YINC.w
+ moveq #4,d5
+ move.l #STRIDE,d7
+.lrun:
+ move.w (a1)+,d1
+ beq .out
+ movem.w (a1)+,d0/d2-d4
+ move.w d3,BLT_END1.w
+ move.w d4,BLT_END3.w
+ lea (a0,d0.w),a2
+ move.l a2,(a3)			; (the source advances by a line with each call)
+ add.l d6,d2
+ subq.w #1,d1
+ wait_b
+.line:
+ move.l d2,(a4)
+ move.w d5,(a5)
+ move.b #$c0,(a6)
+ add.l d7,d2
+ dbf d1,.line
+ bra.s .lrun
+
+; shifted or one word only: the run's masks cut to the chunks, the Blitter's increments per mode
+.general:
+ moveq #2,d0
+ cmp.w #1,d4
+ bne.s .src
+ moveq #4,d0			; (one word of the two: skip the other)
+.src:
+ move.w d0,line_syinc
+ move.w d4,d0
+ subq.w #1,d0
+ lsl.w #3,d0
+ neg.w d0
+ addq.w #2,d0
+ move.w d0,line_dyinc		; to the next plane of the line: 2 - 8 * (chunks - 1)
  move.w d4,d0
  lsl.w #3,d0
  neg.w d0
  add.w #STRIDE+8,d0
- move.w d0,BLT_DST_YINC.w
+ move.w d0,run_dyinc		; to the next line of a plane: STRIDE - 8 * (chunks - 1)
+ moveq #18,d0
+ sub.w d4,d0
+ sub.w d4,d0
+ move.w d0,run_syinc		; to the next line of a plane: 16 - 2 * words read
  move.b d5,d0
  beq.s .skew
  or.b #NFSR,d0
 .skew:
  move.b d0,BLT_SKEW.w
- lea 512(a0),a1			; the runs
-.run:
+ st line_mode			; (the Blitter's increments are set for neither mode yet)
+ moveq #2,d7			; (two lists)
+.grun:
  move.w (a1)+,d1		; lines
- beq .runs_done
- move.w (a1)+,d0		; first line
+ bne.s .grun1
+ subq.w #1,d7
+ bne.s .grun
+ bra .runs_done
+.grun1:
+ move.w (a1)+,d0		; source offset
+ move.w (a1)+,obj_dst		; destination offset
  move.w (a1)+,d2		; masks
  move.w (a1)+,d3
  tst.w d5
  bne.s .shifted
+ tst.w d6
+ beq.s .left
+ move.w d3,BLT_END1.w		; (the right word alone)
+ bra.s .masked
+.left:
  move.w d2,BLT_END1.w
- move.w d3,BLT_END3.w
- bra.s .planes
+ bra.s .masked
 .shifted:
  swap d2
  move.w d3,d2			; the 32 opaque pixels
  move.l d2,d6
  lsr.l d5,d6			; words 0, 1 of the 48
+ move.w d7,-(sp)
  moveq #16,d7
  sub.w d5,d7
  lsl.w d7,d3			; word 2: the low word << (16 - shift)
+ move.w (sp)+,d7
  move.w d3,BLT_END3.w
  move.w d6,BLT_END2.w
  swap d6
  move.w d6,BLT_END1.w
-.planes:
+ moveq #0,d6
+.masked:
  move.l obj_addr,d2
- move.w d0,d3
- ext.l d3
- lsl.l #8,d3
+ moveq #0,d3
+ move.w obj_dst,d3
  add.l d3,d2			; the run's first line
- lsl.w #2,d0
- lea (a0,d0.w),a2		; the run's first line, plane 0 (4 bytes a line, 128 a plane)
+ lea (a0,d0.w),a2		; its source
+ cmp.w #FT_LINE,d1
+ blt.s .glines
+ tst.w d5
+ bne.s .glines			; (shifted: the source words of a plane line are not followed by the next line's)
+ tst.b line_mode		; a plane at a time
+ beq.s .run_regs
+ sf line_mode
+ move.w run_syinc,BLT_SRC_YINC.w
+ move.w run_dyinc,BLT_DST_YINC.w
+.run_regs:
  moveq #3,d3
 .plane:
  wait_b
- move.l a2,BLT_SRC_ADDR.w
- move.l d2,BLT_DST_ADDR.w
- move.w d1,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
- lea 128(a2),a2
+ move.l a2,(a3)
+ move.l d2,(a4)
+ move.w d1,(a5)
+ move.b #$c0,(a6)
+ addq.l #4,a2
  addq.l #2,d2
  dbf d3,.plane
- bra .run
+ bra .grun
+.glines:
+ tst.b line_mode		; a line at a time
+ bgt.s .line_regs
+ move.b #1,line_mode
+ move.w line_syinc,BLT_SRC_YINC.w
+ move.w line_dyinc,BLT_DST_YINC.w
+.line_regs:
+ move.l a2,(a3)
+ subq.w #1,d1
+ moveq #4,d3
+.gline:
+ wait_b
+ move.l d2,(a4)
+ move.w d3,(a5)
+ move.b #$c0,(a6)
+ add.l #STRIDE,d2
+ dbf d1,.gline
+ bra .grun
 .runs_done:
+ tst.w d5
+ beq.s .out			; (unshifted: nothing beside the window)
  move.w obj_chunk,d0		; the chunks beside the window
- cmp.w #13,d0
- bgt.s .outside
- add.w d4,d0
- cmp.w #14,d0
- bgt.s .outside
- tst.w obj_chunk
- bpl.s .inside
+ bmi.s .outside
+ cmp.w #11,d0
+ ble.s .out
 .outside:
  move.l obj_addr,d2
  move.w obj_chunk,d0
+ moveq #3,d4
  moveq #32,d1
  bsr clear_outside
-.inside:
+ move.w #$0203,BLT_HOP_OP.w	; (the front pass's constants again)
+ move.w #8,BLT_DST_XINC.w
+.out:
  movem.l (sp)+,d6-d7/a0
  rts
 
 ; ---- sprites ----------------------------------------------------------------------------------------------------------
 ; The 128 entries of the buffered list (g_sprites: code, attribute, y, x), the last first (the earlier ones win).
-; spr_pass set: the entries of colours 10 and 11 only, else the others.  Attribute: bits 5-7 code bits 8-10, bit 4
-; x bit 8 (subtracted), bits 0-3 colour.  Window x = y - 16, window line = 240 - x.
-draw_sprites:
- lea g_sprites+127*4,a0
- move.l a0,spr_ptr
-.loop:
- move.l spr_ptr,a0
- moveq #0,d1
- move.b 1(a0),d1
- move.w d1,d0
- and.w #15,d0
- cmp.w #10,d0
- beq.s .behind
- cmp.w #11,d0
- beq.s .behind
- tst.b spr_pass
- bne .next
- bra.s .pass
-.behind:
- tst.b spr_pass
- beq .next
-.pass:
+; Attribute: bits 5-7 code bits 8-10, bit 4 x bit 8 (subtracted), bits 0-3 colour.  Window x = y - 16, window line =
+; 240 - x.  sprite_lists sorts the visible entries into spr_behind (colours 10 and 11: behind the front layer) and
+; spr_front (the others), in drawing order: (code, colour, window line, window x) words.
+sprite_lists:
+ lea g_sprites+128*4,a0
+ lea spr_behind,a1
+ lea spr_front,a2
+ moveq #127,d7
+.entry:
+ subq.l #4,a0
+ moveq #0,d4
+ move.b 2(a0),d4		; y: window x + 16
+ beq.s .next			; (window x -16: outside)
  moveq #0,d3
  move.b 3(a0),d3
+ move.b 1(a0),d1
  btst #4,d1
  beq.s .positive
+ cmp.b #240,d3			; (x - 256: visible from x - 256 > -16 on)
+ bls.s .next
  sub.w #256,d3
 .positive:
  neg.w d3
  add.w #240,d3			; window line
- cmp.w #-16,d3
- ble .next
- cmp.w #256,d3
- bge .next
- moveq #0,d4
- move.b 2(a0),d4
  sub.w #16,d4			; window x
- cmp.w #-16,d4
- ble .next
- move.w d3,dest_y
- move.w d4,dest_x
  moveq #0,d0
  move.b (a0),d0
- move.w d1,d2
+ moveq #0,d2
+ move.b d1,d2
  and.w #$e0,d2
  lsl.w #3,d2
  or.w d2,d0			; code
- move.w d0,spr_code
  and.w #15,d1			; colour
+ cmp.b #10,d1
+ beq.s .behind
+ cmp.b #11,d1
+ beq.s .behind
+ movem.w d0-d1/d3-d4,(a2)
+ addq.l #8,a2
+ bra.s .next
+.behind:
+ movem.w d0-d1/d3-d4,(a1)
+ addq.l #8,a1
+.next:
+ dbf d7,.entry
+ move.l a1,spr_behind_end
+ move.l a2,spr_front_end
+ rts
+
+; a0 = a list, a1 = its end: the sprites in it
+draw_sprites:
+ bra.s .test
+.sprite:
+ movem.w (a0)+,d0-d1/d3-d4
+ move.l a0,spr_ptr
+ move.l a1,spr_end
+ move.w d3,dest_y
+ move.w d4,dest_x
+ move.w d0,spr_code
  bsr sprite_get
  bsr sprite_part
-.next:
- subq.l #4,spr_ptr
- cmp.l #g_sprites,spr_ptr
- bhs .loop
+ move.l spr_ptr,a0
+ move.l spr_end,a1
+.test:
+ cmp.l a1,a0
+ blo.s .sprite
  rts
 
 ; d0 = code, d1 = colour: a1 = the baked sprite (16 lines in blit order of 4 plane words), from the cache or baked
@@ -991,10 +1143,11 @@ generic_part:
  rts
 
 ; ---- characters -------------------------------------------------------------------------------------------------------
-; chr_ptr[cell] = the baked character (8 lines of a keep mask and the four plane bytes, for movep.l) of every visible,
-; non-blank cell, or 0.  It changes only where the character RAM (D000 codes, D400 attributes) differs from its copy
-; chr_raw (compared as longs); then chr_list (the offset and the baked character of each cell) is made again.  The
-; cache's pool rolling over (pool_epoch) frees the baked characters: every cell is done again then.
+; chr_ptr[cell] = the baked character (its routine, see chr_get) of every visible, non-blank cell, or 0.  It changes
+; only where the character RAM (D000 codes, D400 attributes) differs from its copy chr_raw (compared as longs, after one
+; of the translated writers set chr_written: gen.py; else 128 bytes a frame in case a writer is missing there); then
+; chr_list (the offset and the routine of each cell) is made again.  The cache's pool rolling over (pool_epoch) frees
+; the baked characters: every cell is done again then.
 draw_chars:
  move.w pool_epoch,d0
  cmp.w chr_epoch,d0
@@ -1022,6 +1175,24 @@ draw_chars:
  bra .list
 .scan_start:
  sf chr_dirty
+ tst.b chr_written
+ bne.s .written
+ move.w chr_roll,d0		; (no writer ran: 128 bytes a frame in case one is missing in gen.py)
+ add.w #128,d0
+ and.w #$7ff,d0
+ move.w d0,chr_roll
+ lea (a2,d0.w),a4
+ lea (a3,d0.w),a5
+ moveq #128/4-1,d0
+.roll:
+ cmpm.l (a4)+,(a5)+
+ dbne d0,.roll
+ beq .scanned
+ ifd DEBUG
+ addq.w #1,chr_missed
+ endc
+.written:
+ clr.b chr_written
  lea $400(a2),a4
  lea $400(a3),a5
  move.w #255,d6
@@ -1138,12 +1309,7 @@ draw_chars:
  move.l (a2)+,a1
  add.l d1,a1
  move.l (a2)+,a0
- rept 8
- movep.l (REPTN*STRIDE)(a1),d0
- and.l (a0)+,d0
- or.l (a0)+,d0
- movep.l d0,(REPTN*STRIDE)(a1)
- endr
+ jsr (a0)			; (the character's routine: its lines, movep.l; uses d0)
 .test:
  cmp.l a3,a2
  blo.s .char
@@ -1181,7 +1347,10 @@ chr_cell:
 .out:
  rts
 
-; d2 = code, d1 = colour: a1 = the baked character (hashed cache: tag = code * 32 + colour, 4096 slots).
+; d2 = code, d1 = colour: a1 = the baked character (hashed cache: tag = code * 32 + colour, 4096 slots): a routine
+; for a1 = its cell's first line, made when it is baked: per line with pixels, movep.l the plane bytes there (all 8
+; opaque) or movep.l / and.l the keep mask / or.l the pixels / movep.l (some opaque).  Uses d0.
+CHR_CODE = 8*20+2			; (the longest routine)
 chr_get:
  move.w d2,d3
  lsl.w #5,d3
@@ -1203,7 +1372,7 @@ chr_get:
 .bake:
  movem.l d0-d7/a0/a2-a6,-(sp)
  move.l pool_ptr,a2
- cmp.l #pool+POOL_SIZE-64,a2
+ cmp.l #pool+POOL_SIZE-CHR_CODE,a2
  blo.s .room
  bsr cache_clear			; (the caller sees pool_epoch change and does every cell again)
  move.l pool_ptr,a2
@@ -1211,8 +1380,6 @@ chr_get:
  move.w d3,(a1)
  move.w pool_epoch,2(a1)
  move.l a2,4(a1)
- lea 64(a2),a3
- move.l a3,pool_ptr
  lea chr_pix,a0
  lsl.w #4,d2
  add.w d2,a0			; (16 bytes a character; d2 < 2048)
@@ -1220,6 +1387,7 @@ chr_get:
  lsl.w #2,d1
  add.w d1,a3
  moveq #7,d7
+ moveq #0,d2			; (the line's offset in the routine: STRIDE a line)
 .line:
  move.w (a0)+,d0		; 8 pens of 2 bits
  moveq #0,d3			; opaque
@@ -1254,6 +1422,16 @@ chr_get:
  bset #0,d4
 .b3:
  dbf d6,.pixel
+ tst.b d3
+ beq.s .next_line		; (no pixel: nothing)
+ cmp.b #$ff,d3
+ bne.s .some
+ move.w #$203c,(a2)+		; move.l #pixels,d0 / movep.l d0,line(a1)
+ move.l d4,(a2)+
+ move.w #$01c9,(a2)+
+ move.w d2,(a2)+
+ bra.s .next_line
+.some:
  move.b d3,d5			; the keep mask in each byte, the plane bytes masked
  lsl.w #8,d5
  move.b d3,d5
@@ -1262,9 +1440,19 @@ chr_get:
  move.w d1,d5
  and.l d5,d4
  not.l d5
+ move.w #$0149,(a2)+		; movep.l line(a1),d0 / and.l #keep,d0 / or.l #pixels,d0 / movep.l d0,line(a1)
+ move.w d2,(a2)+
+ move.w #$0280,(a2)+
  move.l d5,(a2)+
+ move.w #$0080,(a2)+
  move.l d4,(a2)+
+ move.w #$01c9,(a2)+
+ move.w d2,(a2)+
+.next_line:
+ add.w #STRIDE,d2
  dbf d7,.line
+ move.w #$4e75,(a2)+		; rts
+ move.l a2,pool_ptr
  movem.l (sp)+,d0-d7/a0/a2-a6
  move.l 4(a1),a1
  rts
@@ -1295,9 +1483,11 @@ pool: ds.b POOL_SIZE
 cache_misses: ds.l 1
 pool_epoch: ds.w 1
 chr_epoch: ds.w 1
+chr_roll: ds.w 1
+chr_missed: ds.w 1
 chr_full: ds.b 1
+chr_written: ds.b 1
 chr_dirty: ds.b 1
-spr_pass: ds.b 1
 cur_back: ds.b 1
 frame_ready: ds.b 1
  even
@@ -1321,12 +1511,24 @@ front_x: ds.w 1
 front_y: ds.w 1
 front_col: ds.w 1
 obj_chunk: ds.w 1
+obj_dst: ds.w 1
+line_syinc: ds.w 1
+line_dyinc: ds.w 1
+run_syinc: ds.w 1
+run_dyinc: ds.w 1
+line_mode: ds.b 1
+ even
 obj_addr: ds.l 1
 dmg_start: ds.l 1
 dmg_ptr: ds.l 1
 ring_dmg_end: ds.l 3
 ring_dmg: ds.b 3*DMG_MAX*12
 spr_ptr: ds.l 1
+spr_end: ds.l 1
+spr_behind_end: ds.l 1
+spr_front_end: ds.l 1
+spr_behind: ds.w 4*128
+spr_front: ds.w 4*128
 spr_code: ds.w 1
 dest_x: ds.w 1
 dest_y: ds.w 1

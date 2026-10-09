@@ -21,6 +21,7 @@ def main():
     ap.add_argument('first', nargs='?', type=int, default=1200)
     ap.add_argument('--cheat', type=int)
     ap.add_argument('--profile', action='store_true')
+    ap.add_argument('--inside', help='with --profile: the cycles of this routine by offset')
     args = ap.parse_args()
     run = ROOT / 'run' / '1943_sim'
     s = Sim(str(run / '1943.PRG'), ram_kib=16384, run_dir=run)
@@ -71,6 +72,10 @@ def main():
             s.blitter.cycles = 0
             if step:
                 by_name[names[bisect.bisect_right(addrs, pc) - 1][1]] += c
+                if pc in counted:
+                    calls[counted[pc]] += 1
+                if inside is not None and inside <= pc < inside_end:
+                    by_off[pc - inside] += c
             if in_render[0]:
                 frame += c
             else:
@@ -78,6 +83,11 @@ def main():
         raise RuntimeError('timeout')
 
     stack_ret = [0]
+    counted = {sym[k]: k for k in ('front_tile', 'sprite_part', 'chr_get', 'sprite_get', 'add_damage', 'back_line') if k in sym}
+    calls = collections.Counter()
+    by_off = collections.Counter()
+    inside = sym[args.inside] if args.inside else None
+    inside_end = min(v for v in addrs if v > inside) if inside else None
     run_to(wait, False, False)
     logic, frames = [], []
     for f in range(args.ticks):
@@ -109,11 +119,16 @@ def main():
             frames.append(r1 + r2)
     n = len(logic)
     print(f'{n} ticks: logic mean {sum(logic)//n} max {max(logic)}; frame (CPU + Blitter) mean {sum(frames)//n} max {max(frames)}')
+    print('cache misses', mem.r32(sym['cache_misses']), 'pool epoch', mem.r16(sym['pool_epoch']), 'pool used', mem.r32(sym['pool_ptr']) - sym['pool'])
     print(f'at 8 MHz: {8e6/(sum(logic)/n+sum(frames)/n):.1f} ticks+frames a second (Musashi cycles)')
     if args.profile:
         tot = sum(by_name.values())
         for k, v in by_name.most_common(30):
             print(f'{k:24s} {v//n:8d} {100*v/tot:5.1f}%')
+        print('calls a tick:', {k: round(v / n, 1) for k, v in calls.items()})
+        if inside is not None:
+            for off, v in sorted(by_off.items()):
+                print(f'  +{off:04x} {v // n:7d}')
 
 
 if __name__ == '__main__':

@@ -23,7 +23,7 @@ def main():
     frames = int(sys.argv[2]) if len(sys.argv)>2 else 20000
     rng = random.Random(seed)
     m = Game1943()
-    pcs, reads, writes = set(), set(), set()
+    pcs, reads, writes, twrites = set(), set(), set(), set()
     site = [(-1, 0)]
     old_step, old_read, old_write = m.cpu.step, m.rd8, m.wr8
     def step():
@@ -36,6 +36,7 @@ def main():
         return old_read(addr)
     def write(addr, value):
         if addr in (0xc800,0xc804,0xc806,0xc807,0xd806): writes.add((*site[0],addr))
+        if 0xd000 <= addr < 0xd800: twrites.add(site[0])     # (the character RAM's writers: gen.py's chr_written)
         return old_write(addr,value)
     m.cpu.step, m.cpu.rd8, m.cpu.wr8 = step, read, write
     port = seed >= 4
@@ -57,7 +58,7 @@ def main():
         if frame%500 == 0: print(f'frame {frame}: {len(pcs)} bank/PC pairs',flush=True)
     out = build_dir('1943') / f'cover{seed}.pkl'
     with out.open('wb') as f:
-        pickle.dump(dict(pcs=pcs,wread=reads,writes=writes,seed=seed,frames=frames,set=m.set_name),f)
+        pickle.dump(dict(pcs=pcs,wread=reads,writes=writes,twrites=twrites,seed=seed,frames=frames,set=m.set_name),f)
     print(out)
 
 

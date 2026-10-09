@@ -125,6 +125,7 @@ def main():
     palmap = np.frombuffer((build_dir('1943') / 'palmap.bin').read_bytes(), np.uint8)
     pictures = [0]
     text_sum = [None]
+    last_text = [None]
 
     def picture(frame):
         """the ring render_frame finished, against the reference's picture; then a VBL shows it"""
@@ -324,6 +325,14 @@ def main():
             return 1
         if not compare(frame):
             return 1
+        if not args.render:                   # (every change of the character RAM came with chr_written: gen.py)
+            text = bytes(ref.mem[0xd000:0xd800])
+            if last_text[0] is not None and text != last_text[0] and not mem.r8(sym['chr_written']):
+                i = next(i for i in range(2048) if text[i] != last_text[0][i])
+                print(f'frame {frame}: {0xd000 + i:04x} changed without chr_written (a writer missing in the coverage)')
+                return 1
+            last_text[0] = text
+            mem.w8(sym['chr_written'], 0)
         if args.render and not picture(frame):
             return 1
         if args.render:

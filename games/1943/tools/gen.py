@@ -58,9 +58,10 @@ class GameEmitter(Emitter):
     instruction (flag neutral: pea and movea leave the CCR alone).  g_winbase = the current
     bank's copy + $8000 (the Z80 address - $10000 is the offset)."""
 
-    def __init__(self, *a, window_sites=(), **k):
+    def __init__(self, *a, window_sites=(), text_writers=(), **k):
         super().__init__(*a, **k)
         self.window_sites = set(window_sites)
+        self.text_writers = set(text_writers)
         self.stubs = set()
 
     def x_ld_i_a(self, ins):                  # the interrupt vector page (the program checks it)
@@ -99,8 +100,8 @@ class GameEmitter(Emitter):
     def win_check(self, reg):
         """lines: aW = the window's base if the address in reg is in 8000-BFFF, else a6"""
         l = self.new_label()
-        return ["lea (a6),aW", "cmp.w #$8000,%s" % reg, "blo.s %s" % l, "cmp.w #$C000,%s" % reg, "bhs.s %s" % l,
-                "move.l g_winbase,aW", l + ":"]
+        # (as a signed word, 8000-BFFF is exactly the range below C000)
+        return ["lea (a6),aW", "cmp.w #$C000,%s" % reg, "bge.s %s" % l, "move.l g_winbase,aW", l + ":"]
 
     def block_win(self, fn, ins):
         """a block instruction at a site that read the window: aW = the base of the source (hl)"""
@@ -133,6 +134,8 @@ class GameEmitter(Emitter):
         n0 = len(self.lines)
         super().emit_ins(pc, live_out_override, with_label)
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
+        if pc in self.text_writers:
+            self.e('st chr_written')          # (a store to the character RAM: Scc leaves the CCR alone)
 
 
     def mem(self, addr, off=0, io_read=False):
@@ -208,7 +211,7 @@ def skip_returns(rom, code):
 def generate(extra_roots=()):
     rom = image()
     require_coverage('1943', [f'cover{s}.pkl' for s in (1, 2, 3)])
-    pcs, wread = set(), set()
+    pcs, wread, twrites = set(), set(), set()
     for path in BUILD.glob('cover*.pkl'):
         with path.open('rb') as f:
             d = pickle.load(f)
@@ -218,6 +221,8 @@ def generate(extra_roots=()):
             pcs.add(virt(pc, bank) if bank >= 0 else pc)
         for bank, pc in d.get('wread', ()):
             wread.add(virt(pc, bank) if bank >= 0 else pc)
+        for bank, pc in d.get('twrites', ()):
+            twrites.add(virt(pc, bank) if bank >= 0 else pc)
     roots = {0, 0x38, 0x66, IDLE, *extra_roots}
     saved = discover.decode
     discover.decode = decode
@@ -243,7 +248,10 @@ def generate(extra_roots=()):
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
-    em = compile_code(code, joins, cfg, {IDLE}, emitter=GameEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
+    # The writers of the character RAM (D000-D7FF) the coverage saw set chr_written (the renderer compares the RAM with
+    # its copy only then; logic_test.py checks that no change of the RAM comes without it).
+    em = compile_code(code, joins, cfg, {IDLE}, emitter=GameEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites,
+                      text_writers=twrites)
     out = ['; Generated 1943 main Z80, fixed and eight ROM banks', '\tsection text,code', *em.lines]
     for pc in sorted(em.refs-set(code)):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
@@ -261,7 +269,7 @@ def generate(extra_roots=()):
                 out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
         out += ['\tdc.w $ffff']
     out += ['g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
-    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites),
+    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
     out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_window_dispatch{b}' if b in banks else 'g_invalid_dispatch' for b in range(8)),

@@ -26,6 +26,9 @@ def main():
     maincpu = (build / 'maincpu.rom').read_bytes()
     (build / 'fixed.rom').write_bytes(maincpu[:0x8000])
     (build / 'banks.rom').write_bytes(maincpu[0x10000:0x30000])
+    import mcux
+    mtext, n = mcux.generate()
+    (build / 'mcu_code.s').write_text(mtext)
     text, report, _ = gen.generate()
     (build / 'code_1943.s').write_text(text)
     print('translation:', report)

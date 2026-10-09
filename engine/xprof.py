@@ -34,10 +34,12 @@ GAMES = {
     "1942": ("run/1942_sim/1942.PRG", "1942_sim.map", ["code_1942.s"], "Z"),
     "commando": ("run/commando_sim/COMMANDO.PRG", "commando_sim.map", ["code_commando.s"], "Z"),
     "blktiger": ("run/blktiger_sim/BLKTIGER.PRG", "blktiger_sim.map", ["code_blktiger.s"], "Z"),
+    "1943": ("run/1943_sim/1943.PRG", "1943_sim.map", ["code_1943.s"], "Z"),
 }
 # the ports whose foreground is the game (a kernel with an idle hook): the harness stops at sim_wait, sets vbl_pending
-# (1942: and the inputs) and returns; a game frame is one such round (Commando, Black Tiger: attract mode, no inputs)
-KERNEL = {"1942", "commando", "blktiger"}
+# (1942: and the inputs) and returns; a game frame is one such round (Black Tiger: attract mode, no inputs; Commando: the inputs of ref/cover.py, into the play;
+# 1943: the default inputs of its logic_test.py)
+KERNEL = {"1942", "commando", "blktiger", "1943"}
 HEAD = re.compile(r"^([A-Z])([0-9A-F]{4,5}):\s*;\s*(.*)$")       # (5 digits: banked code at virtual pcs)
 LABEL = re.compile(r"^([A-Za-z_][\w]*):")
 
@@ -123,6 +125,22 @@ class Driver:
 
     def on_stop(self, pc):
         """at a harness stop: True when a VBL starts"""
+        if self.game == "commando" and pc == self.sym["sim_wait"]:
+            if not hasattr(self, "cover"):                # (ref/cover.py: the seeded attract / coin / play inputs of the tests)
+                sys.path.insert(0, str(ROOT / "games/commando/ref"))
+                from cover import inputs
+                self.cover = inputs
+            for a, v in zip((0xC000, 0xC001, 0xC002), self.cover(self.f, self.rnd)):
+                self.mem.w8(self.block + a - 0x8000, v)
+        if self.game == "1943" and pc == self.sym["sim_wait"]:
+            if not hasattr(self, "cover"):
+                sys.path.insert(0, str(ROOT / "games/1943/tools"))
+                from logic_test import inputs
+                self.cover = inputs
+            values = self.cover(self.f)
+            a = self.sym["g_inputs"]
+            self.mem.w8(a, values[0] & ~8 | self.mem.r8(a) & 8)
+            self.mem.w8(a + 1, values[1])
         if self.game in KERNEL and pc == self.sym["sim_wait"] and self.game != "1942":
             self.mem.w8(self.sym["vbl_pending"], 1)
             self.resume()
@@ -279,8 +297,8 @@ def main():
     if a.game == "dkong":
         return dkong(a)
     # defaults: past the boot, into the attract demo / the play of the tests' input scripts
-    skip, frames = {"galaga": (800, 400), "bublbobl": (500, 300), "1942": (1100, 400), "commando": (600, 400),
-                    "blktiger": (600, 400)}[a.game]
+    skip, frames = {"galaga": (800, 400), "bublbobl": (500, 300), "1942": (1100, 400), "commando": (1000, 1000),
+                    "blktiger": (600, 400), "1943": (1100, 300)}[a.game]
     if a.skip >= 0:
         skip = a.skip
     if a.frames:
