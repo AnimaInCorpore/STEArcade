@@ -77,6 +77,13 @@ vbl_video:
     move.b flip_addr+1,$ffff8201.w
     move.b flip_addr+2,$ffff8203.w
     move.b flip_addr+3,$ffff820d.w
+    ifnd SIM
+    ; the base is loaded into the video counter before the VBL: the counter itself too, or the ring just
+    ; released stays on screen one more frame while render_frame erases its text (STE: the counter is writable)
+    move.b flip_addr+1,$ffff8205.w
+    move.b flip_addr+2,$ffff8207.w
+    move.b flip_addr+3,$ffff8209.w
+    endc
     move.b fine_scroll,$ffff8265.w
     move.b #(STRIDE-160)/2,d0
     tst.b fine_scroll

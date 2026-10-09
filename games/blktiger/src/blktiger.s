@@ -419,15 +419,35 @@ wait_borders:
 ; that arms Timer A, and the border would stay closed (a jump of the picture).  Short blits use wait_borders.
 wait_heavy:
     ifnd SIM
+    ifd DEBUG
+    addq.l #1,dbg_heavy
+    endc
 .again:
     tst.b border_a
-    bne.s .again                 ; the top border is not open yet
+    bne.s .top                   ; the top border is not open yet
     tst.b border_b
-    beq.s .again                 ; the bottom border is open already: wait for the next frame's top
+    beq.s .low                   ; the bottom border is open already: wait for the next frame's top
     cmp.b #10,$fffffa21.w
-    bls.s .again                 ; too close to the bottom border
+    bls.s .near                  ; too close to the bottom border
     endc
     rts
+    ifnd SIM
+.top:
+    ifd DEBUG
+    addq.l #1,dbg_heavy_top
+    endc
+    bra.s .again
+.low:
+    ifd DEBUG
+    addq.l #1,dbg_heavy_low
+    endc
+    bra.s .again
+.near:
+    ifd DEBUG
+    addq.l #1,dbg_heavy_near
+    endc
+    bra.s .again
+    endc
 
 timer_a:
 	tst.b	ta_state
@@ -444,7 +464,6 @@ timer_a:
 	nop
 	endr
 	move.b	#2,$ffff820a.w
-	clr.b	border_a
 	move.b	#1,ta_state		; the next event: the palette on
 	move.b	#TA2_DATA,$fffffa1f.w
 	move.b	#4,$fffffa19.w
@@ -457,6 +476,7 @@ timer_a_later:
 	bne.s	.off
 	movem.l	shown_pal,d0-d7
 	movem.l	d0-d7,$ffff8240.w
+	clr.b	border_a		; (blits may start now: a HOG blit before would delay the palette, the first line flickers)
 	move.b	#2,ta_state		; the next event: the palette off
 	move.b	#TA3_DATA,$fffffa1f.w
 	move.b	#7,$fffffa19.w
@@ -494,13 +514,18 @@ timer_b:
 
     ifd DEBUG
 ; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, background changes found by the rolling check (a writer
-; missing from gen.BG_WRITERS)
+; missing from gen.BG_WRITERS); then longs: wait_heavy calls and its spins waiting for the top border, after the bottom
+; border, near the bottom border (DEBUG: 64 / 88 / 112 cycles a spin)
 dbg_counters:
     lea dbg_buf,a0
     move.w frame_counter+2,(a0)+
     move.w cnt_renders,(a0)+
     move.w cnt_ticks,(a0)+
     move.w bg_missed,(a0)+
+    move.l dbg_heavy,(a0)+
+    move.l dbg_heavy_top,(a0)+
+    move.l dbg_heavy_low,(a0)+
+    move.l dbg_heavy_near,(a0)+
     clr -(sp)
     pea dbg_name
     move #$3c,-(sp)
@@ -508,7 +533,7 @@ dbg_counters:
     addq #8,sp
     move d0,d6
     pea dbg_buf
-    move.l #8,-(sp)
+    move.l #24,-(sp)
     move d6,-(sp)
     move #$40,-(sp)
     trap #1
@@ -642,7 +667,11 @@ bg_roll: ds.w 1
 bg_missed: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
-dbg_buf: ds.w 8
+dbg_buf: ds.w 12
+dbg_heavy: ds.l 1
+dbg_heavy_top: ds.l 1
+dbg_heavy_low: ds.l 1
+dbg_heavy_near: ds.l 1
 g_iy: ds.w 1
 g_fshadow: ds.w 1
     ds.b 16384
