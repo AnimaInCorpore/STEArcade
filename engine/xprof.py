@@ -234,10 +234,13 @@ class Prof:
 
 def dkong(a):
     """Donkey Kong: the lock-step test (games/dkong/tools/fullrun.py) with its run loop stepped: the translated code
-    alone (NMI injected at the idle loop), compared with the reference every frame"""
+    alone (NMI injected at the idle loop), compared with the reference every frame; --skip N: frames 0..N-1 run
+    without being charged (counted by the NMI returns), --frames: the frames charged after them"""
     sys.path.insert(0, str(ROOT / "games" / "dkong" / "tools"))
     import fullrun
     frames = a.frames or 1500
+    skip = max(a.skip, 0)
+    nmis = [0]
     L = fullrun.Lock()
     prof = Prof("dkong", L.sym, L.cpu)
     cpu = L.cpu
@@ -247,16 +250,19 @@ def dkong(a):
         while used < budget:
             pc = cpu.r_pc()
             if pc in L.stops:
+                if L.stops[pc] == "z80_nmi_ret":
+                    nmis[0] += 1
                 return L.stops[pc]
             c = cpu.execute(1).cycles
             used += c
-            prof.charge(pc, c)
+            if nmis[0] >= skip:
+                prof.charge(pc, c)
         return "budget"
     fullrun.Lock = lambda *x, **k: L
     L.run68 = run68
-    sys.argv = ["fullrun.py", str(frames)]
+    sys.argv = ["fullrun.py", str(skip + frames)]
     rc = fullrun.main()
-    prof.report("dkong: %d NMI frames of fullrun.py (lock-step%s); figures per frame" % (frames, " FAILED" if rc else " ok"),
+    prof.report("dkong: %d NMI frames from %d of fullrun.py (lock-step%s); figures per frame" % (frames, skip, " FAILED" if rc else " ok"),
                 frames, a.top, a.pcs, a.csv)
 
 
