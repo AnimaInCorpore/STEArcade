@@ -414,6 +414,21 @@ wait_borders:
     endc
     rts
 
+; wait_heavy: a long HOG blit (the text layer) may start only in the visible area: after the top border is open and
+; at least 10 lines before the bottom border's Timer B event.  Started later, it would delay that event or the VBL
+; that arms Timer A, and the border would stay closed (a jump of the picture).  Short blits use wait_borders.
+wait_heavy:
+    ifnd SIM
+.again:
+    tst.b border_a
+    bne.s .again                 ; the top border is not open yet
+    tst.b border_b
+    beq.s .again                 ; the bottom border is open already: wait for the next frame's top
+    cmp.b #10,$fffffa21.w
+    bls.s .again                 ; too close to the bottom border
+    endc
+    rts
+
 timer_a:
 	tst.b	ta_state
 	bne	timer_a_later

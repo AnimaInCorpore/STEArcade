@@ -1517,11 +1517,13 @@ character_pass:
     move.l a2,$ffff8a24.w
     move.l d4,$ffff8a32.w
     move.w #8,$ffff8a38.w
+    jsr wait_heavy               ; (long HOG blits: the visible area only)
     move.b #4,$ffff8a3b.w        ; NOT mask AND screen
     move.b #$c0,$ffff8a3c.w
     move.l a1,$ffff8a24.w
     move.l d4,$ffff8a32.w
     move.w #8,$ffff8a38.w
+    jsr wait_heavy               ; (long HOG blits: the visible area only)
     move.b #7,$ffff8a3b.w        ; pixels OR screen
     move.b #$c0,$ffff8a3c.w
     add.w d3,a1
