@@ -50,11 +50,13 @@ def skip_tests(main, sub):
     main[0x138:0x13B] = bytes([0x21, 0x01, 0x00])        # ld hl,$0001
     sub[0x17B] = 0xC9                                    # ret
     # the game checksums main ROM bytes $0001-$0EDC one per frame (E6FD += (de), pc $484B) and compares
-    # with $E6FE at the end: dead bytes of the old RAM test ($C4: the operand of its `ld de`) make the sum
-    # the original's
+    # with $E6FE at the end: a dead byte of the old RAM test ($C5: the operand of its `ld de`) makes the sum
+    # the original's.  A second check at $0AE3 adds every 4th byte of $0004-$0C04 (E35C += (de)) and on a
+    # mismatch returns into that RAM: the bytes it reads ($C4, $0138) stay the original's.
     orig = sum(original[1:0xEDD])
-    main[0xC4] = (main[0xC4] + orig - sum(main[1:0xEDD])) & 0xFF
+    main[0xC5] = (main[0xC5] + orig - sum(main[1:0xEDD])) & 0xFF
     assert sum(main[1:0xEDD]) & 0xFF == orig & 0xFF
+    assert main[4:0xC08:4] == original[4:0xC08:4]
     return bytes(main), bytes(sub)
 
 

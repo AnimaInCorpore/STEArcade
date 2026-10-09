@@ -24,8 +24,9 @@ a static translation of the programs, and a runtime around them.
 * **Sound CPU**: not translated (no sound); its commands go nowhere.
 * **Boot self-tests** are patched out of the ROMs (`machine.skip_tests`, also in the reference): the RAM
   tests, the delay loop, the sub CPU's ROM checksum.  The game checksums `$0001-$0EDC` of its ROM while it runs
-  (one byte per frame, `$484B`); a dead byte of the old RAM test makes the sum the original's.  `tools/build.py`
-  writes the patched ROM files next to the program.
+  (one byte per frame, `$484B`); a dead byte of the old RAM test (`$C5`) makes the sum the original's.  A second
+  check (`$0AE3`, every 4th byte of `$0004-$0C04`) crashes on a mismatch; none of the bytes it reads is patched.
+  `tools/build.py` writes the patched ROM files next to the program.
 
 Schedule (`src/bublbobl.s`): at every VBL the MCU's IRQ1 handler, then the main CPU's interrupt handler and the sub
 CPU's, each to completion, then the frame is drawn behind them (the VBL nests into the renderer: the game
