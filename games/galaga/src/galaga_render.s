@@ -14,7 +14,7 @@
 ;
 ; The stars (05XX, galaga_stars.s) are single pixels in the two grey colours 14 and 15,
 ; plotted where the draw screen is black after the sprites; the previous frame's stars of
-; a draw screen are cleared first.
+; a draw screen are cleared before any screen updates.
 ; ------------------------------------------------------------------------------
 
 DISP_TOP = 32				; the display's line 0 is this line of a screen buffer
@@ -64,16 +64,18 @@ render_frame:
 	lea	32(a0),a0
 	endr
 
-	bsr	scan_cells
-	bsr	draw_dirty_cells
+	; Remove only stars from the previous completed picture, before any writes.
 	ifnd NOSTARS
 	bsr	erase_stars
 	endc
+	bsr	scan_cells
+	bsr	draw_dirty_cells
 	bsr	draw_sprites
+	bsr	chars_over
+	; Plot last: every recorded star owns a previously black pixel.
 	ifnd NOSTARS
 	bsr	draw_stars
 	endc
-	bsr	chars_over
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -453,7 +455,8 @@ draw_cell_masked:
 ; (galaga_stars.s, star_frame -> star_list: step in the window = raw x | raw y << 8, and
 ; the STE colour); the plots are single pixels, only where the draw screen is black
 ; (nothing else is drawn there), and each draw screen keeps its list (offset, bit,
-; colour) to clear them next time (the pixels still in the star's colour).
+; colour) to clear them before any writes next time. Characters are composed before
+; plotting, so no later renderer write can overwrite a recorded star.
 
 erase_stars:
 	move	draw_index,d0
@@ -471,23 +474,6 @@ erase_stars:
 	move.l	(a2)+,a0		; the pixel's byte in plane 0
 	move	(a2)+,d1		; its bit (low byte), its colour (high byte)
 	add.l	a3,a0
-	moveq	#0,d2			; the colour there now
-	btst	d1,(a0)
-	beq.s	.p1
-	addq	#1,d2
-.p1:	btst	d1,2(a0)
-	beq.s	.p2
-	addq	#2,d2
-.p2:	btst	d1,4(a0)
-	beq.s	.p3
-	addq	#4,d2
-.p3:	btst	d1,6(a0)
-	beq.s	.p4
-	addq	#8,d2
-.p4:	lsl	#8,d2
-	eor	d2,d1
-	cmp	#$100,d1
-	bhs.s	.keep			; something else is there now
 	bclr	d1,(a0)
 	bclr	d1,2(a0)
 	bclr	d1,4(a0)

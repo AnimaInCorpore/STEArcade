@@ -60,15 +60,11 @@ G_IO1 = G_ROM1				; its $6800-$7FFF cells: G_IO1+addr
 G_IO2 = g_block				; the sub CPU's
 TOKEN = $0140				; $4001 on the Z80 stack, byte swapped
 
-arm_border_timers	macro
-	clr.b	$fffffa1b.w
-	move.b	#199+29,$fffffa21.w
-	move.b	#8,$fffffa1b.w
-	move.b	#TA_DATA,$fffffa1f.w
-	move.b	#4,$fffffa19.w
-	st	border_a
-	st	border_b
-	endm
+; Border removal: engine/rt/borders.s.  Its events come early and sync themselves to the video, so a Blitter pass
+; may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces (blit_go, there).
+
+BD_PALETTE = 0
+	include	"borders.s"
 
 chk_sp	macro
 	ifd CHKSP
@@ -78,16 +74,6 @@ chk_sp	macro
 	bra	crash_common
 .ok\@:
 	endc
-	endm
-
-wait_borders	macro
-.a\@:	tst.b	border_a
-	bne.s	.a\@
-	cmp.b	#6,$fffffa21.w
-	bhi.s	.d\@
-	tst.b	border_b
-	bne.s	.a\@
-.d\@:
 	endm
 
 	section text,code
@@ -358,6 +344,9 @@ quit:
 	bsr	dump_rate
 	endc
 	bsr	restore_hardware
+	ifd DEBUG
+	bsr	bd_report
+	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
 	trap	#1
@@ -410,15 +399,11 @@ clear_screen:
 	move.b	#1,$ffff8a3a.w		; HOP 1 (halftone only)
 	move.b	#0,$ffff8a3b.w		; OP 0 (destination = 0)
 	clr.b	$ffff8a3d.w
-	move	#$8000,$ffff8a36.w	; X count = 64 KB
+	move	#2,$ffff8a30.w		; Destination Y increment
+	move	#16,$ffff8a36.w		; X count: 16 words, 4096 lines = 128 KB
 	move.l	d0,$ffff8a32.w
-	move	#1,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w
-	add.l	#$10000,d0
-	move.l	d0,$ffff8a32.w
-	move	#1,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w
-	rts
+	move	#4096,$ffff8a38.w
+	bra	blit_go			; (the interrupts run: in pieces)
 
 ; ------------------------------------------------------------------------------
 ; Interrupts
@@ -432,7 +417,7 @@ hbl:
 ; are kept on the stack and restored at the end.
 
 vbl:
-	arm_border_timers
+	borders_vbl			; (first: Timer B counts the frame's lines)
 	ifnd NOTHROTTLE
 	and.b	#$70,$fffffa1d.w	; Timer D (81 us ticks) counts from this VBL (render
 	clr.b	$fffffa25.w		; throttle); Timer C's bits stay
@@ -566,8 +551,8 @@ vbl_render:
 	move.l	draw_screen_address,a0
 	add.l	#CROP_TOP*STRIDE,a0
 	move	frame_counter+2,(a0)
-	move	cnt_timer_a,256(a0)
-	move	cnt_timer_b,512(a0)
+	move	bd_fallbacks,256(a0)
+	move	bd_late_low,512(a0)
 	move	cnt_vbl,768(a0)
 	move	cnt_render,1024(a0)
 	addq	#1,cnt_render
@@ -606,49 +591,9 @@ g2_ret:
 	move.l	g2_ret_to,-(sp)
 	rts
 
-timer_a:
-	addq	#1,cnt_timer_a
-	move	#$2100,sr
-	stop	#$2100
-	move	#$2700,sr
-	clr.b	$fffffa19.w
-	rept TA_NOPS
-	nop
-	endr
-	clr.b	$ffff820a.w
-	rept 9
-	nop
-	endr
-	move.b	#2,$ffff820a.w
-	clr.b	border_a
-	rte
-
-timer_b:
-	addq	#1,cnt_timer_b
-	movem.l	d0/a0,-(sp)
-	lea	$fffffa21.w,a0
-	move.b	(a0),d0
-.wait1:
-	cmp.b	(a0),d0
-	beq.s	.wait1
-	clr.b	$ffff820a.w
-	moveq	#2,d0
-.wait2:
-	nop
-	dbf	d0,.wait2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
-	move.b	(a0),d0
-.wait3:
-	cmp.b	(a0),d0
-	beq.s	.wait3
-	movem.l	(sp)+,d0/a0
-	clr.b	border_b
-	rte
+	borders_handlers
+	borders_blit_go
+	borders_report
 
 ; ------------------------------------------------------------------------------
 ; The boot schedule.  z80_hook is reached from the translated code at the spin loops
@@ -1344,8 +1289,7 @@ frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
 in_render:	ds.b	1		; drawing: the main CPU's registers are in main_ctx
 	even
 main_ctx:	ds.l	15
-border_a:	ds.b	1
-border_b:	ds.b	1
+	borders_vars
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
 in1_kbd:	ds.b	1
@@ -1370,8 +1314,6 @@ iolog_end:
 
 frame_counter:	ds.l	1
 vbl_sp:		ds.l	1
-cnt_timer_a:	ds.w	1
-cnt_timer_b:	ds.w	1
 cnt_acia:	ds.w	1
 cnt_vbl:	ds.w	1
 cnt_skip:	ds.w	1

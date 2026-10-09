@@ -40,7 +40,11 @@ BLT_SKEW = $ffff8a3d
 
 ; Slot record (one per part and draw screen)
 
+	ifd CACHESPRITES
+SLOT_SIZE = 56
+	else
 SLOT_SIZE = 32
+	endc
 S_ENTRY = 0				; .l  the entry drawn (bytes 0-3: code, colour, x, y)
 S_RECT = 4				; .l  byte offset of the rectangle's first word in the screen, -1: none
 S_WORDS = 8				; .w  words per line (4 or 8)
@@ -50,6 +54,7 @@ S_MASK2 = 16
 S_MASK3 = 20
 S_MARK = 24				; .w  byte offset of the window long of row 1 in tile_marks
 S_LINES = 28				; .w  lines of the rectangle
+S_PREPARED = 32			; d0-d1/d3-d5/a0: cached blit setup, per draw screen
 S_FIRST = 30				; .w  first line of the shape that is drawn
 
 ENTRY_SIZE = 8				; spr_entries: code, colour, x, y, flags, xhigh, pad
@@ -61,7 +66,7 @@ init_sprites:
 .slots:
 	clr.l	(a0)+
 	move.l	d1,(a0)+		; no rectangle drawn
-	moveq	#5,d2
+	moveq	#(SLOT_SIZE-8)/4-1,d2
 .z:	clr.l	(a0)+
 	dbf	d2,.z
 	dbf	d0,.slots
@@ -225,8 +230,8 @@ draw_sprites:
 	move	d1,BLT_COUNT.w
 	move	S_LINES(a4),BLT_COUNT+2.w
 	move	#$0100,BLT_HOP_OP.w
-	wait_borders
-	move	#$c000,BLT_CTRL.w
+	clr.b	BLT_SKEW.w
+	bsr	blit_go			; (up to 8 x 16 words: in pieces)
 	move	#$0203,BLT_HOP_OP.w
 	mark_rect
 	moveq	#-1,d0
@@ -249,8 +254,8 @@ draw_sprites:
 	move.l	d3,BLT_DST_ADDR.w
 	move	d1,BLT_COUNT.w
 	move	S_LINES(a4),BLT_COUNT+2.w
-	wait_borders
-	move	#$c000,BLT_CTRL.w
+	clr.b	BLT_SKEW.w
+	bsr	blit_go			; (up to 8 x 16 words: in pieces)
 	mark_rect
 	moveq	#-1,d0
 	move.l	d0,S_RECT(a4)
@@ -356,6 +361,15 @@ entry_next:
 ; Pointers as in the line macros; a6 is free until the lines.
 
 draw_part:
+	ifd CACHESPRITES
+	; Phase A invalidates changed parts. Unchanged damaged parts can replay
+	; their saved setup without rebuilding coordinates, masks or pointers.
+	tst.l	S_RECT(a4)
+	bmi.s	.prepare
+	movem.l	S_PREPARED(a4),d0-d1/d3-d5/a0
+	bra	.prepared
+.prepare:
+	endc
 	; (entry_loop calls it for the parts the size flags give only)
 	moveq	#0,d2
 	move.b	S_FLAGS(a4),d2		; flags: flip x, flip y, size x, size y
@@ -539,6 +553,10 @@ draw_part:
 	lsl.l	#3,d6
 	add.l	d6,d1
 	add.l	#ga_spr_data,d1
+	ifd CACHESPRITES
+	movem.l	d0-d1/d3-d5/a0,S_PREPARED(a4)
+	endc
+.prepared:
 	move.l	d1,BLT_SRC_ADDR.w
 	move.l	d3,BLT_DST_ADDR.w
 
@@ -561,7 +579,6 @@ draw_part:
 	moveq	#4,d1
 	moveq	#-64,d2
 
-	wait_borders
 
 	ifnd NOSPRITECODE
 	tst.l	d0

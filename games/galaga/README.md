@@ -187,3 +187,44 @@ cycles, `ld a,c` 30 -> 16) and of `adc` / `rl` (the carry into X without a branc
 of Galaga's translated code against the reference (`ref/galaga5.py` checks the reference only); the change was checked
 with `engine/xdiff.py galaga <the old build>`: the arcade's RAM is the same at all 400 game frames (interrupts on a
 clock of translated instructions, so a faster build is not ahead in the foreground).
+
+## Renderer experiments (2026-10-09)
+
+Stars are now erased before any screen updates and plotted after `chars_over`.
+Every recorded star therefore owns its pixel until the next erase, avoiding the
+four-plane colour reconstruction on erasure. All existing star colours are retained.
+
+`-D CACHESPRITES=1` enables prepared sprite records (12 KB extra RAM across both
+buffers). Unchanged damaged parts reuse their coordinates, source and routine
+pointers; changed parts rebuild the record. It is disabled by default: despite
+saving 23.0% in a forced-repaint workload, the moving formation does not benefit
+enough to pay for preparing the records.
+
+Measured against the working checkout before these experiments, including its
+existing border changes: 9000 VBLs in cycle-exact 8 MHz STE Hatari, RATE=500,
+4 MB, default star throttle, attract mode. The VBL 3000-5500 windows were:
+
+| Variant | fps in successive 500-VBL windows |
+|---|---|
+| Before | 15.9, 15.1, 15.4, 17.0, 15.4 |
+| Star erase only (default) | 15.6, 15.0, 15.4, 17.0, 15.4 |
+| Stars + prepared sprites | 15.3, 15.0, 15.5, 16.8, 15.3 |
+
+There is no material frame-rate gain in the heavy formation, and **25 fps is not
+achieved**. Stars are already throttled in expensive scenes. A larger reduction
+in formation drawing or translated game logic is needed; these results do not
+support enabling the sprite cache by default.
+
+Validation: 48 complete sprite comparisons with random shapes/colours/flips and
+64 KB crossings passed. The added `tools/render_opt_test.py BEFORE_DIR AFTER_DIR`
+compares 48 complete double-buffered frames with stars, character changes and
+partially moving sprites, plus 48 forced-repaint frames. All screen bytes match.
+Simulator CPU+bus cycles for complete frames: 39,962,194 before,
+39,536,218 star erase only (-1.1%), 38,114,802 with caching (-4.6%). Forced
+repaints: 18,009,742 before, 13,860,192 cached (-23.0%). These synthetic workloads
+exercise correctness and individual costs; they are not gameplay fps estimates.
+
+Reproduce Windows timing with `tools/bench.ps1` (relative to this game directory),
+or `tools/bench.ps1 -Name galaga_cache_bench -Extra '-D','CACHESPRITES=1'`.
+Each output directory contains `GALAGA.PRG`, `galaga.map`, and `RATE.BIN`;
+pass the before/after directories to the renderer comparison script.
