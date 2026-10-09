@@ -18,6 +18,7 @@ WIN_COLS = 17                    ; the cells the 256-pixel view can touch
 WIN_ROWS = 15                    ; and the 224 lines
 TILE_ENTRIES = 512
 TILE_SETS = TILE_ENTRIES/4
+BYTE_LUTS = 16                   ; cached byte tables of bake_pixels (4 KB each)
 SPRITE_ENTRIES = 256
 BLT_SRC_ADDR = $ffff8a24
 BLT_DST_ADDR = $ffff8a32
@@ -979,6 +980,50 @@ tile_get:
 ; a0 packed pixels, a1 output planes, a2 colour LUT; masks at +128/+160.
 bake_pixels:
     addq.l #1,bake_calls
+    ; The byte table of this colour (two pixels a lookup): cached in BYTE_LUTS slots, valid while the colour's
+    ; 16 pens, the transparent pen and the front limit are the same.
+    move.l a2,d0
+    lsr.w #4,d0
+    and.w #BYTE_LUTS-1,d0
+    move.w d0,d1
+    mulu #20,d1
+    lea byte_lut_tags,a5
+    add.w d1,a5
+    moveq #12,d1
+    lsl.l d1,d0
+    add.l #byte_luts,d0
+    move.l d0,byte_lut
+    move.l (a2),d0
+    cmp.l (a5),d0
+    bne.s .build
+    move.l 4(a2),d0
+    cmp.l 4(a5),d0
+    bne.s .build
+    move.l 8(a2),d0
+    cmp.l 8(a5),d0
+    bne.s .build
+    move.l 12(a2),d0
+    cmp.l 12(a5),d0
+    bne.s .build
+    move.b bake_transparent,d0
+    cmp.b 16(a5),d0
+    bne.s .build
+    move.b bake_limit,d0
+    cmp.b 17(a5),d0
+    bne.s .build
+    tst.b 18(a5)
+    bne .rows
+.build:
+    move.l (a2),(a5)+            ; the slot's tag
+    move.l 4(a2),(a5)+
+    move.l 8(a2),(a5)+
+    move.l 12(a2),(a5)+
+    move.b bake_transparent,(a5)+
+    move.b bake_limit,(a5)+
+    st (a5)
+    ifd DEBUG
+    addq.l #1,dbg_byte_luts
+    endc
     ; Expand this colour's sixteen pens once, then build two planes per long.
     lea bake_lut+64,a5
     lea mapped_bits,a6
@@ -1007,6 +1052,40 @@ bake_pixels:
     addq.w #1,d0
     cmp.w #16,d0
     blo.s .lut
+    ; byte b: its high pixel first (the first pixel shifted once more), entries of 16 bytes: planes 0/1, 2/3, mask
+    move.l byte_lut,a4
+    lea bake_lut+64,a3
+    moveq #0,d0
+.byte_hi:
+    move.w d0,d4
+    lsl.w #2,d4
+    move.l -64(a3,d4.w),d1
+    add.l d1,d1
+    move.l (a3,d4.w),d2
+    add.l d2,d2
+    move.l 64(a3,d4.w),d3
+    add.l d3,d3
+    lea bake_lut,a6
+    moveq #15,d5
+.byte_lo:
+    move.l (a6),d6
+    or.l d1,d6
+    move.l d6,(a4)+
+    move.l 64(a6),d6
+    or.l d2,d6
+    move.l d6,(a4)+
+    move.l 128(a6),d6
+    or.l d3,d6
+    move.l d6,(a4)+
+    addq.l #4,a4
+    addq.l #4,a6
+    dbf d5,.byte_lo
+    addq.w #1,d0
+    cmp.w #16,d0
+    blo.s .byte_hi
+.rows:
+    move.l byte_lut,a5
+    lea nibble_swap,a6
     lea 128(a1),a3
     lea 160(a1),a4
     move.w bake_rows,bake_row_count
@@ -1031,48 +1110,27 @@ bake_pixels:
 .reverse:
     moveq #0,d6
     move.b -(a0),d6
-    move.w d6,d4
-    and.w #15,d4
-    lsl.w #2,d4
-    add.l d2,d2
-    add.l d3,d3
-    add.l d5,d5
-    or.l -64(a5,d4.w),d3
-    or.l (a5,d4.w),d5
-    or.l 64(a5,d4.w),d2
-    move.w d6,d4
-    lsr.w #4,d4
-    lsl.w #2,d4
-    add.l d2,d2
-    add.l d3,d3
-    add.l d5,d5
-    or.l -64(a5,d4.w),d3
-    or.l (a5,d4.w),d5
-    or.l 64(a5,d4.w),d2
+    move.b (a6,d6.w),d6          ; (mirrored: the low pixel first)
+    lsl.w #4,d6
+    lsl.l #2,d2
+    lsl.l #2,d3
+    lsl.l #2,d5
+    or.l (a5,d6.w),d3
+    or.l 4(a5,d6.w),d5
+    or.l 8(a5,d6.w),d2
     dbf d7,.reverse
     add.w bake_stride,a0
     bra.s .save
 .forward:
     moveq #0,d6
     move.b (a0)+,d6
-    move.w d6,d4
-    lsr.w #4,d4
-    lsl.w #2,d4
-    add.l d2,d2
-    add.l d3,d3
-    add.l d5,d5
-    or.l -64(a5,d4.w),d3
-    or.l (a5,d4.w),d5
-    or.l 64(a5,d4.w),d2
-    move.w d6,d4
-    and.w #15,d4
-    lsl.w #2,d4
-    add.l d2,d2
-    add.l d3,d3
-    add.l d5,d5
-    or.l -64(a5,d4.w),d3
-    or.l (a5,d4.w),d5
-    or.l 64(a5,d4.w),d2
+    lsl.w #4,d6
+    lsl.l #2,d2
+    lsl.l #2,d3
+    lsl.l #2,d5
+    or.l (a5,d6.w),d3
+    or.l 4(a5,d6.w),d5
+    or.l 8(a5,d6.w),d2
     dbf d7,.forward
 .save:
     cmp.w #8,bake_width
@@ -1931,6 +1989,12 @@ char_get:
     move.l cache_result,a1
     rts
     section data,data
+nibble_swap:                     ; (a byte with its two pixels swapped: the mirrored bakes)
+NS set 0
+    rept 256
+    dc.b ((NS&15)<<4)|(NS>>4)
+NS set NS+1
+    endr
 mapped_bits: dc.l 0,0,65536,0,1,0,65537,0,0,65536,65536,65536,1,65536,65537,65536,0,1,65536,1,1,1,65537,1,0,65537,65536,65537,1,65537,65537,65537
 front_limits: dc.b 12,12,8,8,4,4,0,0,0,0,0,0,0,0,0,0
     even
@@ -2026,6 +2090,9 @@ pen_hist_id: ds.w 64*PEN_HISTORY
 pen_hist: ds.b 64*PEN_HISTORY*16
 palette_dirty: ds.b 64
 bake_lut: ds.l 48
+byte_lut: ds.l 1
+byte_lut_tags: ds.b 20*BYTE_LUTS
+byte_luts: ds.b 4096*BYTE_LUTS
 bake_calls: ds.l 1
 pen_map: ds.b 1024
 shown_pal: ds.w 16
