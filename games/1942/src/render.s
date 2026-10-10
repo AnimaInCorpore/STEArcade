@@ -46,9 +46,16 @@ BLT_HOP_OP = $ffff8a3a
 BLT_CTRL = $ffff8a3c
 BLT_SKEW = $ffff8a3d
 
-TILE_POOL_SIZE = $60000
-SPR_POOL_SIZE = $40000
-CHR_POOL_SIZE = $30000
+; The pools of baked graphics (bump allocated, flushed at a palette bank change or, at the start of a frame, when fewer than
+; *_POOL_ROOM bytes are left).  Measured (tools/perf_test.py runs of 11-19k ticks, attract mode, play, the later stages): at most
+; 20 KB of tiles, 70 KB of sprites, 33 KB of characters baked between two flushes, at most 15 KB / 1.3 KB / 28 KB in one frame.
+; The room covers a frame: every one of the 512 background cells (64 KB), 256 sprite parts (32 KB), 48 KB of characters.
+TILE_POOL_SIZE = $20000
+TILE_POOL_ROOM = $10000
+SPR_POOL_SIZE = $30000
+SPR_POOL_ROOM = $8000
+CHR_POOL_SIZE = $20000
+CHR_POOL_ROOM = $C000
 
 	section text,code
 
@@ -264,13 +271,15 @@ bake_tile:
 	add.w	d3,d3				; (attribute & $80) << 1
 	add.w	d3,d1				; code, 9 bits
 	move.w	d2,d3
-	lsr.w	#5,d3
-	and.w	#3,d3				; flips: bit 0 x, bit 1 y
-	lsl.w	#2,d1
+	lsr.w	#6,d3
+	and.w	#1,d3				; flip y (the attribute's bit 6: the pixel order of a row)
+	add.w	d1,d1
 	or.w	d3,d1
 	lsl.l	#8,d1				; * 256: 16 rows of 8 pen masks
 	lea	tile_masks,a1
 	add.l	d1,a1
+	btst	#5,d2				; flip x (the row order: ring line 15 - x of the tile) is done here: z = 0 / 1
+	seq	d1				; (d1 = 0 flipped: the rows go into the pool from the end)
 	and.w	#$1F,d2
 	lsl.w	#3,d2				; colour * 8
 	lea	luts,a2
@@ -291,6 +300,8 @@ bake_tile:
 	move.l	a2,-(sp)
 	lea	orp_tab,a3
 	moveq	#15,d2
+	tst.b	d1
+	beq.s	.rowx
 .row:	moveq	#0,d3
 	moveq	#0,d4
 	moveq	#0,d5
@@ -312,7 +323,32 @@ bake_tile:
 	move.w	d5,(a2)+
 	move.w	d6,(a2)+
 	dbf	d2,.row
-	move.l	a2,tile_pool_ptr
+	bra.s	.baked
+.rowx:	lea	128(a2),a2			; flipped x: the same rows, the last one first
+	move.l	a2,-(sp)
+.rowx1:	moveq	#0,d3
+	moveq	#0,d4
+	moveq	#0,d5
+	moveq	#0,d6
+	lea	bk_idx,a0
+	moveq	#7,d1
+.penx:	move.w	(a1)+,d7
+	beq.s	.skipx
+	moveq	#0,d0
+	move.b	(a0)+,d0
+	move.l	(a3,d0.w),a4
+	jsr	(a4)
+	dbf	d1,.penx
+	bra.s	.donex
+.skipx:	addq.l	#1,a0
+	dbf	d1,.penx
+.donex:	move.w	d6,-(a2)
+	move.w	d5,-(a2)
+	move.w	d4,-(a2)
+	move.w	d3,-(a2)
+	dbf	d2,.rowx1
+	move.l	(sp)+,a2			; (the end of the tile)
+.baked:	move.l	a2,tile_pool_ptr
 	move.l	(sp)+,a0			; the baked tile
 	moveq	#0,d0
 	move.w	(sp)+,d0
@@ -393,13 +429,13 @@ copy_tile:
 blit_copy:
 	dbgcnt	dbg_c1,0
 	ifd DEBUG
-	cmp.l	#$200000,a0			; (assertion: both rectangles are in the rings / clean)
+	cmp.l	#ring_area,a0			; (assertion: both rectangles are in the rings / clean)
 	blo.s	.bad
-	cmp.l	#$3F0000,a0
+	cmp.l	#ring_area+4*RING_SIZE+512,a0
 	bhs.s	.bad
-	cmp.l	#$200000,a1
+	cmp.l	#ring_area,a1
 	blo.s	.bad
-	cmp.l	#$3F0000,a1
+	cmp.l	#ring_area+4*RING_SIZE+512,a1
 	blo.s	.good
 .bad:	move.l	(sp),d6				; the caller
 	move.w	draw_idx,d5

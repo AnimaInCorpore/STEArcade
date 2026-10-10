@@ -38,7 +38,7 @@ def main():
     first = int(sys.argv[3]) if len(sys.argv) > 3 else 900
     prof = len(sys.argv) > 4 and sys.argv[4] == "profile"
     norender = len(sys.argv) > 4 and sys.argv[4] in ("norender", "profile")
-    s = Sim(str(RUN / "1942.PRG"), run_dir=RUN)
+    s = Sim(str(RUN / "1942.PRG"), ram_kib=16384, run_dir=RUN)      # (the Blitter reads its registers back)
     s.mem.set_trace_mode(not norender or prof)
     sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
     wait, done = sym["sim_wait"], sym["sim_frame_done"]
