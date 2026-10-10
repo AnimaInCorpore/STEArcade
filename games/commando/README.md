@@ -116,7 +116,7 @@ Recursive discovery also translates unobserved branches. Unsupported speculative
 code entries remain explicit traps; any unsupported instruction actually seen
 by coverage stops the build. No unknown opcode becomes a silent NOP.
 
-`python3 port.py build commando --assets` regenerates the palette, masks and sprite
+`python3 port.py build commando --assets` regenerates the palette, pen planes, bake routines and sprite
 streams. The generator reuses the existing 1942 Oklab and sprite-code tools.
 `--sim` produces `run/commando_sim/COMMANDO.PRG`; `--debug` enables diagnostic
 files, `--frames N` exits after N VBLs, and `-D AUTOPLAY=1` supplies coin/start,
@@ -128,7 +128,7 @@ movement and fire according to the arcade tick counter for Hatari checks.
 IY in a2: the runtime saves all registers in its hooks, nothing else needed).  The joins are the real entries (reset,
 the interrupts, the idle hook, the targets of the `RST 30` word tables, which `discover` now records); before, every pc
 the coverage saw was a join, which switched the CCR analysis, the precise returns and the merges off.  Merged pcs get
-z80_badpc in `z80_entries`.  `engine/xprof.py commando` (ticks 600-1000, attract): translated code 8.4k -> 7.0k cycles a
+z80_badpc in the dispatch table.  `engine/xprof.py commando` (ticks 600-1000, attract): translated code 8.4k -> 7.0k cycles a
 tick (1.20x).  `logic_test.py 3000`: exact.
 
 ## Restores without divu (2026-10-09, later)
@@ -147,7 +147,7 @@ The sound board (`tools/sound.py`, from MAME capcom/commando.cpp): a Z80 at 3 MH
 C800), two YM2203, four IRQs a frame from the scanline PROM.  Its driver keeps the two kinds of sound apart: the
 music (commands $20-$2C, 13 tunes) uses only the six FM channels, the effects (commands $02-$1B) only the SSG
 (square waves and noise, 3 channels of one chip each).  The STE has no FM, and the music as samples (the Donkey Kong
-way) does not fit: the program uses ~3.95 of the 4 MB.  The effects map onto the STE's YM2149.
+way) did not fit: the program used ~3.95 of the 4 MB then (2.94 MB since "Memory" below).  The effects map onto the STE's YM2149.
 
 Translating the driver would cost ~3,800 Z80 instructions a frame (its IRQ handler; the effects alone ~2,700), so the
 effects are register streams (`tools/sound_sfx.py`) played by `src/sfx.s`, in the driver's own scheme (audio ROM):
@@ -171,3 +171,40 @@ frames of the game: 509 of 23812 chip outputs differ, all after an effect resume
 $06, at volume 1); `sfx_test.py 3000` (in `port.py test`): the 68000 player against that decoder, 0 of 23809
 differ.  `logic_test.py 3000` and the render tests pass.  Hatari `bench.sh`: 55.6 ticks (93%), 27.2 frames a second,
 no late border events.
+
+## Memory (2026-10-10)
+
+text + data + BSS = 2,944,160 bytes (`build/commando/commando.map`: text 85,264, data 2,072,588, BSS 786,308);
+it was 3,990,068, more than GEMDOS leaves on a real 4 MB STE with a hard disk driver and accessories.  The program
+does not Malloc (GEMDOS: Super, Fcreate / Fwrite / Fclose for the dumps, Pterm0); the screens are BSS.
+
+* **Dispatch table** (`gen.dispatch_table`): the same 256 KB long table in byte swapped pc order, built as data
+  (`dcb.l` runs of z80_badpc) instead of BSS filled at start from 68 KB of (pc, label) entries.  The dispatch code
+  is unchanged.  `tools/dispatch_test.py` checks in the simulator that every entry and the interrupt token land on
+  their labels and every other address on z80_badpc.
+* **Main ROM in place**: assembled into `g_block` (both copies of $8000-$BFFF) instead of copied from a third
+  copy (48 KB).
+* **Pen planes instead of one-hot masks** (704 -> 224 KB): the bake took a mask word per pen and row (tiles 8,
+  sprites 16, characters 4) and OR-ed it into the planes through `orp_tab`, testing and doing the mirror per pen.
+  Now an object is its pen planes (`tile_planes`, `spr_planes`, `chr_planes`), and a row goes through a routine per
+  kind and colour generated from the colour map (`assets.bake_rows`: a pen's pixels are the product of its pair of
+  the two low planes and its pair of the two high ones, OR-ed into the STE planes it has).  A mirrored row reverses
+  its 2-4 plane words once.  The same bytes, in about a quarter of the time.
+* **Characters' opaque pixels** (`chr_opaque`, 128 KB) are the complement of the pen-3 product the row routine
+  leaves; the bake keeps them for `char_convert` where its movep rows go.
+* **Sprite row orders** (`spr_order` 48 -> 12 KB): a sprite and its flipped and mirrored images share one order of
+  base rows (a flip keeps equal rows equal and blank rows blank); a vertically flipped image's routine takes row
+  15 - order[j].  An image and its mirror image now share their Blitter routines (3934 -> 2416, 509 -> 303 KB;
+  the streams 676 -> 682 KB), and equal generic-path plans are stored once (122 -> 51 KB).
+
+`tools/bake_test.py` bakes all 143,360 object keys (tiles, sprite shapes, characters, every colour and flip) in
+the simulator and compares them with the ROM pixels through the colour map; the old bake gave the same bytes
+(sprites: the same rows, in the new order).  Largest items now: the three screens (504 KB), the sprite
+streams (682 KB), routines (303 KB) and their (routine, stream) table (384 KB), the dispatch table (256 KB), the
+object pool and cache (128 + 96 KB; not shrunk: they would cost bakes).  Halving the dispatch table to words or
+splitting the sprite table would cost cycles in every dispatch or sprite, and was left out.
+
+Speed: `perf_test.py 2500 900` (play): logic 41,918 cycles a tick before and after; a frame 182.1k -> 175.9k
+Musashi cycles (174.0k with the screens at the old 64 KB alignment: which sprites cross a 64 KB boundary and take
+`generic_part` depends on where the screens are); `render_test.py 20 scroll` median 1.71M -> 1.57M.  Hatari
+`bench.sh`: 55.8 -> 57.0 game ticks and 26.7 -> 26.9 drawn frames a second.
