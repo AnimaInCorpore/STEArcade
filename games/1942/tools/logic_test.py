@@ -73,6 +73,25 @@ def ref_ranges(ref):
             ("scroll C802", 0xC802, bytes(ref.scroll))]
 
 
+def check_dispatch(s, sym):
+    """The dispatch table (data built by gen.py, byte swapped pc order): every entry is the label of its Z80 address,
+    z80_irq_ret at the interrupt token, or z80_badpc"""
+    import gen
+    t, bad, n = sym["z80_dispatch_sw"], sym["z80_badpc"], 0
+    for i in range(0x10000):
+        pc = ((i & 0xFF) << 8) | (i >> 8)
+        v = s.mem.r32(t + 4 * i)
+        want = sym["z80_irq_ret"] if pc == gen.TOKEN else sym.get("Z%04X" % pc)
+        if v != bad and v != want:
+            print("dispatch table: pc %04X -> %06X, its label %s" % (pc, v, "%06X" % want if want else "none"))
+            return False
+        n += v != bad
+    if sym["z80_dispatch_sw"] & 3 or n < 10000:
+        print("dispatch table: %d entries at %06X" % (n, t))
+        return False
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=300)
@@ -88,6 +107,8 @@ def main():
     block = sym["g_block"]
     s.mem.w16(sym["render_frame"], 0x4E75)          # (rts: the renderer has its own test, render_test.py)
     mem, cpu = s.mem, s.cpu
+    if not check_dispatch(s, sym):
+        return
     ref = Machine1942()
     rnd = random.Random(1)
 
