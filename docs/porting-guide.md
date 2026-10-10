@@ -39,6 +39,14 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;
   otherwise the background, "volatile" entries (changed >= 4 times: flashing, they own a slot), and the heaviest by
   weight capped per bank.  Re-mapping must only rewrite the STE palette when the mapping is unchanged.
+* **Memory budget (4 MB)**: text + data + BSS from the map must stay well below what GEMDOS leaves.  Hatari with TOS
+  2.06 and nothing in AUTO has $CCB2-$3F8000 (4,145,998 bytes); a real STE with a hard disk driver, accessories and
+  TOS 1.62 has less, and Pexec fails without a message.  Aim at 3.6 MB at most.  Black Tiger (2026-10-10) was at
+  4.02 MB: its natural-PC dispatch tables (a long per Z80 address, 640 KB of BSS) became word tables built as
+  data by gen.py, (the entry - a region's base) / 2 (`games/blktiger/README.md`, "Memory"), about 24 cycles a dispatch.
+* **Fixed palette, fitted per stage**: when the game's stages look different, fit the fixed colours to frames of
+  every stage (cheats to reach them, as `games/blktiger/ref/palette_fit.py`), each set's histogram normalised;
+  square-rooting the weights (Bubble Bobble) let a stage's sky lose its colour there.
 * **Throttle the logic when it cannot keep up** so the renderer still runs; never let a pending VBL nest.
 * **Reference renderers can be wrong in ways "port equals reference" cannot see** (plane order, palette weights,
   a sprite row off by one): the MAME check below is not optional.
