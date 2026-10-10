@@ -36,8 +36,56 @@ Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad 
 
 Schedule (`src/bublbobl.s`): at every VBL the MCU's IRQ1 handler, then the main CPU's interrupt handler and the sub
 CPU's, each to completion, then the frame is drawn behind them (the VBL nests into the renderer: the game
-keeps its pace, the display drops frames).  The CPUs' foreground threads only boot to their idle loops (the
+keeps its pace, the display drops frames).  Three screens (2026-10-10): the one shown, a complete one waiting for the
+next VBL (`ready_screen`), the one being drawn; when a picture is done and the game ran meanwhile, the next one starts at
+once (`logic_rounds` against `render_from`) instead of waiting for the VBL.  Each renderer keeps per screen what it lacks
+(`old_stale`, `sr_stale`) and copies it from the screen drawn last (`last_screen_address`).  The CPUs' foreground threads only boot to their idle loops (the
 boot waits for the MCU's handshake at `$0158`: a hook gives the MCU and the sub CPU a turn).
+
+## Sprite renderer (`src/srender.s`, 2026-10-10)
+
+Most frames (the play, the demo play, the title and instruction screens) have the object list in layers: columns (32
+rows of 2 tiles: the level's back), sprites (shapes 0-3: 16 x 16, 2 x 2 tiles), columns again (the walls and platforms,
+in front of the sprites), sometimes sprites after those.  `render_frame` gives such frames to `sr_frame`, the others to
+the general renderer below (switching draws everything once).  On the 8 x 8 grid the columns make a static picture:
+
+* `sr_img` (both column layers, in the screen's layout), `sr_msk` (the front layer's opacity, a byte per 8 pixels and
+  line), `sr_any` (per block: the front layer has an opaque pixel).  Two tiles per cell and layer are allowed (the
+  title has 32 columns and no sprites: both sets are behind); a cell is drawn again when one of its tile entries changed
+  (`rf_vdiff`'s `tile_dirty` through `sr_vinv`, the cell of every entry) or a pen of its tiles changed slot
+  (`pen_chg`, `bb_penmask`: the pens each tile uses).  The maps (`sr_maps`) are built again when a column, its x or
+  its layer changed (sprites coming or going between the two sets move the front set to the back).
+* The screen is handled in blocks of 16 pixels (one plane word group) x 4 lines.  Per object a record (`sr_recs`, 64
+  bytes) of what the last frame drawn here saw; `sr_scan` compares: a sprite whose entry, tile entries (the page flags of
+  `rf_vdiff`) or colour generation (`sr_gen`, per bank, new on a mapping change) changed puts its old and new blocks into
+  the set; one that only moved keeps its tiles' keys.  The visible sprites are listed (`sr_vlist`).
+* Closure: a sprite with a block in the set is drawn whole and its blocks join the set, until nothing changes.  The
+  screen to draw gets: the blocks it lacks outside the set copied from the screen drawn last, the set restored from
+  `sr_img`, the set's sprites in list order, the front columns again through `sr_msk` where a back sprite was drawn
+  (blocks of `sr_s1` and `sr_any`), the sprites after the front columns.
+* A sprite is drawn from its baked image (`sr_cache`, 512 entries of 408 bytes, direct mapped, keyed by the four tiles'
+  keys with their generations and the shift x & 15): two plane word groups per line, the mask inverted and doubled,
+  `and.l` / `or.l` per plane pair, clipped by whole groups (the game area is 16 groups wide) and by lines.  A miss bakes
+  it from the tile cache (`tcache`).
+
+Exact: `render_test.py seq 100 1500` (attract, coin, start, two rounds, a level transition) 1500 of 1500 frames,
+`render_bench.py` 0 wrong pixels.  `render_bench.py ... --step 2` renders every second frame (the pace of 25 pictures a
+second); it leaves the first frame (a full redraw) out of its means and profile and prints how many sprites were drawn
+and baked.
+
+## Fixed palette (2026-10-10, `STATICPAL`, the default; `-D DYNPAL=1` the colours chosen per picture as before)
+
+Colour 0 is the background (palette entry 255), colours 1-13 are fixed: fitted to the game's own colours by
+`ref/palette_fit.py` (weighted k-means in Oklab over the reference pictures of the logic test's 3000 frames and the 64 MAME
+attract frames of `docs/`, each colour snapped to one that occurs; `docs/palette_static.json`), every pen maps to the
+nearest of them in Oklab (`stat_near`, 4096 entries, built by `tools/assets.py`).  Colours 14 and 15 are lent to flashing
+entries: an entry that changed `VOLMIN` (4) times takes a free one, and from then on its changes only rewrite that STE
+colour; it gives it back after `VIDLE` (48) palette changes without one of its own, and a new picture (16 entries or
+more at once) takes both back.  A change of slot redraws only the tiles that use that pen.  Colour error against the
+arcade (per channel, 0-255): gameplay 1.38 with 94.7% of the pixels exact (`palette_fit.py`'s histogram); in
+`render_bench.py`'s windows 0.25-2.4, against 0.08-7.9 for the per-picture choice, whose stable slots drift on the
+second round (7.2-7.9 there).  DawnBringer 16 (black for its darkest) would be 17.8 (68% exact); the earlier Oklab default
+`docs/palette16.json` 8.0.
 
 ## Renderer (`src/render.s`)
 
@@ -86,7 +134,8 @@ differ).  The STE port:
 adopted from the JsOklabQuantizer default (`docs/palette16.json`, not yet checked against gameplay frames; it has no
 green), the CRC manifest of the `bublbobl` (Japan) and `bublboblr` (US / Romstar) sets, and hardware notes with
 evidence grades.  The scripts that produce them are in `ref/`: `mame_attract_collage.py`, `quantize_collage.py`
-(+ `oklab_quantize.mjs`), `palette16.py`, `rom_manifest.py`.  The port itself is built on the `bublbobl` set; the US set
+(+ `oklab_quantize.mjs`), `palette16.py`, `rom_manifest.py`; the fixed palette the port uses: `palette_fit.py`
+(`docs/palette_static.json`, see "Fixed palette").  The port itself is built on the `bublbobl` set; the US set
 differs only in the two main-CPU ROMs and has not been run through the translator.
 
 ## Tests
@@ -245,6 +294,26 @@ at x < 0 or x > 248) and `rf_cleanup` erases only those, in the same frame: 27k 
 costs (`tools/render_bench.py 1500 150 --prof`, play, about 870k cycles): the redraw of the dirty cells in list order
 (`draw_tile` 224k, `rf_redraw` 210k), the video RAM compare (`rf_vdiff`, 84k), the object bookkeeping (`obj_slots`,
 `mark_tile`, `tile_state`, about 150k) and the copy of what the other screen lacks (`rf_copy`, 41k).
+
+## Speed (2026-10-10)
+
+`tools/profile.py 1500` (the real schedule on Musashi; game frames per VBL / pictures a second):
+
+| window | 2026-10-09 | sprite renderer, fixed palette | + three screens |
+|---|---|---|---|
+| attract, 100-400 | 0.77 / 23.7 | 0.86 / 34.5 | 0.85 / 34.7 |
+| start of the game, 600-900 | 0.57 / 1.7 | 0.65 / 3.7 | 0.58 / 3.0 |
+| play, 900-1200 | 0.75 / 6.7 | 0.75 / 9.7 | 0.76 / **13.2** |
+| play, 1200-1500 | 0.49 / 3.5 | 0.56 / 13.2 | 0.57 / **16.2** |
+
+A picture of the play costs ~180k cycles (`render_bench.py 900 300 1200 300 --step 2`, median; ~620k before).  The
+limit is the game itself now: its interrupts cost 95k-146k cycles a game frame in the play (main Z80 70-93k, sub Z80 up
+to 21k, the MCU and its bus routines ~30k) of the 160k a VBL has, so 25 pictures a second and the full speed cannot both
+be had in busy scenes on an 8 MHz STE; the game's speed comes first (the user's choice, 2026-10-10).  Also changed:
+the MCU's bus routines (`mcu_bus_read` / `mcu_bus_write`, ~80 calls a game frame) address its memory through a6.
+
+`logic_test.py` had been failing since the pads came (2026-10-10, release 0.1): the VBL composed the inputs and
+overwrote the ones the test sets; the `--sim` build leaves them to the test now.
 
 ## Speed (2026-10-09)
 

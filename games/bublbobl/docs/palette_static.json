@@ -1,0 +1,51 @@
+{
+ "name": "bublbobl fixed palette (render.s STATICPAL)",
+ "origin": "ref/palette_fit.py: weighted k-means in Oklab over the colours of 3000 frames of the logic test's inputs and docs/attract_collage_64.png",
+ "pens": [
+  "#000000",
+  "#660000",
+  "#770000",
+  "#0044aa",
+  "#990000",
+  "#ff0000",
+  "#ff0099",
+  "#0099ff",
+  "#00dd00",
+  "#ffaa77",
+  "#ffaaff",
+  "#ffff00",
+  "#ffffff"
+ ],
+ "error": {
+  "DawnBringer 16 (black)": {
+   "gameplay": [
+    17.81,
+    0.677
+   ],
+   "attract": [
+    20.96,
+    0.6
+   ]
+  },
+  "docs/palette16.json": {
+   "gameplay": [
+    7.99,
+    0.687
+   ],
+   "attract": [
+    7.77,
+    0.625
+   ]
+  },
+  "fitted (13 + background)": {
+   "gameplay": [
+    1.38,
+    0.947
+   ],
+   "attract": [
+    6.86,
+    0.825
+   ]
+  }
+ }
+}

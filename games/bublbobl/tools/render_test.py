@@ -108,7 +108,7 @@ def main():
             print("   %d differing cells, e.g. %s" % (len(cells), cells[:12]))
             from collections import Counter
             print("   differing cells per column:", sorted(Counter(c[0] for c in cells).items()))
-            cx, cy = cells[1]
+            cx, cy = cells[min(1, len(cells) - 1)]
             print("   cell", cx, cy, "got / expected:")
             for r in range(8):
                 print("     ", "".join("%x" % got[cy * 8 + r, cx * 8 + c] for c in range(8)), "  ", "".join("%x" % exp[cy * 8 + r, cx * 8 + c] for c in range(8)))

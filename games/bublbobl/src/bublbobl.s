@@ -362,21 +362,41 @@ init_video:
 	move.l	#screens,d0
 	add.l	#$100-1,d0
 	and.l	#$ffffff00,d0
-	move.l	d0,scr_address
+	lea	scr_address,a1
+	moveq	#3-1,d1
+.buf:	move.l	d0,(a1)+		; three screens: shown, ready to be shown, being drawn
+	move.l	d0,a0
+	movem.l	d0-d1/a1,-(sp)
+	bsr	clear_screen
+	movem.l	(sp)+,d0-d1/a1
 	add.l	#SCREEN_SIZE,d0
-	move.l	d0,scr_address+4
-
-	move.l	scr_address,a0
-	bsr	clear_screen
-	move.l	scr_address+4,a0
-	bsr	clear_screen
+	dbf	d1,.buf
 
 	clr.b	$ffff8260.w		; low resolution
 	clr.b	$ffff820f.w
 
 	move.l	scr_address+4,draw_screen_address
 	move.l	scr_address,display_screen_address
-	clr	draw_index
+	move.l	scr_address,last_screen_address
+	clr.l	ready_screen
+	rts
+
+; the screen to draw into: neither the one shown nor the one waiting to be shown (draw_screen_address)
+
+pick_screen:
+	move	sr,-(sp)
+	move	#$2700,sr
+	lea	scr_address,a0
+	moveq	#3-1,d1
+.p:	move.l	(a0)+,d0
+	cmp.l	display_screen_address,d0
+	beq.s	.n
+	cmp.l	ready_screen,d0
+	beq.s	.n
+	move.l	d0,draw_screen_address
+	bra.s	.done
+.n:	dbf	d1,.p
+.done:	move	(sp)+,sr
 	rts
 
 ; a0 = screen
@@ -417,22 +437,20 @@ vbl:
 	addq	#1,cnt_vbl
 	endc
 	movem.l	d0-d7/a0-a6,-(sp)
+	ifnd SIM			; (the test harness sets the inputs itself)
 	bsr	jagpad_poll
 	move	sr,-(sp)
 	move	#$2600,sr		; (the keyboard composes them too)
 	bsr	compose_inputs
 	move	(sp)+,sr
+	endc
 
 	; A frame finished drawing since the last VBL: show it, draw into the other one.
 
-	tst.b	frame_ready
+	move.l	ready_screen,d0
 	beq.s	.no_swap
-	clr.b	frame_ready
-	move.l	display_screen_address,d0
-	move.l	draw_screen_address,display_screen_address
-	move.l	d0,draw_screen_address
-	eori	#1,draw_index
-	move.l	display_screen_address,d0
+	clr.l	ready_screen
+	move.l	d0,display_screen_address
 	add.l	#CROP_TOP*STRIDE,d0	; the shown part
 	move.l	d0,-(sp)
 	move.b	1(sp),$ffff8201.w
@@ -442,7 +460,7 @@ vbl:
 	tst.b	pal_pending
 	beq.s	.no_swap
 	clr.b	pal_pending
-	movem.l	ste_pal,d0-d7
+	movem.l	ready_pal,d0-d7		; (the colours of that picture)
 	movem.l	d0-d7,$ffff8240.w
 .no_swap:
 
@@ -469,6 +487,7 @@ vbl:
 
 	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
 	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
+	addq.l	#1,logic_rounds
 	ifd SIM
 	addq.l	#1,sim_game_frames	; (profile.py: game frames run)
 	endc
@@ -560,15 +579,28 @@ vbl_render:
 	movem.l	(sp),d0-d7/a0-a6	; the main CPU's registers for its IRQ handler
 	movem.l	d0-d7/a0-a6,main_ctx
 	st	in_render
+.again:
 	ifd SIM
 	addq.l	#1,sim_renders		; (profile.py: renders started)
 	endc
+	bsr	pick_screen
+	move.l	logic_rounds,render_from
 	move	#$2300,sr
 	bsr	render_frame
+	move	#$2700,sr		; the picture is ready, with its colours
+	move.l	draw_screen_address,ready_screen
+	movem.l	ste_pal,d0-d7
+	movem.l	d0-d7,ready_pal
+	st	pal_pending
+	clr.b	render_age
+	move.l	logic_rounds,d0		; the game moved on while it was drawn: the next picture at once (into the
+	cmp.l	render_from,d0		; third screen; the CPU would only wait for the next VBL)
+	beq.s	.caught_up
+	move	#$2300,sr
+	bra.s	.again
+.caught_up:
 	move	#$2400,sr
 	clr.b	in_render
-	clr.b	render_age
-	st	frame_ready
 
 vbl_done:
 	clr.b	in_logic
@@ -857,80 +889,75 @@ mcu_irq:
 ; (DDRs as the init leaves them: P1 $F0, P2 and P4 $FF): P1 data = P1 | $80, P3 DDR = 0, ($4A) = X,
 ; P4 = X low, P2 = X high nibble, then | $10 (the clock: the bus cycle), A = that, B = the byte.
 
-mcu_bus_read:
-	move.b	mcu_mem+2,d0
+mcu_bus_read:				; (a6 = mcu_mem while the MCU's code runs)
+	move.b	2(a6),d0
 	and.b	#$F0,d0
 	or.b	in0_val,d0		; P1 as the pins show
 	or.b	#$80,d0
-	move.b	d0,mcu_mem+2
-	and.b	#$F0,d0
+	move.b	d0,2(a6)
 	or.b	#$0F,d0
 	move.b	d0,p1_out		; (no edge of bit 6: the latch's bit 6 is what it was)
-	clr.b	mcu_mem+4
-	move.w	d2,mcu_mem+$4A
-	move.b	d2,mcu_mem+7
+	clr.b	4(a6)
+	move.w	d2,$4A(a6)
+	move.b	d2,7(a6)
 	move.w	d2,d0
 	lsr.w	#8,d0
 	and.b	#$0F,d0
-	move.b	d0,mcu_mem+3
-	or.b	#$10,d0
-	move.b	d0,mcu_mem+3
+	or.b	#$10,d0			; (P2 = X high nibble, then | $10: only the second write is seen)
+	move.b	d0,3(a6)
 	move.b	d0,p2_out
 	; the bus cycle (a read): X & $800 clear: DSW0, DSW1, IN1, IN2; X & $C00 = $C00: the shared RAM
-	move.w	d2,d1
-	and.w	#$0800,d1
-	bne.s	.r_mc
-	move.w	d2,d1
-	and.w	#3,d1
-	lea	dsw0,a0
-	move.b	(a0,d1.w),p3_in
-	bra.s	.r_done
-.r_mc:
-	move.w	d2,d1
-	and.w	#$0C00,d1
-	cmp.w	#$0C00,d1
-	bne.s	.r_done
-	move.w	d2,d1
-	and.w	#$03FF,d1
-	lea	G_MCRAM,a0
-	move.b	(a0,d1.w),p3_in
-.r_done:
 	moveq	#0,d1
-	move.b	p3_in,d1		; P3 read (the DDR is 0)
-	tst.b	d1
+	btst	#3,d0
+	bne.s	.r_mc
+	moveq	#3,d7
+	and.w	d2,d7
+	lea	dsw0,a0
+	move.b	(a0,d7.w),d1
+	move.b	d1,p3_in		; (B = P3 read: the DDR is 0)
+	rts
+.r_mc:
+	btst	#2,d0
+	beq.s	.r_none
+	move.w	#$03FF,d7
+	and.w	d2,d7
+	lea	G_MCRAM,a0
+	move.b	(a0,d7.w),d1
+	move.b	d1,p3_in
+	rts
+.r_none:
+	move.b	p3_in,d1
 	rts
 
 ; F1DB: write B (d1) at X (d2): P1 data = P1 & $7F, P3 DDR = $FF, P3 = B, ($4A) = X, P4 = X low,
 ; P2 = X high nibble, then | $10; A = that, B = X low.
 
 mcu_bus_write:
-	move.b	mcu_mem+2,d0
+	move.b	2(a6),d0
 	and.b	#$F0,d0
 	or.b	in0_val,d0
 	and.b	#$7F,d0
-	move.b	d0,mcu_mem+2
-	and.b	#$F0,d0
+	move.b	d0,2(a6)
 	or.b	#$0F,d0
 	move.b	d0,p1_out
-	move.b	#$FF,mcu_mem+4
-	move.b	d1,mcu_mem+6
-	move.w	d2,mcu_mem+$4A
-	move.b	d2,mcu_mem+7
+	st	4(a6)
+	move.b	d1,6(a6)
+	move.w	d2,$4A(a6)
+	move.b	d2,7(a6)
 	move.w	d2,d0
 	lsr.w	#8,d0
 	and.b	#$0F,d0
-	move.b	d0,mcu_mem+3
 	or.b	#$10,d0
-	move.b	d0,mcu_mem+3
+	move.b	d0,3(a6)
 	move.b	d0,p2_out
-	move.w	d2,d1			; the bus cycle (a write): only the shared RAM
-	and.w	#$0C00,d1
-	cmp.w	#$0C00,d1
+	moveq	#$0C,d7			; the bus cycle (a write): only the shared RAM
+	and.b	d0,d7
+	cmp.b	#$0C,d7
 	bne.s	.w_done
-	move.w	d2,d1
-	and.w	#$03FF,d1
+	move.w	d2,d7
+	and.w	#$03FF,d7
 	lea	G_MCRAM,a0
-	move.b	mcu_mem+6,(a0,d1.w)
+	move.b	d1,(a0,d7.w)
 .w_done:
 	moveq	#0,d1
 	move.b	d2,d1			; B = X low (ldd $4A)
@@ -1444,6 +1471,7 @@ z80_unsupported:
 	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
 	include "render.s"
+	include "srender.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated programs (and their dispatch tables in the data section).
@@ -1509,7 +1537,6 @@ quit_flag:	ds.b	1
 	jagpad_vars
 border_a:	ds.b	1
 border_b:	ds.b	1
-frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
 in_logic:	ds.b	1		; the game's interrupts of a VBL are running
 render_age:	ds.b	1		; VBLs since the frame being drawn began
 skip_phase:	ds.b	1
@@ -1559,10 +1586,14 @@ dbg_vbl_sp:	ds.l	1
 dbg_nest:	ds.w	1
 crash_regs:	ds.l	16
 crash_text:	ds.b	512
-draw_index:	ds.w	1
-scr_address:	ds.l	2
-draw_screen_address:	ds.l	1
-display_screen_address:	ds.l	1
+scr_address:	ds.l	3
+draw_screen_address:	ds.l	1		; the screen being drawn
+display_screen_address:	ds.l	1		; the screen shown
+ready_screen:	ds.l	1		; a complete screen to be shown at the next VBL (0: none)
+last_screen_address:	ds.l	1		; the screen drawn last (complete: the renderers copy from it)
+ready_pal:	ds.w	16		; its colours
+logic_rounds:	ds.l	1		; the game's interrupt rounds run
+render_from:	ds.l	1		; ... when the picture being drawn began
 frame_counter:	ds.l	1
 g1_ret_to:	ds.l	1
 g_winbase:	ds.l	1		; the current ROM bank's window copy + $8000
@@ -1583,4 +1614,4 @@ g1_dispatch_sw:	ds.l	65536*4		; one table per bank
 g2_dispatch_sw:	ds.l	65536
 
 	cnop	0,256
-screens:	ds.b	SCREEN_SIZE*2+256
+screens:	ds.b	SCREEN_SIZE*3+256

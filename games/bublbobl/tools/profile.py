@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--window", nargs="*", default=["100:400", "600:900"], help="frame windows A:B to report")
     ap.add_argument("--hist", default="", help="comma list of routines: distribution of their cycles per VBL in each window")
     ap.add_argument("--prg", default=str(RUN / "BUBBLE.PRG"))
+    ap.add_argument("--zpages", action="store_true", help="the translated code by 256-byte page of its Z80 / 6801 address")
     a = ap.parse_args()
 
     s = Sim(a.prg, run_dir=RUN)
@@ -54,7 +55,7 @@ def main():
     sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
     addrs = sorted((v, k) for k, v in sym.items())
     keys = [v for v, _ in addrs]
-    render_names = set(re.findall(r"^([A-Za-z_]\w*):", open(SRC / "render.s", encoding="utf-8").read(), re.M))
+    render_names = set(re.findall(r"^([A-Za-z_]\w*):", open(SRC / "render.s", encoding="utf-8").read() + open(SRC / "srender.s", encoding="utf-8").read(), re.M))
 
     def src(pc):
         i = bisect.bisect_right(keys, pc) - 1
@@ -109,7 +110,12 @@ def main():
         elif pc == 0x600:
             print("exception/halt at 0x600"); break
         cur_b[bucket(pc)] += c
-        cur_r[src(pc)] += c
+        n = src(pc)
+        if a.zpages:
+            m = re.fullmatch(r"(Z|Lx|BK|BKT|Y|Ly|M)([0-9A-Fa-f]+)", n)
+            if m:
+                n = "%s %s00" % ({"Lx": "Z", "BK": "Z", "BKT": "Z", "Ly": "Y"}.get(m.group(1), m.group(1)), m.group(2)[:-2].upper().rjust(2, "0"))
+        cur_r[n] += c
         gf_now = mem.r32(gf_addr)
         gframes += gf_now - hb_last
         hb_last = gf_now
@@ -130,6 +136,9 @@ def main():
                 if f % 100 == 0:
                     print("frame %d" % f, flush=True)
     print()
+    if "sim_sr_frames" in sym:
+        print("sprite renderer (srender.s): %d of %d renders, column maps built %d times, refused %d"
+              % (mem.r32(sym["sim_sr_frames"]), mem.r32(rn_addr), mem.r32(sym["sim_sr_maps"]), mem.r32(sym["sim_sr_cannot"])))
     for lo, hi in wins:
         sel = per_frame[lo:hi]
         if not sel:

@@ -16,6 +16,9 @@
 ; buffer has room for the whole 256 rows and the tiles that hang over.
 ; ------------------------------------------------------------------------------
 
+	ifnd DYNPAL			; (-D DYNPAL=1: the colours chosen per picture, as before 2026-10-10)
+STATICPAL = 1				; the fixed palette (rf_palette)
+	endc
 YPAD = 10
 BUF_LINES = 280
 SCREEN_SIZE = STRIDE*BUF_LINES
@@ -32,6 +35,7 @@ S_PAL = g_ram+$7800
 
 WCAP = 8
 VOLMIN = 4				; a palette entry that changed this often is volatile (flashing)
+VIDLE = 48				; (STATICPAL) palette changes without one of its own: a flashing entry gives its colour back
 TC_SIZE = 4096				; tile cache slots
 TC_ENTRY = 72				; key.l, opaque.l, 8 rows of (data.l, inverted mask.l)
 
@@ -244,8 +248,8 @@ init_render:
 	bra	rf_init_state
 
 rf_init_state:
-	lea	dirty_prev,a0
-	moveq	#28-1,d0
+	lea	old_stale,a0
+	moveq	#3*28-1,d0
 .dp:	move.l	#-1,(a0)+
 	dbf	d0,.dp
 	lea	objs,a0
@@ -312,6 +316,20 @@ NEED_MAX = 1000			; (off: building the composites a frame lacks pays back in the
 
 render_frame:
 	move.l	draw_screen_address,rf_screen
+	lea	scr_address,a0		; rf_buf = its number (0-2): what it lacks is kept per screen
+	moveq	#0,d0
+.bufno:	move.l	(a0)+,d1
+	cmp.l	rf_screen,d1
+	beq.s	.bufok
+	addq.w	#1,d0
+	cmp.w	#3,d0
+	blo.s	.bufno
+	moveq	#0,d0
+.bufok:	move.w	d0,rf_buf
+	bsr.s	.frame
+	move.l	rf_screen,last_screen_address
+	rts
+.frame:
 	clr.b	rf_all
 	move.l	#dirty,rf_map
 	clr.l	rf_map2
@@ -319,6 +337,16 @@ render_frame:
 	sf	rf_noclear
 	bsr	rf_vdiff
 	bsr	rf_palette
+	ifnd NOSR
+	move.b	sr_active,sr_was	; the sprite renderer (srender.s) takes the frames it can
+	bsr	sr_frame
+	tst.w	d0
+	beq	.sr_drawn
+	tst.b	sr_was
+	beq.s	.general
+	st	rf_all			; (it drew the frames before: everything again)
+.general:
+	endc
 	bm_fill	dirty,0
 	bm_fill	stale,0
 	tst.b	rf_all
@@ -341,7 +369,7 @@ render_frame:
 	bm_or	stale_k,comp_bad_k
 	bm_or	stale,dirty
 	; This frame's changed cells (dirty).  The screen to draw also lacks the previous frame's changes
-	; (dirty_prev); those this frame leaves alone are copied from the screen shown, which is complete
+	; (old_stale); those this frame leaves alone are copied from the screen drawn last, which is complete
 	; and equal to them there, the others (dirty) are drawn.
 	bm_copy	dirty,dirty_raw
 	bsr	closure_rect		; closure over the moving range (the composites hold the rest whole)
@@ -402,7 +430,24 @@ render_frame:
 	bsr	rf_closure
 .counted_need:
 	bsr	rf_copy
-	bm_copy	dirty_raw,dirty_prev	; (dirty_prev = this frame's changes, before the closure)
+	lea	old_stale,a1		; the other screens lack this frame's changes (before the closure), this one nothing
+	moveq	#0,d2
+.st_buf:
+	lea	dirty_raw,a0
+	moveq	#28-1,d0
+	cmp.w	rf_buf,d2
+	beq.s	.st_clr
+.st_or:	move.l	(a0)+,d1
+	or.l	d1,(a1)+
+	dbf	d0,.st_or
+	bra.s	.st_next
+.st_clr:
+	clr.l	(a1)+
+	dbf	d0,.st_clr
+.st_next:
+	addq.w	#1,d2
+	cmp.w	#3,d2
+	blo.s	.st_buf
 	tst.b	rf_whole
 	beq.s	.layers
 	move.l	#dirty,rf_map
@@ -424,6 +469,7 @@ render_frame:
 	bsr	comp_overlay		; the objects after it, through their mask
 .done:
 	bsr	rf_cleanup
+.sr_drawn:
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -637,13 +683,13 @@ rf_mark_banks:
 .any:	or.b	(a1)+,d1
 	dbf	d0,.any
 	tst.b	d1
-	beq.s	.clear
+	beq	.clear
 	lea	objs,a3
 	lea	objslots,a2
 	move.w	#192-1,d6
 .obj:
 	move.w	O_COUNT(a3),d5
-	beq.s	.next
+	beq	.next
 	move.l	a2,a4
 	subq.w	#1,d5
 .slot:
@@ -658,6 +704,25 @@ rf_mark_banks:
 	and.w	#15,d3			; the tile's bank
 	lea	bank_chg_b,a1
 	tst.b	(a1,d3.w)
+	beq.s	.sn
+	lea	pen_chg,a1		; ... and the tile uses a pen whose slot changed
+	add.w	d3,d3
+	move.w	(a1,d3.w),d3
+	moveq	#0,d4
+	move.b	(a0,d2.w),d4
+	move.b	1(a0,d2.w),d7
+	and.w	#3,d7
+	lsl.w	#8,d7
+	or.w	d7,d4
+	moveq	#0,d7
+	move.b	O_ENTRY+3(a3),d7
+	and.w	#15,d7
+	lsl.w	#8,d7
+	lsl.w	#2,d7
+	or.w	d7,d4			; the tile number
+	add.w	d4,d4
+	lea	bb_penmask,a1
+	and.w	(a1,d4.w),d3
 	beq.s	.sn
 	stale_if_static
 	movem.l	d5-d6/a2-a4,-(sp)
@@ -678,7 +743,7 @@ rf_mark_banks:
 	rts
 
 ; ------------------------------------------------------------------------------
-; The cells the screen to draw lacks (dirty_prev: the last frame's changes) and this frame does not draw
+; The cells the screen to draw lacks (old_stale: the changes since it was drawn) and this frame does not draw
 ; (not in dirty after the closure) are copied from the screen being shown, which holds the last frame
 ; complete: nothing changed in them since.  A cell is 8 lines of one movep.l.
 ; ------------------------------------------------------------------------------
@@ -686,9 +751,12 @@ rf_mark_banks:
 rf_copy:
 	move.l	rf_screen,a1
 	lea	(YPAD+16)*STRIDE+16(a1),a1	; the first game cell row, column 0 of the screen to draw
-	move.l	display_screen_address,a2
-	lea	(YPAD+16)*STRIDE+16(a2),a2	; ... of the screen shown
-	lea	dirty_prev,a0
+	move.l	last_screen_address,a2
+	lea	(YPAD+16)*STRIDE+16(a2),a2	; ... of the screen drawn last
+	move.w	rf_buf,d0
+	mulu	#28*4,d0
+	lea	old_stale,a0
+	add.l	d0,a0			; what this screen lacks
 	lea	dirty,a3
 	moveq	#28-1,d0
 .row:
@@ -1901,6 +1969,159 @@ FLIPX = 1
 ; ------------------------------------------------------------------------------
 
 rf_palette:
+	ifd STATICPAL
+	; The fixed palette (-D STATICPAL=1, docs/palette_static.json): colour 0 the background (entry 255), 1-STAT_PENS
+	; fixed, every pen maps to the nearest of them (stat_near, by its 12 bit colour).  The colours after them are lent
+	; to flashing entries: an entry that changed VOLMIN times takes a free one, and its changes then only rewrite that
+	; STE colour (no tile changes slot); it gives it back after VIDLE palette changes without one of its own.  A new
+	; picture (16 entries or more at once) takes the lent colours back.  Only the tiles of the pens whose slot changed
+	; are baked and drawn again (.banks: pen_chg).
+	lea	S_PAL,a0
+	lea	pal_shadow,a1
+	moveq	#128-1,d0
+.s_cmp:	cmpm.l	(a0)+,(a1)+
+	bne.s	.s_changed
+	dbf	d0,.s_cmp
+	rts
+.s_changed:
+	addq.w	#1,pal_tick
+	lea	S_PAL,a0		; the entries that changed
+	lea	pal_shadow,a1
+	moveq	#0,d3
+	move.w	#256-1,d0
+.s_cnt:	cmpm.w	(a0)+,(a1)+
+	beq.s	.s_cn
+	addq.w	#1,d3
+.s_cn:	dbf	d0,.s_cnt
+	lea	ttab,a0			; the mapping as it is
+	lea	ttab_new,a1
+	moveq	#64-1,d0
+.s_tt:	move.l	(a0)+,(a1)+
+	dbf	d0,.s_tt
+	sf	rf_sbulk
+	cmp.w	#16,d3
+	blo.s	.s_map
+	st	rf_sbulk		; a new picture: the lent colours back, the counts from 0
+	lea	stat_pens,a0
+	lea	kept,a1
+	moveq	#8-1,d0
+.s_k:	move.l	(a0)+,(a1)+
+	dbf	d0,.s_k
+	lea	vslot_of,a0		; (vcount follows)
+	moveq	#128-1,d0
+.s_v:	clr.l	(a0)+
+	dbf	d0,.s_v
+	lea	vowner,a0
+	moveq	#16-1,d0
+.s_o:	move.w	#-1,(a0)+
+	dbf	d0,.s_o
+.s_map:
+	lea	S_PAL,a2		; every changed entry (in a new picture every entry): its slot
+	lea	pal_shadow,a3
+	lea	ttab_new,a6
+	moveq	#0,d6			; the entry
+.s_e:
+	move.w	(a2)+,d0
+	cmp.w	(a3)+,d0
+	bne.s	.s_do
+	tst.b	rf_sbulk
+	beq	.s_en
+.s_do:
+	move.w	d0,d1
+	lsr.w	#4,d1
+	and.w	#$FFF,d1		; the colour (r << 8 | g << 4 | b)
+	move.w	d6,d2
+	and.w	#15,d2
+	cmp.w	#15,d2
+	bne.s	.s_pen
+	clr.b	(a6,d6.w)		; pen 15: transparent
+	cmp.w	#255,d6
+	bne	.s_en
+	move.w	d1,kept			; (entry 255: the background)
+	bra	.s_en
+.s_pen:
+	lea	vslot_of,a0
+	moveq	#0,d2
+	move.b	(a0,d6.w),d2
+	beq.s	.s_noslot
+	add.w	d2,d2			; it has a lent colour: only that is new
+	lea	kept,a1
+	move.w	d1,(a1,d2.w)
+	lea	vlast,a1
+	move.w	pal_tick,(a1,d2.w)
+	bra	.s_en
+.s_noslot:
+	tst.b	rf_sbulk
+	bne.s	.s_near
+	lea	vcount,a0
+	addq.b	#1,(a0,d6.w)
+	bcc.s	.s_c
+	st	(a0,d6.w)
+.s_c:	cmp.b	#VOLMIN,(a0,d6.w)
+	blo.s	.s_near
+	lea	vowner,a1		; flashing: a free lent colour?
+	moveq	#STAT_PENS+1,d2
+.s_f:	cmp.w	#16,d2
+	bhs.s	.s_near
+	move.w	d2,d4
+	add.w	d4,d4
+	tst.w	(a1,d4.w)
+	bmi.s	.s_take
+	addq.w	#1,d2
+	bra.s	.s_f
+.s_take:
+	move.w	d6,(a1,d4.w)		; its owner
+	lea	vslot_of,a0
+	move.b	d2,(a0,d6.w)
+	lea	kept,a0
+	move.w	d1,(a0,d4.w)
+	lea	vlast,a0
+	move.w	pal_tick,(a0,d4.w)
+	move.b	d2,(a6,d6.w)		; (its pixels change slot once)
+	bra.s	.s_en
+.s_near:
+	lea	stat_near,a0
+	move.b	(a0,d1.w),(a6,d6.w)
+.s_en:
+	addq.w	#1,d6
+	cmp.w	#256,d6
+	blo	.s_e
+	lea	vowner,a1		; lent colours whose entry stopped flashing: back to its nearest fixed one
+	moveq	#STAT_PENS+1,d2
+.s_r:	cmp.w	#16,d2
+	bhs.s	.s_rd
+	move.w	d2,d4
+	add.w	d4,d4
+	move.w	(a1,d4.w),d6
+	bmi.s	.s_rn
+	lea	vlast,a0
+	move.w	pal_tick,d0
+	sub.w	(a0,d4.w),d0
+	cmp.w	#VIDLE,d0
+	blo.s	.s_rn
+	move.w	#-1,(a1,d4.w)
+	lea	vslot_of,a0
+	clr.b	(a0,d6.w)
+	lea	vcount,a0
+	clr.b	(a0,d6.w)
+	lea	S_PAL,a0
+	move.w	d6,d0
+	add.w	d0,d0
+	move.w	(a0,d0.w),d1
+	lsr.w	#4,d1
+	and.w	#$FFF,d1
+	lea	stat_near,a0
+	move.b	(a0,d1.w),(a6,d6.w)
+.s_rn:	addq.w	#1,d2
+	bra.s	.s_r
+.s_rd:
+	lea	S_PAL,a0
+	lea	pal_shadow,a1
+	moveq	#128-1,d0
+.s_cp:	move.l	(a0)+,(a1)+
+	dbf	d0,.s_cp
+	bra	.banks
+	endc
 	lea	S_PAL,a0
 	lea	pal_shadow,a1
 	moveq	#128-1,d0
@@ -2278,6 +2499,22 @@ rf_palette:
 	; the banks whose mapping changed (16 bytes of ttab each; bank_chg_b): only their tiles are baked and drawn
 	; again.  No bank changed (the colours merely changed, or the usage did not matter): only the STE palette is
 	; new, nothing is re-baked or redrawn.
+.banks:
+	lea	ttab_new,a0		; the pens whose slot changed, per bank (pen_chg: a word of pen bits)
+	lea	ttab,a1
+	lea	pen_chg,a2
+	moveq	#16-1,d0
+.pc_b:	moveq	#0,d1
+	moveq	#0,d2
+.pc_p:	move.b	(a0)+,d3
+	cmp.b	(a1)+,d3
+	beq.s	.pc_n
+	bset	d2,d1
+.pc_n:	addq.w	#1,d2
+	cmp.w	#16,d2
+	blo.s	.pc_p
+	move.w	d1,(a2)+
+	dbf	d0,.pc_b
 	lea	ttab_new,a0
 	lea	ttab,a1
 	lea	bank_chg_b,a2
@@ -2537,11 +2774,20 @@ rf_palette:
 .flush:
 	move.l	(a0),d1
 	bmi.s	.fl_n			; (empty already)
+	move.l	d1,d3
+	and.l	#$3FFF,d3		; the tile number
 	moveq	#14,d2
 	lsr.l	d2,d1
 	and.w	#15,d1			; the entry's bank
 	tst.b	(a4,d1.w)
 	beq.s	.fl_n
+	add.w	d1,d1
+	lea	pen_chg,a1
+	move.w	(a1,d1.w),d1
+	add.w	d3,d3
+	lea	bb_penmask,a1
+	and.w	(a1,d3.w),d1
+	beq.s	.fl_n			; (none of its pens changed)
 	move.l	#-1,(a0)
 .fl_n:	lea	TC_ENTRY(a0),a0
 	dbf	d0,.flush
@@ -2599,6 +2845,8 @@ rgb_dist:
 	section data,data
 bb_prom:	incbin "bb_prom.bin"
 bb_blank:	incbin "bb_blank.bin"
+	even
+bb_penmask:	incbin "bb_penmask.bin"
 	cnop	0,4
 bb_tiles:	incbin "bb_tiles.bin"
 	include "bb_tables.s"
@@ -2616,7 +2864,8 @@ snap_vram:	ds.b	$1D00
 objs:		ds.b	192*24
 objslots:	ds.b	192*SLOT_BYTES
 dirty:		ds.l	28
-dirty_prev:	ds.l	28
+old_stale:	ds.l	3*28		; per screen: the cells it lacks (the changes since it was drawn)
+rf_buf:		ds.w	1		; the number of the screen being drawn
 hang_rows:	ds.b	32
 stale:		ds.l	28		; cells whose composites are rebuilt this frame
 stale_k:	ds.l	28		; (and their masks: a shape changed)
@@ -2676,6 +2925,16 @@ kept_own_new:	ds.w	16
 slot_claimed:	ds.b	16
 slot_placed:	ds.b	16
 bank_chg_b:	ds.b	16
+pen_chg:	ds.w	16		; per bank: the pens whose slot changed (rf_palette)
+	ifd STATICPAL
+vslot_of:	ds.b	256		; the lent colour of an entry (0: none)
+vcount:		ds.b	256		; (follows vslot_of) its changes without one
+vowner:		ds.w	16		; the entry a colour is lent to (-1: free)
+vlast:		ds.w	16		; pal_tick of its last change
+pal_tick:	ds.w	1		; palette changes so far
+rf_sbulk:	ds.b	1
+	even
+	endc
 ttab:		ds.b	256
 ttab_new:	ds.b	256
 dtab:		ds.l	16*256
