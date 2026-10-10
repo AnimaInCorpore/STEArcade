@@ -18,7 +18,7 @@ BUILD = build_dir('blktiger')
 
 # The background RAM (c000-cfff, out $0d selects one of four 4 KB banks) is not in the Z80 image: every indirect
 # access checks for it (win_check: with the window's check, at no cost to other addresses) and goes to the bank in
-# g_bg, a write marking map_dirty for the renderer; a block instruction whose ranges meet it runs on a copy of the
+# g_bg, a write noting its map entry for the renderer (bg_note); a block instruction whose ranges meet it runs on a copy of the
 # bank in the image (bt_bg_fwd / bt_bg_bwd, bt_bg_post).  A bank switch is a pointer (g_bgbase).
 # The same for the palette RAM (d800-dfff, the fades): pal_dirty.
 PAL_WRITERS = {0x1951, 0x1959, 0x1965, 0x196d, 0x19a5, 0x19bd, ('bank', 6, 0x809d), ('bank', 6, 0xb944),
@@ -136,7 +136,7 @@ class BTEmitter(Emitter):
 
     def win_check(self, reg, disp=0, store=False, window=True):
         """lines: aW = the base for the Z80 address reg + disp: a6, the window's (8000-BFFF) or the background bank's
-        (C000-CFFF; a write there marks map_dirty).  Signed words: 8000-BFFF is below -$4000, C000-CFFF below -$3000;
+        (C000-CFFF; a write there is noted for the renderer: bg_note).  Signed words: 8000-BFFF is below -$4000, C000-CFFF below -$3000;
         the displacement goes into the constants (the 68000 adds it to the sign-extended register).  A store to the
         window (ROM) goes to a6's unused copy of it, as the Z80's goes nowhere.  window=False: the old check of
         a block instruction's source (the background is in the image then)."""
@@ -148,8 +148,8 @@ class BTEmitter(Emitter):
         if not store:
             lines.append("move.l g_winbase,aW")
         lines += ["cmp.w %s,%s" % (k(0xC000 - 0x10000), reg), "blt.s %s" % l, "move.l g_bgbase,aW"]
-        if store or self.cur.mn in RMW:
-            lines.append("st map_dirty")       # (Scc leaves the CCR alone)
+        if store or self.cur.mn in RMW:        # (the map entry written, for the renderer)
+            lines += ["lea %d(aW,%s.w),a1" % (disp, reg), "jsr bg_note"]
         return lines + [l + ":"]
 
     def block_win(self, fn, ins, backward=False):

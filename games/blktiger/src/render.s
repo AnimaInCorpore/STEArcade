@@ -16,10 +16,15 @@ ROWS = 34
 CELLS = COLS*ROWS
 WIN_COLS = 17                    ; the cells the 256-pixel view can touch
 WIN_ROWS = 15                    ; and the 224 lines
+    ifnd TILE_ENTRIES
 TILE_ENTRIES = 512
+    endc
 TILE_SETS = TILE_ENTRIES/4
 BYTE_LUTS = 16                   ; cached byte tables of bake_pixels (4 KB each)
-SPRITE_ENTRIES = 256
+    ifnd SPRITE_ENTRIES
+SPRITE_ENTRIES = 512
+    endc
+SPRITE_SETS = SPRITE_ENTRIES/4
 BLT_SRC_ADDR = $ffff8a24
 BLT_DST_ADDR = $ffff8a32
 
@@ -391,7 +396,7 @@ epoch_wrap:
     move.l d1,(a0)+
     dbf d0,.invalidate
     lea tile_cache_tags,a0
-    move #TILE_ENTRIES+SPRITE_ENTRIES+128-1,d0
+    move #(cache_tags_end-tile_cache_tags)/4-1,d0
 .clear:
     clr.l (a0)+
     dbf d0,.clear
@@ -538,6 +543,9 @@ clean_update:
     move.w win_r0,prev_r0
     tst.w d7
     bne .full
+    movem.w d2-d3,-(sp)
+    bsr check_noted
+    movem.w (sp)+,d2-d3
     move.w d2,d0
     addq.w #4,d0
     cmp.w #8,d0
@@ -580,14 +588,90 @@ clean_update:
 .row_rect:
     move.w win_c0,d4
     moveq #WIN_COLS,d6
-    bra.s check_rect
+    bra check_rect
 .full:
+    clr.w bg_noted_n                ; (all cells checked)
     move.w win_c0,d4
     move.w win_r0,d5
     moveq #WIN_COLS,d6
     moveq #WIN_ROWS,d7
-    bra.s check_rect
+    bra check_rect
 .done:
+    rts
+
+; The background entries the game wrote since the last frame (bg_note): the window's cells that show one are checked
+; (cells outside the window are checked when they scroll in).  cell_key's packing of the entry reversed.
+check_noted:
+    move.w bg_noted_n,d0
+    beq .none
+    clr.w bg_noted_n
+    btst #1,g_video_enable
+    bne .none                       ; (the background off: no keys; switching it on checks all)
+    subq.w #1,d0
+    lea bg_noted,a4
+.next:
+    move.w d0,-(sp)
+    move.l a4,-(sp)
+    move.w (a4),d0
+    move.w d0,d4                    ; x, y bits 0-3
+    and.w #15,d4
+    move.w d0,d5
+    lsr.w #4,d5
+    and.w #15,d5
+    lsr.w #8,d0
+    tst.b g_layout
+    beq.s .tall
+    move.w d0,d1                    ; wide: x bits 4-6, y bits 4-5
+    and.w #7,d1
+    lsl.w #4,d1
+    or.w d1,d4
+    lsr.w #3,d0
+    and.w #3,d0
+    lsl.w #4,d0
+    or.w d0,d5
+    move.w #127,d2
+    moveq #63,d3
+    bra.s .world
+.tall:
+    move.w d0,d1                    ; tall: x bits 4-5, y bits 4-6
+    and.w #3,d1
+    lsl.w #4,d1
+    or.w d1,d4
+    lsr.w #2,d0
+    and.w #7,d0
+    lsl.w #4,d0
+    or.w d0,d5
+    moveq #63,d2
+    move.w #127,d3
+.world:
+    tst.b view_flip                 ; the cell: world - base (flipped: base - world), as cell_key wraps it
+    bne.s .flip
+    sub.w base_x,d4
+    sub.w base_y,d5
+    bra.s .masked
+.flip:
+    neg.w d4
+    add.w base_x,d4
+    neg.w d5
+    add.w base_y,d5
+.masked:
+    and.w d2,d4
+    and.w d3,d5
+    move.w d4,d0
+    sub.w win_c0,d0
+    cmp.w #WIN_COLS,d0
+    bhs.s .skip
+    move.w d5,d0
+    sub.w win_r0,d0
+    cmp.w #WIN_ROWS,d0
+    bhs.s .skip
+    bsr check_cell
+.skip:
+    move.l (sp)+,a4
+    addq.l #2,a4
+    move.w (sp)+,d0
+    dbf d0,.next
+.none:
     rts
 
 ; check_rect: d4 first column, d5 first row, d6 columns, d7 rows.
@@ -964,6 +1048,9 @@ tile_get:
     move.b #15,bake_transparent
     move.w #16,bake_width
     move.w #16,bake_rows
+    ifd SIM
+    addq.l #1,bake_n_tile
+    endc
     bsr bake_pixels
     bra.s .done
 .way:
@@ -1339,19 +1426,47 @@ sprite_get:
     ror.l #8,d3
     or.l d3,d2
     or.l #$100000,d2
-    move.w d1,d3                 ; (256 entries: the code with the colour)
+    move.w d1,d3                 ; (SPRITE_SETS sets of 4, as tile_get's: the code with the colour and its epoch)
     lsl.w #5,d3
     eor.w d0,d3
-    and.w #SPRITE_ENTRIES-1,d3
+    move.l d2,d4
+    rol.l #8,d4
+    and.w #$ff,d4
+    mulu #37,d4
+    eor.w d4,d3
+    and.w #SPRITE_SETS-1,d3
+    lsl.w #2,d3                  ; the set's first entry
     move.w d3,d4
     lsl.w #2,d4
     lea sprite_cache_tags,a0
-    cmp.l (a0,d4.w),d2
+    add.w d4,a0
+    cmp.l (a0)+,d2
     beq .hit
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .hit
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .hit
+    addq.w #1,d3
+    cmp.l (a0)+,d2
+    beq .hit
+    and.w #-4,d3                 ; a miss: the set's ways in turn
+    move.w d3,d4
+    lsr.w #2,d4
+    lea sprite_victim,a0
+    moveq #3,d5
+    and.b (a0,d4.w),d5
+    addq.b #1,(a0,d4.w)
+    add.w d5,d3
+    move.w d3,d4
+    lsl.w #2,d4
+    lea sprite_cache_tags,a0
     move.l d2,(a0,d4.w)
-    lsl.w #7,d3
+    and.l #$ffff,d3
+    lsl.l #7,d3
     lea sprite_cache,a1
-    add.w d3,a1
+    add.l d3,a1
     move.l a1,cache_result
     clr.b bake_vflip
     clr.b bake_flip
@@ -1372,6 +1487,9 @@ sprite_get:
     clr.b bake_limit
     move.w #16,bake_width
     move.w #16,bake_rows
+    ifd SIM
+    addq.l #1,bake_n_sprite
+    endc
     bsr bake_pixels
     moveq #0,d0
     move.w object_code,d0
@@ -1390,9 +1508,10 @@ sprite_get:
     dbf d0,.reorder
     bra.s .done
 .hit:
-    lsl.w #7,d3
+    and.l #$ffff,d3
+    lsl.l #7,d3
     lea sprite_cache,a1
-    add.w d3,a1
+    add.l d3,a1
     move.l a1,cache_result
 .done:
     movem.l (sp)+,d0-d7/a0-a6
@@ -1975,6 +2094,9 @@ char_get:
     clr.b bake_limit
     move.w #8,bake_width
     move.w #8,bake_rows
+    ifd SIM
+    addq.l #1,bake_n_char
+    endc
     bsr bake_pixels
     bra.s .done
 .hit:
@@ -2092,6 +2214,11 @@ byte_lut: ds.l 1
 byte_lut_tags: ds.b 20*BYTE_LUTS
 byte_luts: ds.b 4096*BYTE_LUTS
 bake_calls: ds.l 1
+    ifd SIM
+bake_n_tile: ds.l 1                ; (perf_test frames: the bakes by kind)
+bake_n_sprite: ds.l 1
+bake_n_char: ds.l 1
+    endc
 pen_map: ds.b 1024
 shown_pal: ds.w 16
 palette_valid: ds.b 1
@@ -2158,10 +2285,12 @@ row_y: ds.w 1
 text_row: ds.w 1
 pal_roll: ds.w 1
 tile_cache_tags: ds.l TILE_ENTRIES
-tile_victim: ds.b TILE_SETS
-    even
 sprite_cache_tags: ds.l SPRITE_ENTRIES
 char_cache_tags: ds.l 128
+cache_tags_end:                   ; (epoch_wrap clears the tags above)
+tile_victim: ds.b TILE_SETS
+sprite_victim: ds.b SPRITE_SETS
+    even
 tile_cache: ds.b TILE_ENTRIES*192
 sprite_cache: ds.b SPRITE_ENTRIES*128
 char_cache: ds.b 128*192

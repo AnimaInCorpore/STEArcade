@@ -49,8 +49,14 @@ class Renderer:
         mem.w8(sym['pal_dirty'],1)        # (the game's palette writers set it)
         mem.w8(sym['text_compare'],1)     # (the game's text writers mark their rows: every row compared)
         if bytes(m.bg)!=getattr(self,'last_bg',None):
-            # (the game's background writes flag a changed map for the renderer: gen.py win_check)
-            self.last_bg=bytes(m.bg);mem.w_block(sym['g_bg'],self.last_bg);mem.w8(sym['map_dirty'],1)
+            # (the game's background writes note their entries for the renderer, bg_note: logic_test checks that;
+            # more than 64 of them, or the first frame, set map_dirty)
+            old=getattr(self,'last_bg',None);self.last_bg=bytes(m.bg);mem.w_block(sym['g_bg'],self.last_bg)
+            changed=None if old is None else sorted(set((np.nonzero(np.frombuffer(old,np.uint8)!=np.frombuffer(self.last_bg,np.uint8))[0]>>1).tolist()))
+            if changed is None or len(changed)>64:mem.w8(sym['map_dirty'],1)
+            else:
+                for i,e in enumerate(changed):mem.w16(sym['bg_noted']+2*i,e)
+                mem.w16(sym['bg_noted_n'],len(changed))
         mem.w_block(sym['bt_sprites'],bytes(m.sprites))
         for name,value in [('g_layout',m.layout),('g_control',m.control),('g_video_enable',m.video_enable)]:
             mem.w8(sym[name],value)
@@ -86,6 +92,7 @@ def main():
     ap.add_argument('--flip-layout-sweep',action='store_true')
     ap.add_argument('--sprite-edges',action='store_true')
     ap.add_argument('--consecutive',action='store_true',help='draw every frame from --first on (the incremental paths), compare every --step')
+    ap.add_argument('--every',type=int,default=1,help='--consecutive: draw only every n-th frame between the compared ones (Hatari skips frames)')
     ap.add_argument('--walk',action='store_true',help="logic_test's walk: right and attack from frame 1000")
     args=ap.parse_args()
     renderer=Renderer()
@@ -99,7 +106,8 @@ def main():
         ref.inputs[:3]=values
         ref.run_frame_port()
         if args.consecutive and frame>=args.first and (frame-args.first)%args.step:
-            renderer.render(ref)
+            if (frame-args.first)%args.every==0:
+                renderer.render(ref)
             continue
         if frame<args.first or (frame-args.first)%args.step:
             continue

@@ -112,12 +112,22 @@ def main():
             return False
         return True
 
-    # The renderer checks its window against the background only after map_dirty (any write to the background,
-    # gen.py win_check) and the palette after a hooked writer (gen.PAL_WRITERS): a change without its flag is a miss.
-    regions = [('map_dirty', sym['g_bg'], 0x4000), ('pal_dirty', block+0x5800, 0x800)]
+    # The renderer checks the background cells the translated writes noted (bg_note, gen.py win_check), all of them
+    # after map_dirty, and the palette after a hooked writer (gen.PAL_WRITERS): a change without its note is a miss.
+    regions = [('pal_dirty', block+0x5800, 0x800)]
     last = {}
     text_checked = [0]
     def hooks(frame):
+        bg = bytes(mem.r_block(sym['g_bg'], 0x4000))
+        if 'bg' in last and not mem.r8(sym['map_dirty']):
+            noted = {mem.r16(sym['bg_noted'] + 2*i) for i in range(mem.r16(sym['bg_noted_n']))}
+            miss = [i for i in range(0x4000) if bg[i] != last['bg'][i] and i >> 1 not in noted]
+            if miss:
+                print(f'frame {frame}: background byte {miss[0]:04x} changed without its note (bg_note)')
+                return False
+        last['bg'] = bg
+        mem.w8(sym['map_dirty'], 0)
+        mem.w16(sym['bg_noted_n'], 0)
         for flag, a, size in regions:
             now = bytes(mem.r_block(a, size))
             if flag in last and now != last[flag] and not mem.r8(sym[flag]):

@@ -290,6 +290,37 @@ bt_out_0d:
 bt_out_0e:
     move.b d0,g_layout
     rts
+; A translated write to the background (gen.py win_check): a1 = the byte in g_bg.  Its map entry goes to bg_noted
+; (the renderer checks those cells), map_dirty (all of them) when the list is full.  All registers and the CCR kept.
+BG_NOTES = 64
+bg_note:
+    move sr,-(sp)
+    movem.l d0-d1,-(sp)
+    move.l a1,d0
+    sub.l #g_bg,d0
+    lsr.w #1,d0                     ; (the entry: 2 bytes)
+    move.w bg_noted_n,d1
+    beq.s .add
+    add.w d1,d1
+    lea bg_noted-2,a1
+    cmp.w (a1,d1.w),d0
+    beq.s .done                     ; (the entry's other byte, written right after)
+    move.w bg_noted_n,d1
+    cmp.w #BG_NOTES,d1
+    bhs.s .full
+.add:
+    addq.w #1,bg_noted_n
+    add.w d1,d1
+    lea bg_noted,a1
+    move.w d0,(a1,d1.w)
+.done:
+    movem.l (sp)+,d0-d1
+    move (sp)+,ccr
+    rts
+.full:
+    st map_dirty
+    bra.s .done
+
 ; Block instructions (gen.py block_win): when the source or the destination range of one meets C000-CFFF, the
 ; background bank is copied into the image there for it and back afterwards (bt_bg_post, which marks the map).
 ; d3 = HL, d2 = DE, d5.w = the count - 1; bt_bg_bwd: the ranges end at HL / DE.  All registers and the CCR kept.
@@ -554,6 +585,8 @@ in_p1: ds.b 1
 in_p2: ds.b 1
     even
 cnt_acia: ds.w 1
+bg_noted_n: ds.w 1               ; the background entries written since the last frame (bg_note)
+bg_noted: ds.w BG_NOTES
 crash_vector: ds.w 1
 crash_sp: ds.l 1
 crash_regs: ds.l 16

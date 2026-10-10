@@ -3,6 +3,7 @@ with logic_test.py's inputs (coin, start, then walking right and attacking: the 
 
     python perf_test.py [ticks] [first] [profile|logic [regions]|frames]   (first: ticks not counted; profile: render_frame's CPU cycles by routine;
                                                            frames: each frame's cost, map and palette changes, tiles baked)
+    PERF_EVERY=n: a frame drawn every n-th tick only (Hatari draws about every 2.6th: MAX_SKIPS), the means per frame drawn
 
 Musashi counts the 68000's own cycles: Hatari takes about 1.35 times as many (bus alignment, interrupts, the Blitter's bus).
 """
@@ -13,6 +14,9 @@ from machine68k import Register as R
 from sim import Sim,TRAP1
 from paths import ROOT,build_dir
 from logic_test import inputs
+import os
+EVERY=int(os.environ.get('PERF_EVERY','1'))
+SEL=os.environ.get('PERF_SEL')   # (map / nomap: profile only the frames after a background write, or the others)
 
 
 REGS=[getattr(R,f'D{i}') for i in range(8)]+[getattr(R,f'A{i}') for i in range(8)]
@@ -67,21 +71,29 @@ def main():
         mem.w8(sym['vbl_pending'],1);resume()
         lc=run_to({done},step=lprof and f>=first)
         if dbg:dirty=mem.r8(sym['map_dirty']);bk=mem.r32(sym['bake_calls']);ep=mem.r8(sym['epoch_changed'])
+        if f%EVERY:                                   # (not drawn: on to the next tick)
+            mem.w8(sym['frame_ready'],0);resume();lc+=run_to({wait},step=lprof and f>=first)
+            if f>=first:logic.append(lc)
+            continue
         pc_done=cpu.r_pc();sp=cpu.r_reg(R.A7);regs=[cpu.r_reg(r) for r in REGS]   # (render_frame keeps no registers: the hook saved them)
         mem.w16(render,word);mem.set_trace_mode(True);cpu.w_reg(R.A7,sp-4);mem.w32(sp-4,ret);cpu.w_pc(render)
-        try:rc=run_to({ret},step=prof and f>=first)
+        sel=SEL is None or (SEL=='map')==bool(mem.r8(sym['map_dirty']))
+        try:rc=run_to({ret},step=prof and f>=first and sel)
         except Exception:print(f'render_frame failed at tick {f}');raise
         mem.set_trace_mode(False);mem.w16(render,0x4e75);cpu.w_pc(pc_done)
         for r,v in zip(REGS,regs):cpu.w_reg(r,v);mem.w8(sym['frame_ready'],0)
         resume();lc+=run_to({wait},step=lprof and f>=first)
-        if f>=first:logic.append(lc);frames.append(rc)
+        if f>=first:
+            logic.append(lc)
+            if sel:frames.append(rc)
         if dbg and f>=first:print(f,'map',dirty,'epoch',ep,'bakes',mem.r32(sym['bake_calls'])-bk,'frame',rc,'scroll',bytes(mem.r_block(sym['g_scroll'],4)).hex())
-    n=len(logic)
-    print(f'{n} ticks: logic mean {sum(logic)//n} max {max(logic)}; frame (CPU + Blitter) mean {sum(frames)//n} max {max(frames)}')
-    print(f'at 8 MHz: {8e6/(sum(logic)/n+sum(frames)/n):.1f} ticks+frames a second (Musashi cycles)')
+    n=len(logic);nf=len(frames);fs=sorted(frames)
+    print(f'{n} ticks: logic mean {sum(logic)//n} max {max(logic)}; {nf} frames (CPU + Blitter) mean {sum(frames)//nf} median {fs[nf//2]} max {max(frames)}')
+    print(f'at 8 MHz: {8e6/(sum(logic)/n+sum(frames)/n):.1f} ticks a second (Musashi cycles)')
+    if dbg:print('bakes: tiles',mem.r32(sym['bake_n_tile']),'sprites',mem.r32(sym['bake_n_sprite']),'characters',mem.r32(sym['bake_n_char']),'(all ticks)')
     if prof or lprof:
         tot=sum(by_name.values())
-        for k,v in by_name.most_common(25):print(f'{k:24s} {v//n:8d} {100*v/tot:5.1f}%')
+        for k,v in by_name.most_common(25):print(f'{k:24s} {v//(n if lprof else nf):8d} {100*v/tot:5.1f}%')
 
 
 if __name__=='__main__':main()
