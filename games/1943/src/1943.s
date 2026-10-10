@@ -56,16 +56,9 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
-    lea fixed_rom,a0
-    lea G_Z80,a1
-    move #$8000/4-1,d0
-.copyrom:
-    move.l (a0)+,(a1)+
-    dbf d0,.copyrom
     bsr init_hardware
     bsr init_video
     bsr mcu_init
-    bsr init_dispatch
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
@@ -74,7 +67,7 @@ start:
     bsr g_control_w
     lea G_Z80,a6
     lea G_Z80-1,a5
-    lea g_fixed_dispatch,a4
+    lea g_wd_fx,a4
     moveq #0,d0
     moveq #0,d1
     moveq #0,d2
@@ -90,77 +83,30 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch: fixed table 128 KB, a 64 KB table per ROM bank with code.
-; (a3 is free for computed jumps: z80x.FAST)
+; Natural-PC dispatch through word tables (gen.py dispatch_tables: a word per Z80 address, (the entry - the table) / 2,
+; each table in the text section right before its code): the fixed code's in a4 ($0000-$7FFF), the window's in
+; g_wdispatch, only the span of the bank's code: its words * 2 at -4, its first address - $8000, * 2, at -2 (g_wd_none,
+; no words: a bank without code).  (The address - $8000 - the first) * 2 unsigned below the words * 2 is in the table;
+; that also rejects $C000 and up.  d7.w = the Z80 address; a3 is free for computed jumps (z80x.FAST).
 g_dispatch:
     move.w d7,g_dispatch_pc
     and.l #$ffff,d7
-    lsl.l #2,d7
-    cmp.l #$8000*4,d7
-    bhs.s .window
-    move.l (a4,d7.l),a3
-    jmp (a3)
+    add.w d7,d7                  ; (C: from $8000)
+    bcs.s .window
+    move.w (a4,d7.l),d7
+    add.l d7,d7
+    jmp (a4,d7.l)
 .window:
-    cmp.l #$c000*4,d7
+    move.l g_wdispatch,a3
+    sub.w -2(a3),d7
+    cmp.w -4(a3),d7
     bhs.s .bad
-    move.l g_wdispatch,a3        ; (the bank's table - $8000 * 4)
-    move.l (a3,d7.l),a3
-    jmp (a3)
+    move.w (a3,d7.l),d7
+    add.l d7,d7
+    jmp (a3,d7.l)
 .bad:
-    lsr.l #2,d7
+    moveq #-1,d7                 ; (z80_badpc reports g_dispatch_pc)
     jmp z80_badpc
-
-init_dispatch:
-    lea g_fixed_dispatch,a0
-    move.l #z80_badpc,d0
-    move.l #32768/4-1,d1
-    bsr fill_dispatch
-    lea g_invalid_dispatch,a0
-    move.l #(G_WINDOW_TABLES*16384)/4-1,d1
-    bsr fill_dispatch
-    lea g_fixed_dispatch,a0
-    lea g_entries_fixed,a1
-    bsr scatter
-    lea g_entry_banks,a2
-    lea g_dispatch_targets,a3
-    moveq #7,d3
-.bank:
-    move.l (a2)+,a1
-    move.l (a3)+,a0
-    bsr scatter
-    dbf d3,.bank
-    lea bank_tabs,a0             ; per bank: the window's base, its dispatch table - $8000 * 4
-    lea g_dispatch_targets,a3
-    move.l #bank_rom+$8000,d0
-    moveq #7,d3
-.tabs:
-    move.l d0,(a0)+
-    add.l #$4000,d0
-    move.l (a3)+,d1
-    sub.l #$8000*4,d1
-    move.l d1,32-4(a0)
-    dbf d3,.tabs
-    rts
-fill_dispatch:
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    subq.l #1,d1
-    bpl.s fill_dispatch
-    rts
-scatter:
-    moveq #0,d1
-.next:
-    move.w (a1)+,d1
-    cmp.w #$ffff,d1
-    beq.s .done
-    lsl.l #2,d1
-    move.l (a1)+,(a0,d1.l)
-    moveq #0,d1
-    bra.s .next
-.done:
-    rts
 
 ; The scheduler has scanned all sixteen task records with no ready task.
 z80_hook:
@@ -449,7 +395,9 @@ g_inputs:
     even
 bank_rom:
     incbin "banks.rom"
-fixed_rom:
+    cnop 0,4
+g_block:                         ; the Z80 image (G_Z80 its middle): $8000-$ffff, then the fixed ROM in place
+    ds.b $8000
     incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
@@ -514,7 +462,6 @@ crash_text: ds.b 512
 frame_counter: ds.l 1
 g_winbase: ds.l 1
 g_wdispatch: ds.l 1
-bank_tabs: ds.l 16
 g_dispatch_pc: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
@@ -522,8 +469,6 @@ dma_count: ds.w 1
 dbg_buf: ds.w 8
 g_iy: ds.w 1
 g_fshadow: ds.w 1
-    ds.b 16384
+    ds.b 8192                    ; (the 68000 stack: under 200 bytes used in the simulator; TOS calls at the exit)
 own_stack_top:
-g_block: ds.b $10000
 g_sprites: ds.b 512
-g_fixed_dispatch: ds.l 32768

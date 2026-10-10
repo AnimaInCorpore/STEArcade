@@ -280,33 +280,74 @@ def generate(extra_roots=()):
     # its copy only then; logic_test.py checks that no change of the RAM comes without it).
     em = compile_code(code, joins, cfg, {IDLE}, emitter=GameEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites,
                       text_writers=twrites)
-    out = ['; Generated 1943 main Z80, fixed and eight ROM banks', '\tsection text,code', *em.lines]
-    for pc in sorted(em.refs-set(code)):
-        out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
-    for pc in sorted(em.stubs):
-        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
-    out += ['\tsection data,data', '\teven', 'g_entries_fixed:']
-    for pc in sorted(code):
-        if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
-            out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
-    out += ['\tdc.w $ffff']
-    for bank in range(8):
-        out += [f'g_entries_bank{bank}:']
-        for pc in sorted(code):
-            if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
-                out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
-        out += ['\tdc.w $ffff']
-    out += ['g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
               'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
-    out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_window_dispatch{b}' if b in banks else 'g_invalid_dispatch' for b in range(8)),
-            f'G_WINDOW_TABLES = {len(banks)+1}', '\tsection bss,bss', 'g_invalid_dispatch: ds.l 16384']
-    for bank in banks:
-        out += [f'g_window_dispatch{bank}: ds.l 16384']
-    out += ['\tsection text,code']
+    lines, regions = dispatch_tables(em, code, banks)
+    out = ['; Generated 1943 main Z80, fixed and eight ROM banks', '\tsection text,code', *lines]
+    for pc in sorted(em.refs-set(code)):
+        out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
+    for pc in sorted(em.stubs):
+        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
+    # per bank: the window's base (g_winbase), its dispatch table (g_wdispatch; g_wd_none: a bank without code)
+    out += ['\tsection data,data', '\teven', 'bank_tabs:']
+    out += [f'\tdc.l bank_rom+${0x8000 + bank*0x4000:x}' for bank in range(8)]
+    out += [f'\tdc.l {"g_wd_b%d" % bank if bank in banks else "g_wd_none"}' for bank in range(8)]
+    out += ['\tdc.w 0,0                            ; (a bank without code: no words)', 'g_wd_none:', '\tsection text,code']
+    (BUILD / 'dispatch.json').write_text(json.dumps(regions) + '\n')   # (logic_test.py checks the tables against the map)
     return '\n'.join(out)+'\n', report, code
+
+
+def dispatch_tables(em, code, banks):
+    """The natural-PC dispatch tables (g_dispatch), built as data at assembly time: a word per Z80 address, (the entry -
+    the table) / 2, unsigned.  A table is in the text section right before its region's code (the fixed code, each bank's
+    code), so the entries are offsets from the table itself (g_dispatch: jmp (a4,d7.l)); vasm rejects an entry beyond
+    128 KB.  Every address that is not an entry (no code, or a merged label: em.no_entry) goes to the region's stub
+    g_bad_<region> after the table.  The line before a table must end its flow (a jump), so nothing falls into it.
+    Returns the lines and {region: [the first index, the table's words, its Z80 entries (by index)]} for logic_test.py."""
+    entries = sorted(pc for pc in code if pc not in em.no_entry)
+    regions = [('fx', 0x8000, {pc: pc for pc in entries if pc < WIN_LO})]
+    regions += [(f'b{bank}', 0x4000, {pc: pc - VBASE - bank*0x4000 for pc in entries
+                                      if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000}) for bank in banks]
+    lines = list(em.lines)
+    where = {}
+    for i, line in enumerate(lines):
+        m = re.match(r'Z([0-9A-F]+):', line)
+        if m:
+            where[int(m.group(1), 16)] = i
+    starts = [min(where[pc] for pc in pcs) for _, _, pcs in regions]
+    for n, (name, size, pcs) in enumerate(regions):
+        end = starts[n+1] if n+1 < len(regions) else len(lines)
+        if not all(starts[n] <= where[pc] < end for pc in pcs):
+            raise RuntimeError(f'dispatch region {name}: the code is not in address order')
+        if n:
+            prev = next(lines[i] for i in range(starts[n]-1, -1, -1) if lines[i].strip() and not lines[i].lstrip().startswith(';'))
+            if not re.match(r'\t(bra|jmp|rts)\b', prev):
+                raise RuntimeError(f'dispatch region {name}: the code before its table may fall through ({prev!r})')
+    spans = {}
+    for n in reversed(range(len(regions))):
+        name, size, pcs = regions[n]
+        # the fixed table covers $0000-$7FFF; a bank's only its code's span (lo..hi), with its words * 2 and lo * 2
+        # before it (g_dispatch: (the address - lo) * 2 unsigned below the words * 2, else z80_badpc)
+        lo, hi = (0, size - 1) if name == 'fx' else (min(pcs.values()), max(pcs.values()))
+        spans[name] = lo, hi - lo + 1
+        at = {i: pc for pc, i in pcs.items()}
+        rows = [] if name == 'fx' else [f'\tdc.w ${2 * (hi - lo + 1):04x},${2 * lo:04x}']
+        rows, run, bad = rows + [f'g_wd_{name}:'], 0, f'(g_bad_{name}-g_wd_{name})/2'
+        for i in range(lo, hi + 1):
+            if i not in at:
+                run += 1
+                continue
+            if run:
+                rows.append(f'\tdcb.w {run},{bad}')
+                run = 0
+            rows.append(f'\tdc.w (Z{at[i]:04X}-g_wd_{name})/2')
+        if run:
+            rows.append(f'\tdcb.w {run},{bad}')
+        rows += [f'g_bad_{name}:', '\tmoveq #-1,d7', '\tjmp z80_badpc']   # (z80_badpc reports g_dispatch_pc)
+        lines[starts[n]:starts[n]] = rows
+    return lines, {name: [*spans[name], sorted(pcs.values())] for name, size, pcs in regions}
 
 
 if __name__ == '__main__':

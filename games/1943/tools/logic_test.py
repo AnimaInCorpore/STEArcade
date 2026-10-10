@@ -4,7 +4,7 @@ Every tick: the RAM (video RAM, scroll latches, work RAM, sprite RAM; the dead s
 excepted), the buffered sprite list, the latches and the MCU's reply are compared.
 """
 from pathlib import Path
-import argparse, re
+import argparse, json, re
 import random
 import sys
 import numpy as np
@@ -27,6 +27,27 @@ def inputs(frame):
         player &= ~16
         player &= ~(1 if (frame % 180) >= 90 else 2)
     return system, player, 0xff
+
+
+def check_dispatch(mem, sym):
+    """The dispatch tables as loaded (gen.py dispatch_tables): every Z80 entry lands on its label, every other address of
+    the table on the region's z80_badpc stub; a bank's table has its span (words * 2, first index * 2) before it."""
+    regions = json.loads((build_dir('1943') / 'dispatch.json').read_text())
+    n = 0
+    for name, (lo, size, entries) in regions.items():
+        table, bad, entries = sym[f'g_wd_{name}'], sym[f'g_bad_{name}'], set(entries)
+        base = 0 if name == 'fx' else 0x10000 + int(name[1:]) * 0x4000
+        if name != 'fx' and (mem.r16(table - 4), mem.r16(table - 2)) != (2 * size, 2 * lo):
+            raise SystemExit(f'dispatch table {name}: span {mem.r16(table - 4):x} {mem.r16(table - 2):x}, not {2 * size:x} {2 * lo:x}')
+        for i in range(lo, lo + size):
+            got = table + 2 * mem.r16(table + 2 * (i - lo))
+            want = sym[f'Z{base + i:04X}'] if i in entries else bad
+            if got != want:
+                raise SystemExit(f'dispatch table {name}: entry {i:04x} -> {got - table:x}, not {want - table:x}')
+        n += len(entries)
+    if (mem.r16(sym['g_wd_none'] - 4), mem.r16(sym['g_wd_none'] - 2)) != (0, 0):
+        raise SystemExit('g_wd_none: not empty')
+    print(f'dispatch tables: {n} entries, {len(regions)} regions exact')
 
 
 def main():
@@ -53,8 +74,9 @@ def main():
     mem, cpu = sim.mem, sim.cpu
     if not args.render:
         mem.w16(sym['render_frame'], 0x4e75)
+    check_dispatch(mem, sym)
     ref = Game1943()
-    ref.cpu.afmask = 0xc1                          # (push / pop af: the translation keeps S Z C)
+    ref.cpu.afmask = 0xc1                         # (push / pop af: the translation keeps S Z C)
     block = sym['g_block'] + 0x8000 - 0x10000       # (Z80 address a at block + a for a >= $8000)
     # The translator merges `push rr / pop rr'` into a move (the stack word below SP is dead): the bytes such a push
     # writes in the reference are not compared until another instruction writes them.
