@@ -264,13 +264,15 @@ bake_tile:
 	add.w	d3,d3				; (attribute & $80) << 1
 	add.w	d3,d1				; code, 9 bits
 	move.w	d2,d3
-	lsr.w	#5,d3
-	and.w	#3,d3				; flips: bit 0 x, bit 1 y
-	lsl.w	#2,d1
+	lsr.w	#6,d3
+	and.w	#1,d3				; flip y (the attribute's bit 6: the pixel order of a row)
+	add.w	d1,d1
 	or.w	d3,d1
 	lsl.l	#8,d1				; * 256: 16 rows of 8 pen masks
 	lea	tile_masks,a1
 	add.l	d1,a1
+	btst	#5,d2				; flip x (the row order: ring line 15 - x of the tile) is done here: z = 0 / 1
+	seq	d1				; (d1 = 0 flipped: the rows go into the pool from the end)
 	and.w	#$1F,d2
 	lsl.w	#3,d2				; colour * 8
 	lea	luts,a2
@@ -291,6 +293,8 @@ bake_tile:
 	move.l	a2,-(sp)
 	lea	orp_tab,a3
 	moveq	#15,d2
+	tst.b	d1
+	beq.s	.rowx
 .row:	moveq	#0,d3
 	moveq	#0,d4
 	moveq	#0,d5
@@ -312,7 +316,32 @@ bake_tile:
 	move.w	d5,(a2)+
 	move.w	d6,(a2)+
 	dbf	d2,.row
-	move.l	a2,tile_pool_ptr
+	bra.s	.baked
+.rowx:	lea	128(a2),a2			; flipped x: the same rows, the last one first
+	move.l	a2,-(sp)
+.rowx1:	moveq	#0,d3
+	moveq	#0,d4
+	moveq	#0,d5
+	moveq	#0,d6
+	lea	bk_idx,a0
+	moveq	#7,d1
+.penx:	move.w	(a1)+,d7
+	beq.s	.skipx
+	moveq	#0,d0
+	move.b	(a0)+,d0
+	move.l	(a3,d0.w),a4
+	jsr	(a4)
+	dbf	d1,.penx
+	bra.s	.donex
+.skipx:	addq.l	#1,a0
+	dbf	d1,.penx
+.donex:	move.w	d6,-(a2)
+	move.w	d5,-(a2)
+	move.w	d4,-(a2)
+	move.w	d3,-(a2)
+	dbf	d2,.rowx1
+	move.l	(sp)+,a2			; (the end of the tile)
+.baked:	move.l	a2,tile_pool_ptr
 	move.l	(sp)+,a0			; the baked tile
 	moveq	#0,d0
 	move.w	(sp)+,d0
