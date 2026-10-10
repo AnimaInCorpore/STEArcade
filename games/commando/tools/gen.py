@@ -89,11 +89,29 @@ def generate():
     out=['; generated Commando World Z80 -> 68000','\tsection text,code']+em.lines
     missing=sorted(p for p in em.refs if p not in code)
     for p in missing:out.append(f'Z{p:04X}: move.w #${p:04X},d7\n\tjmp z80_badpc')
-    out+=['\tsection data,data','\tcnop 0,2','z80_entries:']
-    for p in sorted(code):
-        if p not in em.no_entry:out.append(f'\tdc.w ${p:04X}\n\tdc.l Z{p:04X}')   # (merged: z80_badpc)
-    out.append(f'\tdc.w ${TOKEN:04X}\n\tdc.l z80_irq_ret\n\tdc.w $FFFF')
+    out+=['\tsection data,data']+dispatch_table(entries(code,em))
     return '\n'.join(out)+'\n',em,code,missing
+
+
+def entries(code,em):
+    """Z80 pc -> the label the dispatch table sends it to (every other pc: z80_badpc)"""
+    out={p:f'Z{p:04X}' for p in code if p not in em.no_entry}   # (merged: z80_badpc)
+    out[TOKEN]='z80_irq_ret'
+    return out
+
+
+def dispatch_table(labels):
+    """The dispatch table (a4), built here as data: a long per Z80 address in byte swapped order (the word a ret
+    reads from the Z80 stack), index (pc low byte * 256 + pc high byte) * 4; runs of z80_badpc as dcb.l."""
+    rows,run=['\tcnop 0,4','z80_dispatch_sw:'],0
+    for swapped in range(65536):
+        label=labels.get(((swapped&255)<<8)|(swapped>>8))
+        if label is None:
+            run+=1;continue
+        if run:rows.append(f'\tdcb.l {run},z80_badpc');run=0
+        rows.append(f'\tdc.l {label}')
+    if run:rows.append(f'\tdcb.l {run},z80_badpc')
+    return rows
 
 if __name__=='__main__':
     text,em,code,missing=generate();(BUILD/'code_commando.s').write_text(text)
