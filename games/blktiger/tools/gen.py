@@ -57,7 +57,10 @@ def _pcs(writers):
 
 
 TEXT_PCS = _pcs(TEXT_WRITERS)
-DIRTY_FLAGS = {pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}
+# The writers that run in almost every other frame copy the player's colours, entries $200-$209 (ld de,$DA00 / $DE00,
+# ld bc,$0A, ldir): they set pal_player, and the renderer compares only those 20 bytes (generate() checks the code).
+PAL_PLAYER = {0x1951: 0xda00, 0x1959: 0xde00}
+DIRTY_FLAGS = {pc: 'pal_player' if pc in PAL_PLAYER else 'pal_dirty' for pc in _pcs(PAL_WRITERS)}
 RMW = {'inc', 'dec', 'set', 'res', 'rlc', 'rrc', 'rl', 'rr', 'sla', 'sra', 'srl', 'sll', 'rld', 'rrd'}
 
 
@@ -365,6 +368,11 @@ def generate(extra_roots=()):
     finally:
         discover.decode = saved
     code = {pc: ins for pc, ins in code.items() if pc < 0x8000 or pc >= VBASE}
+    for pc, de in PAL_PLAYER.items():                # (the range is the block's own: no jump into it)
+        block = [code[pc-6], code[pc-3], code[pc]]
+        if [(i.mn, tuple(i.ops)) for i in block] != [('ld', (('r16', 'de'), ('imm', de))), ('ld', (('r16', 'bc'), ('imm', 10))),
+                                              ('ldir', ())] or any(i.target in (pc-3, pc) for i in code.values()):
+            raise RuntimeError(f'PAL_PLAYER {pc:04x}: not the copy of the player colours')
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0xc000,
                       iyaddr=0x10000, fshadow=0x10002, io_read_redirect={}, write_hooks=[],
                       rst28_tables=False, bit_s=True, **z80x.FAST)

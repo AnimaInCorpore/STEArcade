@@ -222,12 +222,34 @@ render_frame:
     st frame_ready
     rts
 
-; The palette writers set pal_dirty (gen.PAL_WRITERS); 128 bytes a frame are compared in case one is missing.
+; The palette writers set pal_dirty (gen.PAL_WRITERS), the copies of the player's colours (entries $200-$209, in
+; about every other frame) pal_player: only those 20 bytes are compared then.  128 bytes a frame are compared in
+; case a writer is missing.
 penmap_update:
     tst.b pal_dirty
     bne.s .full_compare
     tst.b palette_valid
     beq.s .full_compare
+    tst.b pal_player
+    beq.s .roll_on
+    clr.b pal_player
+    lea g_block+$5800+$200,a0
+    lea palette_shadow+$200,a1
+    cmpm.l (a0)+,(a1)+
+    bne.s .full_compare
+    cmpm.l (a0)+,(a1)+
+    bne.s .full_compare
+    cmpm.w (a0)+,(a1)+
+    bne.s .full_compare
+    lea g_block+$5c00+$200,a0
+    lea palette_shadow+$600,a1
+    cmpm.l (a0)+,(a1)+
+    bne.s .full_compare
+    cmpm.l (a0)+,(a1)+
+    bne.s .full_compare
+    cmpm.w (a0)+,(a1)+
+    bne.s .full_compare
+.roll_on:
     moveq #0,d0
     move.w pal_roll,d0
     add.w #128,d0
@@ -245,6 +267,7 @@ penmap_update:
     rts
 .full_compare:
     clr.b pal_dirty
+    clr.b pal_player
     lea g_block+$5800,a0
     lea palette_shadow,a1
     move #511,d0
@@ -2223,6 +2246,7 @@ pen_map: ds.b 1024
 shown_pal: ds.w 16
 palette_valid: ds.b 1
 pal_dirty: ds.b 1
+pal_player: ds.b 1
     even
 palette_shadow: ds.b 2048
 black_pal: ds.w 16
