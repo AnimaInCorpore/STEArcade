@@ -20,12 +20,18 @@ def programs(sprites):
     mask_index = {v:i for i,v in enumerate(mask_values)}
     streams = {}
     pointers, orders, blanks = [], [], []
+    # The row order (equal masks together, blank rows last) of a sprite and its mirror image (the second half) is
+    # the same, from the sprite's own masks: sprite_order holds the first half only (render.s sprite_get).
+    half = len(sprites)//2
+    base = [[sum((int(p)!=15) << (15-x) for x,p in enumerate(row)) for row in pixels] for pixels in sprites[:half]]
     for flip_y in (False,True):
-      for pixels in sprites:
+      for index,pixels in enumerate(sprites):
         opaque = [sum((int(p)!=15) << (15-x) for x,p in enumerate(row)) for row in pixels]
-        order = sorted(range(16),key=lambda y:(opaque[y]==0,opaque[y],y))
+        key = base[index % half]
+        order = sorted(range(16),key=lambda y:(key[y]==0,key[y],y))
         if not flip_y:
-            orders.extend(order)
+            if index < half:
+                orders.extend(order)
             blanks.append(int(not any(opaque)))
         groups=[]
         for row in order:

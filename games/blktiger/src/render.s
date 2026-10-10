@@ -1491,8 +1491,8 @@ sprite_get:
     addq.l #1,bake_n_sprite
     endc
     bsr bake_pixels
-    moveq #0,d0
     move.w object_code,d0
+    and.l #2047,d0               ; (a mirror image: the sprite's own row order)
     lsl.l #4,d0
     lea sprite_order,a0
     add.l d0,a0
