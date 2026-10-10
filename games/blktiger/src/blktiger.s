@@ -50,16 +50,9 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
-    lea fixed_rom,a0
-    lea G_Z80,a1
-    move #$8000/4-1,d0
-.copyrom:
-    move.l (a0)+,(a1)+
-    dbf d0,.copyrom
     bsr init_hardware
     bsr init_video
     bsr mcu_init
-    bsr init_dispatch
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
@@ -83,68 +76,40 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch: fixed table 128 KB, sixteen 64 KB window tables.
+; Natural-PC dispatch through word tables (gen.py: a word per Z80 address, (the entry - the region's base) / 2):
+; the fixed code in two regions ($0000-$3FFF, $4000-$7FFF: 64 KB, a4), the window through the bank's table (32 KB,
+; its base the long before it; g_wdispatch 0 for a bank without code).
 bt_dispatch:                    ; d7.w = the Z80 address (kept for z80_badpc); a0 / d5 are free at a jump
     move.w d7,g_dispatch_pc
     bmi.s .window
     moveq #0,d5
     move.w d7,d5
-    lsl.l #2,d5
-    move.l (a4,d5.l),a0
-    jmp (a0)
+    add.w d5,d5                     ; (N: from $4000)
+    bmi.s .high
+    move.w (a4,d5.l),d5
+    add.l d5,d5
+    lea bt_base_lo,a0
+    jmp (a0,d5.l)
+.high:
+    move.w (a4,d5.l),d5
+    add.l d5,d5
+    lea bt_base_hi,a0
+    jmp (a0,d5.l)
 .window:
     cmp.w #$c000,d7
     bhs.s .bad
+    move.l g_wdispatch,d5
+    beq.s .bad
+    move.l d5,a0
+    moveq #0,d5
     move.w d7,d5
-    lsl.w #2,d5
-    eor.w #$8000,d5                 ; ((the address - $8000) * 4 - $8000: g_wdispatch is the table's middle)
-    move.l g_wdispatch,a0
-    move.l (a0,d5.w),a0
-    jmp (a0)
+    add.w d5,d5                     ; ($8000-$bfff: 0-$7ffe)
+    move.w (a0,d5.l),d5
+    add.l d5,d5
+    move.l -4(a0),a0
+    jmp (a0,d5.l)
 .bad:
     jmp z80_badpc
-
-init_dispatch:
-    lea bt_fixed_dispatch,a0
-    move.l #z80_badpc,d0
-    move.l #32768/4-1,d1
-    bsr fill_dispatch
-    lea bt_invalid_dispatch,a0
-    move.l #(BT_WINDOW_TABLES*16384)/4-1,d1
-    bsr fill_dispatch
-    lea bt_fixed_dispatch,a0
-    lea bt_entries_fixed,a1
-    bsr scatter
-    lea bt_entry_banks,a2
-    lea bt_dispatch_targets,a3
-    moveq #15,d3
-.bank:
-    move.l (a2)+,a1
-    move.l (a3)+,a0
-    lea -$8000(a0),a0
-    bsr scatter
-    dbf d3,.bank
-    rts
-fill_dispatch:
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    subq.l #1,d1
-    bpl.s fill_dispatch
-    rts
-scatter:
-    moveq #0,d1
-.next:
-    move.w (a1)+,d1
-    cmp.w #$ffff,d1
-    beq.s .done
-    lsl.l #2,d1
-    move.l (a1)+,(a0,d1.l)
-    moveq #0,d1
-    bra.s .next
-.done:
-    rts
 
 ; The scheduler has scanned all sixteen task records with no ready task.
 z80_hook:
@@ -260,7 +225,7 @@ bt_out_01:                      ; (d5 / a0: scratch at an instruction's end)
     and.b d0,d5
     move.b d5,g_bank
     lsl.w #2,d5
-    lea bt_dispatch_targets,a0      ; (gen.py: the middles of the banks' tables)
+    lea bt_dispatch_targets,a0      ; (gen.py: the banks' tables, 0 without code)
     move.l (a0,d5.w),g_wdispatch
     lea bt_winbases,a0
     move.l (a0,d5.w),g_winbase
@@ -549,7 +514,9 @@ N   set N+1
     endr
 bank_rom:
     incbin "banks.rom"
-fixed_rom:
+    cnop 0,4
+g_block:                         ; the Z80 image (G_Z80 its middle): $8000-$ffff, then the fixed ROM in place
+    ds.b $8000
     incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
@@ -632,8 +599,6 @@ g_iy: ds.w 1
 g_fshadow: ds.w 1
     ds.b 16384
 own_stack_top:
-g_block: ds.b $10000
 g_bg: ds.b $4000
 bt_sprites: ds.b $200
-bt_fixed_dispatch: ds.l 32768
 
