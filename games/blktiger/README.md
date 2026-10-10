@@ -99,8 +99,8 @@ pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frame
 
 ## Memory (2026-10-10)
 
-text + data + BSS = 3,484,662 bytes (`build/blktiger/blktiger.map`: text 297,674,
-data 2,089,628, BSS 1,097,360); there is no Malloc, the screens are BSS.  It was
+text + data + BSS = 3,484,734 bytes (`build/blktiger/blktiger.map`: text 297,744,
+data 2,089,628, BSS 1,097,362); there is no Malloc, the screens are BSS.  It was
 4,023,518, more than GEMDOS leaves on a 4 MB STE with a hard disk driver,
 accessories and TOS 1.62 (TOS 2.06 without AUTO programs: 4,145,998).
 
