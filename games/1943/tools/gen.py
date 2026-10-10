@@ -290,11 +290,11 @@ def generate(extra_roots=()):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
-    # per bank: the window's base (g_winbase), its dispatch table (g_wdispatch, 0: a bank without code)
+    # per bank: the window's base (g_winbase), its dispatch table (g_wdispatch; g_wd_none: a bank without code)
     out += ['\tsection data,data', '\teven', 'bank_tabs:']
     out += [f'\tdc.l bank_rom+${0x8000 + bank*0x4000:x}' for bank in range(8)]
-    out += [f'\tdc.l {"g_wd_b%d" % bank if bank in banks else "0"}' for bank in range(8)]
-    out += ['\tsection text,code']
+    out += [f'\tdc.l {"g_wd_b%d" % bank if bank in banks else "g_wd_none"}' for bank in range(8)]
+    out += ['\tdc.w 0,0                            ; (a bank without code: no words)', 'g_wd_none:', '\tsection text,code']
     (BUILD / 'dispatch.json').write_text(json.dumps(regions) + '\n')   # (logic_test.py checks the tables against the map)
     return '\n'.join(out)+'\n', report, code
 
@@ -305,7 +305,7 @@ def dispatch_tables(em, code, banks):
     code), so the entries are offsets from the table itself (g_dispatch: jmp (a4,d7.l)); vasm rejects an entry beyond
     128 KB.  Every address that is not an entry (no code, or a merged label: em.no_entry) goes to the region's stub
     g_bad_<region> after the table.  The line before a table must end its flow (a jump), so nothing falls into it.
-    Returns the lines and {region: [the table's words, its Z80 entries (the table's index)]} for logic_test.py."""
+    Returns the lines and {region: [the first index, the table's words, its Z80 entries (by index)]} for logic_test.py."""
     entries = sorted(pc for pc in code if pc not in em.no_entry)
     regions = [('fx', 0x8000, {pc: pc for pc in entries if pc < WIN_LO})]
     regions += [(f'b{bank}', 0x4000, {pc: pc - VBASE - bank*0x4000 for pc in entries
@@ -325,11 +325,17 @@ def dispatch_tables(em, code, banks):
             prev = next(lines[i] for i in range(starts[n]-1, -1, -1) if lines[i].strip() and not lines[i].lstrip().startswith(';'))
             if not re.match(r'\t(bra|jmp|rts)\b', prev):
                 raise RuntimeError(f'dispatch region {name}: the code before its table may fall through ({prev!r})')
+    spans = {}
     for n in reversed(range(len(regions))):
         name, size, pcs = regions[n]
+        # the fixed table covers $0000-$7FFF; a bank's only its code's span (lo..hi), with its words * 2 and lo * 2
+        # before it (g_dispatch: (the address - lo) * 2 unsigned below the words * 2, else z80_badpc)
+        lo, hi = (0, size - 1) if name == 'fx' else (min(pcs.values()), max(pcs.values()))
+        spans[name] = lo, hi - lo + 1
         at = {i: pc for pc, i in pcs.items()}
-        rows, run, bad = [f'g_wd_{name}:'], 0, f'(g_bad_{name}-g_wd_{name})/2'
-        for i in range(size):
+        rows = [] if name == 'fx' else [f'\tdc.w ${2 * (hi - lo + 1):04x},${2 * lo:04x}']
+        rows, run, bad = rows + [f'g_wd_{name}:'], 0, f'(g_bad_{name}-g_wd_{name})/2'
+        for i in range(lo, hi + 1):
             if i not in at:
                 run += 1
                 continue
@@ -341,7 +347,7 @@ def dispatch_tables(em, code, banks):
             rows.append(f'\tdcb.w {run},{bad}')
         rows += [f'g_bad_{name}:', '\tmoveq #-1,d7', '\tjmp z80_badpc']   # (z80_badpc reports g_dispatch_pc)
         lines[starts[n]:starts[n]] = rows
-    return lines, {name: [size, sorted(pcs.values())] for name, size, pcs in regions}
+    return lines, {name: [*spans[name], sorted(pcs.values())] for name, size, pcs in regions}
 
 
 if __name__ == '__main__':

@@ -84,21 +84,23 @@ start:
     jmp Z0000
 
 ; Natural-PC dispatch through word tables (gen.py dispatch_tables: a word per Z80 address, (the entry - the table) / 2,
-; each table in the text section right before its code): the fixed code's in a4, the window's in g_wdispatch (0: a
-; bank without code).  d7.w = the Z80 address; a3 is free for computed jumps (z80x.FAST).
+; each table in the text section right before its code): the fixed code's in a4 ($0000-$7FFF), the window's in
+; g_wdispatch, only the span of the bank's code: its words * 2 at -4, its first address - $8000, * 2, at -2 (g_wd_none,
+; no words: a bank without code).  (The address - $8000 - the first) * 2 unsigned below the words * 2 is in the table;
+; that also rejects $C000 and up.  d7.w = the Z80 address; a3 is free for computed jumps (z80x.FAST).
 g_dispatch:
     move.w d7,g_dispatch_pc
     and.l #$ffff,d7
-    add.w d7,d7                  ; (C: from $8000; then N: from $C000)
+    add.w d7,d7                  ; (C: from $8000)
     bcs.s .window
     move.w (a4,d7.l),d7
     add.l d7,d7
     jmp (a4,d7.l)
 .window:
-    bmi.s .bad
     move.l g_wdispatch,a3
-    cmp.w #0,a3
-    beq.s .bad
+    sub.w -2(a3),d7
+    cmp.w -4(a3),d7
+    bhs.s .bad
     move.w (a3,d7.l),d7
     add.l d7,d7
     jmp (a3,d7.l)
@@ -467,6 +469,6 @@ dma_count: ds.w 1
 dbg_buf: ds.w 8
 g_iy: ds.w 1
 g_fshadow: ds.w 1
-    ds.b 16384
+    ds.b 8192                    ; (the 68000 stack: under 200 bytes used in the simulator; TOS calls at the exit)
 own_stack_top:
 g_sprites: ds.b 512
