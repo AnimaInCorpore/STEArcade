@@ -1,5 +1,6 @@
 """Packed ROM graphics, a fixed STE palette, and mask-grouped sprite programs."""
 from pathlib import Path
+import json
 import sys
 import numpy as np
 from PIL import Image
@@ -72,34 +73,32 @@ def programs(sprites):
     return '\n'.join(out)+'\n',bytes(orders),bytes(blanks)
 
 
+def oklab(c):
+    """sRGB 0-255 -> Oklab"""
+    c = np.asarray(c, float) / 255
+    lin = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    m1 = np.array([[0.4122214708, 0.5363325363, 0.0514459929], [0.2119034982, 0.6806995451, 0.1073969566],
+                   [0.0883024619, 0.2817188376, 0.6299787005]])
+    m2 = np.array([[0.2104542553, 0.7936177850, -0.0040720468], [1.9779984951, -2.4285922050, 0.4505937099],
+                   [0.0259707400, 0.7827717716, -0.8086757660]])
+    return np.cbrt(lin @ m1.T) @ m2.T
+
+
+RGB = np.array([[(v >> 4 & 15) * 17, (v & 15) * 17, (v >> 8 & 15) * 17] for v in range(4096)])   # (a palette word's colour)
+
+
 def palette():
-    # Deterministic samples from the reference's own attract/gameplay sequence.
-    m = BlackTiger()
-    hist = np.zeros(4096,np.int64)
-    from logic_test import inputs
-    for frame in range(2600):
-        m.inputs[:3] = inputs(frame)
-        m.run_frame_port()
-        if frame % 20 == 0 and frame > 300:
-            values = np.frombuffer(m.mem,np.uint8)
-            pal = values[0xd800:0xdc00].astype(np.uint16) | values[0xdc00:0xe000].astype(np.uint16)<<8
-            hist += np.bincount((pal[m.render_raw()[16:240]]&4095).ravel(),minlength=4096)
-    rgb = np.array([[(v>>4&15)*17,(v&15)*17,(v>>8&15)*17] for v in range(4096)],np.uint8)
-    # Cap the repeated black backdrop; dedicate slot 0 to true black.
-    counts = np.minimum(hist,50000)
-    counts[0]=0
-    samples = np.repeat(rgb, np.maximum(0, counts//50),axis=0)
-    q = Image.fromarray(samples.reshape(1,-1,3)).quantize(colors=15)
-    colours = np.array(q.getpalette()[:45],np.uint8).reshape(15,3)
-    colours = np.round(colours/17).astype(np.uint8)*17
-    colours = np.vstack((np.zeros((1,3),np.uint8),colours))
-    distance = ((rgb[:,None,:].astype(np.int32)-colours[None,:,:])**2 * np.array([2,4,1])).sum(axis=2)
-    mapping = distance.argmin(axis=1).astype(np.uint8)
-    regs=[]
-    for r,g,b in colours//17:
-        conv=lambda n: ((int(n)>>1)&7) | ((int(n)&1)<<3)
-        regs.append((conv(r)<<8)|(conv(g)<<4)|conv(b))
-    return colours,mapping,np.array(regs,'>u2')
+    # The fixed colours (docs/palette.json, ref/palette_fit.py: fitted in Oklab to the game's colours, colour 0
+    # black); every palette word maps to the nearest of them in Oklab.
+    doc = json.loads((Path(__file__).resolve().parents[1] / 'docs' / 'palette.json').read_text())
+    colours = np.array([[int(c[i:i+2], 16) for i in (1, 3, 5)] for c in doc['colours']], np.uint8)
+    assert len(colours) == 16 and not colours[0].any() and not (colours % 17).any()
+    mapping = ((oklab(RGB)[:, None] - oklab(colours)[None]) ** 2).sum(2).argmin(1).astype(np.uint8)
+    regs = []
+    for r, g, b in colours // 17:
+        conv = lambda n: ((int(n) >> 1) & 7) | ((int(n) & 1) << 3)
+        regs.append((conv(r) << 8) | (conv(g) << 4) | conv(b))
+    return colours, mapping, np.array(regs, '>u2')
 
 
 def build():
@@ -116,11 +115,10 @@ def build():
     (dest/'sprite_order.bin').write_bytes(order)
     (dest/'sprite_blank.bin').write_bytes(blank)
     (dest/'char_blank.bin').write_bytes(bytes(int(not (p!=3).any()) for p in g.chars))
-    if not (dest/'palette_rgb.bin').exists():
-        colours,mapping,regs=palette()
-        (dest/'palette_rgb.bin').write_bytes(colours.tobytes())
-        (dest/'rgb_map.bin').write_bytes(mapping.tobytes())
-        (dest/'palette.bin').write_bytes(regs.tobytes())
+    colours,mapping,regs=palette()
+    (dest/'palette_rgb.bin').write_bytes(colours.tobytes())
+    (dest/'rgb_map.bin').write_bytes(mapping.tobytes())
+    (dest/'palette.bin').write_bytes(regs.tobytes())
     print('renderer assets:',dest,flush=True)
 
 
