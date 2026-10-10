@@ -1,6 +1,9 @@
 # legacy
 
 Superseded or unmaintained material, kept for reference. Nothing here is built, tested or referenced by `port.py`.
+The Falcon030 converter's outputs (`src/generated/cpu_*.asm`, `src/dkong_initial*.asm`, `src/test.asm`) and the
+routine disassemblies (`analysis/*_disasm*.txt`) were removed from the repository and its history: they are ROM
+content; the notes that mention them remain.
 
 | folder | what it is |
 |---|---|

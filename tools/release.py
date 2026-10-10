@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Pack a release: the eight ports as self-contained TOS programs (the arcade code and graphics are embedded in each
-.PRG, nothing is loaded at run time) and a README.TXT.  The ROM files themselves are not part of it.
+"""Pack a release for your own use: the eight ports as self-contained TOS programs and a README.TXT.  Each .PRG holds
+the arcade's program (translated, and the ROMs it reads as data) and its converted graphics, built from your ROM sets:
+the result contains ROM data and must not be distributed (the GitHub release has no binaries for that reason).
 
     python tools/release.py <version> [--no-build]      -> release/STEArcade-<version>/ and release/STEArcade-<version>.zip
 
@@ -84,8 +85,8 @@ Games
 Notes
 -----
 
-The arcade's DIP switches are fixed in each program (upright cabinet).  The arcade ROMs are not part of the
-STEArcade sources; the programs here are built from the original ROM sets.
+The arcade's DIP switches are fixed in each program (upright cabinet).  The programs are built from your own ROM
+sets and contain their data: they are for your own use, do not distribute them.
 
 Files (SHA-256)
 ---------------

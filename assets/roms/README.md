@@ -1,6 +1,8 @@
 # assets/roms
 
-ROM archives (`*.zip`, as shipped, never modified) and the files the tools read.
+The ROM archives (MAME sets, `*.zip`, as shipped, never modified) and the files the tools read.  **None of them is in
+the repository** (`.gitignore`): supply the archives below yourself; `port.py prepare <game>` verifies one against
+`games/<game>/docs/rom_manifest.json` and unpacks it.
 
 | archive | set | extracted to | used by |
 |---|---|---|---|

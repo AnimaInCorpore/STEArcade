@@ -2,8 +2,10 @@
 build/
 run/
 release/
-# unpacked from the archives by port.py prepare <game> (games/<game>/tools/prepare.py)
-assets/roms/extracted/
+# the ROM sets are never part of the repository: the archives are supplied locally, extracted/ is unpacked from them
+# by port.py prepare <game> (games/<game>/tools/prepare.py)
+assets/roms/*
+!assets/roms/README.md
 *.pkl
 *.png
 __pycache__/

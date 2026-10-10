@@ -19,11 +19,14 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
 
-## Download
+## Building the programs
 
-[Release 0.1](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.1): `STEArcade-0.1.zip` with one
-self-contained TOS program per game (the arcade code and graphics are part of it; no ROM files are needed or included)
-and a README.TXT with the controls.  Requirements: an Atari STE with 4 MB.
+There are no binaries to download: a self-contained program holds the arcade's ROM data (the translated program, the
+ROMs it reads as data, the converted graphics), so it cannot be distributed.  No ROM is part of this repository either.
+With your own ROM sets (the MAME archives listed in [`assets/roms/README.md`](assets/roms/README.md), placed in
+`assets/roms/`) and the Quick start's venv, `python port.py release 0.1` builds one TOS program per game and a
+README.TXT with the controls into `release/` ([release 0.1](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.1)
+is that state of the sources).  Requirements: an Atari STE with 4 MB.
 
 Every port takes the keyboard (cursor keys, Space / Control / Alternate, 1 / 2 start, 5 / 6 coin, Esc quits), two
 joysticks (port 1 player 1, the mouse port player 2) and two Jaguar pads / PowerPads in the STE's enhanced joystick
@@ -63,8 +66,8 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
 
 Input: keyboard, the two IKBD joysticks and two Jaguar pads / PowerPads in every port (`docs/architecture.md`,
 "Input").  A release: `python port.py release <version>` builds every port and packs the self-contained programs
-with a README.TXT into `release/STEArcade-<version>.zip` (`tools/release.py`; no ROM files); then tag `v<version>`
-and attach the zip to a GitHub release (`gh release create`).
+with a README.TXT into `release/STEArcade-<version>.zip` (`tools/release.py`): for your own use only, the programs
+contain ROM data.  A GitHub release is the tag `v<version>` with notes and no files.
 
 Reading order: `docs/architecture.md` (how a port works), `docs/porting-guide.md` (method, MAME check, lessons),
 then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
