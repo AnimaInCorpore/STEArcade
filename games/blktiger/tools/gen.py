@@ -57,7 +57,10 @@ def _pcs(writers):
 
 
 TEXT_PCS = _pcs(TEXT_WRITERS)
-DIRTY_FLAGS = {pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}
+# The writers that run in almost every other frame copy the player's colours, entries $200-$209 (ld de,$DA00 / $DE00,
+# ld bc,$0A, ldir): they set pal_player, and the renderer compares only those 20 bytes (generate() checks the code).
+PAL_PLAYER = {0x1951: 0xda00, 0x1959: 0xde00}
+DIRTY_FLAGS = {pc: 'pal_player' if pc in PAL_PLAYER else 'pal_dirty' for pc in _pcs(PAL_WRITERS)}
 RMW = {'inc', 'dec', 'set', 'res', 'rlc', 'rrc', 'rl', 'rr', 'sla', 'sra', 'srl', 'sll', 'rld', 'rrd'}
 
 
@@ -365,6 +368,11 @@ def generate(extra_roots=()):
     finally:
         discover.decode = saved
     code = {pc: ins for pc, ins in code.items() if pc < 0x8000 or pc >= VBASE}
+    for pc, de in PAL_PLAYER.items():                # (the range is the block's own: no jump into it)
+        block = [code[pc-6], code[pc-3], code[pc]]
+        if [(i.mn, tuple(i.ops)) for i in block] != [('ld', (('r16', 'de'), ('imm', de))), ('ld', (('r16', 'bc'), ('imm', 10))),
+                                              ('ldir', ())] or any(i.target in (pc-3, pc) for i in code.values()):
+            raise RuntimeError(f'PAL_PLAYER {pc:04x}: not the copy of the player colours')
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0xc000,
                       iyaddr=0x10000, fshadow=0x10002, io_read_redirect={}, write_hooks=[],
                       rst28_tables=False, bit_s=True, **z80x.FAST)
@@ -374,32 +382,60 @@ def generate(extra_roots=()):
     for nxt, targets in tables.values():
         joins |= set(targets)
     em = compile_code(code, joins, cfg, {IDLE}, emitter=BTEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
-    out = ['; Generated Black Tiger main Z80, fixed and sixteen ROM banks', '\tsection text,code', *em.lines]
-    for pc in sorted(em.refs-set(code)):
-        out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
-    for pc in sorted(em.stubs):
-        # (a jump into the window from fixed code: the bank's table directly, g_wdispatch is its middle)
-        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tmove.w d7,g_dispatch_pc', '\tmove.l g_wdispatch,a0',
-                f'\tmove.l {(pc - 0x8000) * 4 - 0x8000}(a0),a0', '\tjmp (a0)']
-    out += ['\tsection data,data', '\teven', 'bt_entries_fixed:']
-    for pc in sorted(code):
-        if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
-            out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
-    out += ['\tdc.w $ffff']
-    for bank in range(16):
-        out += [f'bt_entries_bank{bank}:']
-        for pc in sorted(code):
-            if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
-                out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
-        out += ['\tdc.w $ffff']
-    out += ['bt_entry_banks:', '\tdc.l '+','.join(f'bt_entries_bank{b}' for b in range(16))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
-    out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_window_dispatch{b}+$8000' if b in banks else 'bt_invalid_dispatch+$8000' for b in range(16)),
-            f'BT_WINDOW_TABLES = {len(banks)+1}', '\tsection bss,bss', 'bt_invalid_dispatch: ds.l 16384']
-    for bank in banks:
-        out += [f'bt_window_dispatch{bank}: ds.l 16384']
+    # The dispatch tables (bt_dispatch), built here as data: a word per Z80 address, (the entry - the region's base) / 2,
+    # unsigned.  Regions: the fixed code below $4000, the fixed code from $4000, each bank's code.  A region's base
+    # is a label before its first line (no bytes: nothing changes for a fall-through), its z80_badpc stub follows
+    # an unconditional jump inside the region (nothing falls into it).  vasm rejects an entry beyond 128 KB.
+    entries = sorted(pc for pc in code if pc not in em.no_entry)   # (merged: z80_badpc)
+    regions = [('lo', [pc for pc in entries if pc < 0x4000]), ('hi', [pc for pc in entries if 0x4000 <= pc < WIN_LO])]
+    regions += [(f'b{bank}', [pc for pc in entries if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000]) for bank in banks]
+    lines = list(em.lines)
+    where = {}
+    for i, line in enumerate(lines):
+        m = re.match(r'Z([0-9A-F]+):', line)
+        if m:
+            where[int(m.group(1), 16)] = i
+    starts = [min(where[pc] for pc in pcs) for _, pcs in regions]
+    inserts = []
+    for n, (name, pcs) in enumerate(regions):
+        first, end = starts[n], starts[n+1] if n+1 < len(regions) else len(lines)
+        if not all(first <= where[pc] < end for pc in pcs):
+            raise RuntimeError(f'dispatch region {name}: the code is not in address order')
+        stub = next(i for i in range((first+end)//2, end)
+                    if re.match(r'\t(bra|jmp|rts)\b', lines[i]) and not lines[i].startswith('\tjmp (a0,'))
+        inserts += [(first, f'bt_base_{name}:'), (stub+1, f'bt_bad_{name}:\n\tjmp z80_badpc')]
+    for i, text in sorted(inserts, reverse=True):
+        lines.insert(i, text)
+    out = ['; Generated Black Tiger main Z80, fixed and sixteen ROM banks', '\tsection text,code', *lines]
+    for pc in sorted(em.refs-set(code)):
+        out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
+    for pc in sorted(em.stubs):
+        # (a jump into the window from fixed code: the bank's table, through bt_dispatch)
+        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp bt_dispatch']
+
+    def table(name, pcs, index):
+        rows, run, bad = [], 0, f'(bt_bad_{name}-bt_base_{name})/2'
+        at = {index(pc): pc for pc in pcs}
+        for i in range(0x4000):
+            if i not in at:
+                run += 1
+                continue
+            if run:
+                rows.append(f'\tdcb.w {run},{bad}')
+                run = 0
+            rows.append(f'\tdc.w (Z{at[i]:04X}-bt_base_{name})/2')
+        if run:
+            rows.append(f'\tdcb.w {run},{bad}')
+        return rows
+    out += ['\tsection data,data', '\teven', 'bt_fixed_dispatch:']
+    out += table('lo', regions[0][1], lambda pc: pc) + table('hi', regions[1][1], lambda pc: pc-0x4000)
+    for (name, pcs), bank in zip(regions[2:], banks):
+        out += [f'\tdc.l bt_base_{name}', f'bt_window_dispatch{bank}:'] + table(name, pcs, lambda pc: real(pc)-WIN_LO)
+    out += ['bt_dispatch_targets:                ; (0: a bank without code)',
+            '\tdc.l '+','.join(f'bt_window_dispatch{b}' if b in banks else '0' for b in range(16))]
     out += ['\tsection text,code']
     return '\n'.join(out)+'\n', report, code
 

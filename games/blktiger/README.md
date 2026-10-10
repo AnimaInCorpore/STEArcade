@@ -4,7 +4,7 @@
 
 STE port of MAME set `blktiger`, with a bank-aware translation of the unmodified
 main Z80 and an i8751 interpreter running the dumped protection firmware.
-Requires a 4 MB STE. Sound is not implemented.
+Requires a 4 MB STE (the program takes 3.48 MB: see "Memory"). Sound is not implemented.
 
 ```sh
 python port.py build blktiger         # verify ROMs, build assets and BLKTIGER.PRG
@@ -14,6 +14,7 @@ python port.py mame blktiger 1500     # reference bitmap against MAME state
 python port.py cover blktiger 1       # optional additional bank-aware coverage
 games/blktiger/tools/perf_test.py     # Musashi: a tick's and a frame's cycles (profile, logic, frames)
 games/blktiger/tools/bench.sh         # Hatari: DEBUG + AUTOPLAY build, ticks and frames a second
+python games/blktiger/ref/palette_fit.py   # refit the fixed palette (docs/palette.json), its error against the one before
 ```
 
 Supply `assets/roms/blktiger.zip`. Preparation checks all 20 ROMs against the
@@ -62,24 +63,78 @@ Everything is drawn whole into hidden margins, nothing is clipped. Per frame
 
 Whole sprites use precomputed shifted masks and equal-mask row groups, including
 mirrored variants. Background split priority and viewport-anchored text follow
-MAME. A fixed 16-colour STE palette approximates the arcade palette; renderer
-comparisons use that same colour mapping.
+MAME. The palette changes go through the
+writers' flags: `pal_dirty` makes the renderer compare the 2 KB palette, the
+copies of the player's colours (`gen.PAL_PLAYER`, in about every other frame)
+set `pal_player`, which compares only their 20 bytes.
+
+**The palette** is fixed: black and 15 colours fitted by a weighted k-means in
+Oklab (`ref/palette_fit.py`, Bubble Bobble's method) to the reference's
+pictures of the logic test's script and of each stage 0-7 (cover.py's cheats),
+each set's colour histogram normalised, the colours snapped to ones that occur
+(4 bits a channel, exact on the STE). Every palette word maps to the nearest of
+them in Oklab (`tools/assets.py`: a 4096-entry table at build time). A palette
+change remaps the pens of the colours it touched; their tiles and sprites are
+baked again unless one of the colour's last eight mappings returns (flashes and
+cycles find their bakes in the caches). Renderer comparisons use that same
+colour mapping.
+
+| palette | error per channel (0-255), mean of the 9 sets | exact pixels | worst set |
+|---|---|---|---|
+| before: median cut of the script's colours, RGB-weighted map | 17.2 | 27.7% | 38.8 (stage 5) |
+| now | 11.6 | 42.7% | 17.9 (stage 7) |
+| square-rooted weights (as Bubble Bobble) | 15.5 | 35.4% | 40.4 |
+| 13 colours + 2 lent to flashing entries | 12.4 | 40.3% | 21.1 |
+
+Only the script set (the old fit's own data) is a little worse (9.9 -> 10.8).
+
+Lending colours does not pay here: the frequent changes are the fades and a
+four-entry ramp of the player's colours (every few hundred frames). The
+palette's choice costs nothing at run time; its work is the change detection
+and the remap (below).
 
 The cooperative task scheduler yields at the game's idle loop. Native VBLs
 queue six game ticks per five 50 Hz fields; drawing is skipped while ticks are
 pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frames.
 
-## Speed (2026-10-09)
+## Memory (2026-10-10)
 
-| | before | now |
-|---|---|---|
-| a frame, Musashi cycles (`tools/perf_test.py 1500 1000`, play) | 2.15 M | 231 k |
-| a game tick (logic) | 54 k | 47 k |
-| Hatari (`tools/bench.sh`, 6000 VBLs of play) | | 38.9 ticks/s (65% of the arcade), 12.3 frames/s |
+text + data + BSS = 3,484,734 bytes (`build/blktiger/blktiger.map`: text 297,744,
+data 2,089,628, BSS 1,097,362); there is no Malloc, the screens are BSS.  It was
+4,023,518, more than GEMDOS leaves on a 4 MB STE with a hard disk driver,
+accessories and TOS 1.62 (TOS 2.06 without AUTO programs: 4,145,998).
 
-`MAX_SKIPS=2` gives 33.5 ticks/s and 14.0 frames/s. The logic is now the larger
-part: the bank switches of the background RAM (4 KB copied out and in, the game
-reads its map for collisions) and the guarded window reads. `perf_test.py`
+* **Dispatch tables** (`gen.py`, `bt_dispatch`): a word per Z80 address,
+  (the entry - the region's base) / 2, built as data: the fixed code in two
+  regions (below and from $4000, 64 KB, a4) and each bank's code (32 KB, its
+  base in the long before the table; `g_wdispatch` 0 for a bank without code).
+  Before: 640 KB of long tables in BSS (an invalid bank's too), filled at start
+  from 113 KB of entry lists.  A region's base is a label before its first
+  line, its `z80_badpc` stub follows an unconditional jump inside it; vasm
+  rejects an entry out of range.  About 24 cycles more a dispatch (16 a tick).
+* **The fixed ROM** is assembled into the Z80 image (`g_block`, data) instead
+  of copied there (32 KB).
+* **Sprite row orders**: a sprite and its mirror image share theirs (32 KB).
+
+The largest items now: the three 768 by 544 screens (612 KB), the graphics
+(tiles, sprites 256 KB each, characters 64 KB), the ROM banks (256 KB), the
+shifted sprite masks (250 KB), the caches (tiles 96 KB, sprites 64 KB, byte
+tables 64 KB; `perf_test.py 4000 300 frames` bakes the same with half the
+tile or sprite entries, but later stages were not measured).
+
+## Speed (2026-10-10)
+
+| | 2026-10-09 | before the memory work | now |
+|---|---|---|---|
+| a frame, Musashi cycles (`tools/perf_test.py 4000 300`) | | 152.9 k | 146.2 k |
+| a frame (`tools/perf_test.py 1500 1000`, play) | 231 k | 158.5 k | 155.0 k |
+| a game tick (logic, 1500 1000) | 47 k | 33.4 k | 33.8 k |
+| Hatari (`tools/bench.sh`, 6000 VBLs of play), ticks/s | 38.9 | 52.8 | 52.9 |
+| Hatari, frames drawn/s | 12.3 | 22.9 | 23.4 |
+
+The frame's gain is the palette compare (`pal_player`); the tick's loss the
+word dispatch.  `MAX_SKIPS=2` gave 33.5 ticks/s and 14.0 frames/s (2026-10-09).
+`perf_test.py`
 takes `profile` (render_frame by routine), `logic [regions]` (the tick by
 routine or Z80 page), `frames` (a frame's cost, map / palette changes, tiles
 baked). `render_test.py --consecutive --walk` draws every frame (the

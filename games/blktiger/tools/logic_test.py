@@ -131,11 +131,15 @@ def main():
         for flag, a, size in regions:
             now = bytes(mem.r_block(a, size))
             if flag in last and now != last[flag] and not mem.r8(sym[flag]):
-                i = next(i for i in range(size) if now[i] != last[flag][i])
-                print(f'frame {frame}: {flag} not set, {a:06x}+{i:04x} changed')
-                return False
+                # (gen.PAL_PLAYER: the writers of entries $200-$209 set pal_player, the renderer compares those)
+                changed = [i for i in range(size) if now[i] != last[flag][i]]
+                missed = [i for i in changed if not (mem.r8(sym['pal_player']) and (i & 0x3ff) - 0x200 in range(10))]
+                if missed:
+                    print(f'frame {frame}: {flag} not set, {a:06x}+{missed[0]:04x} changed')
+                    return False
             last[flag] = now
             mem.w8(sym[flag], 0)
+            mem.w8(sym['pal_player'], 0)
         # The text layer rebuilds only the rows the hooked stores marked (gen.TEXT_WRITERS): right after the frame's
         # text_scan the renderer's copy of rows 2-29 must equal the text RAM, else a writer is missing there.
         if mem.r8(sym['text_valid']):
