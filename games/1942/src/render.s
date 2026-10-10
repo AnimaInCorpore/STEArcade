@@ -46,9 +46,16 @@ BLT_HOP_OP = $ffff8a3a
 BLT_CTRL = $ffff8a3c
 BLT_SKEW = $ffff8a3d
 
-TILE_POOL_SIZE = $60000
-SPR_POOL_SIZE = $40000
-CHR_POOL_SIZE = $30000
+; The pools of baked graphics (bump allocated, flushed at a palette bank change or, at the start of a frame, when fewer than
+; *_POOL_ROOM bytes are left).  Measured (tools/perf_test.py runs of 11-19k ticks, attract mode, play, the later stages): at most
+; 20 KB of tiles, 70 KB of sprites, 33 KB of characters baked between two flushes, at most 15 KB / 1.3 KB / 28 KB in one frame.
+; The room covers a frame: every one of the 512 background cells (64 KB), 256 sprite parts (32 KB), 48 KB of characters.
+TILE_POOL_SIZE = $20000
+TILE_POOL_ROOM = $10000
+SPR_POOL_SIZE = $30000
+SPR_POOL_ROOM = $8000
+CHR_POOL_SIZE = $20000
+CHR_POOL_ROOM = $C000
 
 	section text,code
 
@@ -422,13 +429,13 @@ copy_tile:
 blit_copy:
 	dbgcnt	dbg_c1,0
 	ifd DEBUG
-	cmp.l	#$200000,a0			; (assertion: both rectangles are in the rings / clean)
+	cmp.l	#ring_area,a0			; (assertion: both rectangles are in the rings / clean)
 	blo.s	.bad
-	cmp.l	#$3F0000,a0
+	cmp.l	#ring_area+4*RING_SIZE+512,a0
 	bhs.s	.bad
-	cmp.l	#$200000,a1
+	cmp.l	#ring_area,a1
 	blo.s	.bad
-	cmp.l	#$3F0000,a1
+	cmp.l	#ring_area+4*RING_SIZE+512,a1
 	blo.s	.good
 .bad:	move.l	(sp),d6				; the caller
 	move.w	draw_idx,d5

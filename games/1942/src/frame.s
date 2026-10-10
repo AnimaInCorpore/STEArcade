@@ -55,11 +55,11 @@ render_frame:
 	bsr	set_bank
 .same_bank:
 	; baked data nearly out of memory: start the caches over (the pictures stay)
-	cmp.l	#tile_pool+TILE_POOL_SIZE-$20000,tile_pool_ptr
+	cmp.l	#tile_pool+TILE_POOL_SIZE-TILE_POOL_ROOM,tile_pool_ptr
 	bhs.s	.flush
-	cmp.l	#spr_pool+SPR_POOL_SIZE-$8000,spr_pool_ptr
+	cmp.l	#spr_pool+SPR_POOL_SIZE-SPR_POOL_ROOM,spr_pool_ptr
 	bhs.s	.flush
-	cmp.l	#chr_pool+CHR_POOL_SIZE-$8000,chr_pool_ptr
+	cmp.l	#chr_pool+CHR_POOL_SIZE-CHR_POOL_ROOM,chr_pool_ptr
 	blo.s	.pools
 .flush:	bsr	flush_caches
 .pools:
