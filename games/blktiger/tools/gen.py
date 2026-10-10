@@ -16,12 +16,10 @@ IDLE = 0x00d4
 BUILD = build_dir('blktiger')
 
 
-# The instructions that write the background RAM (c000-cfff), from bank-aware coverage of attract and play
-# (the map copies at level starts, the tile updates at 2af7 / 2afb): each sets bg_dirty after it, so the runtime
-# compares the RAM with the renderer's copy only then (and 256 bytes a frame in case a writer is missing here).
-BG_WRITERS = {0x090d, 0x090f, 0x091f, 0x0921, 0x0931, 0x0933, 0x0943, 0x0945, 0x0c44, 0x1239, 0x2518, 0x29f9, 0x29fd,
-              0x2af7, 0x2afb, ('bank', 2, 0xb951), ('bank', 2, 0xb955), ('bank', 2, 0xb95f), ('bank', 2, 0xb963),
-              ('bank', 6, 0xb90d)}
+# The background RAM (c000-cfff, out $0d selects one of four 4 KB banks) is not in the Z80 image: every indirect
+# access checks for it (win_check: with the window's check, at no cost to other addresses) and goes to the bank in
+# g_bg, a write marking map_dirty for the renderer; a block instruction whose ranges meet it runs on a copy of the
+# bank in the image (bt_bg_fwd / bt_bg_bwd, bt_bg_post).  A bank switch is a pointer (g_bgbase).
 # The same for the palette RAM (d800-dfff, the fades): pal_dirty.
 PAL_WRITERS = {0x1951, 0x1959, 0x1965, 0x196d, 0x19a5, 0x19bd, ('bank', 6, 0x809d), ('bank', 6, 0xb944),
                ('bank', 6, 0xb951), ('bank', 6, 0xbaa1), ('bank', 6, 0xbaac), ('bank', 6, 0xbab8),
@@ -59,7 +57,8 @@ def _pcs(writers):
 
 
 TEXT_PCS = _pcs(TEXT_WRITERS)
-DIRTY_FLAGS = {**{pc: 'bg_dirty' for pc in _pcs(BG_WRITERS)}, **{pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}}
+DIRTY_FLAGS = {pc: 'pal_dirty' for pc in _pcs(PAL_WRITERS)}
+RMW = {'inc', 'dec', 'set', 'res', 'rlc', 'rrc', 'rl', 'rr', 'sla', 'sra', 'srl', 'sll', 'rld', 'rrd'}
 
 
 def image():
@@ -135,27 +134,48 @@ class BTEmitter(Emitter):
             return "%d(aW,%s.w)" % (disp, reg) if disp else "(aW,%s.w)" % reg
         return super().ind(reg, disp)
 
-    def win_check(self, reg):
-        """lines: aW = the window's base if the address in reg is in 8000-BFFF, else a6"""
+    def win_check(self, reg, disp=0, store=False, window=True):
+        """lines: aW = the base for the Z80 address reg + disp: a6, the window's (8000-BFFF) or the background bank's
+        (C000-CFFF; a write there marks map_dirty).  Signed words: 8000-BFFF is below -$4000, C000-CFFF below -$3000;
+        the displacement goes into the constants (the 68000 adds it to the sign-extended register).  A store to the
+        window (ROM) goes to a6's unused copy of it, as the Z80's goes nowhere.  window=False: the old check of
+        a block instruction's source (the background is in the image then)."""
         l = self.new_label()
-        # (as a signed word, 8000-BFFF is exactly the range below C000)
-        return ["lea (a6),aW", "cmp.w #$C000,%s" % reg, "bge.s %s" % l, "move.l g_winbase,aW", l + ":"]
+        if not window:
+            return ["lea (a6),aW", "cmp.w #$C000,%s" % reg, "bge.s %s" % l, "move.l g_winbase,aW", l + ":"]
+        k = lambda v: "#$%04X" % ((v - disp) & 0xFFFF)
+        lines = ["lea (a6),aW", "cmp.w %s,%s" % (k(0xD000 - 0x10000), reg), "bge.s %s" % l]
+        if not store:
+            lines.append("move.l g_winbase,aW")
+        lines += ["cmp.w %s,%s" % (k(0xC000 - 0x10000), reg), "blt.s %s" % l, "move.l g_bgbase,aW"]
+        if store or self.cur.mn in RMW:
+            lines.append("st map_dirty")       # (Scc leaves the CCR alone)
+        return lines + [l + ":"]
 
-    def block_win(self, fn, ins):
-        """a block instruction at a site that read the window: aW = the base of the source (hl)"""
+    def block_win(self, fn, ins, backward=False):
+        """a block instruction: the background bank into the image while it runs, if its ranges meet C000-CFFF;
+        at a site that read the window, aW = the base of the source (hl)"""
+        if ins.mn in ('ldi', 'ldd', 'cpi'):
+            self.e('moveq #0,d5')               # (the count - 1)
+        else:
+            self.e('move.w d1,d5')
+            self.e('ror.w #8,d5')
+            self.e('subq.w #1,d5')              # (BC = 0: 65536)
+        self.e('jsr bt_bg_bwd' if backward else 'jsr bt_bg_fwd')
         if ins.pc in self.window_sites:
-            for line in self.win_check("d3"):
+            for line in self.win_check("d3", window=False):
                 self.lines.append(line) if line.endswith(":") else self.e(line)
             self.win_src = "d3"
         try:
             fn(ins)
         finally:
             self.win_src = None
+        self.e('jsr bt_bg_post')                # (keeps the CCR)
 
     def x_ldir(self, ins): self.block_win(super().x_ldir, ins)     # (z80x: on address registers, by longs where it can)
     def x_ldi(self, ins): self.block_win(super().x_ldi, ins)
-    def x_ldd(self, ins): self.block_win(super().x_ldd, ins)
-    def x_lddr(self, ins): self.block_win(super().x_lddr, ins)
+    def x_ldd(self, ins): self.block_win(super().x_ldd, ins, True)
+    def x_lddr(self, ins): self.block_win(super().x_lddr, ins, True)
     def x_cpi(self, ins): self.block_win(super().x_cpi, ins)
     def x_cpir(self, ins): self.block_win(super().x_cpir, ins)
 
@@ -170,15 +190,16 @@ class BTEmitter(Emitter):
 
     def read8(self, op, io_read=True):
         pre, ea = Emitter.read8(self, op, io_read)
-        if op[0] == 'ind' and not self.storing and self.cur is not None and self.cur.pc in self.window_sites:
+        if op[0] == 'ind' and self.cur is not None and self.cur.pc in self.window_sites:
             match = re.fullmatch(r'(-?\d+)?\(a6,(d\d|a2)\.w\)', ea)
-            if match:
-                reg = match[2]
-                if reg == 'a2':                 # (IY with z80x.FAST: the low word of a2, whose upper word is not 0)
-                    pre += ['move.w a2,d5']
-                    reg = 'd5'
-                pre += self.win_check(reg)
-                ea = f'{match[1] or ""}(aW,{match[2]}.w)'
+            if not match:
+                raise Unsupported('indirect access %s' % ea)
+            reg = match[2]
+            if reg == 'a2':                 # (IY with z80x.FAST: the low word of a2, whose upper word is not 0)
+                pre += ['move.w a2,d5']
+                reg = 'd5'
+            pre += self.win_check(reg, int(match[1] or 0), store=self.storing)
+            ea = f'{match[1] or ""}(aW,{reg}.w)'
         return pre, ea
 
     def emit_ins(self, pc, live_out_override=None, with_label=True):
@@ -216,6 +237,8 @@ class BTEmitter(Emitter):
         a = (addr + off) & 0xffff
         if WIN_LO <= a < WIN_HI:
             return f'{a-0x10000}(aW)'
+        if 0xc000 <= a < 0xd000:              # (the program has none: the banked background would need g_bgbase)
+            raise Unsupported(f'static background address {a:04x}')
         return Emitter.mem(self, addr, off, io_read)
 
     def dispatch_d7(self):
@@ -355,7 +378,9 @@ def generate(extra_roots=()):
     for pc in sorted(em.refs-set(code)):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
-        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp bt_dispatch']
+        # (a jump into the window from fixed code: the bank's table directly, g_wdispatch is its middle)
+        out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tmove.w d7,g_dispatch_pc', '\tmove.l g_wdispatch,a0',
+                f'\tmove.l {(pc - 0x8000) * 4 - 0x8000}(a0),a0', '\tjmp (a0)']
     out += ['\tsection data,data', '\teven', 'bt_entries_fixed:']
     for pc in sorted(code):
         if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
@@ -371,7 +396,7 @@ def generate(extra_roots=()):
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
-    out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_window_dispatch{b}' if b in banks else 'bt_invalid_dispatch' for b in range(16)),
+    out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_window_dispatch{b}+$8000' if b in banks else 'bt_invalid_dispatch+$8000' for b in range(16)),
             f'BT_WINDOW_TABLES = {len(banks)+1}', '\tsection bss,bss', 'bt_invalid_dispatch: ds.l 16384']
     for bank in banks:
         out += [f'bt_window_dispatch{bank}: ds.l 16384']

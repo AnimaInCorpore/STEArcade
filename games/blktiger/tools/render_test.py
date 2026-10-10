@@ -49,7 +49,7 @@ class Renderer:
         mem.w8(sym['pal_dirty'],1)        # (the game's palette writers set it)
         mem.w8(sym['text_compare'],1)     # (the game's text writers mark their rows: every row compared)
         if bytes(m.bg)!=getattr(self,'last_bg',None):
-            # (the game's bg_flush flags a changed map for the renderer)
+            # (the game's background writes flag a changed map for the renderer: gen.py win_check)
             self.last_bg=bytes(m.bg);mem.w_block(sym['g_bg'],self.last_bg);mem.w8(sym['map_dirty'],1)
         mem.w_block(sym['bt_sprites'],bytes(m.sprites))
         for name,value in [('g_layout',m.layout),('g_control',m.control),('g_video_enable',m.video_enable)]:

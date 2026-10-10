@@ -93,12 +93,7 @@ def main():
         for name, addr, want in [('RAM', block+0x5000, ref.mem[0xd000:]),
                                  ('background',sym['g_bg'],ref.bg),
                                  ('sprites',sym['bt_sprites'],ref.sprites)]:
-            if name == 'background':
-                got = bytearray(mem.r_block(addr,len(want)))
-                bank = mem.r8(sym['g_bg_bank'])
-                got[bank*0x1000:(bank+1)*0x1000] = mem.r_block(block+0x4000,0x1000)
-            else:
-                got = mem.r_block(addr,len(want))
+            got = mem.r_block(addr,len(want))
             # Dead stack bytes still carry unused H/N flags; only the live kernel
             # state and saved task stacks have architectural significance.
             diff = [i for i,(a,b) in enumerate(zip(got,want)) if a != b]
@@ -117,24 +112,20 @@ def main():
             return False
         return True
 
-    # The renderer compares the background bank and the palette only after a hooked writer (gen.BG_WRITERS /
-    # PAL_WRITERS): a change without its flag is a writer missing there.  (A bank switch reloads the bank.)
-    regions = [('bg_dirty', block+0x4000, 0x1000), ('pal_dirty', block+0x5800, 0x800)]
+    # The renderer checks its window against the background only after map_dirty (any write to the background,
+    # gen.py win_check) and the palette after a hooked writer (gen.PAL_WRITERS): a change without its flag is a miss.
+    regions = [('map_dirty', sym['g_bg'], 0x4000), ('pal_dirty', block+0x5800, 0x800)]
     last = {}
     text_checked = [0]
     def hooks(frame):
-        bank = mem.r8(sym['g_bg_bank'])
         for flag, a, size in regions:
-            now = bytes(mem.r_block(a, size)), bank
-            # (a bank switch flushes a written bank: bg_flush then sets map_dirty instead)
-            flagged = mem.r8(sym[flag]) or flag == 'bg_dirty' and mem.r8(sym['map_dirty'])
-            if flag in last and now[1] == last[flag][1] and now[0] != last[flag][0] and not flagged:
-                i = next(i for i in range(size) if now[0][i] != last[flag][0][i])
-                print(f'frame {frame}: {a-block-0x8000+0x10000+i:04x} changed without {flag} (a writer missing in gen.py)')
+            now = bytes(mem.r_block(a, size))
+            if flag in last and now != last[flag] and not mem.r8(sym[flag]):
+                i = next(i for i in range(size) if now[i] != last[flag][i])
+                print(f'frame {frame}: {flag} not set, {a:06x}+{i:04x} changed')
                 return False
             last[flag] = now
             mem.w8(sym[flag], 0)
-        mem.w8(sym['map_dirty'], 0)
         # The text layer rebuilds only the rows the hooked stores marked (gen.TEXT_WRITERS): right after the frame's
         # text_scan the renderer's copy of rows 2-29 must equal the text RAM, else a writer is missing there.
         if mem.r8(sym['text_valid']):

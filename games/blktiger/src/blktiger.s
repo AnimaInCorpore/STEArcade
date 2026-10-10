@@ -61,27 +61,25 @@ start:
     jmp Z0000
 
 ; Natural-PC dispatch: fixed table 128 KB, sixteen 64 KB window tables.
-bt_dispatch:
+bt_dispatch:                    ; d7.w = the Z80 address (kept for z80_badpc); a0 / d5 are free at a jump
     move.w d7,g_dispatch_pc
-    and.l #$ffff,d7
-    cmp.w #$8000,d7
-    bhs.s .window
-    lsl.l #2,d7
-    move.l (a4,d7.l),-(sp)
-    rts
+    bmi.s .window
+    moveq #0,d5
+    move.w d7,d5
+    lsl.l #2,d5
+    move.l (a4,d5.l),a0
+    jmp (a0)
 .window:
     cmp.w #$c000,d7
-    blo.s .valid
-    jmp z80_badpc
-.valid:
-    sub.w #$8000,d7
-    lsl.l #2,d7
-    move.l a0,-(sp)
+    bhs.s .bad
+    move.w d7,d5
+    lsl.w #2,d5
+    eor.w #$8000,d5                 ; ((the address - $8000) * 4 - $8000: g_wdispatch is the table's middle)
     move.l g_wdispatch,a0
-    move.l (a0,d7.l),d7
-    move.l (sp)+,a0
-    move.l d7,-(sp)
-    rts
+    move.l (a0,d5.w),a0
+    jmp (a0)
+.bad:
+    jmp z80_badpc
 
 init_dispatch:
     lea bt_fixed_dispatch,a0
@@ -100,6 +98,7 @@ init_dispatch:
 .bank:
     move.l (a2)+,a1
     move.l (a3)+,a0
+    lea -$8000(a0),a0
     bsr scatter
     dbf d3,.bank
     rts
@@ -146,7 +145,6 @@ z80_hook:
 .draw_now:
     clr.b render_skips
     endc
-    bsr bg_sync
     bsr render_frame
     addq.w #1,cnt_renders
 .skip_draw:
@@ -205,14 +203,26 @@ z80_hook:
     endc
     st frame_dirty
     st isr_stage
-    movem.l d0-d7/a0-a6,-(sp)
+    ; The sprite RAM as the VBL latches it, for this tick's frame: not when that frame will be skipped (VBLs still
+    ; pending now are pending at its end too, and .normal then skips it unless MAX_SKIPS were skipped already).
+    ifnd SIM
+    tst.b vbl_pending
+    beq.s .sprites
+    cmp.b #MAX_SKIPS,render_skips
+    blo.s .no_sprites
+    endc
+.sprites:
+    movem.l d0-d7/a0-a2,-(sp)
     lea g_block+$7e00,a0
     lea bt_sprites,a1
-    move #$200/4-1,d0
-.sprites:
-    move.l (a0)+,(a1)+
-    dbf d0,.sprites
-    movem.l (sp)+,d0-d7/a0-a6
+    moveq #$200/32-1,d0
+.spr:
+    movem.l (a0)+,d1-d7/a2
+    movem.l d1-d7/a2,(a1)
+    lea 32(a1),a1
+    dbf d0,.spr
+    movem.l (sp)+,d0-d7/a0-a2
+.no_sprites:
     lea own_stack_top,sp
     clr.b g_iff
     move.w #$d400,-(a5)          ; real return address $00d4, exact kernel stack data
@@ -222,21 +232,15 @@ z80_hook:
 bt_out_00:
     move.b d0,g_sound_latch
     rts
-bt_out_01:
-    movem.l d0/d7,-(sp)
-    and.l #15,d0
-    move.b d0,g_bank
-    move.l d0,d7
-    lsl.w #2,d7
-    move.l a0,-(sp)
-    lea bt_dispatch_targets,a0
-    move.l (a0,d7.w),g_wdispatch
-    move.l (sp)+,a0
-    lsl.l #7,d0
-    lsl.l #7,d0
-    add.l #bank_rom+$8000,d0
-    move.l d0,g_winbase
-    movem.l (sp)+,d0/d7
+bt_out_01:                      ; (d5 / a0: scratch at an instruction's end)
+    moveq #15,d5
+    and.b d0,d5
+    move.b d5,g_bank
+    lsl.w #2,d5
+    lea bt_dispatch_targets,a0      ; (gen.py: the middles of the banks' tables)
+    move.l (a0,d5.w),g_wdispatch
+    lea bt_winbases,a0
+    move.l (a0,d5.w),g_winbase
     rts
 bt_out_02:
     rts
@@ -274,91 +278,91 @@ bt_out_0c:
     move.b d0,g_video_enable
     rts
 bt_out_0d:
-    movem.l d0-d7/a0-a2,-(sp)
-    and.w #3,d0
-    cmp.b g_bg_bank,d0
-    beq.s .same
-    move.w d0,-(sp)
-    ; The outgoing bank back to g_bg: compared (for the renderer) only after a hooked writer,
-    ; else copied (the game's state stays exact even if gen.BG_WRITERS misses one).
-    tst.b bg_dirty
-    beq.s .copy_out
-    clr.b bg_dirty
-    bsr bg_flush
-    bra.s .saved
-.copy_out:
-    lea g_block+$4000,a0
-    move.l g_bgactive,a1
-    moveq #$1000/32-1,d0
-.out:
-    movem.l (a0)+,d1-d7/a2
-    movem.l d1-d7/a2,(a1)
-    lea 32(a1),a1
-    dbf d0,.out
-.saved:
-    move.w (sp)+,d0
+    move.l d0,-(sp)
+    and.l #3,d0
     move.b d0,g_bg_bank
     lsl.w #8,d0
     lsl.w #4,d0
-    lea g_bg,a0
-    lea (a0,d0.w),a0
-    move.l a0,g_bgactive
-    lea g_block+$4000,a1
-    moveq #$1000/32-1,d0
-.load:
-    movem.l (a0)+,d1-d7/a2
-    movem.l d1-d7/a2,(a1)
-    lea 32(a1),a1
-    dbf d0,.load
-.same:
-    movem.l (sp)+,d0-d7/a0-a2
+    add.l #g_bg+$4000,d0             ; (C000 is -$4000 as the signed index of the translated accesses)
+    move.l d0,g_bgbase
+    move.l (sp)+,d0
     rts
 bt_out_0e:
     move.b d0,g_layout
     rts
-; Before a frame: the renderer's copy of the active background bank.  The translated writers set
-; bg_dirty; 256 bytes a frame are compared in case one is missing from gen.BG_WRITERS (DEBUG counts them).
-bg_sync:
-    tst.b bg_dirty
-    bne.s .flush
-    moveq #0,d0
-    move.w bg_roll,d0
-    add.w #256,d0
-    and.w #$fff,d0
-    move.w d0,bg_roll
-    lea g_block+$4000,a0
-    add.l d0,a0
-    move.l g_bgactive,a1
-    add.l d0,a1
-    moveq #256/4-1,d1
-.compare:
-    cmpm.l (a0)+,(a1)+
-    dbne d1,.compare
-    bne.s .missed
+; Block instructions (gen.py block_win): when the source or the destination range of one meets C000-CFFF, the
+; background bank is copied into the image there for it and back afterwards (bt_bg_post, which marks the map).
+; d3 = HL, d2 = DE, d5.w = the count - 1; bt_bg_bwd: the ranges end at HL / DE.  All registers and the CCR kept.
+bt_bg_bwd:
+    movem.l d0/d7,-(sp)
+    move.w d3,d0
+    sub.w d5,d0
+    bsr.s bg_meets
+    bne.s bg_in
+    move.w d2,d0
+    sub.w d5,d0
+    bra.s bg_dst
+bt_bg_fwd:
+    movem.l d0/d7,-(sp)
+    move.w d3,d0
+    bsr.s bg_meets
+    bne.s bg_in
+    move.w d2,d0
+bg_dst:
+    bsr.s bg_meets
+    bne.s bg_in
+    movem.l (sp)+,d0/d7
     rts
-.missed:
-    ifd DEBUG
-    addq.w #1,bg_missed
-    endc
-.flush:
-    clr.b bg_dirty
-; The active background bank back to g_bg; a change makes the renderer check its window.
-bg_flush:
-    lea g_block+$4000,a0
-    move.l g_bgactive,a1
-    move #$1000/4-1,d1
-.compare:
-    cmpm.l (a0)+,(a1)+
-    dbne d1,.compare
-    bne.s .changed
+bg_in:
+    movem.l d1-d6/a0-a2,-(sp)
+    move.l g_bgbase,a0
+    lea -$4000(a0),a0
+    lea g_block+$4000,a1
+    bsr.s bg_copy
+    movem.l (sp)+,d1-d6/a0-a2
+    st bg_mat
+    movem.l (sp)+,d0/d7
     rts
-.changed:
+; Z clear if the d5.w + 1 bytes from d0.w (mod 64K) meet C000-CFFF; uses d7
+bg_meets:
+    move.w d0,d7
+    sub.w #$C000,d7
+    cmp.w #$1000,d7
+    blo.s .yes
+    move.w #$C000,d7
+    sub.w d0,d7                     ; (the bytes before C000)
+    cmp.w d5,d7
+    bls.s .yes
+    moveq #0,d7
+    rts
+.yes:
+    moveq #1,d7
+    rts
+bt_bg_post:
+    move sr,-(sp)
+    tst.b bg_mat
+    bne.s .back
+    move (sp)+,ccr
+    rts
+.back:
+    movem.l d0-d7/a0-a2,-(sp)
+    lea g_block+$4000,a0
+    move.l g_bgbase,a1
+    lea -$4000(a1),a1
+    bsr.s bg_copy
+    movem.l (sp)+,d0-d7/a0-a2
+    clr.b bg_mat
     st map_dirty
-    subq.l #4,a0
-    subq.l #4,a1
-.copy:
-    move.l (a0)+,(a1)+
-    dbf d1,.copy
+    move (sp)+,ccr
+    rts
+; 4 KB (a0)+ -> (a1); uses d0-d7 / a2
+bg_copy:
+    moveq #$1000/32-1,d0
+.c:
+    movem.l (a0)+,d1-d7/a2
+    movem.l d1-d7/a2,(a1)
+    lea 32(a1),a1
+    dbf d0,.c
     rts
 
 hbl:
@@ -398,8 +402,7 @@ vbl:
 	borders_blit_go
 
     ifd DEBUG
-; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, background changes found by the rolling check (a writer
-; missing from gen.BG_WRITERS), the frames whose top border the VBL armed, the top border / palette on / bottom border
+; COUNTERS.BIN (words): VBLs, frames drawn, game ticks, 0 (was: background changes the hooks missed), the frames whose top border the VBL armed, the top border / palette on / bottom border
 ; / palette off events that started too late (engine/rt/borders.s), 0; then longs: blit_go's passes run in pieces,
 ; the text rows rebuilt, the frames a ring kept its text, the byte tables bake_pixels built
 dbg_counters:
@@ -407,7 +410,7 @@ dbg_counters:
     move.w frame_counter+2,(a0)+
     move.w cnt_renders,(a0)+
     move.w cnt_ticks,(a0)+
-    move.w bg_missed,(a0)+
+    clr.w (a0)+
     move.w bd_fallbacks,(a0)+
     move.w bd_late_top,(a0)+
     move.w bd_late_on,(a0)+
@@ -479,8 +482,14 @@ sim_render_ret:
 bt_inputs:
     dc.b $ff,$ff,$ff,$ff,$6f,$ff
     even
-g_bgactive:
-    dc.l g_bg
+g_bgbase:                        ; the background bank selected (out $0d) + $4000
+    dc.l g_bg+$4000
+bt_winbases:                     ; g_winbase of each bank: its copy + $8000 (the Z80 address - $10000 the offset)
+N   set 0
+    rept 16
+    dc.l bank_rom+$8000+N*$4000
+N   set N+1
+    endr
 bank_rom:
     incbin "banks.rom"
 fixed_rom:
@@ -523,12 +532,12 @@ g_iff: ds.b 1
 g_ireg: ds.b 1
 g_bank: ds.b 1
 g_bg_bank: ds.b 1
+bg_mat: ds.b 1                   ; the bank is in the image (a block instruction runs)
 g_control: ds.b 1
 g_video_enable: ds.b 1
 g_layout: ds.b 1
 g_scroll: ds.b 4
 g_sound_latch: ds.b 1
-bg_dirty: ds.b 1
 g_coin_lockout: ds.b 1
 g_mcu_response: ds.b 1
 mcu_command: ds.b 1
@@ -553,8 +562,6 @@ frame_counter: ds.l 1
 g_winbase: ds.l 1
 g_wdispatch: ds.l 1
 g_dispatch_pc: ds.w 1
-bg_roll: ds.w 1
-bg_missed: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
 dbg_buf: ds.w 18
