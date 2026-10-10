@@ -15,10 +15,10 @@ parts, and the first two are checked against each other with a lock-step test:
    list.  Sprites are drawn with the **Blitter** (one blit per sprite line, masks as end masks, no clearing pass);
    tiles with the CPU.
 
-Layout: `engine/` (shared), `games/<game>/{src,tools,ref}` (plus `docs/` where a game keeps notes and reference captures),
-`build/<game>/` and `run/<game>/` (generated, not in git), `assets/roms/` (archives; `extracted/<game>/` the unpacked files),
-`tools/hatari.sh` (Hatari driver) and `tools/windows/`, `port.py` (build/test/run front end), `legacy/` (superseded, not
-built).  `engine/paths.py` knows where things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment
+Layout (the conventions are in the README's "Layout"): `engine/` (shared), `games/<game>/{src,tools,ref,docs}`,
+`build/<game>/`, `run/<game>/` and `release/` (generated, not in git), `assets/roms/` (the archives; `extracted/<game>/`
+unpacked by `port.py prepare`, not in git), `tools/` (`hatari.sh`, `release.py`, `windows/`), `port.py` (the front end
+and the list of the ports), `legacy/` (superseded, not built).  `engine/paths.py` knows where things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment
 variables select the tools).
 
 ## Renderers of the ports
@@ -151,13 +151,13 @@ does the same), so an entry the analysis did not foresee stops loudly instead of
 * `engine/xprof.py <game>`: a `--sim` build stepped instruction by instruction, each 68000 instruction charged to the
   Z80 instruction it was translated from: cycles per *game frame* (one round of the arcade's interrupts, so a faster
   build is not charged more work per VBL), by instruction form, by 68000 instruction, hottest pcs.  Donkey Kong runs
-  through its lock-step harness (`fullrun.py`).  Idle loops are counted apart (`IDLE`).
+  through its lock-step harness (`logic_test.py`).  Idle loops are counted apart (`IDLE`).
 * `engine/xdiff.py galaga <old.PRG> <old.map>`: two builds side by side (separate processes: Musashi keeps the CPU in
   globals), the arcade's RAM compared at every game frame.  The interrupts come on a clock of translated instructions
   (and when no Z80 code runs for two frames), so both builds are interrupted at the same points of the Z80 programs:
   Galaga's main CPU draws text in its foreground, and a faster build is otherwise legitimately ahead.  The stacks are
   not compared (an interrupt's `push af` saves d6, which need not hold the interrupted code's flags: they may be in
-  the CCR).  This is Galaga's translation test (its `galaga5.py` checks the reference only).
+  the CCR).  This is Galaga's translation test (its `schedule_test.py` checks the reference only).
 
 Measured 2026-10-08 (`xprof`, translated code per game frame, Musashi cycles; Bubble Bobble without its idle loop):
 
@@ -168,7 +168,7 @@ Measured 2026-10-08 (`xprof`, translated code per game frame, Musashi cycles; Bu
 | 1942 (ticks 1100-1500, play) | 28.1k | 24.3k | 1.16x |
 | Commando (ticks 600-1000, attract; 2026-10-09) | 8.4k | 7.0k | 1.20x |
 | Black Tiger (ticks 600-1000, attract; 2026-10-09) | 15.7k | 12.9k | 1.22x |
-| Donkey Kong (NMI, 1500 frames of fullrun.py) | 5.2k | 4.8k | 1.08x |
+| Donkey Kong (NMI, 1500 frames of logic_test.py) | 5.2k | 4.8k | 1.08x |
 
 The gain is where the old code was weak: Galaga's `ldir` clears (37% of its cycles), the `ret` dispatch with A' in a3,
 the high bytes.  Donkey Kong's code was lean already (16 cycles a Z80 instruction, mostly memory moves that cannot get
@@ -257,7 +257,7 @@ Galaga; isolated line bodies save 9.0% and 9.9%. These are simulated cycle count
 not Hatari frame-rate measurements. Executables grow by about 407 KB and 558 KB;
 both ports still fit the configured 4 MB STE. Both rebuilt binaries also completed
 5000 VBLs in the pinned Hatari with no crash file; screenshots confirmed the games
-running (including Galaga's sprites).  Bubble Bobble's renderer (`games/bublbobl/src/bb_render.s`) is
+running (including Galaga's sprites).  Bubble Bobble's renderer (`games/bublbobl/src/render.s`) is
 a complete tile renderer that does not use the Blitter; it has no sprite blitter to optimize, and its
 measured cost is elsewhere (see "Renderers of the ports" above).
 

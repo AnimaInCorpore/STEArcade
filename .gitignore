@@ -2,6 +2,8 @@
 build/
 run/
 release/
+# unpacked from the archives by port.py prepare <game> (games/<game>/tools/prepare.py)
+assets/roms/extracted/
 *.pkl
 *.png
 __pycache__/
@@ -12,5 +14,6 @@ venv/
 !games/*/docs/**/*.png
 !legacy/**/*.png
 
-# MAME writes its configuration into the directory it runs in
+# MAME writes its configuration and snapshots into the directory it runs in
 cfg/
+snap/

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """One entry point for the ports.
 
-    port.py list
-    port.py prepare <game>                 verify and unpack a newly added ROM set
+    port.py list                           the games and their programs
+    port.py prepare <game>                 verify the ROM archive, unpack it to assets/roms/extracted/<game>/ (build, cover,
+                                           test and mame do it first when that folder is missing)
     port.py cover  <game> [seeds ...]        coverage runs the translator is seeded from (parallel; ~15 min for dkong)
     port.py build  <game> [build.py args]    translate + assemble + link -> run/<game>/   (--sim: the simulator build)
     port.py test   <game> [frames]           the tests that compare the build with the reference machine
+    port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader)
     port.py run    <game> [item@s ...]       Hatari (tools/hatari.sh): screenshots, key presses, memory dumps
     port.py mame   <game> [frames ...]       reference renderer against MAME's own picture (needs `mame`)
     port.py release <version> [--no-build]  every port built and packed: release/STEArcade-<version>.zip (tools/release.py)
 
 The python is the repository's venv (venv/bin/python) when it exists.  Everything it starts is a plain script in
-games/<game>/tools or ref (see games/<game>/README.md); this file only knows the order and the arguments.
+games/<game>/tools or ref (see games/<game>/README.md); this file only knows the order and the arguments.  GAMES is
+the one list of the ports (tools/hatari.sh and tools/release.py read it); every game has tools/build.py,
+tools/prepare.py and ref/mame_cmp_<game>.py.
 """
 import os
 import subprocess
@@ -22,13 +26,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python").exists() else sys.executable
 
+# the ports, in the order of the README, and their programs (run/<game>/<program>)
+GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
+         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG"}
+EXTRACTED = ROOT / "assets" / "roms" / "extracted"
+
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
     "1943": [("ref/cover.py", list(range(1, 21)), 20000)],     # 4-5: attract, the test inputs; 6-20: cheats, one stage each
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
-    "dkong": [("ref/cover1.py", [11, 12, 13, 14], 60000), ("ref/cover2.py", [21, 22, 23, 24], 40000),
-              ("ref/colors3.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
+    "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
+              ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8], 60000)],     # 5-8: with MAME's cheats (later stages)
@@ -60,8 +69,8 @@ TESTS = {
                  ("tools/logic_test.py", ["{n}"], 1600),
                  ("tools/logic_test.py", ["4000", "--walk"], None),
                  ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None)],
-    "dkong": [("tools/fullrun.py", ["{n}"], 3000)],
-    "galaga": [("ref/galaga5.py", ["{n}"], 3000)],
+    "dkong": [("tools/logic_test.py", ["{n}"], 3000)],
+    "galaga": [("tools/schedule_test.py", ["{n}"], 3000)],
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 700),
@@ -73,10 +82,8 @@ TESTS = {
              ("tools/sprite_test.py", [], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-MAME = {"1943": "ref/mame_cmp_1943.py", "commando": "ref/mame_cmp_commando.py", "gunsmoke": "ref/mame_cmp_gunsmoke.py", "blktiger": "ref/mame_cmp_blktiger.py", "dkong": "ref/mame_cmp_dkong.py", "galaga": "ref/mame_cmp_galaga.py", "bublbobl": "ref/mame_cmp_bublbobl.py",
-        "1942": "ref/mame_cmp_1942.py"}
-PREPARE = {"1943": "tools/prepare.py", "gunsmoke": "tools/prepare.py", "blktiger": "tools/prepare.py", "commando": "tools/prepare.py"}
-GAMES = sorted(set(COVER) | set(PREPARE))
+ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py"]
+assert set(COVER) == set(TESTS) == set(GAMES)
 
 
 def game_script(game, rel):
@@ -95,8 +102,17 @@ def main():
         return 0
     cmd = a[0]
     if cmd == "list":
-        for g in GAMES:
-            print(g)
+        for g, prg in GAMES.items():
+            print("%-10s %s" % (g, prg))
+        return 0
+    if cmd == "prg" and len(a) == 2 and a[1] in GAMES:       # (tools/hatari.sh)
+        print(GAMES[a[1]])
+        return 0
+    if cmd == "test" and a[1:2] == ["engine"]:
+        for t in ENGINE_TESTS:
+            rc = call([PY, str(ROOT / t)])
+            if rc:
+                return rc
         return 0
     if cmd == "release":
         return call([PY, str(ROOT / "tools" / "release.py")] + a[1:])
@@ -104,11 +120,13 @@ def main():
         print("usage: port.py %s <%s> ..." % (cmd, "|".join(GAMES)))
         return 2
     game, rest = a[1], a[2:]
+    prepare = [PY, game_script(game, "tools/prepare.py")]
     if cmd == "prepare":
-        if game not in PREPARE:
-            print("no preparation command for", game)
-            return 2
-        return call([PY, game_script(game, PREPARE[game])] + rest)
+        return call(prepare + rest)
+    if cmd in ("build", "cover", "test", "mame") and not (EXTRACTED / game).is_dir():
+        rc = call(prepare)                  # (the extracted ROMs are not in git)
+        if rc:
+            return rc
     if cmd == "build":
         return call([PY, game_script(game, "tools/build.py")] + rest)
     if cmd == "cover":
@@ -130,10 +148,7 @@ def main():
     if cmd == "run":
         return call([str(ROOT / "tools" / "hatari.sh"), game] + rest)
     if cmd == "mame":
-        if game not in MAME:
-            print(game + ": MAME renderer comparison is not implemented yet")
-            return 2
-        return call([PY, game_script(game, MAME[game])] + rest)
+        return call([PY, game_script(game, "ref/mame_cmp_%s.py" % game)] + rest)
     print("unknown command", cmd)
     return 2
 

@@ -4,7 +4,7 @@
 ;
 ; The arcade's main and sub Z80 programs and the protection MCU's firmware are
 ; translated to 68000 code (tools/gen.py: engine/z80x.py, engine/m6801x.py); this file is the
-; machine around them: STE video, the tile renderer (bb_render.s), input, and the
+; machine around them: STE video, the tile renderer (render.s), input, and the
 ; schedule:
 ;
 ;   At every VBL the MCU's IRQ1 handler runs (it reads the inputs and the DIP switches,
@@ -1443,7 +1443,7 @@ z80_unsupported:
 	moveq	#99,d0			; the dump: d7 = the address (an untranslated target: its pc; a
 	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
-	include "bb_render.s"
+	include "render.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated programs (and their dispatch tables in the data section).
@@ -1476,7 +1476,7 @@ bad_text:
 	dc.b	"(see the dispatch tables). Press a key.",13,10,0
 	even
 
-	include "bb_data.s"
+	include "data.s"
 
 ; ------------------------------------------------------------------------------
 	section bss,bss

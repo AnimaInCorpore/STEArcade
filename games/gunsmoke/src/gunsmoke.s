@@ -863,7 +863,7 @@ z80_unsupported:
 	moveq	#99,d0			; the dump: d7 = the address (an untranslated target: its pc), the stack
 	bra	crash_common
 
-	include "gunsmoke_render.s"
+	include "render.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch lists in the data section).

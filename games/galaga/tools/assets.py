@@ -35,7 +35,7 @@ def dist(a, b):
 def build_palette(g):
     """16 STE colours: black, the game's colours, two for the stars.  Returns the colours
     (4 bit per channel) and the map from the 96 arcade palette entries to them."""
-    # the palette entries the game draws with (ref/galaga4.py over attract mode and play:
+    # the palette entries the game draws with (ref/probes/galaga4.py over attract mode and play:
     # sprites 0-14, characters 16-29); the lookup PROMs name three more, which get the
     # nearest of these
     used = [0, 1, 2, 3, 5, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 22, 27, 29]
@@ -103,7 +103,7 @@ def build_sprites(g, pmap):
         q = tuple(pmap[g.sprite_lut[c * 4 + p]] if g.sprite_lut[c * 4 + p] != 0x0f else 0 for p in (1, 2, 3))
         trans = tuple(p for p in range(4) if g.sprite_lut[c * 4 + p] == 0x0f)
         # the shape's opaque pens must be exactly 1-3 (pen 0 transparent): true for every
-        # colour code the game shows (ref/galaga4.py); others get all pens opaque = black
+        # colour code the game shows (ref/probes/galaga4.py); others get all pens opaque = black
         if trans != (0,):
             q = (0, 0, 0)
         if q not in quads:
@@ -187,7 +187,7 @@ def build():
     lines.append("ga_cell_off:\t\t; display cell -> byte offset of its character in the screen")
     for i in range(0, len(off), 8):
         lines.append("\tdc.l " + ",".join("$%X" % x for x in off[i:i + 8]))
-    # the cell marks (galaga_sprites.s): 8 bytes per display row, bit 7 of byte 0 is cell
+    # the cell marks (sprites.s): 8 bytes per display row, bit 7 of byte 0 is cell
     # column 0 = display x -32 (the game area starts at cell column 4)
     mb, mbit = [], []
     for n in range(36 * 28):

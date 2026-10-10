@@ -4,8 +4,9 @@
 
 First port and the reference design for the Blitter sprite renderer (`docs/architecture.md`).  Paths relative to
 `games/dkong/`: `src/` (`dkong.s` runtime, `render.s` tiles, `sprites.s` Blitter sprites), `tools/` (`machine.py`
-reference machine, `dkong_pens.py` palette dumped from MAME, `gen.py`, `assets.py`, `build.py`, `fullrun.py`, `nmitrace.py`,
-`bench.py`, `frametimes.py`), `ref/` (analysis scripts, committed coverage logs, `mame_cmp_dkong.py`).
+reference machine, `dkong_pens.py` palette dumped from MAME, `gen.py`, `assets.py`, `build.py`, `logic_test.py`, `nmitrace.py`,
+`insn_bench.py`, `frametimes.py`), `ref/` (coverage `cover.py` / `cover_stages.py` / `cover_pens.py`,
+`mame_cmp_dkong.py`, one-off probes in `ref/probes/`), `docs/` (the screenshot, the coverage logs in `docs/coverage/`).
 
 State: Donkey Kong runs from the static Z80 -> 68000 translation with the Blitter renderer, exact against the reference
 emulator and MAME, 50 fps in play (see "Measuring" in `docs/architecture.md`).
@@ -21,13 +22,13 @@ Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): eith
     python port.py build dkong          # -> run/dkong/DKONG.PRG (the ROMs embedded: nothing else needed)
     python port.py run dkong shot@30    # Hatari (F030Arcade build), screenshot at 30 s
 
-The coverage and pens runs reproduce the committed logs (`ref/*.log`) exactly (3766/4949 PCs, 155/115/154 pens).
+The coverage and pens runs reproduce the committed logs (`docs/coverage/*.log`) exactly (3766/4949 PCs, 155/115/154 pens).
 `VASM`/`VLINK` select the toolchain; the default on macOS is `~/Work/f030dsp3d/tools`.  The program needs about
 2.3 MB of RAM (sprite data 0.9 MB, the dispatch table 256 KB).
 
-Tests: `tools/fullrun.py 3000` (whole program, lock-step against the Z80 reference, the NMI injected at the idle loop head),
+Tests: `tools/logic_test.py 3000` (whole program, lock-step against the Z80 reference, the NMI injected at the idle loop head),
 `tools/nmitrace.py N` (the NMIs from frame N on, instruction by instruction, names the first diverging instruction),
-`engine/sprite_blit_test.py` (sprite code against independently masked pixels, DK and Galaga).  `tools/bench.py`
+`engine/sprite_blit_test.py` (sprite code against independently masked pixels, DK and Galaga).  `tools/insn_bench.py`
 stops with `KeyError: 'pe'` on a conditional RET/CALL on the parity flag (not translated).
 
 The game itself is not deterministic across builds: its idle loop counts its spins (`inc ($6019)`), so the attract
@@ -63,9 +64,9 @@ deaths (the AVI says 60 fps for the 50 Hz frames).
 
 ## Translator speed (2026-10-08)
 
-`z80x.FAST` (no runtime change was needed: Donkey Kong has no `exx` / `ex af,af'`; `fullrun.py` reads IY from a2).
-`engine/xprof.py dkong` (1500 NMI frames of `fullrun.py`): translated code 5.2k -> 4.8k cycles a frame (1.08x): the
+`z80x.FAST` (no runtime change was needed: Donkey Kong has no `exx` / `ex af,af'`; `logic_test.py` reads IY from a2).
+`engine/xprof.py dkong` (1500 NMI frames of `logic_test.py`): translated code 5.2k -> 4.8k cycles a frame (1.08x): the
 code was lean (16 cycles a Z80 instruction, mostly memory moves), the gain is the direct returns and the flags.
-`tools/bench.py` knows the swapped BC and the 65536 entry dispatch table now (it failed 61 cases since BC was swapped);
-the engine's `engine/xbench.py` covers every opcode and memory layout.  Known, not from this change: `fullrun.py`
+`tools/insn_bench.py` knows the swapped BC and the 65536 entry dispatch table now (it failed 61 cases since BC was swapped);
+the engine's `engine/xbench.py` covers every opcode and memory layout.  Known, not from this change: `logic_test.py`
 stops at frame ~1030 (`z80_badjump`, d7 = $2BD) on the commit before it too; `port.py test dkong` runs 3000 frames.

@@ -7,9 +7,9 @@ Blitter sprite renderer of Donkey Kong extended to double-size sprites and a sta
 relative to `games/galaga/`; the shared pieces are described in `docs/architecture.md` and the method in
 `docs/porting-guide.md`.
 
-* `src/` the runtime and renderer (`galaga.s`, `galaga_render.s`, `galaga_sprites.s`, `galaga_stars.s`)
+* `src/` the runtime and renderer (`galaga.s`, `render.s`, `sprites.s`, `stars.s`)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `build.py`
-* `ref/` analysis scripts and the MAME comparison; the coverage pickles go to `build/galaga/`
+* `ref/` coverage (`cover.py`) and the MAME comparison, one-off probes in `ref/probes/`; the coverage pickles go to `build/galaga/`
 
 Build and run from the repository root: `python port.py build galaga`, `python port.py run galaga shot@30`.
 
@@ -37,12 +37,12 @@ credits, start buttons, joysticks with the fire edge; the MCU ROM is not in the 
 05XX starfield (LFSR period walked once per frame), the renderer (tiles 36x28 through
 tilemap_scan, 64 sprites with the double sizes, stars under them, characters over them,
 rotated 90).  It boots to the attract mode in 1500 frames at ~45 frames/s; coin, start and
-play work (`ref/galaga1.py`).  Probes: `ref/galaga2.py` (the sound CPU can be stopped
+play work (`ref/probes/galaga1.py`).  Probes: `ref/probes/galaga2.py` (the sound CPU can be stopped
 after its boot: screens identical over 2400 frames; it only posts its test result $9101
-and clears $9A00-$9AFF), `ref/galaga3.py` (sprites changed per frame mean 4.9, 90% 13,
+and clears $9A00-$9AFF), `ref/probes/galaga3.py` (sprites changed per frame mean 4.9, 90% 13,
 tiles 1.5; every I/O access is a static address except the NMI handler's `ldi` through
-hl' and the video latch through hl), `ref/galaga4.py` (13 colours plus black are drawn,
-so the STE palette has two entries for the stars), `ref/galaga5.py` (the port's schedule,
+hl' and the video latch through hl), `ref/probes/galaga4.py` (13 colours plus black are drawn,
+so the STE palette has two entries for the stars), `tools/schedule_test.py` (the port's schedule,
 below, against the interleaved reference: same game, stars one scroll step apart, up to about frame 2000; once the
 scripted player shoots the two drift into different games: frame 2500 scores 1110 / 1030),
 `ref/cover.py` (coverage pickles for the translation, `build/galaga/`).
@@ -162,7 +162,7 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   title phases, 9-22 with the formation (23.8 average).  So the stars cost half of a light
   frame but the heavy phases are bound by the sprites and the translated code (the game's
   two IRQ handlers take ~63% of every VBL, the renderer gets the rest).
-- Render throttle (`src/galaga_stars.s`, `-D NOTHROTTLE=1` switches it off): every render is
+- Render throttle (`src/stars.s`, `-D NOTHROTTLE=1` switches it off): every render is
   timed with MFP Timer D (81 us ticks, restarted at each VBL; a frame is 246 ticks, Timer
   C's control bits stay).  A render that took longer than a frame thins the starfield one
   step (every 2nd star, every 4th, none: `star_level`; the filter is the star's period
@@ -190,7 +190,7 @@ CPU1 `z80x.FAST`, CPU2 / CPU3 `z80x.FAST_LONG`; `g_ctrl06` reads DE' from the up
 clears (`ld (hl),n; ldir` over $37F bytes) are long fills now, the cost of the half registers (`ld d,(hl)` 48 -> 34
 cycles, `ld a,c` 30 -> 16) and of `adc` / `rl` (the carry into X without a branch) went down.  `engine/xprof.py galaga`
 (game frames 800-1200, attract): translated code 47.6k -> 27.6k cycles a game frame (1.73x).  There is no lock-step test
-of Galaga's translated code against the reference (`ref/galaga5.py` checks the reference only); the change was checked
+of Galaga's translated code against the reference (`tools/schedule_test.py` checks the reference only); the change was checked
 with `engine/xdiff.py galaga <the old build>`: the arcade's RAM is the same at all 400 game frames (interrupts on a
 clock of translated instructions, so a faster build is not ahead in the foreground).
 

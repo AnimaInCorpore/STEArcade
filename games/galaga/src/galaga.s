@@ -5,8 +5,8 @@
 ; The arcade's main and sub Z80 programs are translated to 68000 code by
 ; tools/gen.py (engine/z80x.py); this file is the machine around them: STE video
 ; (320 x 277 with the borders removed, the game's 224 x 288 rotated picture with a few
-; lines cropped), double buffering, the tile and sprite renderer (galaga_render.s,
-; galaga_sprites.s), the custom I/O chips (06XX, 51XX), input, and the schedule:
+; lines cropped), double buffering, the tile and sprite renderer (render.s,
+; sprites.s), the custom I/O chips (06XX, 51XX), input, and the schedule:
 ;
 ;   The main CPU's program is the foreground thread.  At every VBL the main CPU's IRQ
 ;   handler runs (if the program enabled it), then the sub CPU's IRQ handler with the sub
@@ -1251,9 +1251,9 @@ z80_unsupported:
 	addq	#2,sp
 	bra	quit
 
-	include "galaga_render.s"
-	include "galaga_sprites.s"
-	include "galaga_stars.s"
+	include "render.s"
+	include "sprites.s"
+	include "stars.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated programs (and their dispatch tables in the data section).

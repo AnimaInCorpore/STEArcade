@@ -62,7 +62,7 @@ gets past round 1's boss.
 
 ## The renderer
 
-`src/gunsmoke_render.s`, the method of Commando's renderer (`docs/porting-guide.md`,
+`src/render.s`, the method of Commando's renderer (`docs/porting-guide.md`,
 "Scrolling with virtual screens"):
 
 * **Background**: 32 x 32 tiles from the map ROM (2048 columns of 8 tiles), a function of

@@ -2,7 +2,7 @@
 import random, sys
 import os
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
-from fullrun import Lock, fine_trace, R
+from logic_test import Lock, fine_trace, R
 
 first = int(sys.argv[1])
 L = Lock()

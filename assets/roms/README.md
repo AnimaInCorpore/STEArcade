@@ -15,4 +15,8 @@ ROM archives (`*.zip`, as shipped, never modified) and the files the tools read.
 | `gunsmoke.zip` | Gun.Smoke (MAME `gunsmoke`) | `extracted/gunsmoke/` (32 verified files; `port.py prepare gunsmoke`) | `games/gunsmoke` |
 | `galaga88.zip` | other set | not extracted yet | — |
 
+`extracted/` is not in git: `python port.py prepare <game>` (each game's `tools/prepare.py`) verifies the archive
+against `games/<game>/docs/rom_manifest.json` and unpacks it; `port.py build`, `cover`, `test` and `mame` do that first
+when the folder is missing.
+
 Tools locate files through `engine/paths.py` (`EXTRACTED / "<game>" / name`); one folder per game.

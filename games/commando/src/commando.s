@@ -878,7 +878,7 @@ z80_unsupported:
 	moveq	#99,d0			; the dump: d7 = the address (an untranslated target: its pc; a
 	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
-	include "commando_render.s"
+	include "render.s"
 	include "sfx.s"
 
 ; ------------------------------------------------------------------------------

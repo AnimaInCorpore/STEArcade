@@ -39,22 +39,32 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 ## Layout
 
     engine/            shared: Z80 / 6801 emulators and disassemblers, translators (z80x, translate, m6801x), STE simulator on
-                       Musashi (sim.py), Blitter sprite code generator, shared runtime (rt/rtlib.s), paths and toolchain
-    games/<game>/      src/ 68000 source, tools/ reference machine + generator + build + tests, ref/ analysis scripts,
-                       README (docs/ where a game has notes and reference captures: bublbobl, 1942)
-    tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), windows/ (PowerShell
-                       helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
+                       Musashi (sim.py), Blitter sprite code generator, ROM preparation (roms.py), paths and toolchain;
+                       rt/: the shared 68000 runtime (rtlib.s, borders.s, jagpad.s); *_test.py: the engine's tests
+    games/<game>/      one folder per port, all alike:
+      README.md        state, controls, method, measurements (a screenshot at the top)
+      src/             <game>.s (start, VBL schedule, input, hooks) and the parts it includes, named by topic without a
+                       game prefix (render.s, sprites.s, hardware.s, mcu.s, sound.s, ...)
+      tools/           machine.py (reference machine), gen.py (translation), assets.py, build.py, prepare.py (ROMs), the
+                       tests *_test.py that port.py test runs, bench.sh / bench.ps1 (speed in Hatari) where a port has one
+      ref/             cover*.py (port.py cover), mame_cmp_<game>.py + mame_dump.lua (port.py mame), analysis scripts;
+                       ref/probes/: the numbered one-off experiments of the early ports, kept for the record
+      docs/            screenshot.png, rom_manifest.json, notes and reference data (palettes, coverage, captures)
+    tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), release.py, windows/
+                       (PowerShell helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
     docs/              architecture.md, porting-guide.md, reference/ (68000 and Z80 manuals)
-    assets/roms/       ROM archives; extracted/<game>/ holds the unpacked files (assets/roms/README.md)
+    assets/roms/       the ROM archives (assets/roms/README.md); extracted/<game>/ is unpacked by port.py prepare (not in git)
     build/ run/        generated code, assets, coverage data / the .PRG (ROMs embedded) (not in git)
+    release/           port.py release: the packed programs (not in git)
     legacy/            superseded material, not built or tested (legacy/README.md): the Falcon030 plan, the old
                        Blitter-renderer branch, scratch scripts of the pre-restructure layout
-    port.py            build / test / run / cover / mame for every game
+    port.py            the list of the ports and the front end: list / prepare / cover / build / test / run / mame / release
 
 ## Quick start
 
     python3 -m venv venv && venv/bin/pip install numpy pillow machine68k scipy    # once (scipy: Donkey Kong's sound)
     python port.py list
+    python port.py prepare bublbobl                                           # the ROMs (build does it when needed)
     python port.py build bublbobl && python port.py run bublbobl shot@20      # screenshot in /tmp/hrun
     python port.py test bublbobl                                              # reference vs translation vs renderer
 

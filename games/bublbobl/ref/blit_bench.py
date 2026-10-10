@@ -26,7 +26,7 @@ ENTRY, BDATA, MASKS = 0x330000, 0x330100, 0x330200
 # per-tile / per-run register writes the renderer would do on top of the row loops (68000 cycles):
 SETUP_TILE = 28 + 28 + 20 + 24          # SRC (move.l #,abs.l), DST, skew byte, X count
 SETUP_RUN = 28 + 28 + 24 + 24 + 20      # SRC/DST, X count, Y count, control (run blits)
-SETUP_CPU_SHIFT = 110                   # draw_tile's set-up of the two cells, MH table lookup (bb_render.s .u_go)
+SETUP_CPU_SHIFT = 110                   # draw_tile's set-up of the two cells, MH table lookup (render.s .u_go)
 
 
 class BHarness(Harness):

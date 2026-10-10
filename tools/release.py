@@ -16,6 +16,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import port                                         # noqa: E402  (port.GAMES: the ports and their programs)
 PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python").exists() else sys.executable
 
 # game, program, title, state, buttons (keyboard Space/Control, Alternate; joystick fire; pad A, B, C)
@@ -48,6 +50,8 @@ GAMES = [
      "shoot left / straight / right: Control / Space / Alternate, or Z / X / C; pad A / B / C.\n"
      "  The joystick's fire shoots straight."),
 ]
+assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
+    "tools/release.py: GAMES must list port.GAMES (same order, same programs)"
 DEBUG_NAMES = (b"COUNTERS.BIN", b"DEBUG.BIN", b"LATEPC.BIN", b"RATE.BIN", b"TIMES.BIN", b"DUMP.BIN")
 
 README = """STE Arcade {version}

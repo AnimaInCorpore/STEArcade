@@ -6,11 +6,11 @@ Fourth port (started 2026-10-08), the first with a **hardware scrolled** backgro
 `assets/roms/1942.zip`, extracted to `assets/roms/extracted/1942/`).  Paths in this file are relative to `games/1942/`; the
 shared pieces are described in `docs/architecture.md`, the method in `docs/porting-guide.md`.
 
-* `src/` the runtime and renderer: `1942.s` (start, schedule, input, timers), `1942_render.s` (video, palette banks, baking),
-  `1942_bg.s`, `1942_chr.s` + `1942_chr2.s`, `1942_spr.s`, `1942_frame.s` (one frame, data, variables)
+* `src/` the runtime and renderer: `1942.s` (start, schedule, input, timers), `render.s` (video, palette banks, baking),
+  `bg.s`, `chr.s` + `chr2.s`, `spr.s`, `frame.s` (one frame, data, variables)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` / `palettes.py` (graphics, palettes), `build.py`,
   `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari)
-* `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump_1942.lua`), `palette_stats.py`
+* `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump.lua`), `palette_stats.py`
 * `docs/` `palette_stats.json` (how often every palette entry shows) and `palettes.json` (the four 16 colour palettes)
 
 Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** loop, **Esc** quits.  Joystick port 1
@@ -64,7 +64,7 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
   characters of the next frame, one or two lines off, while the upper half was steady).  The VBL shows the newest finished frame
   (video address = ring + `T` * 256 - `PIC_TOP` lines, palette `frame_pal`); a frame that is not shown when the next one is done is dropped.
   Every ring keeps its own state (`ring_T`, sprite rectangles, characters drawn, tiles to copy).
-* **A frame** (`src/1942_frame.s`): window and palette bank from the Z80's registers; background RAM and character RAM are compared with
+* **A frame** (`src/frame.s`): window and palette bank from the Z80's registers; background RAM and character RAM are compared with
   shadows (`bg_shadow`, `fg_shadow`) only when a store to them was seen (the translated code sets `bg_dirty` / `fg_dirty` at the 25 store
   sites the coverage found, plus a rescan every 32nd frame; `logic_test.py` checks that no change goes unflagged); new tiles are baked
   and put into `clean` and noted for both draw rings; the old sprite rectangles of the ring go back (Blitter copy from `clean`); tiles;
@@ -78,7 +78,7 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
   switches the palette on at the picture's first line and off after its last (the black bars).  Blits that hog the bus delay the
   interrupts, so every event comes ~2-3 lines early and syncs itself to the video (Timer B polls its line counter, Timer A picks its
   HBL by reading its own counter); no blit waits.  `blit_copy` runs rows longer than 32 words a line a pass (`blit_go`).
-* **Sprites** (`src/1942_spr.s`, `tools/spritegen.py`, the method of `stefastbobs2/FAST_BLITTER_SPRITES.md`): the baked source of a part
+* **Sprites** (`src/spr.s`, `tools/spritegen.py`, the method of `stefastbobs2/FAST_BLITTER_SPRITES.md`): the baked source of a part
   has its rows in blit order (equal opaque masks adjacent, transparent rows left out, `assets.sprite_orders`), one Blitter call per
   row draws the four planes (Y count 4, the opaque mask cut into the two destination words as END1 / END3, holes included, NFSR for
   the second word, X / Y increment 2 so the Blitter walks through the source itself).  There is a generated routine per row

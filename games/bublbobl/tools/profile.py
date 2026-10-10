@@ -5,7 +5,7 @@ schedule (50 Hz, 160256 cycles), scripted coin / start / play inputs, and the PC
 
 Per window of frames it prints, as cycles per VBL (a VBL is 160256) and percent of the CPU:
   * the game  : translated code of the main CPU (Z / Lx / BK labels), the sub CPU (Y / Ly) and the MCU (M),
-  * the renderer: render_frame and what it calls (bb_render.s),
+  * the renderer: render_frame and what it calls (render.s),
   * the runtime: the VBL glue, the hardware stand-ins (bublbobl.s, rtlib.s),
   * idle      : the foreground wait loop (nothing to do),
 and the hottest routines.  The sim build stops at `sim_frame_done` once per frame for the test harness; here that
@@ -54,7 +54,7 @@ def main():
     sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
     addrs = sorted((v, k) for k, v in sym.items())
     keys = [v for v, _ in addrs]
-    render_names = set(re.findall(r"^([A-Za-z_]\w*):", open(SRC / "bb_render.s", encoding="utf-8").read(), re.M))
+    render_names = set(re.findall(r"^([A-Za-z_]\w*):", open(SRC / "render.s", encoding="utf-8").read(), re.M))
 
     def src(pc):
         i = bisect.bisect_right(keys, pc) - 1

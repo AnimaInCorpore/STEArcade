@@ -21,7 +21,8 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
    model, register map (`z80x.FAST`, see below), hooks for I/O writes and yields, window/bank handling for banked ROMs.  `port.py test <game>`: lock-step against the reference (RAM every frame).
 6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input (the IKBD handler and key_table, the
    pads through `engine/rt/jagpad.s`: the `JP1_*` ... `JP_COIN2` bits, `jagpad_poll` and `jp_merge` in the VBL), border
-   removal, hooks.  `port.py release <version>` packs every port's program (`tools/release.py`: add the new one there).
+   removal, hooks.  A new port gets a line in `port.py`'s `GAMES` (and its tables), `tools/release.py`'s list and the
+   README's tables; its folder follows the README's "Layout" (ROMs: `tools/prepare.py` + `docs/rom_manifest.json`).
 7. **Renderer**: exact against the reference bitmap through the colour table first (`render_test.py` style:
    copy the reference RAM in, call `render_frame`, compare pixels), fast second.
 8. **Hatari** (`tools/hatari.sh`, F030Arcade build): look at the screen, then compare frame counters/skips from the `--debug` build.
@@ -222,7 +223,7 @@ the rules its runtime must keep:
 * **a0-a2 with FAST** are the translated code's scratch registers (`ldir` uses two of them); a runtime routine called
   from translated code may use them too, but must not expect them to keep anything between instructions.
 * **The Z80 stack below SP is dead**: merged `push rr; pop rr'` does not write the word.  A lock-step test compares the
-  stack above SP only (Donkey Kong's `fullrun.py` already did).
+  stack above SP only (Donkey Kong's `logic_test.py` already did).
 * **An interrupt's `push af` saves d6**, which need not hold the interrupted code's flags at that moment (they may be in
   the CCR; the 68000's own interrupt restores them).  The pushed byte is not state: compare it in a test only where the
   translation makes the flags exact (1942: hooks, `jp (hl)`).

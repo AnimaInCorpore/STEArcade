@@ -4,7 +4,7 @@
 ; (even cell: the high bytes, odd cell: the low bytes).  A baked tile (the renderer's tcache entry, +8 = rows):
 ; per row the data long (plane 0-3 bytes) and the inverted mask long (1 = transparent).
 ;
-; The CPU routines are the loops of draw_tile (bb_render.s) unchanged.  The Blitter routines draw one tile row
+; The CPU routines are the loops of draw_tile (render.s) unchanged.  The Blitter routines draw one tile row
 ; per blit (Y count 4 = the four planes, source = one word per plane, the row's opaque pixels as end masks).
 
 STRIDE = 160

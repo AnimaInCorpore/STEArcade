@@ -3,7 +3,7 @@ frames come from its AVI recording, see docs/porting-guide.md).
 
     python mame_cmp_1942.py [frame ...]        (default 50 100 300 700 1000 1500 1600 1800 2000 2400)
 
-Runs MAME for the attract mode with mame_dump_1942.lua (video RAM, sprite RAM and the game's shadows of the scroll
+Runs MAME for the attract mode with mame_dump.lua (video RAM, sprite RAM and the game's shadows of the scroll
 and palette bank at E0D2 / E0D5 at those frames, plus the AVI), loads every dump into the reference machine, renders it and
 counts the pixels that differ from the AVI frame (searching the lag of a few frames).  MAME= selects the executable
 (default F030Arcade's wolfmame-0162), needs ffmpeg.  Result 2026-10-08: 0 differing pixels in all of the default frames
@@ -34,7 +34,7 @@ def record(frames, work):
     env = dict(os.environ, FRAMES=" ".join(map(str, frames)), LAST=str(max(frames) + 130))
     subprocess.run([MAME, "1942", "-rompath", ROMS, "-window", "-sound", "none", "-nothrottle", "-frameskip", "0",
                     "-skip_gameinfo", "-seconds_to_run", "100", "-aviwrite", "m1942.avi",
-                    "-autoboot_script", str(HERE / "mame_dump_1942.lua")], cwd=work, env=env,
+                    "-autoboot_script", str(HERE / "mame_dump.lua")], cwd=work, env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
 

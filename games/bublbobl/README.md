@@ -3,7 +3,7 @@
 ![Bubble Bobble on the STE (Hatari)](docs/screenshot.png)
 
 Third port; paths in this file are relative to `games/bublbobl/` (`src/` runtime and renderer, `tools/` reference machine,
-translation, build and tests, `ref/` analysis scripts; generated files in `build/bublbobl/`).  Shared pieces:
+translation, build and tests, `ref/` analysis scripts (one-off probes in `ref/probes/`); generated files in `build/bublbobl/`).  Shared pieces:
 `docs/architecture.md`; method: `docs/porting-guide.md`.
 
 Started 2026-10-08.  The `bublbobl` set (Taito 1986, with the protection MCU): three Z80s (main, sub, sound) and
@@ -39,7 +39,7 @@ CPU's, each to completion, then the frame is drawn behind them (the VBL nests in
 keeps its pace, the display drops frames).  The CPUs' foreground threads only boot to their idle loops (the
 boot waits for the MCU's handshake at `$0158`: a hook gives the MCU and the sub CPU a turn).
 
-## Renderer (`src/bb_render.s`)
+## Renderer (`src/render.s`)
 
 The arcade draws a list of objects (strips of 8 x 8 tiles, shape from a PROM, columns chained across objects;
 `tools/machine.py render_raw` is the reference, checked against MAME with `ref/mame_cmp_bublbobl.py`: 0 pixels
