@@ -1,5 +1,7 @@
 # 1942, Atari STE
 
+![1942 on the STE (Hatari)](docs/screenshot.png)
+
 Fourth port (started 2026-10-08), the first with a **hardware scrolled** background.  The `1942` set (Capcom 1984, Revision B,
 `assets/roms/1942.zip`, extracted to `assets/roms/extracted/1942/`).  Paths in this file are relative to `games/1942/`; the
 shared pieces are described in `docs/architecture.md`, the method in `docs/porting-guide.md`.
@@ -10,6 +12,11 @@ shared pieces are described in `docs/architecture.md`, the method in `docs/porti
   `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari)
 * `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump_1942.lua`), `palette_stats.py`
 * `docs/` `palette_stats.json` (how often every palette entry shows) and `palettes.json` (the four 16 colour palettes)
+
+Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** loop, **Esc** quits.  Joystick port 1
+plays player 1, port 0 player 2 (fire = fire).
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** loop, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Tap the coin key: the game ignores a coin held for 40 ticks (the reference machine credits 3-20).
 
 Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, 8 runs of 60000 frames, about 30 minutes;
 seeds 5-8 play with MAME's cheats, see "Later stages" below):

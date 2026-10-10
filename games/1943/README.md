@@ -1,5 +1,7 @@
 # 1943: The Battle of Midway
 
+![1943 on the STE (Hatari)](docs/screenshot.png)
+
 Atari STE port (4 MB) of the `1943` set (Euro), registered as `1943`: the main Z80 translated to 68000 code, the
 i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter renderer.  Sound is not implemented.
 
@@ -15,7 +17,8 @@ python port.py mame 1943                    # pixel checks at frames 100, 700 an
 ```
 
 Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2),
-**Escape** quits.  Joystick port 1 plays player 1.
+**Escape** quits.  Joystick port 1 plays player 1, port 0 player 2.
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 Both sets have 38 ROMs. Manifests come from the local MAME driver. The supplied
 `1943.zip` plus `assets/roms/bm.7k` verifies completely as the Euro set.

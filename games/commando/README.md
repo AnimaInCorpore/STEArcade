@@ -1,5 +1,7 @@
 # Commando (World) for Atari STE
 
+![Commando on the STE (Hatari)](docs/screenshot.png)
+
 The main Z80 program is statically translated to 68000 code and runs with keyboard
 and joystick input on an unexpanded 8 MHz, 4 MB Atari STE. Graphics use a fixed
 16-colour Oklab palette. The sound effects play on the STE's YM2149 (see "Sound effects"); the music (FM) does not.
@@ -14,6 +16,7 @@ Controls: **5** inserts a coin, **1** starts, **arrows** move, **Space/Ctrl** fi
 **Alt** throws a grenade, and **Esc** exits. Joystick port 1 also controls player 1.
 Wait for startup before inserting a coin. Player 2 uses joystick port 0; **6**
 inserts its coin and **2** starts a two-player game.
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** grenade, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 The Python reference has separate encrypted operand/data and decrypted opcode
 buses, including ordinary CB/ED prefixes and the data-bus indexed-CB tail. The

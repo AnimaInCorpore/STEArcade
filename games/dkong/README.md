@@ -1,5 +1,7 @@
 # Donkey Kong, Atari STE
 
+![Donkey Kong on the STE (Hatari)](docs/screenshot.png)
+
 First port and the reference design for the Blitter sprite renderer (`docs/architecture.md`).  Paths relative to
 `games/dkong/`: `src/` (`dkong.s` runtime, `render.s` tiles, `sprites.s` Blitter sprites), `tools/` (`machine.py`
 reference machine, `dkong_pens.py` palette dumped from MAME, `gen.py`, `assets.py`, `build.py`, `fullrun.py`, `nmitrace.py`,
@@ -7,6 +9,10 @@ reference machine, `dkong_pens.py` palette dumped from MAME, `gen.py`, `assets.p
 
 State: Donkey Kong runs from the static Z80 -> 68000 translation with the Blitter renderer, exact against the reference
 emulator and MAME, 50 fps in play (see "Measuring" in `docs/architecture.md`).
+
+Controls: **5** coin, **1/2** start, **arrows** move, **Space/Ctrl/Alt** jump, **Esc** quits.  Players take turns: both
+joysticks and both pads move Mario (fire jumps).
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): either pad, the D-pad moves, **A / B / C** jump, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#** quit.
 
 ## Build and run (macOS)
 

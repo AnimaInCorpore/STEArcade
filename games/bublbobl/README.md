@@ -1,5 +1,7 @@
 # Bubble Bobble, Atari STE
 
+![Bubble Bobble on the STE (Hatari)](docs/screenshot.png)
+
 Third port; paths in this file are relative to `games/bublbobl/` (`src/` runtime and renderer, `tools/` reference machine,
 translation, build and tests, `ref/` analysis scripts; generated files in `build/bublbobl/`).  Shared pieces:
 `docs/architecture.md`; method: `docs/porting-guide.md`.
@@ -7,6 +9,10 @@ translation, build and tests, `ref/` analysis scripts; generated files in `build
 Started 2026-10-08.  The `bublbobl` set (Taito 1986, with the protection MCU): three Z80s (main, sub, sound) and
 an MC6801 whose own firmware (`a78-01.17`) is in the set.  Built the way the Galaga port is: a reference machine,
 a static translation of the programs, and a runtime around them.
+
+Controls: **5/6** coins, **1/2** start, **left/right** move, **Space/Ctrl** jump, **Alt** bubble, **Esc** quits.  Joystick
+port 1 plays player 1, port 0 player 2 (fire jumps, up blows a bubble).
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** jump, **B** (or up) bubble, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 ## What runs
 
@@ -212,9 +218,7 @@ C', the task switch at `$0094` pushes it; no reader (the reference with and with
 bytes only over 6000 frames).  `$E0DE`/`$E0DF` from frame 1002 were the dead word of the merged `push hl / pop iy` at
 `$1479`.  Open: the coverage run of seed 4 stops at frame ~18000 with
 `handler of 01ED did not return` in the reference machine (`ref/cover.py 4 20000`), so five seeds were used.
-Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, a keyboard
-check of coin / start in Hatari (the scancodes: `5` coin 1, `1` start 1, `6` coin 2, `2` start 2, arrows, space
-= jump, alt = bubble), per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
+Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
 per bank weight are kept, the rest map to the nearest).
 
 ## Translator speed (2026-10-08)

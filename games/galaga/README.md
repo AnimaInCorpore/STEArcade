@@ -1,5 +1,7 @@
 # Galaga, Atari STE
 
+![Galaga on the STE (Hatari)](docs/screenshot.png)
+
 Second port (started 2026-10-08), the first with several CPUs: three Z80s translated into one 68000 program, the
 Blitter sprite renderer of Donkey Kong extended to double-size sprites and a starfield.  Paths in this file are
 relative to `games/galaga/`; the shared pieces are described in `docs/architecture.md` and the method in
@@ -10,6 +12,10 @@ relative to `games/galaga/`; the shared pieces are described in `docs/architectu
 * `ref/` analysis scripts and the MAME comparison; the coverage pickles go to `build/galaga/`
 
 Build and run from the repository root: `python port.py build galaga`, `python port.py run galaga shot@30`.
+
+Controls: **5** coin, **1/2** start, **left/right** move, **Space/Ctrl/Alt** fire, **Esc** quits.  Players take turns:
+both joysticks and both pads move the fighter.
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): either pad, the D-pad moves, **A / B / C** fire, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#** quit.
 
 State: the attract mode runs at the game's
 full speed (frame counter = VBL counter, no skipped interrupts) with everything drawn

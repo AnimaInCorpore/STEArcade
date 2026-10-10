@@ -19,7 +19,9 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
    what static recursive descent finds; anything coverage found but discovery missed is a hook or a table.
 5. **Translate** (`tools/gen.py` of the game, config in `engine/z80x.py`, pipeline `translate.compile_code`): memory
    model, register map (`z80x.FAST`, see below), hooks for I/O writes and yields, window/bank handling for banked ROMs.  `port.py test <game>`: lock-step against the reference (RAM every frame).
-6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input, border removal, hooks.
+6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input (the IKBD handler and key_table, the
+   pads through `engine/rt/jagpad.s`: the `JP1_*` ... `JP_COIN2` bits, `jagpad_poll` and `jp_merge` in the VBL), border
+   removal, hooks.  `port.py release <version>` packs every port's program (`tools/release.py`: add the new one there).
 7. **Renderer**: exact against the reference bitmap through the colour table first (`render_test.py` style:
    copy the reference RAM in, call `render_frame`, compare pixels), fast second.
 8. **Hatari** (`tools/hatari.sh`, F030Arcade build): look at the screen, then compare frame counters/skips from the `--debug` build.

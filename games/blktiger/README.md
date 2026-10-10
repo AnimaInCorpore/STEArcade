@@ -1,5 +1,7 @@
 # Black Tiger (Capcom, 1987)
 
+![Black Tiger on the STE (Hatari)](docs/screenshot.png)
+
 STE port of MAME set `blktiger`, with a bank-aware translation of the unmodified
 main Z80 and an i8751 interpreter running the dumped protection firmware.
 Requires a 4 MB STE. Sound is not implemented.
@@ -23,7 +25,9 @@ Committed instruction roots make a fresh build independent of coverage files.
 
 Controls: **5/6** insert coins, **1/2** start, **arrow keys** move,
 **Space/Ctrl** attack, **Alt** jumps, **Escape** returns to the desktop.
-Joystick fire attacks; use Alt for jump. For scripted Hatari events, use ST
+Joystick fire attacks; use Alt for jump (joystick port 1 player 1, port 0 player 2).
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+For scripted Hatari events, use ST
 scancodes for special keys: Right `77`, Space `57`, Alt `56`, Escape `01`.
 
 ## Display and timing

@@ -1,5 +1,7 @@
 # Gun.Smoke (Capcom, 1985) for Atari STE
 
+![Gun.Smoke on the STE (Hatari)](docs/screenshot.png)
+
 MAME set `gunsmoke`. The main Z80 program (fixed ROM and four 16 KB banks) is
 statically translated to 68000 code and runs on an unexpanded 8 MHz, 4 MB Atari STE
 with keyboard and joystick input. Graphics use a fixed 16-colour Oklab palette; the
@@ -16,8 +18,9 @@ games/gunsmoke/tools/bench.ps1       # Hatari speed (Windows): ticks and frames 
 
 Controls: **5/6** insert coins, **1/2** start, **arrow keys** move, **Ctrl** or **Z**
 shoots left, **Space** or **X** straight, **Alt** or **C** right, **Esc** quits.
-Joystick port 1 plays player 1 (fire shoots straight). Wait for the attract mode
+Joystick port 1 plays player 1, port 0 player 2 (fire shoots straight). Wait for the attract mode
 before inserting a coin.
+Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A / B / C** shoot left / straight / right, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 ## The reference machine
 
