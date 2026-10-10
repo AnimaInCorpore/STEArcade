@@ -96,8 +96,6 @@ start:
 .mark:	move.l	#$A5A5A5A5,(a0)+
 	dbf	d0,.mark
 
-	stage	$f00
-	bsr	load_roms
 	stage	$ff0
 
 	bsr	init_hardware
@@ -111,10 +109,6 @@ start:
 	bsr	dbg_dump
 	endc
 
-	lea	z80_dispatch_sw,a1	; the dispatch table: every translated pc, and the token
-	lea	z80_entries,a2
-	bsr	init_table
-
 	move.b	#$FF,Z_SYSTEM
 	move.b	#$FF,Z_SYSTEM+1
 	move.b	#$FF,Z_SYSTEM+2
@@ -125,7 +119,7 @@ start:
 	move.b	#$FF,in_p2
 
 
-	lea	z80_dispatch_sw,a4
+	lea	z80_dispatch_sw,a4	; the dispatch table (gen.py: every translated pc, and the token)
 	lea	G_Z80,a6
 	lea	G_Z80-1,a5		; SP = $FFFF as after a reset (the program sets it itself)
 	moveq	#0,d0
@@ -142,52 +136,6 @@ start:
 	sub.l	a3,a3
 	move	#$2300,sr
 	jmp	Z0000
-
-; ------------------------------------------------------------------------------
-; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
-; translated code reads them
-; ------------------------------------------------------------------------------
-
-load_roms:
-	lea	rom_table,a2
-.next:	move.l	(a2)+,d0		; source, 0 = the end
-	beq.s	.done
-	move.l	d0,a0
-	move.l	(a2)+,a1		; destination
-	move.l	(a2)+,d0		; bytes, a multiple of 4
-	lsr.l	#2,d0
-	subq.l	#1,d0
-.copy:	move.l	(a0)+,(a1)+
-	subq.l	#1,d0
-	bpl.s	.copy
-	bra.s	.next
-.done:
-	rts
-
-; The dispatch table (byte swapped pc order, 65536 longs): a1 = the table, a2 = the list of
-; (pc.w, label.l) ending with $FFFF
-
-init_table:
-	move.l	a1,a4
-	move.l	#z80_badpc,d1
-	move	#65536/8-1,d2
-.fill:
-	rept 8
-	move.l	d1,(a4)+
-	endr
-	dbf	d2,.fill
-.next:
-	moveq	#0,d2
-	move.w	(a2)+,d2
-	cmp.w	#$ffff,d2
-	beq.s	.done
-	move.l	(a2)+,d3
-	ror.w	#8,d2
-	lsl.l	#2,d2
-	move.l	d3,(a1,d2.l)
-	bra.s	.next
-.done:
-	rts
 
 ; ------------------------------------------------------------------------------
 ; Hardware
@@ -893,12 +841,13 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_table:				; source, destination, bytes
-	dc.l	rom_main,G_Z80,$C000
-	dc.l	rom_main+$8000,g_block,$4000	; (the banked part, also where the code reads it)
-	dc.l	0
-rom_main:	incbin	"maincpu.rom"		; (tools/prepare.py)
-	even
+; The Z80's 64 KB (G_Z80 = a6 its middle, signed offsets): $8000-$FFFF, then $0000-$BFFF again (unsigned offsets from
+; a6).  The main CPU ROM (tools/prepare.py) is assembled in place, both copies of $8000-$BFFF; the RAM from $C000 starts
+; zero as BSS would.
+	cnop	0,4
+g_block:	incbin	"maincpu.rom",$8000,$4000
+	ds.b	$4000
+	incbin	"maincpu.rom"
 
 ; ------------------------------------------------------------------------------
 	section bss,bss
@@ -974,7 +923,4 @@ dbg_idle_f:	ds.l	1
 	ds.l	1024
 own_stack_top:
 
-g_block:	ds.b	$14000		; the Z80's 64 KB
-g_win:		ds.b	0		; the ROM banks' copies: 3 + the empty one
 sprite_buffer:	ds.b $180
-z80_dispatch_sw:	ds.l	65536

@@ -182,6 +182,17 @@ clear_margins:
  dbf d1,.segment
  rts
 
+mirror macro			; \1 = a row's pen plane word: its pixels reversed (a6 = reverse_bits; d6 / d7 scratch)
+ move.w \1,d7
+ and.w #255,d7
+ move.b (a6,d7.w),d6
+ lsl.w #8,d6
+ move.w \1,d7
+ lsr.w #8,d7
+ move.b (a6,d7.w),d6
+ move.w d6,\1
+ endm
+
 ; Hash caches: tag (long with object type), pointer. Pools roll over together.
 ; d0=code+attribute*256, d1=kind (0 tile,1 sprite,2 char). Returns a1 baked planes.
 get_object:
@@ -265,7 +276,9 @@ get_object_bake:
  move.l d2,pool_ptr
  move.l obj_tag,(a2)
  move.l a1,4(a2)
- ; Decode code/colour/raw flips from the packed arcade attribute.
+ ; Decode code/colour/raw flips from the packed arcade attribute.  The pen planes of a row (tile_planes, spr_planes,
+ ; chr_planes: assets.py) go through the object's row routine (bake_*_rows, one per kind and colour: assets.bake_rows)
+ ; into the STE planes; a mirrored object's plane words are reversed first.
  moveq #0,d0
  move.w obj_key,d0
  move.w d0,d2
@@ -276,6 +289,8 @@ get_object_bake:
  and.w #255,d0
  or.w d3,d0
  move.w d0,obj_code
+ lea reverse_bits,a6
+ lea bake_ab,a2
  move.w obj_kind,d1
  cmp.w #1,d1
  beq .sprite
@@ -284,130 +299,113 @@ get_object_bake:
  and.w #3,d3
  move.w d3,obj_flip
  and.w #15,d2
+ lsl.w #2,d2
  cmp.w #2,d1
  beq .char
- lsl.w #3,d2
- lea cmap,a5
- add.w d2,a5
- lea tile_masks,a4
- lsl.l #8,d0
- add.l d0,a4
- move.w #8,obj_pens
- move.w #16,obj_height
- clr.w obj_order
- bra .rows
+ lea bake_tile_rows,a5		; tiles: 16 rows of 3 pen planes, out plane-major (a plane's 16 rows, 4 planes)
+ move.l (a5,d2.w),a5
+ lea tile_planes,a3
+ mulu #16*6,d0
+ add.l d0,a3
+ move.w #6,a4
+ btst #0,d3
+ beq.s .tile_down
+ lea 15*6(a3),a3
+ move.w #-6,a4
+.tile_down:
+ lea 32(a1),a0
+.tile_row:
+ movem.w (a3),d0-d2
+ add.w a4,a3
+ btst #1,obj_flip+1
+ beq.s .tile_put
+ mirror d0
+ mirror d1
+ mirror d2
+.tile_put:
+ jsr (a5)
+ move.w d4,(a1)
+ move.w d5,32(a1)
+ move.w d6,64(a1)
+ move.w d7,96(a1)
+ addq.l #2,a1
+ cmp.l a0,a1
+ blo.s .tile_row
+ bra .baked
 .char:
- lsl.w #2,d2
- lea cmap+192,a5
- add.w d2,a5
- lea chr_masks,a4
- lsl.l #6,d0
- add.l d0,a4
- move.w #4,obj_pens
- move.w #8,obj_height
- clr.w obj_order
- bra .rows
+ lea bake_chr_rows,a5		; characters: 8 rows of 2 pen planes, out plane-major (8 rows, 4 planes), the opaque
+ move.l (a5,d2.w),a5		; pixels at 64(a1) in steps of 8 for char_convert
+ lea chr_planes,a3
+ lsl.l #5,d0
+ add.l d0,a3
+ move.w #4,a4
+ btst #0,d3
+ beq.s .char_down
+ lea 7*4(a3),a3
+ move.w #-4,a4
+.char_down:
+ lea 64(a1),a2
+ lea 16(a1),a0
+.char_row:
+ movem.w (a3),d0-d1
+ add.w a4,a3
+ btst #1,obj_flip+1
+ beq.s .char_put
+ mirror d0
+ mirror d1
+ lsl.w #8,d0			; (8 pixels: back to the high byte)
+ lsl.w #8,d1
+.char_put:
+ jsr (a5)
+ not.w d2			; (pen 3 is transparent)
+ move.w d2,(a2)
+ addq.l #8,a2
+ move.w d4,(a1)
+ move.w d5,16(a1)
+ move.w d6,32(a1)
+ move.w d7,48(a1)
+ addq.l #2,a1
+ cmp.l a0,a1
+ blo.s .char_row
+ bra .baked
 .sprite:
- ; Sprite colour is bits 4/5, flips bits 2/3; screen row flip is raw X.
+ ; Sprite colour is bits 4/5, flips bits 2/3; screen row flip is raw X.  The rows in mask-group order (row-major, for
+ ; the automatically advancing Blitter source): spr_order has the sprite's base rows, the same for its flips (the
+ ; routines of a vertically flipped image take row 15 - order[j]: assets.py).
  move.w d2,d3
  lsr.w #2,d3
  and.w #3,d3
  move.w d3,obj_flip
  lsr.w #4,d2
  and.w #3,d2
- lsl.w #4,d2
- lea cmap+128,a5
- add.w d2,a5
- lea spr_masks,a4
- lsl.l #8,d0
- add.l d0,d0
- add.l d0,a4
- move.w #16,obj_pens
- move.w #16,obj_height
- moveq #1,d0
- move.w d0,obj_order
- moveq #0,d0
- move.w obj_code,d0
- lsl.w #2,d0
- or.w d3,d0
- move.w d0,obj_pcode
+ lsl.w #2,d2
+ lea bake_spr_rows,a5
+ move.l (a5,d2.w),a5
+ lea spr_planes,a4
  lsl.l #4,d0
  lea spr_order,a3
  add.l d0,a3
-.rows:
- clr.w obj_row
-.row:
- move.w obj_row,d0
- tst.w obj_order
- beq .no_order
+ lsl.l #3,d0
+ add.l d0,a4
+ lea 128(a1),a0
+.spr_row:
  moveq #0,d0
  move.b (a3)+,d0
-.no_order:
- btst #0,obj_flip+1
- beq .forward
- move.w obj_height,d1
- subq.w #1,d1
- sub.w d0,d1
- move.w d1,d0
-.forward:
- mulu obj_pens,d0
- add.w d0,d0
- lea (a4,d0.w),a0
- moveq #0,d3
- moveq #0,d4
- moveq #0,d5
- moveq #0,d6
- moveq #0,d2
-.pen:
- moveq #0,d7
- move.w (a0)+,d7
+ lsl.w #3,d0
+ movem.w (a4,d0.w),d0-d3
  btst #1,obj_flip+1
- beq .normal
- ; Mirror words using a byte reversal table. 8px chars shift back to MSB.
- move.w d7,d0
- and.w #255,d0
- lea reverse_bits,a6
- move.b (a6,d0.w),d1
- lsl.w #8,d1
- lsr.w #8,d7
- move.b (a6,d7.w),d1
- move.w d1,d7
- cmp.w #8,obj_height
- bne .normal
- lsl.w #8,d7
-.normal:
- moveq #0,d0
- move.b (a5,d2.w),d0
- lsl.w #2,d0
- lea orp_tab,a6
- move.l (a6,d0.w),a6
- jsr (a6)
- addq.w #1,d2
- cmp.w obj_pens,d2
- blo .pen
- ; Tiles/chars plane-major for rectangle/row drawing. Sprites row-major
- ; in mask-group order for the automatically advancing Blitter source.
- tst.w obj_order
- beq .planes
- movem.w d3-d6,(a1)
+ beq.s .spr_put
+ mirror d0
+ mirror d1
+ mirror d2
+ mirror d3
+.spr_put:
+ jsr (a5)
+ movem.w d4-d7,(a1)
  addq.l #8,a1
- bra .row_done
-.planes:
- move.w obj_height,d0
- add.w d0,d0
- move.w d3,(a1)
- move.w d4,(a1,d0.w)
- add.w d0,d0
- move.w d5,(a1,d0.w)
- move.w obj_height,d0
- mulu #6,d0
- move.w d6,(a1,d0.w)
- addq.l #2,a1
-.row_done:
- addq.w #1,obj_row
- move.w obj_row,d0
- cmp.w obj_height,d0
- blo .row
+ cmp.l a0,a1
+ blo.s .spr_row
+.baked:
  move.l baked_ptr,a1
  cmp.w #2,obj_kind
  bne.s .cached
@@ -421,21 +419,14 @@ get_object_bake:
  rts
 
 ; a1 = a character's planes (plane-major, 8 rows, the pixels in the high bytes): 64(a1) gets 8 rows of (the keep mask,
-; the four plane bytes masked by the opaque pixels) as longs for movep.l.  The opaque pixels: chr_opaque, left position.
+; the four plane bytes masked by the opaque pixels) as longs for movep.l.  The opaque pixels: the high byte of each
+; row's first word there (get_object_bake).
 char_convert:
- moveq #0,d0
- move.w obj_code,d0
- lsl.w #2,d0
- or.w obj_flip,d0
- lsl.l #5,d0
- lea chr_opaque,a0
- add.l d0,a0
  lea 64(a1),a2
  move.l a1,a3
  moveq #7,d7
 .row:
- move.b (a0),d1			; opaque pixels
- addq.l #2,a0
+ move.b (a2),d1			; opaque pixels
  move.b d1,d4
  lsl.w #8,d4
  move.b d1,d4
@@ -1343,12 +1334,11 @@ ste_pal: incbin "palette.bin"
 cmap: incbin "palmap.bin"
 black_pal: dcb.w 16,0
 reverse_bits: incbin "reverse.bin"
-tile_masks: incbin "tile_masks.bin"
-spr_masks: incbin "spr_masks.bin"
-chr_masks: incbin "chr_masks.bin"
+tile_planes: incbin "tile_planes.bin"
+spr_planes: incbin "spr_planes.bin"
+chr_planes: incbin "chr_planes.bin"
 chr_blank: incbin "chr_blank.bin"
 spr_order: incbin "spr_order.bin"
-chr_opaque: incbin "chr_opaque.bin"
 spr_plan_offsets: incbin "spr_plan_offsets.bin"
 spr_plan: incbin "spr_plan.bin"
  section bss,bss
@@ -1397,11 +1387,7 @@ obj_key: ds.w 1
 obj_kind: ds.w 1
 obj_code: ds.w 1
 obj_flip: ds.w 1
-obj_order: ds.w 1
-obj_pcode: ds.w 1
-obj_row: ds.w 1
-obj_height: ds.w 1
-obj_pens: ds.w 1
+bake_ab: ds.w 4			; (the bake's row routines: the products of the two low pen planes)
 dest_stride: ds.w 1
 copy_src_y: ds.w 1
 copy_xinc: ds.w 1
