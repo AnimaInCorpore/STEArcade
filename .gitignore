@@ -1,6 +1,7 @@
 # derived from the ROMs / reproducible: python port.py build <game>
 build/
 run/
+release/
 *.pkl
 *.png
 __pycache__/

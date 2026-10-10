@@ -41,14 +41,15 @@ def lowpass(x, r, cut):
 
 
 def period(x, r):
-    """Loop period in (fractional) samples: the shortest strong autocorrelation peak, refined on a far multiple."""
+    """Loop period in (fractional) samples: the shortest strong autocorrelation peak, refined on a far multiple.
+    (Out of time: 0.967 in the recordings of 2026-10-09 19:40, hence 0.96.)"""
     x = x[r:] - x[r:].mean()
     n = len(x)
     f = np.fft.rfft(x, 2 * n)
     ac = np.fft.irfft(f * np.conj(f))[:n] / np.arange(n, 0, -1)
     ac /= ac[0]
     lo, hi = int(0.3 * r), int(6 * r)
-    peaks = [i for i in range(lo, hi) if ac[i] > 0.975 and ac[i] == ac[max(0, i - 300):i + 300].max()]
+    peaks = [i for i in range(lo, hi) if ac[i] > 0.96 and ac[i] == ac[max(0, i - 300):i + 300].max()]
     p0 = peaks[0]
     k = (n // 2) // p0                         # the farthest multiple with enough overlap
     c = k * p0

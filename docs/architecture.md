@@ -286,6 +286,25 @@ is pending or Timer B is within 5 lines (`wait_borders`).  A measurement for all
 the top row of the game area in a Hatari AVI of 1800 VBLs is 0 for 1788 frames, 58 (border
 not removed) for none.
 
+## Input (all ports)
+
+Each port has its own IKBD handler (`acia_isr`): the keyboard through `key_table` (scancode -> the bits it sets in
+the arcade's input bytes, active high), the two IKBD joysticks (port 1 player 1, port 0 player 2; Donkey Kong and
+Galaga OR them into one player), Esc quits.  The IKBD gives a joystick one fire button: button 2 (and Gun.Smoke's
+third) is on the keyboard, or Bubble Bobble's joystick up.
+
+The pads of the STE's enhanced joystick ports (Jaguar pad / PowerPad: pad A player 1, pad B player 2, A / B / C the
+buttons, Option coin, Pause start, keypad 1 / 2 / 5 / 6 as the number keys, * + # quit) are read once a VBL by
+`engine/rt/jagpad.s`.  The port only says which bits a pad button sets (`JP1_UP` ... `JP_COIN2`, longs in its
+key_table's byte order); `jagpad_poll` ORs them into `jp_in`, which the port merges where it merges the keyboard: the
+VBL's copy into the arcade's input bytes (`jp_merge`), Donkey Kong's and Galaga's input reads, Bubble Bobble's
+`compose_inputs` (also called from the VBL, at IPL 6 against the keyboard's).  `jagpad_init` probes $FF9202 (a bus
+error on a plain ST: the pads stay off); the SIM build does not call it.  `engine/jagpad_test.py` checks the reader
+against Hatari's model of the pads.
+
+An arcade program may reject a coin held too long: 1942 ignores one of 40 ticks (credits 3-20, the reference machine),
+so a test script taps the coin key (`tools/hatari.sh tap:5@20`), a long `hold:` is lost.
+
 ## Measuring (`games/dkong/tools/build.py` options, `games/dkong/tools/frametimes.py`)
 
 * `--debug`: frame, Timer A, Timer B, VBL and skipped-VBL counters as bits in the top-left

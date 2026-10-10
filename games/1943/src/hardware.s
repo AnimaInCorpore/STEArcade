@@ -70,6 +70,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 	rts
 

@@ -42,6 +42,27 @@ FRAMES = 0				; quit after n frames (0 = never), for measurements
 BD_PALETTE = 0
 	include	"borders.s"
 
+; the pads (engine/rt/jagpad.s): IN0, IN2 bits as in key_table (bytes 0-1 of each long); both pads play player 1
+JP1_RIGHT = $01<<24
+JP1_LEFT = $02<<24
+JP1_UP = $04<<24
+JP1_DOWN = $08<<24
+JP1_B1 = $10<<24			; A, B, C: jump
+JP1_B2 = $10<<24
+JP1_B3 = $10<<24
+JP2_RIGHT = JP1_RIGHT
+JP2_LEFT = JP1_LEFT
+JP2_UP = JP1_UP
+JP2_DOWN = JP1_DOWN
+JP2_B1 = JP1_B1
+JP2_B2 = JP1_B2
+JP2_B3 = JP1_B3
+JP_START1 = $04<<16
+JP_START2 = $08<<16
+JP_COIN1 = $80<<16
+JP_COIN2 = JP_COIN1			; (one coin slot)
+	include	"jagpad.s"
+
 stage	macro
 	ifd DEBUG
 	move	#\1,$ffff8240.w
@@ -196,6 +217,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 
 	rts
@@ -367,8 +389,10 @@ vbl:
 
 	; Input into the Z80 side shadows.
 
+	bsr	jagpad_poll
 	move.b	in0_kbd,d0
 	or.b	in0_joy,d0
+	or.b	jp_in,d0		; (the pads)
 	ifd AUTOSTART			; test: from 8 s after the start, walk right and jump every 64 frames
 	move.l	frame_counter,d1
 	sub.l	#AUTOSTART+400,d1
@@ -383,6 +407,7 @@ vbl:
 	move.b	d0,$7e00(a6)
 	clr.b	$7e80(a6)
 	move.b	in2_kbd,d1
+	or.b	jp_in+1,d1
 	ifd AUTOSTART			; test: a coin at frame AUTOSTART, start 1 a second later
 	move.l	frame_counter,d0
 	sub.l	#AUTOSTART,d0
@@ -485,6 +510,9 @@ vbl_skip:
 ;
 ; IN0: bit0 right, bit1 left, bit2 up, bit3 down, bit4 jump
 ; IN2: bit2 start 1, bit3 start 2, bit7 coin
+
+	jagpad_text
+	jagpad_maps
 
 acia_isr:
 	addq	#1,cnt_acia
@@ -856,6 +884,7 @@ old_fa1f:	ds.b	1
 old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
+	jagpad_vars
 vbl_busy:	ds.b	1
 	borders_vars
 freeze_flag:	ds.b	1

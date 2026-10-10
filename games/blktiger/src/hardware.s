@@ -70,6 +70,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 	rts
 
@@ -279,7 +280,7 @@ compose_inputs:
 	move.b	d0,in_p2
 	rts
 
-; scancode, SYSTEM bits (start 1 = 0, start 2 = 1, coin 2 = 6, coin 1 = 7), player 1 bits (right 0, left 1, down 2,
+; scancode, SYSTEM bits (start 1 = 0, start 2 = 1, coin 1 = 6, coin 2 = 7), player 1 bits (right 0, left 1, down 2,
 ; up 3, button 1 = 4 (fire), button 2 = 5 (jump)), player 2 bits
 
 key_table:

@@ -43,6 +43,27 @@ TA_NOPS = 84
 FRAMES = 0
 	endc
 
+; the pads (engine/rt/jagpad.s): IN0, P1, P2 bits as in key_table (bytes 0-2 of each long)
+JP1_LEFT = $01<<16
+JP1_RIGHT = $02<<16
+JP1_UP = $10<<16			; (bubble, as the joystick's up)
+JP1_DOWN = 0
+JP1_B1 = $20<<16			; A: jump, B: bubble
+JP1_B2 = $10<<16
+JP1_B3 = 0
+JP2_LEFT = $01<<8
+JP2_RIGHT = $02<<8
+JP2_UP = $10<<8
+JP2_DOWN = 0
+JP2_B1 = $20<<8
+JP2_B2 = $10<<8
+JP2_B3 = 0
+JP_START1 = $40<<16
+JP_START2 = $40<<8
+JP_COIN1 = $04<<24
+JP_COIN2 = $08<<24
+	include	"jagpad.s"
+
 ; The Z80 address space as 68k addresses (see the header).
 
 G_ROM1 = g_block+$10000			; main CPU: a6
@@ -280,6 +301,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 	rts
 
@@ -395,6 +417,11 @@ vbl:
 	addq	#1,cnt_vbl
 	endc
 	movem.l	d0-d7/a0-a6,-(sp)
+	bsr	jagpad_poll
+	move	sr,-(sp)
+	move	#$2600,sr		; (the keyboard composes them too)
+	bsr	compose_inputs
+	move	(sp)+,sr
 
 	; A frame finished drawing since the last VBL: show it, draw into the other one.
 
@@ -1105,6 +1132,9 @@ mcu_wr_p2_slow:
 ; Keyboard / joystick (IKBD): the pressed bits of p1 / p2 / coins
 ; ------------------------------------------------------------------------------
 
+	jagpad_text
+	jagpad_maps
+
 acia_isr:
 	addq	#1,cnt_acia
 	movem.l	d0-d2/a0,-(sp)
@@ -1235,14 +1265,17 @@ acia_isr:
 
 compose_inputs:
 	move.b	in0_kbd,d0
+	or.b	jp_in,d0		; (the pads: jagpad_poll in the VBL)
 	or.b	#$03,d0
 	move.b	d0,in0_val
 	move.b	p1_kbd,d0
 	or.b	p1_joy,d0
+	or.b	jp_in+1,d0
 	not.b	d0
 	move.b	d0,in1_val
 	move.b	p2_kbd,d0
 	or.b	p2_joy,d0
+	or.b	jp_in+2,d0
 	not.b	d0
 	move.b	d0,in2_val
 	rts
@@ -1473,6 +1506,7 @@ old_fa21:	ds.b	1
 	even
 
 quit_flag:	ds.b	1
+	jagpad_vars
 border_a:	ds.b	1
 border_b:	ds.b	1
 frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL

@@ -33,6 +33,29 @@ PIC_LINES = 256
 BD_PALETTE = 1
 	include	"borders.s"
 
+; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
+JP_SH1 = 16
+JP_SH2 = 8
+JP1_RIGHT = $01<<JP_SH1
+JP1_LEFT = $02<<JP_SH1
+JP1_DOWN = $04<<JP_SH1
+JP1_UP = $08<<JP_SH1
+JP1_B1 = $10<<JP_SH1				; A, B, C: shoot left, straight, right
+JP1_B2 = $20<<JP_SH1
+JP1_B3 = $40<<JP_SH1
+JP2_RIGHT = $01<<JP_SH2
+JP2_LEFT = $02<<JP_SH2
+JP2_DOWN = $04<<JP_SH2
+JP2_UP = $08<<JP_SH2
+JP2_B1 = $10<<JP_SH2
+JP2_B2 = $20<<JP_SH2
+JP2_B3 = $40<<JP_SH2
+JP_START1 = $01<<24
+JP_START2 = $02<<24
+JP_COIN1 = $40<<24
+JP_COIN2 = $80<<24
+	include	"jagpad.s"
+
 ; The Z80 address space as 68k addresses ("signed" model: a6 = G_Z80 = the Z80 address 0, 8000-FFFF below it).
 
 G_Z80 = g_block+$8000			; a6
@@ -290,6 +313,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 	rts
 
@@ -364,9 +388,10 @@ vbl:
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
 	bsr	vbl_video
-	move.b	in_sys,Z_SYSTEM		; (the program only reads them)
-	move.b	in_p1,Z_SYSTEM+1
-	move.b	in_p2,Z_SYSTEM+2
+	bsr	jagpad_poll
+	jp_merge	in_sys,Z_SYSTEM,0	; (the program only reads them; the pads merged)
+	jp_merge	in_p1,Z_SYSTEM+1,1
+	jp_merge	in_p2,Z_SYSTEM+2,2
 	ifd AUTOPLAY				; (benchmark build: scripted coin, start, fire and joystick, period 3000 ticks)
 	moveq #0,d0
 	move.w isr_count,d0
@@ -476,6 +501,8 @@ buffer_sprites:
 	rts
 
 	borders_handlers
+	jagpad_text
+	jagpad_maps
 
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): SYSTEM, P1 and P2 are active low bytes
@@ -883,6 +910,7 @@ old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
 	borders_vars
+	jagpad_vars
 vbl_pending:	ds.b	1		; the arcade's vertical blanks that have come (a counter: the VBL adds, the idle hook takes one)
 vbl_phase:	ds.b	1		; (every 5th VBL adds a second one: 60 ticks a second)
 render_skips:	ds.b	1		; the ticks since the last frame was drawn

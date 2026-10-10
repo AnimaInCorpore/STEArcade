@@ -9,6 +9,29 @@ BD_PALETTE = 1
 ; video, so a Blitter pass may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces
 ; (blit_go, there).
     include "borders.s"
+
+; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
+JP_SH1 = 16
+JP_SH2 = 8
+JP1_RIGHT = $01<<JP_SH1
+JP1_LEFT = $02<<JP_SH1
+JP1_DOWN = $04<<JP_SH1
+JP1_UP = $08<<JP_SH1
+JP1_B1 = $10<<JP_SH1
+JP1_B2 = $20<<JP_SH1
+JP1_B3 = 0<<JP_SH1
+JP2_RIGHT = $01<<JP_SH2
+JP2_LEFT = $02<<JP_SH2
+JP2_DOWN = $04<<JP_SH2
+JP2_UP = $08<<JP_SH2
+JP2_B1 = $10<<JP_SH2
+JP2_B2 = $20<<JP_SH2
+JP2_B3 = 0<<JP_SH2
+JP_START1 = $01<<24
+JP_START2 = $02<<24
+JP_COIN1 = $40<<24
+JP_COIN2 = $80<<24
+	include	"jagpad.s"
 BUSY = $80
 HOG = $40
 G_Z80 = g_block+$8000
@@ -405,9 +428,10 @@ vbl:
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
     ifnd AUTOPLAY                ; (the benchmark's inputs are set at each tick)
-    move.b in_sys,bt_inputs
-    move.b in_p1,bt_inputs+1
-    move.b in_p2,bt_inputs+2
+    bsr jagpad_poll              ; (the pads merged)
+    jp_merge in_sys,bt_inputs,0
+    jp_merge in_p1,bt_inputs+1,1
+    jp_merge in_p2,bt_inputs+2,2
     endc
     bsr vbl_video
     cmp.b #32,vbl_pending
@@ -430,6 +454,8 @@ vbl:
     rte
 
 	borders_handlers
+	jagpad_text
+	jagpad_maps
 	borders_blit_go
 
     ifd DEBUG
@@ -552,6 +578,7 @@ old_fa1d: ds.b 1
 old_fa1f: ds.b 1
 old_fa21: ds.b 1
 	borders_vars
+	jagpad_vars
 quit_flag: ds.b 1
 vbl_pending: ds.b 1
 tick_phase: ds.b 1

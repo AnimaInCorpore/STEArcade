@@ -41,6 +41,10 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
     python port.py build bublbobl && python port.py run bublbobl shot@20      # screenshot in /tmp/hrun
     python port.py test bublbobl                                              # reference vs translation vs renderer
 
+Input: keyboard, the two IKBD joysticks and two Jaguar pads / PowerPads in the STE's enhanced ports in every port
+(`docs/architecture.md`, "Input").  A release (`python port.py release 0.1`) builds every port and packs the
+self-contained programs with a README.TXT into `release/STEArcade-<version>.zip` (`tools/release.py`; no ROM files).
+
 Reading order: `docs/architecture.md` (how a port works), `docs/porting-guide.md` (method, MAME check, lessons),
 then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
 are a deliberate failure), check the reference against MAME before building graphics, and verify with the pinned

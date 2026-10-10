@@ -12,6 +12,29 @@ TA_NOPS = 84
 PIC_LINES = 256
 BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's first line, off after its last)
     include "borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
+
+; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
+JP_SH1 = 16
+JP_SH2 = 8
+JP1_RIGHT = $01<<JP_SH1
+JP1_LEFT = $02<<JP_SH1
+JP1_DOWN = $04<<JP_SH1
+JP1_UP = $08<<JP_SH1
+JP1_B1 = $10<<JP_SH1
+JP1_B2 = $20<<JP_SH1
+JP1_B3 = 0<<JP_SH1
+JP2_RIGHT = $01<<JP_SH2
+JP2_LEFT = $02<<JP_SH2
+JP2_DOWN = $04<<JP_SH2
+JP2_UP = $08<<JP_SH2
+JP2_B1 = $10<<JP_SH2
+JP2_B2 = $20<<JP_SH2
+JP2_B3 = 0<<JP_SH2
+JP_START1 = $01<<24
+JP_START2 = $02<<24
+JP_COIN1 = $40<<24
+JP_COIN2 = $80<<24
+	include	"jagpad.s"
 BUSY = $80
 HOG = $40
 G_Z80 = g_block+$8000
@@ -318,14 +341,15 @@ vbl:
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
     ifnd AUTOPLAY                ; (the benchmark's inputs are set at each tick)
-    move.b in_sys,d0
+    bsr jagpad_poll              ; (the pads merged)
+    jp_merge in_sys,d0,0
     and.b #~8,d0
     move.b g_inputs,d1
     and.b #8,d1
     or.b d1,d0                   ; (the VBL bit stays the runtime's)
     move.b d0,g_inputs
-    move.b in_p1,g_inputs+1
-    move.b in_p2,g_inputs+2
+    jp_merge in_p1,g_inputs+1,1
+    jp_merge in_p2,g_inputs+2,2
     endc
     bsr vbl_video
     cmp.b #32,vbl_pending
@@ -348,6 +372,8 @@ vbl:
     rte
 
     borders_handlers
+    jagpad_text
+    jagpad_maps
     borders_blit_go
 
     ifd DEBUG
@@ -452,6 +478,7 @@ old_fa1d: ds.b 1
 old_fa1f: ds.b 1
 old_fa21: ds.b 1
     borders_vars
+    jagpad_vars
     even
 quit_flag: ds.b 1
 vbl_pending: ds.b 1

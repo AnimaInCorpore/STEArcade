@@ -8,6 +8,7 @@
     port.py test   <game> [frames]           the tests that compare the build with the reference machine
     port.py run    <game> [item@s ...]       Hatari (tools/hatari.sh): screenshots, key presses, memory dumps
     port.py mame   <game> [frames ...]       reference renderer against MAME's own picture (needs `mame`)
+    port.py release <version> [--no-build]  every port built and packed: release/STEArcade-<version>.zip (tools/release.py)
 
 The python is the repository's venv (venv/bin/python) when it exists.  Everything it starts is a plain script in
 games/<game>/tools or ref (see games/<game>/README.md); this file only knows the order and the arguments.
@@ -97,6 +98,8 @@ def main():
         for g in GAMES:
             print(g)
         return 0
+    if cmd == "release":
+        return call([PY, str(ROOT / "tools" / "release.py")] + a[1:])
     if len(a) < 2 or a[1] not in GAMES:
         print("usage: port.py %s <%s> ..." % (cmd, "|".join(GAMES)))
         return 2

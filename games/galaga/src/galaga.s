@@ -66,6 +66,27 @@ TOKEN = $0140				; $4001 on the Z80 stack, byte swapped
 BD_PALETTE = 0
 	include	"borders.s"
 
+; the pads (engine/rt/jagpad.s): in0, in1 bits as in key_table (bytes 0-1 of each long); both pads play player 1
+JP1_RIGHT = $02<<24
+JP1_LEFT = $08<<24
+JP1_UP = 0
+JP1_DOWN = 0
+JP1_B1 = $01<<16			; A, B, C: fire
+JP1_B2 = $01<<16
+JP1_B3 = $01<<16
+JP2_RIGHT = JP1_RIGHT
+JP2_LEFT = JP1_LEFT
+JP2_UP = 0
+JP2_DOWN = 0
+JP2_B1 = JP1_B1
+JP2_B2 = JP1_B2
+JP2_B3 = JP1_B3
+JP_START1 = $04<<16
+JP_START2 = $08<<16
+JP_COIN1 = $10<<16
+JP_COIN2 = JP_COIN1			; (one coin key, as the keyboard's)
+	include	"jagpad.s"
+
 chk_sp	macro
 	ifd CHKSP
 	cmp.l	vbl_sp,sp
@@ -260,6 +281,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w
+	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
 	rts
 
@@ -435,6 +457,7 @@ vbl:
 	addq	#1,cnt_vbl
 	endc
 	movem.l	d0-d7/a0-a6,-(sp)
+	bsr	jagpad_poll		; (n51_read merges jp_in)
 
 	; A frame finished drawing since the last VBL: show it, draw into the other one.
 
@@ -842,9 +865,11 @@ n51_read:
 	movem.l	d0-d3/a0,-(sp)
 	move.b	in0_kbd,d2
 	or.b	in0_joy,d2
+	or.b	jp_in,d2		; (the pads)
 	not.b	d2			; in0
 	move.b	in1_kbd,d3
 	or.b	in1_joy,d3
+	or.b	jp_in+1,d3
 	not.b	d3			; in1
 	move.b	n51_count,d0
 	addq.b	#1,n51_count
@@ -991,6 +1016,9 @@ n51_read:
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): the pressed bits of in0 (joystick) and in1 (buttons)
 ; ------------------------------------------------------------------------------
+
+	jagpad_text
+	jagpad_maps
 
 acia_isr:
 	addq	#1,cnt_acia
@@ -1284,6 +1312,7 @@ old_fa1f:	ds.b	1
 old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
+	jagpad_vars
 vbl_busy:	ds.b	1
 frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
 in_render:	ds.b	1		; drawing: the main CPU's registers are in main_ctx

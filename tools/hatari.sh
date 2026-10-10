@@ -5,6 +5,7 @@
 #   items (in time order):  shot@60                    screenshot  -> $OUT/<game>_60.png
 #                           key:5@20                   key press (Hatari key name: 5 = coin 1, 1 = start 1, Left, space ...)
 #                           hold:5@20                  key held for 0.7 s (down:KEY / up:KEY: held until up)   wait@90: just keep running
+#                           tap:5@20                   key held for 0.2 s (coins: 1942 ignores a coin held for 40 ticks)
 #                           dbg:COMMAND@50             a debugger command (dbg:profile on, dbg:profile save /tmp/p.txt ...)
 #                           dump:0xADDR:0xSIZE@50      memory dump (debugger savebin) -> $OUT/<game>_<s>_<ADDR>.bin
 #   no items: run interactively.   A CRASH.TXT written by the program is printed.
@@ -45,6 +46,8 @@ for ITEM in "$@"; do
     key:*) printf 'hatari-event keypress %s\n' "${WHAT#key:}" > "$OUT/cmd.fifo" ;;
     hold:*) printf 'hatari-event keydown %s\n' "${WHAT#hold:}" > "$OUT/cmd.fifo"; sleep 0.7   # (games that poll the keys once a tick)
             printf 'hatari-event keyup %s\n' "${WHAT#hold:}" > "$OUT/cmd.fifo" ;;
+    tap:*) printf 'hatari-event keydown %s\n' "${WHAT#tap:}" > "$OUT/cmd.fifo"; sleep 0.2
+           printf 'hatari-event keyup %s\n' "${WHAT#tap:}" > "$OUT/cmd.fifo" ;;
     down:*) printf 'hatari-event keydown %s\n' "${WHAT#down:}" > "$OUT/cmd.fifo" ;;
     up:*)   printf 'hatari-event keyup %s\n' "${WHAT#up:}" > "$OUT/cmd.fifo" ;;
     wait)  ;;
