@@ -1,4 +1,4 @@
-; Commando World for Atari STE; translated main CPU, the sound effects on the YM2149 (sfx.s), no music.
+; Commando World for Atari STE; translated main CPU, the sound effects (sfx.s) and the music (music.s) on the YM2149.
 MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
 MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
 
@@ -107,6 +107,7 @@ start:
 	stage	$0f0
 	bsr	init_render
 	bsr	sfx_init
+	bsr	mus_init
 	stage	$00f
 	ifd DEBUG
 	bsr	dbg_dump
@@ -850,6 +851,7 @@ z80_unsupported:
 
 	include "render.s"
 	include "sfx.s"
+	include "music.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch list in the data section).

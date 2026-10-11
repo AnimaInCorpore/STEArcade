@@ -8,7 +8,7 @@ $4600-$4660 the second's, 32 bytes): the sequencer (0537 / 0564) steps only the 
 So a slot's output after n steps depends only on its effect: out[n] is recorded with the effect alone, until the
 slot ends (its byte 0 becomes 0), or until its 32 bytes repeat (a loop: out[n] = out[start + (n - start) % period]).
 
-The music commands ($20-$2C) are the FM part (02B3), not modelled here.
+The music commands ($20-$2C) are the FM part (02B3): tools/sound_music.py.
 
     python sound_sfx.py check [frames]    the model against the driver over the game run of ref/cover.py
 """

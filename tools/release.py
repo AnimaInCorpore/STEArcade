@@ -43,7 +43,7 @@ GAMES = [
      "about 65% of the arcade's speed, 12 frames a second; no sound",
      "fire: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
     ("commando", "COMMANDO.PRG", "Commando (Capcom 1985)",
-     "playable, 52 ticks and 21-27 frames a second, 16 colours; the sound effects on the YM (no music)",
+     "playable, 55 ticks and 25-27 frames a second, 16 colours; the sound effects and the music on the YM",
      "fire: Space, Control, joystick fire, pad A.  grenade: Alternate, pad B."),
     ("gunsmoke", "GUNSMOKE.PRG", "Gun.Smoke (Capcom 1985)",
      "91% of the arcade's speed, 29 frames a second, 16 colours; no sound",

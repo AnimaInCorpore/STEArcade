@@ -325,3 +325,23 @@ Also seen in Black Tiger (2026-10-09):
   at the screen (8-pixel steps): compose a strip per text row and blit it shifted (mask pass, plane pass).  A line pair
   that comes into the band must get black side bars: it may hold what an earlier window position drew there (a test
   with 25 spaced frames passed, one with 40 found it).
+
+## FM music as square waves (Commando, 2026-10-11; the other Capcom boards have the same YM2203s)
+
+* **`engine/opn.py`** turns a sound driver's YM2203 register writes into what a YM2149 can play: per FM channel the
+  pitch of its carriers and their loudness through the envelope generator (MAME's ymfm: rates, key scaling, sustain
+  level, total level; the modulators only shape the timbre and are left out).  Mind the prescaler the driver selects
+  ($2D/$2E/$2F): it sets the FM rate (clock / 72, / 36, / 24) and the SSG clock.  ymfm's attack step relies on C's `~`
+  of a promoted int (`att += (~att * inc) >> 4`): with `~att & 0x3FF` in Python the attack never leaves full
+  attenuation.  1943, Gun.Smoke and Black Tiger have YM2203s too (MAME capcom/1943.cpp, gunsmoke.cpp, blktiger.cpp).
+* **Record with the STE's interrupt timing, not the arcade's.**  The arcade's sound CPU loses an IRQ when a handler runs
+  longer than the gap to the next (a tune's load); a driver that does part of its work on odd counts then drifts
+  against its own loop.  The STE runs the four IRQs of a tick back to back, so record that way (run each handler to
+  its return) and the tunes become periodic; their tempo still matches MAME's audio.
+* **A repeat of a channel's RAM is a loop only if it keeps repeating**: check it over a whole period more.  Commando's
+  channels repeated their 32 bytes after 24 ticks and then parted.
+* **Six channels on three**: pick the loudest each tick (prefer the ones that played the tick before, keep each on its
+  YM channel), after the effect has taken the channels it sounds on; per-channel streams loop independently, so the
+  choice has to be made at run time, not in the recording.
+* **Check the pitch against MAME's audio**: poke the sound latch from a Lua script (`space:write_u8` goes through the
+  handlers) and `-wavwrite`; correlate semitone spectra of both (a wrong prescaler or octave shows as a shifted peak).

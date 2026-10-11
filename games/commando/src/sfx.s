@@ -7,7 +7,8 @@
 ; output after n steps is in sfx_data.s: phase 0 as runs, phases 1-3 (the IRQ counter $4000 & 3 when the effect
 ; steps: 05F8 works every 4th) as exceptions to it.  sfx_irq is one IRQ of that; sfx_tick runs the four of an arcade
 ; tick and writes the YM2149, which plays one chip: the one whose effect started last (the STE has 3 channels, the
-; arcade 2 x 3).  The music (FM) is not played.  The decoder is tools/sound_sfx.py's Decoded, step for step.
+; arcade 2 x 3); the music (music.s) takes the channels the effect does not sound on.  The decoder is
+; tools/sound_sfx.py's Decoded, step for step.
 ; ------------------------------------------------------------------------------
 
 ; a slot (2 chips x 4)
@@ -235,8 +236,9 @@ sfx_seek:
 .none:
 	rts
 
-; The four IRQs of an arcade tick, then the YM2149: the chip whose shown effect started last (or the first chip's
-; idle values), the registers that changed.  Uses d0-d7 / a0-a4.
+; The four IRQs of an arcade tick and the music's tick, then the YM2149: the chip whose shown effect started last (or
+; the first chip's idle values) with the music on the channels it leaves, the registers that changed.  Uses d0-d7 /
+; a0-a4.
 sfx_tick:
 	bsr	sfx_irq
 	bsr	sfx_irq
@@ -257,6 +259,11 @@ sfx_tick:
 	bls.s	.chosen
 	move.l	sfx_chip_out+4,a1
 .chosen:
+	move.l	a1,-(sp)
+	bsr	mus_tick
+	move.l	(sp)+,a1
+	bsr	mus_mix
+	lea	mus_regs,a1
 	lea	sfx_ym,a2
 	moveq	#0,d1			; the register (no interrupt handler of the port writes the YM: no masking, which
 					; would make the border events late)

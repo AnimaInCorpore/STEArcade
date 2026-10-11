@@ -4,7 +4,7 @@
 
 The main Z80 program is statically translated to 68000 code and runs with keyboard
 and joystick input on an unexpanded 8 MHz, 4 MB Atari STE. Graphics use a fixed
-16-colour Oklab palette. The sound effects play on the STE's YM2149 (see "Sound effects"); the music (FM) does not.
+16-colour Oklab palette. The sound effects and the music play on the STE's YM2149 (see "Sound effects" and "Music").
 
     python3 port.py build commando
     python3 port.py run commando
@@ -108,6 +108,8 @@ Validation:
 * The pinned Hatari build runs the port with 4 MB RAM through coin/start, movement,
   fire, deaths and player restarts.
 * Shared Donkey Kong/Galaga sprite regressions pass after the FXSR model fix.
+* The music player matches its model tick for tick; the converted main theme matches MAME's audio in pitch and time
+  (see "Music").
 
 `docs/coverage.json` retains baseline instruction and sprite-latch coverage for
 reproducible clean builds. `port.py cover commando` expands it with seeded
@@ -147,7 +149,8 @@ The sound board (`tools/sound.py`, from MAME capcom/commando.cpp): a Z80 at 3 MH
 C800), two YM2203, four IRQs a frame from the scanline PROM.  Its driver keeps the two kinds of sound apart: the
 music (commands $20-$2C, 13 tunes) uses only the six FM channels, the effects (commands $02-$1B) only the SSG
 (square waves and noise, 3 channels of one chip each).  The STE has no FM, and the music as samples (the Donkey Kong
-way) does not fit: the program uses ~3.95 of the 4 MB.  The effects map onto the STE's YM2149.
+way) does not fit: the program uses ~3.95 of the 4 MB.  The effects map onto the STE's YM2149; the music became square
+waves later (see "Music").
 
 Translating the driver would cost ~3,800 Z80 instructions a frame (its IRQ handler; the effects alone ~2,700), so the
 effects are register streams (`tools/sound_sfx.py`) played by `src/sfx.s`, in the driver's own scheme (audio ROM):
@@ -171,3 +174,48 @@ frames of the game: 509 of 23812 chip outputs differ, all after an effect resume
 $06, at volume 1); `sfx_test.py 3000` (in `port.py test`): the 68000 player against that decoder, 0 of 23809
 differ.  `logic_test.py 3000` and the render tests pass.  Hatari `bench.sh`: 55.6 ticks (93%), 27.2 frames a second,
 no late border events.
+
+## Music (2026-10-11)
+
+The 13 tunes (commands $20-$2C) are FM: six channels on the two YM2203.  They play as square waves on the YM2149,
+recorded per FM channel by `tools/sound_music.py` and played by `src/music.s` (its `Player`, `Channel`, `Mixer` and
+`combine` are the 68000 code in Python, step for step).
+
+The driver (audio ROM): a tune command clears its slot's six channels and loads them (01F7 / 0200 / 0209, then 0224);
+$2D / $2E stop the music (0101).  Four slots of six channels, $4100-$4400 (32 bytes a channel); the IRQ (02B3) steps
+only the highest slot whose first channel is active, so a jingle ($20 the start, $2B a death, $22 ...) pauses the main
+theme ($21, the lowest slot), which resumes when it ends.  Slot channel n is FM channel n % 3 of chip n // 3.
+
+Recording: each tune alone, from the boot, the driver's four IRQs of a tick run one after the other to their end, as
+the STE runs them.  (The arcade loses an IRQ when a handler runs long, a tune's load for one: that shifts the IRQ
+counter's parity, which a channel with the double-speed flag (ix+31, 02F6) depends on.  Recorded with the arcade's
+timing, $28 did not repeat in 40,000 ticks and $21 only after 6,920.)  The register writes go through
+`engine/opn.py`, the YM2203's envelope generator after MAME's ymfm (carriers only; 64 units = 6 dB): per tick and
+channel the pitch of the carriers (the lowest within 12 dB of the loudest: their multipliers differ) as a period of
+the 2 MHz YM2149, and their mean loudness over the four quarters of the tick as a volume (3 dB a step; a carrier at
+full level is 14: ymfm peaks an FM carrier like an SSG square at 15, a sine sounds 3 dB below the square).  The FM
+clock: 1.5 MHz / 36 (the prescaler 3 the driver selects, 0064), so Hz = fnum * 2^(block-1) * 41667 / 2^20.
+
+Each channel loops on its own: its 32 bytes (and its output) repeat, and keep repeating with that period for a period
+more (at least 600 ticks): a short repeat alone can part again (the bytes are not all of the state).  The loops: $21
+1,728 ticks, $23 384, $24 864 from 25, $28 2,304 (two channels 9,217), $2C 864 from 193; the others end, and their
+notes' release is recorded as a tail (up to 180 ticks), played while no other tune plays.  The loop seams differ from
+the following ticks in 0-2% of the ticks (the envelopes' state at the seam).
+
+The STE's form (34 KB): per channel a byte stream, a tick a step: hold n + 1 ticks, a volume, a volume - 1 with a
+hold, a period (no tick), the end (the loop or silence).  `src/music.s`, after the effects' four IRQs of the tick: the
+latch starts or stops slots, the highest slot that plays steps its six channels (else the highest tail), and
+`mus_mix` builds the YM's registers: the effect keeps the YM channels it sounds on (a volume, the tone or the noise
+on); the loudest music channels take the others (key volume * 2, +1 for a channel that played the tick before, the
+lowest channel of a tie), each on the YM channel it had if it is free.  About 3.5k cycles a tick (Musashi: the tick
+1.4k, the mix 2.2k).  The program leaves about 34 KB free from the desktop (`tools/memfree.sh`).
+
+Checks: `sound_music.py check`: the encoded streams through the decoder against the recording (183,733 channel ticks,
+0 differ).  `music_test.py 20000` (in `port.py test`): the 68000 player (`mus_tick`, `mus_mix`) against the Python
+model, with random tunes, stops and effects (pauses, resumes, tails, loops, effect channels): 0 of 20,000 ticks
+differ.  Against MAME 0.289's own audio (the latch poked to $21 at frame 300, `-wavwrite`): the semitone spectra of
+the first 50 s correlate 0.94 at the same pitch and time (0.2 a semitone off, 0.4 an octave off), with no tempo drift.
+Hatari (`--sound 44100 --avirecord true`, coin and start): its audio against the model's rendering of the start
+jingle 0.955.  `sound_music.py wav XX` renders a tune through the player (`build/commando/music_XX.wav`).
+Hatari `bench.sh`: 55.1 game ticks (92%) and 25.0 frames a second (before: 55.6 and 27.2; the scripted run differs
+with any timing change, the player's cost is ~2.4% of the CPU).
