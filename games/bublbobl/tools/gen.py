@@ -239,7 +239,7 @@ def vpc_of_cover(pc):
 
 
 def configs():
-    hooks = [(0xFB40, 0xFB40, "bb_bank", None)]
+    hooks = [(0xFB40, 0xFB40, "bb_bank", None), (0xFA00, 0xFA00, "bb_snd_put", None)]   # (the sound latch: src/sound.s)
     main = z80x.Config(prefix="Z", table="g1_dispatch", token_sym="g1_ret", mode="signed", block=0x10000,
                        iyaddr=IY_MAIN, fshadow=IY_MAIN + 2, io_read_redirect={}, write_hooks=hooks,
                        nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", **z80x.FAST)

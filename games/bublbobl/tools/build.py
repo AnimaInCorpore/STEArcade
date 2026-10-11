@@ -4,6 +4,7 @@ import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import gen, assets, m6801x
 import machine
+import sound
 from paths import build_dir, ROOT
 from toolchain import assemble_link
 
@@ -16,12 +17,16 @@ def main():
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("-D", dest="defines", action="append", default=[])
+    ap.add_argument("--sound", action="store_true", help="record the sound driver again (tools/sound.py, ~15 min)")
     ap.add_argument("--out", default=None, help="default: run/bublbobl/BUBBLE.PRG, run/bublbobl_sim/BUBBLE.PRG with --sim")
     a = ap.parse_args()
     tag = "bublbobl_sim" if a.sim else "bublbobl"
     if a.out is None:
         a.out = str(ROOT / "run" / tag / "BUBBLE.PRG")
     build = build_dir("bublbobl")
+    if a.sound:
+        sound.all_sounds(True)
+    print("bb_sound.s: %d bytes" % sound.emit(build / "bb_sound.s"))     # (from build/bublbobl/sound.pkl)
     text, reps = gen.generate()
     (build / "bb_code.s").write_text(text)
     for n, rep in enumerate(reps):

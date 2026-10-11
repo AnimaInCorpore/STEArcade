@@ -295,6 +295,10 @@ class Galaga:
         self.irq_pending = [False, False]
         self.port_mode = False                # the STE runtime's schedule (run_frame_port)
         self.in_nmi06 = False
+        self.n54_skip = 0
+        self.n54_triggers = 0                 # explosions started (54XX commands)
+        self.nested_frames = 0                # port mode: frames of the sub / sound CPU while the main CPU's IRQ waits
+        self.sound_hook = None                # port mode: called (machine, before / after) around the sound CPU's NMIs
         self.booted = [True, False, False]    # CPU2/3 reached their idle loops (port mode)
         self.handler_runs = [0, 0, 0]
         self.frame = 0
@@ -375,7 +379,18 @@ class Galaga:
             return
         if self.ctrl06 & 1:
             self.n51.write(v)
-        # bit 3: 54XX (noise sound), ignored
+        elif self.ctrl06 & 8:
+            self.n54_write(v)
+
+    def n54_write(self, v):
+        """the 54XX (explosions, not emulated): commands $1x / $2x start the player's explosion while the sound runs
+        (the port plays a noise burst, tools/sound.py), $3x / $4x take four parameter bytes"""
+        if self.n54_skip:
+            self.n54_skip -= 1
+        elif (v & 0xF0) in (0x30, 0x40):
+            self.n54_skip = 4
+        elif (v & 0xF0) in (0x10, 0x20) and self.booted[2]:
+            self.n54_triggers += 1
 
     def ctrl06_w(self, v):
         self.ctrl06 = v
@@ -485,11 +500,35 @@ class Galaga:
             return False
         n = 0
         while not (cpu.sp == sp0 and cpu.pc == pc0):
+            if self.port_mode and cpu is self.cpus[0] and cpu.pc == 0x134C and self.ram[0x1287]:
+                self.nested_frame()
             cpu.step()
             n += 1
             if n > 2_000_000:
                 raise RuntimeError("handler of %04X did not return" % pc0)
         return True
+
+    def nested_frame(self):
+        """the port's g_spin_wait: a task of the main CPU's IRQ handler waits at $134C for the sub CPU's count of the
+        attacking enemies ($9287) to become 0; the runtime lets the next VBL in: the sub CPU's IRQ handler and the
+        sound CPU's NMIs run (the main CPU's IRQ is off), then the wait reads the count again"""
+        if self.latch[1] and self.booted[1] and self.run_handler(self.cpus[1]):
+            self.handler_runs[1] += 1
+        self.sound_nmis()
+        self.nested_frames += 1
+
+    def sound_nmis(self):
+        """the sound CPU's two NMIs of a frame (lines 64 and 192), once booted, while its NMION is off"""
+        if not self.booted[2]:
+            return
+        if self.sound_hook:
+            self.sound_hook(self, "before")
+        for _ in range(2):
+            if self.latch[2]:
+                break
+            self.run_handler(self.cpus[2], nmi=True)
+        if self.sound_hook:
+            self.sound_hook(self, "after")
 
     def run_to_idle(self, n):
         cpu = self.cpus[n]
@@ -505,7 +544,7 @@ class Galaga:
         """One frame as the STE runtime schedules it: CPU1's main thread for the frame, then
         at the vertical blank CPU1's IRQ handler and CPU2's IRQ handler, each to
         completion.  CPU2 and CPU3 run their boot code to the idle loop once they are
-        released; CPU3 never runs afterwards.  06XX NMIs are synchronous (ctrl06_w)."""
+        released; then CPU3's NMI handler twice a frame (the sound).  06XX NMIs are synchronous (ctrl06_w)."""
         self.port_mode = True
         cpu1, cpu2, cpu3 = self.cpus
         cpu1.r_hook = self.rnd
@@ -520,6 +559,7 @@ class Galaga:
             self.handler_runs[0] += 1
         if self.latch[1] and self.booted[1] and self.run_handler(cpu2):
             self.handler_runs[1] += 1
+        self.sound_nmis()
         self.stars.draw()
         vl = self.vlatch
         self.stars.set_params(vl[0] | (vl[1] << 1) | (vl[2] << 2), vl[3], vl[4] | 2, vl[5])

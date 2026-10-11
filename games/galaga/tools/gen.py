@@ -7,8 +7,9 @@ Three programs with their own labels and dispatch tables (galaga.s is the machin
        (a6 = its ROM, the shared RAM lies 32 KB below it); hooks: the 06XX writes
   CPU2 (sub, 4 KB):   labels Y, table g2_dispatch, mode "long" (a6 = its ROM, the shared
        RAM at a6 + $8000 = g_ram)
-  CPU3 (sound, 4 KB): labels X, table g3_dispatch, mode "long" with a private RAM copy
-       (g3_ram); only its boot runs
+  CPU3 (sound, 4 KB): labels X, table g3_dispatch, mode "long" over its own block (a6 = g3_block: its ROM, its I/O
+       cells, its RAM g3_ram at + $8000); its boot is done natively, its NMI handler runs twice a frame with the
+       shared page $9A00-$9AFF (and $9211) copied in and out (galaga.s g_sound)
 Coverage from ref/cover.py (galaga_cover_*.pkl: executed pcs per CPU, the instructions that write the video RAM: each
 marks the blocks of 32 bytes it wrote, so the renderer compares only those with its copy, Emitter / scan_cells).
 """
@@ -44,8 +45,9 @@ def configs():
 
 
 ROOTS = [[0, 0x38, 0x66], [0, 0x38], [0, 0x66]]
-# the boot handshake's spin loops and CPU2's idle loop: the runtime's scheduler (z80_hook)
-YIELDS = [{0x3589, 0x359C}, {0x057F, 0x0596, 0x05B1}, set()]
+# the boot handshake's spin loops and CPU2's idle loop: the runtime's scheduler (z80_hook); $134C: a task of the main
+# CPU's IRQ handler waits for the sub CPU's count of the attacking enemies ($9287) to become 0 (g_spin_wait)
+YIELDS = [{0x3589, 0x359C, 0x134C}, {0x057F, 0x0596, 0x05B1}, set()]
 
 
 BLOCK_OPS = ("ldir", "lddr", "ldi", "ldd")
@@ -139,7 +141,7 @@ def generate(hooks=((), (), ()), skip_tests=True):
     tables = ["\tsection data,data", "\tcnop 0,4", "TABLE_ENTRIES = %d" % ENTRIES]
     reports = []
     ems = []
-    for n, cfg in enumerate(configs()[:2]):      # CPU3's boot is done natively (galaga.s)
+    for n, cfg in enumerate(configs()):
         code_lines, table, rep, em = generate_program(roms[n], ROOTS[n], dyn[n] & set(range(len(roms[n]))), cfg,
                                                       set(hooks[n]) | YIELDS[n], emitter=Emitter, vwriters=vw[n])
         lines.append("; ---------------- CPU%d" % (n + 1))

@@ -27,7 +27,8 @@ Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad 
   can never pass on the board skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write)
   native in the runtime.  It reads the inputs and DIP switches, moves bytes to and from `$FC00-$FFFF` and
   raises the main CPU's interrupt (IM 2, the vector byte is in `$FC00`, the page in the I register).
-* **Sound CPU**: not translated (no sound); its commands go nowhere.
+* **Sound CPU**: not translated; its driver's output is recorded per command and played on the YM2149 (see
+  "Sound"); the main CPU's writes of the latch (`$FA00`) reach the player through a write hook.
 * **Boot self-tests** are patched out of the ROMs (`machine.skip_tests`, also in the reference): the RAM
   tests, the delay loop, the sub CPU's ROM checksum.  The game checksums `$0001-$0EDC` of its ROM while it runs
   (one byte per frame, `$484B`); a dead byte of the old RAM test (`$C5`) makes the sum the original's.  A second
@@ -267,7 +268,7 @@ C', the task switch at `$0094` pushes it; no reader (the reference with and with
 bytes only over 6000 frames).  `$E0DE`/`$E0DF` from frame 1002 were the dead word of the merged `push hl / pop iy` at
 `$1479`.  Open: the coverage run of seed 4 stops at frame ~18000 with
 `handler of 01ED did not return` in the reference machine (`ref/cover.py 4 20000`), so five seeds were used.
-Not done: sound, the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
+Not done: the 16 sprites per line limit, screen flip (`$FB40` bit 7), test / service modes, per-band palettes (22-26 distinct colours on a screen, the STE shows 16: the 15 most used
 per bank weight are kept, the rest map to the nearest).
 
 ## Translator speed (2026-10-08)
@@ -329,3 +330,36 @@ Consecutive frames (`render_test.py seq 1600 100`, every frame drawn): median 92
 level (600-900) builds the composites of nearly every cell; `NEED_MAX` 96-160 (draw such frames whole and leave
 the composites) gives 0.58 / 2.0 there and 0.68-0.69 / 4.5-5.0 later, so it is off.  All 1200 frames of
 `render_test.py seq` over attract and play are exact; `--layers` prints the moving range and the cell counts.
+
+## Sound (2026-10-11)
+
+The sound board (MAME `taito/bublbobl.cpp`): a Z80 at 3 MHz, a YM2203 (its timers interrupt the CPU) and a YM3526
+(OPL), both at 3 MHz; the main CPU's latch raises the NMI.  The driver (`tools/sound.py`, which models the board:
+the timers, the OPL's timer the boot waits for, the SSG registers read back) queues commands (NMI, 0066) and starts
+their items, one a track: 26 tracks, two for each of the 9 OPL channels, the 3 FM channels and the SSG (sets A and B);
+a track takes a new item unless it plays one with a lower priority number (0357), and a channel plays its A track
+while that plays, else its B track (0535).  The stage tunes are OPL set B, the jingles OPL set A, the effects FM (and
+three on the SSG).  The game sends $EF first (the sound on), then the sound commands $00-$34.
+
+The tempo is the YM2203's timer A, which a tune may change (`8FA3`): so the recording is in real time, a value a
+50 Hz VBL.  Each command is recorded alone: per track a YM2149 period and volume (an OPL channel through
+`engine/opl.py`, new: the YM3526's envelopes after ymfm; an FM channel through `engine/opn.py`) or the SSG's
+registers, until the track ends, or with its loop: the chip writes of the driver's timer ticks repeat with a period
+(the tracks' blocks hold a counter that never repeats), the loop rounded to whole VBLs.  `build/bublbobl/bb_sound.s`:
+270 KB (53 commands; the program leaves 167 KB from the desktop).
+
+`src/sound.s` runs in the VBL (`bb_snd_vbl`, every VBL, also those that only arm the border timers): the queued
+commands start their items, every track steps a VBL, each channel takes its A track's value or its B track's, and the
+mixer of `engine/rt/capsnd_core.s` (now for up to 12 music channels, `CS_MCH`, with a per-channel boost: the FM
+effects before the OPL music) puts the loudest on the YM channels the SSG leaves.  12,500-14,000 cycles a VBL (Musashi:
+the game's commands / random ones), 8-9% of the CPU: the game runs that much slower than without the sound
+(`-D NOSOUND=1` builds without it).
+
+Checks: `sound.py check` runs the real driver beside the model, a VBL at a time.  With the game's commands
+(`logic_test.py`'s inputs, 2,400 frames): the SSG 0 VBLs differ audibly; of 14,688 sounding OPL / FM channel-VBLs
+2,972 differ by a VBL (the driver's ~60 Hz ticks fall elsewhere in the VBL than in the recording) or a volume step,
+1,719 more, mostly the vibrato's phase (a few cents) and a note starting a VBL later.  With random commands far more
+differ: commands that change another's tracks (effect $1A changes a parameter of two OPL channels' B tracks, which
+lasts) are not modelled.  `sound_test.py` (in `port.py test`): the 68000 player against the model, 0 of 6,000 VBLs
+differ.  Hatari: music and effects in the attract mode and play.  `build.py --sound` records again (~10 min).
+

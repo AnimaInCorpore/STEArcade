@@ -268,7 +268,9 @@ def generate(extra_roots=()):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
-    out += ['\tsection data,data', '\teven', 'g_entries_fixed:']
+    # The entries are read once (init_dispatch): a macro the runtime puts last in the data section, where the screen
+    # buffer begins (src/1943.s: its memory is the screen's afterwards).
+    out += ['g_entries_data macro', 'g_entries_fixed:']
     for pc in sorted(code):
         if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
             out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
@@ -279,7 +281,8 @@ def generate(extra_roots=()):
             if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
                 out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
         out += ['\tdc.w $ffff']
-    out += ['g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
+    out += ['\tendm', '\tsection data,data', '\teven',
+            'g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
               'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}

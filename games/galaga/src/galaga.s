@@ -15,7 +15,8 @@
 ;   write, as often as the program keeps the transfer going.  The boot handshake between
 ;   the three CPUs (self-test results in RAM flags) is run by giving the sub CPU a turn at
 ;   the main CPU's spin loops and at the VBL (z80_hook); the sound CPU's part of it is
-;   done natively, it is not translated (no sound).
+;   done natively.  Once it has booted, its NMI handler (translated) runs twice a VBL, its
+;   WSG registers become the YM2149's (snd_update, tools/sound.py).
 ;
 ; Memory: one block holds [sub ROM 32K | shared RAM 32K ($8000-$FFFF) | main ROM 32K];
 ; the main CPU's code addresses with a6 = its ROM and signed word offsets (the RAM lies
@@ -127,6 +128,10 @@ start:
 	lea	g2_dispatch_sw,a1
 	move	#TABLE_ENTRIES,d0
 	bsr	z80_init_dispatch
+	lea	g3_dispatch,a0
+	lea	g3_dispatch_sw,a1
+	move	#TABLE_ENTRIES,d0
+	bsr	z80_init_dispatch
 	ifd RESETTRAP
 	move.l	#reset_trap1,g1_dispatch_sw	; (-D RESETTRAP=1: a computed jump to $0000, the program restarting
 	move.l	#reset_trap2,g2_dispatch_sw	; itself, ends in CRASH.TXT: vector 97 / 96, its stack the Z80's)
@@ -141,6 +146,18 @@ start:
 	move.l	#g2_dispatch_sw,ctx2+4*12	; a4
 	move.l	#g_block,ctx2+4*14		; a6
 	move.l	#Y0000,ctx2+4*15		; resume
+
+	; The sound CPU's context for its NMI handler: registers 0, SP = $9B00 (where its boot leaves it).
+
+	lea	ctx3,a0
+	moveq	#15,d0
+.ctx3:	clr.l	(a0)+
+	dbf	d0,.ctx3
+	move.l	#g3_dispatch_sw,ctx3+4*12	; a4
+	move.l	#g3_ram+$1B00,ctx3+4*13		; a5
+	move.l	#g3_block,ctx3+4*14		; a6
+	move.b	#$FF,snd_expl_t
+	bsr	snd_init
 
 	bsr	n51_reset
 	move.l	#$1234,rnd_state
@@ -292,6 +309,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	bsr	snd_off
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -538,8 +556,10 @@ vbl:
 .regs1:
 	move.w	#TOKEN,-(a5)
 	move.l	#.after_irq1,g1_ret_to
+	st	in_irq1
 	jmp	Z0038
 .after_irq1:
+	clr.b	in_irq1
 	chk_sp	20
 .no_irq1:
 
@@ -560,6 +580,11 @@ vbl:
 	movem.l	d0-d7/a0-a6,ctx2
 	chk_sp	21
 .no_irq2:
+
+	ifnd NOSOUND			; (-D NOSOUND=1: the sound CPU stays idle, the cost of the sound measured)
+	bsr	g_sound_frame		; the sound CPU's NMIs, the YM
+	endc
+	chk_sp	23
 
 	bsr	g_boot_turns		; a booting CPU waiting for the main CPU gets on
 	chk_sp	22
@@ -619,6 +644,211 @@ g2_ret:
 	move.l	g2_ret_to,-(sp)
 	rts
 
+g3_ret:
+	move.l	g3_ret_to,-(sp)
+	rts
+
+; The sound CPU's two NMIs of a frame (lines 64 and 192), once it has booted, while its NMION ($6822) is off.  It
+; has a RAM of its own (its page $9A00-$9AFF: work area, stack); what it shares with the other CPUs is copied in
+; before and out afterwards: the commands $9A79 and $9AA0-$9AB9 (the only bytes of the page the others write; they
+; read $9AAC, $9AB6, $9AB9), and in $9211 (the only other byte it reads).  Then the WSG to the YM.  Clobbers every
+; register.
+
+g_sound_frame:
+	cmp.b	#2,cpu3_state
+	bne.s	.no_nmi3
+	movem.l	g_ram+$1AA0,d0-d6
+	movem.l	d0-d6,g3_ram+$1AA0
+	move.b	g_ram+$1A79,g3_ram+$1A79
+	move.b	g_ram+$1211,g3_ram+$1211
+	move.b	#2,nmi3_left
+.nmi3:	tst.b	g3_block+$6822
+	bne.s	.nmi3_done
+	movem.l	ctx3,d0-d7/a0-a6
+	move.w	#TOKEN,-(a5)
+	move.l	#.after,g3_ret_to
+	jmp	X0066
+.after:
+	movem.l	d0-d7/a0-a6,ctx3
+	subq.b	#1,nmi3_left
+	bne.s	.nmi3
+.nmi3_done:
+	movem.l	g3_ram+$1AA0,d0-d6
+	movem.l	d0-d6,g_ram+$1AA0
+	move.b	g3_ram+$1A79,g_ram+$1A79
+.no_nmi3:
+	bra	snd_update
+
+
+; ------------------------------------------------------------------------------
+; Sound: the WSG (the sound CPU's $6800-$681F cells) on the YM2149, a square wave per voice, and the 54XX's explosion
+; as noise on channel C.  tools/sound.py is the same in Python (ym_image, Explosion), sound_test.py compares them.
+; ------------------------------------------------------------------------------
+
+; at the start: the YM silent, its shadow
+snd_init:
+	lea	snd_ym,a0
+	moveq	#0,d1
+.y:	move.b	d1,$ffff8800.w
+	moveq	#0,d0
+	cmp.b	#7,d1
+	bne.s	.w
+	moveq	#-1,d0			; (mixer: everything off, both ports outputs)
+.w:	move.b	d0,$ffff8802.w
+	move.b	d0,(a0)+
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.y
+	rts
+
+snd_off:
+	moveq	#8,d0
+.v:	move.b	d0,$ffff8800.w
+	clr.b	$ffff8802.w
+	addq.b	#1,d0
+	cmp.b	#11,d0
+	blo.s	.v
+	rts
+
+; One game frame: the explosion's envelope steps, the YM's registers 0-10 from the WSG cells.  Clobbers d0-d7 / a0-a2.
+snd_update:
+	lea	g3_block+$6800,a0	; nothing to do when the WSG is as last time and no explosion sounds
+	lea	snd_wsg,a1
+	tst.b	snd_expl_t
+	bpl.s	.changed
+	moveq	#8-1,d0
+.cmp:	cmpm.l	(a0)+,(a1)+
+	dbne	d0,.cmp
+	bne.s	.changed
+	rts
+.changed:
+	lea	g3_block+$6800,a0
+	lea	snd_wsg,a1
+	moveq	#8-1,d0
+.keep:	move.l	(a0)+,(a1)+
+	dbf	d0,.keep
+	lea	snd_buf,a2
+	clr.l	(a2)
+	clr.l	4(a2)
+	clr.w	8(a2)
+	clr.b	10(a2)
+	moveq	#$3F,d6			; the mixer: bit k tone off, bit k + 3 noise off
+	lea	g3_block+$6800,a0
+	moveq	#0,d5			; the voice
+.voice:	move.w	d5,d4
+	mulu	#5,d4			; its register offset
+	moveq	#0,d0			; the frequency
+	tst.w	d5
+	bne.s	.f1
+	move.b	$10(a0),d0
+	and.w	#15,d0
+.f1:	moveq	#4,d2			; nibbles $11-$14 of the voice: << 4, 8, 12, 16
+	lea	$11(a0,d4.w),a1
+.fn:	moveq	#15,d1
+	and.b	(a1)+,d1
+	lsl.l	d2,d1
+	add.l	d1,d0
+	addq.w	#4,d2
+	cmp.w	#20,d2
+	blo.s	.fn
+	moveq	#15,d1
+	and.b	$15(a0,d4.w),d1		; the volume
+	beq.s	.next
+	tst.l	d0
+	beq.s	.next
+	moveq	#7,d3
+	and.b	5(a0,d4.w),d3		; the waveform
+	move.w	#4095,d2
+	cmp.l	#334,d0
+	blo.s	.per
+	moveq	#20,d2
+	cmp.l	#$FFFF,d0
+	bhi.s	.per
+	move.l	#DIVIDEND,d2
+	divu	d0,d2
+.per:	lea	snd_shift,a1
+	move.b	(a1,d3.w),d7
+	lsr.w	d7,d2
+	bne.s	.p1
+	moveq	#1,d2
+.p1:	lsl.w	#4,d3
+	add.w	d1,d3
+	lea	snd_level,a1
+	move.b	(a1,d3.w),d1		; the level
+	beq.s	.next
+	move.w	d5,d3
+	add.w	d3,d3
+	move.b	d2,(a2,d3.w)		; the period
+	lsr.w	#8,d2
+	move.b	d2,1(a2,d3.w)
+	move.b	d1,8(a2,d5.w)
+	bclr	d5,d6			; tone on
+.next:	addq.w	#1,d5
+	cmp.w	#3,d5
+	blo	.voice
+	; the explosion
+	moveq	#0,d0
+	move.b	snd_expl_t,d0
+	bmi.s	.noexpl
+	lea	snd_expl_env,a1
+	move.b	(a1,d0.w),d1
+	addq.b	#1,d0
+	cmp.b	#SND_EXPL_LEN,d0
+	blo.s	.t
+	moveq	#-1,d0
+.t:	move.b	d0,snd_expl_t
+	cmp.b	10(a2),d1
+	bls.s	.noexpl
+	clr.b	4(a2)
+	clr.b	5(a2)
+	move.b	d1,10(a2)
+	bset	#2,d6			; channel C: tone off, noise on
+	bclr	#5,d6
+	move.b	#SND_NOISE,6(a2)
+.noexpl:
+	or.b	#$C0,d6
+	move.b	d6,7(a2)
+	; the registers that changed (no interrupt handler of the port touches the YM)
+	lea	snd_ym,a0
+	moveq	#0,d1
+.wr:	move.b	(a2)+,d0
+	cmp.b	(a0),d0
+	beq.s	.same
+	move.b	d0,(a0)
+	move.b	d1,$ffff8800.w
+	move.b	d0,$ffff8802.w
+.same:	addq.l	#1,a0
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.wr
+	rts
+
+; A byte the main CPU sends the 54XX (d7; everything else is kept): commands $1x / $2x start the explosion (when the
+; sound runs), $3x / $4x take four parameter bytes.
+n54_write:
+	tst.b	n54_skip
+	beq.s	.cmd
+	subq.b	#1,n54_skip
+	rts
+.cmd:	and.b	#$F0,d7
+	cmp.b	#$30,d7
+	beq.s	.par
+	cmp.b	#$40,d7
+	beq.s	.par
+	cmp.b	#$10,d7
+	beq.s	.trig
+	cmp.b	#$20,d7
+	bne.s	.x
+.trig:	cmp.b	#2,cpu3_state
+	bne.s	.x
+	clr.b	snd_expl_t
+.x:	rts
+.par:	move.b	#4,n54_skip
+	rts
+
+DIVIDEND = 1365333			; 125000 * 2^20 / 96000: the YM period of a WSG frequency
+	include	"sound_tables.s"
+
 	borders_handlers
 	borders_blit_go
 	borders_report
@@ -631,6 +861,8 @@ g2_ret:
 ; ------------------------------------------------------------------------------
 
 z80_hook:				; (the hook pushed the address it continues at)
+	cmp.w	#$134C,d7
+	beq.s	g_spin_wait
 	tst.b	current
 	bne.s	.sub_yields
 
@@ -651,6 +883,27 @@ z80_hook:				; (the hook pushed the address it continues at)
 	clr.b	in_turn			; (after the registers: a VBL in between sees the turn)
 	clr.b	current
 	rts
+
+; $134C: a task of the main CPU's IRQ handler (interrupts off) waits for the sub CPU's count of the attacking enemies
+; ($9287, written by its IRQ handler) to become 0 - on the arcade for seconds, while the sub CPU goes on.  Inside
+; the handler (the VBL handler) the VBL is let in again until the next one has come: it runs the sub and the sound
+; CPU's frames and draws (the main CPU's IRQ stays off: g1_iff).  In the foreground the VBLs come anyway.  Keeps
+; every register.
+
+g_spin_wait:
+	tst.b	in_irq1
+	beq.s	.done
+	tst.b	g_ram+$1287
+	beq.s	.done
+	movem.l	d0-d1,-(sp)
+	move	sr,d1
+	move.l	frame_counter,d0
+	move	#$2300,sr
+.w:	cmp.l	frame_counter,d0
+	beq.s	.w
+	move	d1,sr
+	movem.l	(sp)+,d0-d1
+.done:	rts				; (the loop reads the count again and comes back here)
 
 ; Turns for the CPUs that are released (latch $6823) and still booting.  Keeps every
 ; register.
@@ -694,9 +947,11 @@ g_cpu3_turn:
 	tst.b	g_ram+$1101
 	bne.s	.wait
 	lea	g_ram+$1a00,a0
+	lea	g3_ram+$1a00,a1		; (and its own copy)
 	moveq	#0,d0
 	move	#255/4,d1
 .clear:	move.l	d0,(a0)+
+	move.l	d0,(a1)+
 	dbf	d1,.clear
 	move.b	#2,cpu3_state
 	rts
@@ -783,13 +1038,17 @@ g_ctrl06:
 	move.b	(sp)+,g1_iff
 	btst	#4,ctrl06_mode
 	bne	.loop
-	btst	#0,ctrl06_mode
-	beq	.loop
 	move.l	d2,d7			; the handler's `ldi` wrote through de' (after its exx back the upper
 	swap	d7			; word of d2: z80x.FAST keeps the alternate registers there),
 	subq.w	#1,d7			; one past the byte
 	move.b	(a6,d7.w),d7
+	btst	#0,ctrl06_mode
+	beq.s	.no51
 	bsr	n51_write
+	bra	.loop
+.no51:	btst	#3,ctrl06_mode
+	beq	.loop
+	bsr	n54_write
 	bra	.loop
 .done:
 	move.l	(sp)+,g1_ret_to
@@ -802,9 +1061,13 @@ g_data06:
 	btst	#4,d7
 	bne.s	.done
 	btst	#0,d7
+	beq.s	.no51
+	move.b	G_IO1+$7000,d7
+	bra	n51_write
+.no51:	btst	#3,d7
 	beq.s	.done
 	move.b	G_IO1+$7000,d7
-	bsr	n51_write
+	bra	n54_write
 .done:
 	rts
 
@@ -1352,6 +1615,16 @@ g2_ret_to:	ds.l	1
 turn_sp:	ds.l	1
 rnd_state:	ds.l	1
 ctx2:		ds.l	16		; d0-d7, a0-a6, resume address
+ctx3:		ds.l	16		; the sound CPU's registers for its NMI handler
+g3_ret_to:	ds.l	1
+snd_wsg:	ds.b	32		; the WSG cells at the last snd_update
+snd_buf:	ds.b	12		; the YM registers of this frame
+snd_ym:		ds.b	12		; the YM2149's registers 0-10 as written
+nmi3_left:	ds.b	1
+in_irq1:	ds.b	1		; the main CPU's IRQ handler runs (g_spin_wait)
+snd_expl_t:	ds.b	1		; the explosion: its frame of snd_expl_env, $FF off
+n54_skip:	ds.b	1		; parameter bytes of a 54XX command still to come
+	even
 
 n51_state:
 n51_mode:	ds.b	1		; 0 switches, 1 credits, 2 in game
@@ -1370,11 +1643,14 @@ N51_SIZE = *-n51_state
 	cnop 0,4
 g_block:	ds.b	$18000		; [sub ROM 32K | RAM 32K | main ROM 32K]
 g_ram = g_block+$8000
-g3_rom:		ds.b	$1000		; the sound CPU's ROM (loaded, unused)
+g3_block:	ds.b	$10000		; the sound CPU: its ROM, its I/O cells (the WSG at $6800), its RAM at + $8000
+g3_rom = g3_block
+g3_ram = g3_block+$8000
+g3_dispatch_sw:	ds.l	65536
 g1_dispatch_sw:	ds.l	65536
 g2_dispatch_sw:	ds.l	65536
 
-	ds.b	1024
+	ds.b	4096			; (g_spin_wait nests a VBL and its drawing in the VBL handler)
 own_stack_top:
 
 	cnop 0,4

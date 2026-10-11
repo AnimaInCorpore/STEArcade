@@ -3,7 +3,8 @@
 ![1943 on the STE (Hatari)](docs/screenshot.png)
 
 Atari STE port (4 MB) of the `1943` set (Euro), registered as `1943`: the main Z80 translated to 68000 code, the
-i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter renderer.  Sound is not implemented.
+i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter renderer, the sound driver's effects
+and music on the YM2149 (see "Sound").
 
 ```sh
 python port.py prepare 1943                 # auto: US archive if present, otherwise Euro
@@ -40,7 +41,7 @@ latches, sprite buffering on c806, and IRQs at scanlines 144 and 240. The SYSTEM
 VBL input follows the scanline. `tools/mcu.py` executes the actual i8751 firmware
 at reset and each VBL INT1, including its table search and P3 falling-edge reply
 strobe. Unknown MCU instructions fail explicitly. MCU execution is synchronous,
-not cycle accurate; sound CPU and YM2203s are not implemented.
+not cycle accurate; the sound CPU is not part of it (its driver is recorded alone: "Sound").
 
 `tools/reference_test.py` checks all 256 MCU command values against the dumped
 firmware tables (including retained replies for unknown commands), then runs
@@ -144,7 +145,37 @@ coverage saw reading the banked window (and sites it never ran; block instructio
 guard, a table bank switch.  `MAX_SKIPS` 8 (4 gave 87% speed and 15.5 frames/s).  `-D STAGE=n` makes the AUTOPLAY
 build play stage n with the cheats; `engine/xprof.py 1943` profiles the translated code (`X1943_STAGE=n`).
 
+Short Blitter passes (2026-10-11): no HOG pass is longer than ~256 bus cycles (`engine/rt/borders.s` `blit_go`; the
+56-word copies of `restore_damage` and `ff_clean` run in two halves), so the top border interrupt is never held back
+long.  It cost ~1% of a frame in Musashi (`perf_test.py 1600 1200`: 227k -> 230k) and in Hatari (DEBUG + AUTOPLAY, 6000
+VBLs) 8.4 -> 7.9 drawn frames a second, the ticks unchanged (51.3); no border event started late in that run.
+
+## Sound (2026-10-11)
+
+The sound board (MAME `capcom/1943.cpp`): a Z80 at 3 MHz, two YM2203 at 1.5 MHz, four IRQs a frame (lines 32, 96,
+160, 224).  The driver is Capcom's of Commando and Gun.Smoke (the same code at other addresses), recorded and played
+with the engine's `engine/capsnd.py` / `engine/rt/capsnd.s` (see `games/gunsmoke/README.md` "Sound" for the method).
+`tools/sound.py`: RAM C000, latch C800, the command table at 009F, five effect slots a chip (C500-C580, C600-C680)
+that end the lower ones unless their byte 31 is $FF, four music slots C100-C400; command 00 stops everything, 33-39
+and 3B-3F the music.  31 effects (the SSG) and 19 tunes (FM) are recorded: 122 KB in `build/1943/cs_data.s`.
+
+Effect $0A (64 seconds of notes) would take 68 KB with its four phases: its phases 1-3 differ from phase 0 only in
+which IRQ a volume step falls on (up to 3 IRQs, 12 ms), so it plays phase 0 in every phase (`capsnd.EXC_LIMIT`: an
+effect whose phase exceptions exceed 8 KB), 50 KB less.
+
+Memory: the program leaves 11 KB from the desktop (`tools/memfree.sh`; 4,049,934 of 4,061,212 bytes).  To make room,
+the dispatch entries (91 KB, read once by `init_dispatch`) are the first part of the screen buffer: `gen.py` emits them
+as a macro that `src/1943.s` places last in the data section under `screen_area`, and the rest of the buffer is the
+first thing in the BSS, which follows the data directly (the start checks that the two parts meet, and runs
+`init_dispatch` before anything uses the screen).
+
+Checks: `sound.py check 6000`: the music streams through the decoder 0 of 445,113 channel ticks differ; the effects
+with random commands 70 of 48,000 chip-IRQs differ audibly (the noise period an effect's first IRQs inherit), with the
+game's commands (`logic_test.py`'s play) 0.  `sound_test.py` (in `port.py test`): the 68000 player against the model,
+0 of 20,000 ticks differ; ~7,900 cycles a tick.  Hatari (DEBUG + AUTOPLAY, 4000 VBLs): 53.6 game ticks (90%) and 9.4 drawn
+frames a second; without the sound (`-D NOSOUND=1`) 55.7 and 11.3 (the frames get what the ticks leave).  Hatari: sound in the attract mode and play.
+
 ## Not done
 
-Sound; the flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
+The flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
 busiest scenes (the game's own logic is 86k cycles a tick there).

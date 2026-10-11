@@ -575,7 +575,7 @@ class Emitter:
     # ---- small helpers -------------------------------------------------
     def new_label(self):
         self.uid += 1
-        return "L%s%d" % (self.cfg.prefix.lower() if self.cfg.prefix != "Z" else "x", self.uid)
+        return "L%s%d" % ({"Z": "x", "X": "w"}.get(self.cfg.prefix, self.cfg.prefix.lower()), self.uid)   # (Z and X would both be Lx)
 
     def e(self, s):
         self.lines.append("\t" + s)

@@ -52,14 +52,16 @@ TESTS = {
              ("tools/logic_test.py", ["{n}"], 3000),
              ("tools/logic_test.py", ["3000", "--render", "--every", "3"], None),
              ("tools/logic_test.py", ["4000", "--render", "--every", "4", "--cheat", "13"], None),   # front layer scrolls sideways
-             ("tools/logic_test.py", ["4000", "--render", "--every", "8", "--seed", "1"], None)],
+             ("tools/logic_test.py", ["4000", "--render", "--every", "8", "--seed", "1"], None),
+             ("tools/sound_test.py", ["20000"], None)],          # the STE's sound player against the model
     "gunsmoke": [("tools/reference_test.py", ["700"], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/logic_test.py", ["4000", "--seed", "9"], None),     # MAME's cheats: round 6
                  ("tools/render_test.py", ["40", "seq", "--first", "1500"], None),
                  ("tools/render_test.py", ["20", "scroll"], None),
-                 ("tools/render_test.py", ["4", "edges"], None)],
+                 ("tools/render_test.py", ["4", "edges"], None),
+                 ("tools/sound_test.py", ["20000"], None)],        # the STE's sound player against the model
     "commando": [("tools/reference_test.py", [], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
@@ -70,14 +72,19 @@ TESTS = {
     "blktiger": [("tools/build.py", ["--sim"], None), ("tools/reference_test.py", ["700"], None),
                  ("tools/logic_test.py", ["{n}"], 1600),
                  ("tools/logic_test.py", ["4000", "--walk"], None),
-                 ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None)],
+                 ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None),
+                 ("tools/sound_test.py", ["6000"], None)],          # the STE's sound player against the model
     "dkong": [("tools/logic_test.py", ["{n}"], 3000)],
-    "galaga": [("tools/schedule_test.py", ["{n}"], 3000)],
+    "galaga": [("tools/schedule_test.py", ["{n}"], 3000),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/sound_test.py", ["{n}"], 3000),          # the sound CPU against the reference, the YM mapping
+               ("tools/render_test.py", [], None)],               # the picture at frozen moments of the attract mode
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 700),
                  ("tools/render_test.py", ["seq", "1500", "20"], None),
-                 ("tools/align_test.py", ["{n}"], 900)],
+                 ("tools/align_test.py", ["{n}"], 900),
+                 ("tools/sound_test.py", ["6000"], None)],          # the STE's sound player against the model
     "1942": [("tools/build.py", ["--sim"], None),
              ("tools/logic_test.py", ["{n}"], 6000),
              ("tools/logic_test.py", ["9000", "--cheat"], None),      # MAME's cheats: the later stages
@@ -86,7 +93,7 @@ TESTS = {
              ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py"]
+ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py"]
 assert set(COVER) == set(TESTS) == set(GAMES)
 
 

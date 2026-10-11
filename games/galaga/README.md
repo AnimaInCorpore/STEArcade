@@ -8,7 +8,8 @@ relative to `games/galaga/`; the shared pieces are described in `docs/architectu
 `docs/porting-guide.md`.
 
 * `src/` the runtime and renderer (`galaga.s`, `render.s`, `sprites.s`, `stars.s`)
-* `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `build.py`
+* `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `sound.py` (the WSG on the
+  YM2149), `build.py`; tests `schedule_test.py`, `sound_test.py`, `render_test.py`, `render_opt_test.py`
 * `ref/` coverage (`cover.py`) and the MAME comparison, one-off probes in `ref/probes/`; the coverage pickles go to `build/galaga/`
 
 Build and run from the repository root: `python port.py build galaga`, `python port.py run galaga shot@30`.
@@ -17,10 +18,11 @@ Controls: **5** coin, **1/2** start, **left/right** move, **Space/Ctrl/Alt** fir
 both joysticks and both pads move the fighter.
 Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): either pad, the D-pad moves, **A / B / C** fire, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#** quit.
 
-State: the attract mode runs at the game's
-full speed (frame counter = VBL counter, no skipped interrupts) with everything drawn
-(tiles, the formation, explosions, the starfield, the high score table); the display
-drops frames: 25-28 fps in the title phases, 8-15 fps with the full formation.  Build
+State (2026-10-11): complete.  The game runs at one game frame per VBL (the arcade's 60.6 a second become 50, no
+skipped interrupts) with everything drawn (tiles, the formation, explosions, the starfield, the high score table) and
+its sound (the sound CPU translated, the WSG's three voices as the YM2149's square waves, the 54XX's explosion as
+noise, see "Sound"); the display drops frames: 33 a second on average over the attract mode, 17-21 with the full
+formation, up to 49 in the title phases (Hatari, `-D RATE=500`, see below).  Build
 `python port.py build galaga [--debug] [--full-selftest]` -> `run/galaga/GALAGA.PRG` (needs the six ROM
 files of the `galaga` set extracted to `assets/roms/extracted/galaga/`).  The main CPU's boot
 RAM test (about 600 of the 850 frames to the attract mode) is patched out of the translation
@@ -158,7 +160,8 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   draw_part takes the part's graphics offset, flip y and offsets from `ga_part_tab` (assets.py) instead of the bit
   arithmetic.  Checked with `-D FREEZEAT=N -D NOSTARS=1` (from VBL N the game's interrupts stop, the renderer goes
   on): both screens against `render_raw()` of the frozen arcade RAM, 0 pixels at N = 2200 and 3600.  N = 5200 (the
-  boss row over "HIGH SCORE") differs by 60-120 pixels before and after the change.
+  boss row over "HIGH SCORE") differed by 60-120 pixels then; `tools/render_test.py` (2026-10-11, the same check on
+  Musashi) finds 0 at 1500, 2200, 3000, 3600, 4400, 5200, 6400 and 8000.
 - Frame rate without the FIFO (Windows): `python port.py build galaga --debug -D RATE=500 --frames 9000
   --out <dir>/GALAGA.PRG`, Hatari `--fast-forward true --run-vbls 9600`: `cnt_vbl` and `cnt_render` (words) every
   500 VBLs in `RATE.BIN`, written at the quit; renders per VBL * 50 = fps.  Measured 2026-10-09 (attract mode and
@@ -198,7 +201,8 @@ CPU1 `z80x.FAST`, CPU2 / CPU3 `z80x.FAST_LONG`; `g_ctrl06` reads DE' from the up
 clears (`ld (hl),n; ldir` over $37F bytes) are long fills now, the cost of the half registers (`ld d,(hl)` 48 -> 34
 cycles, `ld a,c` 30 -> 16) and of `adc` / `rl` (the carry into X without a branch) went down.  `engine/xprof.py galaga`
 (game frames 800-1200, attract): translated code 47.6k -> 27.6k cycles a game frame (1.73x).  There is no lock-step test
-of Galaga's translated code against the reference (`tools/schedule_test.py` checks the reference only); the change was checked
+of the main and sub CPU's translated code against the reference (`tools/schedule_test.py` checks the reference only; the
+sound CPU's has one: `sound_test.py`); the change was checked
 with `engine/xdiff.py galaga <the old build>`: the arcade's RAM is the same at all 400 game frames (interrupts on a
 clock of translated instructions, so a faster build is not ahead in the foreground).
 
@@ -268,3 +272,52 @@ before and after, byte-identical at N = 2200 and 3600 (the README's reference po
 VBLs, attract mode; the phases fall differently in the two runs): 28.7 -> 35.6 frames a second on average, the
 heaviest 500-VBL windows 15.0-15.6 -> 19.5-20.9.  Musashi does not fault on odd word accesses: two bss words of
 this change were odd and only Hatari showed it (address errors), so run a Hatari build after a bss change.
+
+## Sound (2026-10-11)
+
+The arcade (MAME `namco/galaga.cpp`, `devices/sound/namco.cpp`): the sound CPU's NMI handler (twice a frame, lines 64
+and 192) plays the commands the main and the sub CPU leave at `$9A79` and `$9AA0-$9AB9` on the Namco WSG at
+`$6800-$681F`: three voices, each a 32 step 4-bit waveform of `prom-1.1d`, a 16 / 20 bit frequency (96 kHz steps) and a
+volume.  The 54XX (the player's explosion) gets commands from the main CPU through the 06XX.
+
+* **The sound CPU** is translated now too (`gen.py`, labels X, 841 instructions, mode "long" over its own 64 KB block
+  `g3_block`: its ROM, its I/O cells, its RAM at + $8000).  Its boot stays native; once booted, `g_sound_frame` (at
+  every VBL, after the sub CPU's IRQ) runs its NMI handler twice.  Its RAM is its own: the bytes it shares with the
+  others are copied in before and out afterwards (`$9AA0-$9ABB`, `$9A79`; in: `$9211`, the only other byte it reads;
+  the main CPU reads `$9AAC`, `$9AB6`, `$9AB9` of its page, the others write only those commands).  `machine.py`'s
+  port schedule runs it the same way (`sound_nmis`).  It runs about 960 Z80 instructions a frame.
+* **WSG to YM** (`tools/sound.py`, `snd_update` in `galaga.s`): voice n plays on YM channel n as a square wave of the
+  WSG voice's pitch (period 1365333 / freq, one octave up for waveform 4, whose shape repeats twice in its 32 steps;
+  clamped to 1-4095); loudness 15 + 2 log2(volume / 15 * waveform RMS / 7) (the YM's levels are 3 dB apart, a square
+  has RMS 7).  The registers that changed are written once a game frame (skipped when the WSG is as last time).
+* **The explosion**: a 54XX command `$1x` / `$2x` (the main CPU sends `10 10 20 20` when the player is hit) starts a
+  noise burst on channel C (period 26, level 15 for 4 frames, then one step down every 3 frames), when it is louder
+  than voice 2; `$3x` / `$4x` take four parameter bytes.  No other sound of the game uses the 54XX.
+
+Checks: `sound_test.py 6000` (in `port.py test`) runs the reference's game in the port schedule and, at every frame,
+the 68000's `g_sound_frame` on the same shared bytes: the sound CPU's page (but its stack bytes), the WSG registers and
+the YM's registers equal the reference's and the model's in 5987 of 5987 frames (4856 with sound, 14 explosions); and
+`snd_update` against the model on 3000 random WSG states.  Cost (Hatari, `-D RATE=500`, 9000 VBLs of the attract mode,
+`-D NOSOUND=1` builds without): 35.0 -> 33.1 frames a second on average, the heaviest 500 VBLs 18.9 -> 17.4.
+
+## A wait inside the main CPU's IRQ handler (2026-10-11)
+
+A task of the main CPU's IRQ handler (`$1808` -> `$134C`) waits, with the interrupts off, for the sub CPU's count of
+the attacking enemies (`$9287`, written by its IRQ handler in game state 2, table `$003B`) to become 0.  On the arcade
+the sub CPU runs on meanwhile (the reference with real timing waits there for up to 300 frames in the attract mode's
+demo); in the port's schedule the sub CPU's handler only runs after the main CPU's has returned: `machine.py`'s port
+schedule hung there (frame 3812 of the attract mode).  The runtime now hooks `$134C` (`g_spin_wait`): inside the main
+CPU's handler with the count not 0 it lets the next VBL in (SR $2300), which runs the sub and the sound CPU's frames and
+draws (the main CPU's IRQ stays off, `g1_iff`), then the wait reads the count again; `machine.py` does the same
+(`nested_frame`).  The 68000 build did not reach the wait inside the handler in 8000 VBLs of the attract mode on
+Musashi (its timing differs from the reference's schedule), so the hang was possible, not seen.  A search with a
+detector of handlers longer than a frame (seven games of 20000 frames with random play) found no other such wait.
+
+## Picture test (2026-10-11)
+
+`tools/render_test.py [N ...]` builds `-D FREEZEAT=N -D NOSTARS=1`, runs it on Musashi to VBL N + 12 and compares the
+screen shown with `render_raw()` of the arcade RAM the build froze (the palette map of `assets.py`, rotated like the
+display): 0 of 64512 pixels differ at 1500, 2200, 3000, 3600, 4400, 5200, 6400 and 8000 (1800-3300 drawn pixels each).
+`schedule_test.py` compares the pictures of the port's schedule and of the interleaved reference: they differ from frame
+900 on (the stars one scroll step apart, as before; the same with the committed reference).
+

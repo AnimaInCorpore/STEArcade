@@ -104,6 +104,7 @@ start:
 	bsr	load_roms
 
 	bsr	init_cells
+	bsr	bb_snd_init
 	bsr	init_hardware
 	bsr	init_video
 	bsr	init_render
@@ -308,6 +309,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	bsr	cs_off
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -427,6 +429,16 @@ hbl:
 vbl:
 	ifnd NOBORDER
 	arm_border_timers		; (first thing: the timers count from here)
+	endc
+	ifnd NOSOUND
+	tst.b	snd_busy		; the sound: every VBL, also the ones that only arm the timers (src/sound.s)
+	bne.s	.snd_done
+	st	snd_busy
+	movem.l	d0-d7/a0-a4,-(sp)
+	bsr	bb_snd_vbl
+	movem.l	(sp)+,d0-d7/a0-a4
+	clr.b	snd_busy
+.snd_done:
 	endc
 	tst.b	in_logic		; the game's interrupts of the last VBL still run (they are not masked
 	bne	vbl_late		; against the VBL): this one only arms the timers, the game runs slower
@@ -1442,6 +1454,7 @@ z80_unsupported:
 
 	include "render.s"
 	include "srender.s"
+	include "sound.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated programs (and their dispatch tables in the data section).
@@ -1491,6 +1504,7 @@ old_timer_a:	ds.l	1
 old_res:	ds.b	1
 old_hz:		ds.b	1
 old_linewid:	ds.b	1
+snd_busy:	ds.b	1		; (the VBL's sound runs)
 old_fa07:	ds.b	1
 old_fa09:	ds.b	1
 old_fa13:	ds.b	1

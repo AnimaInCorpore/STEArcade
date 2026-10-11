@@ -14,6 +14,7 @@ def main():
     ap.add_argument('--sim', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--assets', action='store_true', help='regenerate the graphics and palette assets')
+    ap.add_argument('--sound', action='store_true', help='record the sound driver again (tools/sound.py, ~15 min)')
     ap.add_argument('--frames', type=int, default=0)
     ap.add_argument('-D', dest='defines', action='append', default=[])
     args = ap.parse_args()
@@ -25,6 +26,14 @@ def main():
         assets = None
     if assets and (args.assets or not (build / 'spr_code.s').exists()):
         assets.build()
+    if True:                                    # (from the recordings, build/gunsmoke/fx.pkl and music.pkl)
+        import sound
+        import capsnd
+        d = sound.driver()
+        if args.sound:
+            capsnd.all_effects(d, again=True)
+            capsnd.all_tunes(d, again=True)
+        print('cs_data.s: %d bytes' % capsnd.emit(d, build / 'cs_data.s'))
     maincpu = (build / 'maincpu.rom').read_bytes()
     (build / 'fixed.rom').write_bytes(maincpu[:0x8000])
     (build / 'banks.rom').write_bytes(maincpu[0x8000:0x18000])

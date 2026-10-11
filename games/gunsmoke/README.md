@@ -4,8 +4,8 @@
 
 MAME set `gunsmoke`. The main Z80 program (fixed ROM and four 16 KB banks) is
 statically translated to 68000 code and runs on an unexpanded 8 MHz, 4 MB Atari STE
-with keyboard and joystick input. Graphics use a fixed 16-colour Oklab palette; the
-sound CPU and the YM2203s are omitted.
+with keyboard and joystick input. Graphics use a fixed 16-colour Oklab palette; the sound
+driver's effects and music play on the STE's YM2149 (see "Sound").
 
 ```sh
 python port.py prepare gunsmoke      # verify the 32 ROMs, build the MAME regions
@@ -127,6 +127,41 @@ second (the autoplay run differs from build to build). `render_test.py` (Musashi
 84-380k cycles (median 89k in round 1, 251k in round 3), a frame of a D802 slide 238k, a
 full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.8M).
 
+Short Blitter passes (2026-10-11): no HOG pass is longer than ~256 bus cycles (`engine/rt/borders.s` `blit_go`: the
+masked foreground passes now run in pieces of 16 words), so the top border interrupt is never held back long.  Hatari
+(DEBUG + AUTOPLAY, 6000 VBLs, sound on): 50.6 -> 48.9 game ticks and 24.2 -> 23.0 drawn frames a second; no border
+event started late in that run.
+
+## Sound (2026-10-11)
+
+The sound board (MAME `capcom/gunsmoke.cpp`): a Z80 at 3 MHz, two YM2203 at 1.5 MHz, four IRQs a frame.  Its driver is
+Capcom's of Commando (the same code at other addresses), so the port uses the engine's generalisation of Commando's
+method, `engine/capsnd.py` (recording, models, checks) and `engine/rt/capsnd.s` (the 68000 player): translating the
+driver would cost about 3,800 Z80 instructions a frame.  `tools/sound.py` describes the driver (RAM C000, latch C800,
+the command table at 0085, the effect slots C500-C580 / C600-C680, the music slots C100-C400) and records:
+
+* **Effects** (29 commands, the SSG only): each recorded alone in the four phases of the IRQ counter, a stream of the
+  SSG registers per IRQ.  This driver has five slots a chip, and its output ends the lower slots under the one shown
+  unless their byte 31 is $FF (0A97 / 0C54; an effect opcode sets it, 077A, and nothing clears it): the byte is
+  recorded with the registers, the player keeps it per slot.
+* **Music** (32 tunes, FM only): each channel of each tune recorded alone through `engine/opn.py` (the YM2203's
+  envelopes after ymfm) as a YM2149 period and volume per tick, with its own loop (confirmed over a period more) or the
+  release of its notes as a tail.
+* **Stops**: found by running every command's handler (00 / 1E clear the lower four effect slots, 1F the music).
+
+`build/gunsmoke/cs_data.s` holds 87 KB of streams.  The STE runs the driver's four IRQs of a tick and the music's tick
+when it delivers the game's tick (`z80_hook`), then writes the YM registers that changed: the chip whose shown effect
+started last, the loudest music channels on the YM channels it leaves.  About 8,000 cycles a tick in the game's play
+(Musashi; ~5% of the CPU at 54 ticks a second). Hatari (DEBUG + AUTOPLAY, 6000 VBLs): 50.6 game ticks and 24.2 drawn frames a
+second; the same build without the sound (`-D NOSOUND=1`) 52.7 and 26.1.
+
+Checks: `sound.py check 6000` runs the real driver beside the model: the music streams through the decoder 0 of
+379,557 channel ticks differ; the effects with random commands 26 of 48,000 chip-IRQs differ audibly and with the
+game's own commands (`ref/cover.py`'s play) 14 of 48,000: the noise period at an effect's first IRQs, left by the
+effect before (another 300-400 differ only in registers of silent channels).  `sound_test.py` (in `port.py test`):
+the 68000 player against the model, 0 of 20,000 ticks differ.  Hatari: the attract music and the play's effects in a
+recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again (~15 min on 8 cores).
+
 ## Validation
 
 * All 32 ROM files pass the checked-in MAME CRC32/SHA1 manifest.
@@ -147,6 +182,6 @@ full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.
   57 screenshots (6 in the middle of the slide) without a dropped or shifted picture,
   colour in the side bars or in the line above the picture.
 
-Not done: sound, the flip screen (the DIP switch is upright), the service mode. The last
+Not done: the flip screen (the DIP switch is upright), the service mode. The last
 line of the picture is sometimes black from a varying x on: Timer A's palette off comes
 in that line (seen in Hatari screenshots before and after the hardware scrolling).

@@ -353,3 +353,34 @@ Also seen in Black Tiger (2026-10-09):
   choice has to be made at run time, not in the recording.
 * **Check the pitch against MAME's audio**: poke the sound latch from a Lua script (`space:write_u8` goes through the
   handlers) and `-wavwrite`; correlate semitone spectra of both (a wrong prescaler or octave shows as a shifted peak).
+
+## Recorded sound for every port (Gun.Smoke, 1943, Black Tiger, Bubble Bobble; 2026-10-11)
+
+Commando's method (record the sound driver's output per command, play it in the driver's own scheme) became shared:
+`engine/capsnd.py` (a driver described by its addresses: the board, the recordings, the models, the checks, the data
+of `engine/rt/capsnd.s`), `engine/rt/capsnd_core.s` (the stream decoders and the mixer, also used by Black Tiger's and
+Bubble Bobble's own players).  Regenerating Commando's data with it gives Commando's recordings exactly.
+
+* **Find the driver's facts by running it, not by reading it**: which commands stop which slots (run every handler on
+  a board whose slots are all marked busy), which chip parts a command uses (log the writes of each command alone).
+* **Check the model against the real driver, then the 68000 player against the model.**  Compare what sounds: a
+  channel with tone and noise off is silent whatever its period and volume (`capsnd.audible`); start the model's IRQ
+  counter where the driver's boot left it.  What is left are real limits of recording each command alone (a noise
+  period an effect inherits from the one before; an FM envelope carried over), counted in the READMEs.
+* **Drivers differ in the details**: Gun.Smoke's and 1943's end the lower effect slots under the shown one unless a
+  byte of theirs is $FF (an effect opcode sets it and nothing clears it); Black Tiger's (timer-driven, ~250 Hz) has
+  priorities, one effect slot a chip and a main / backup tune; Bubble Bobble's (Taito) has 26 tracks, two per channel,
+  the A track winning, and a tempo the tunes change: record that one in real time (a value a VBL), and find loops on
+  the chip writes of the driver's timer ticks, per timer (its RAM holds counters that never repeat).
+* **Long effects and big tunes**: an effect that repeats a period for minutes keeps one period with a loop and a total
+  (`compact`); tunes as data for a 250 Hz player pack 3x with a byte LZ (`engine/lz.py`, `rt/lz.s`): unpack when a tune
+  starts, in the idle hook, not in the VBL.  Phase exceptions above 8 KB are dropped (`capsnd.EXC_LIMIT`).
+* **Memory**: 1943 and Black Tiger had 26-45 KB free.  Their dispatch entry lists (91 / 115 KB) are read once at the
+  start: the generator emits them as a macro placed last in the data section, where the screen buffer begins, the rest
+  of which is the first thing in the BSS (the program checks that the two parts meet and fills the dispatch tables
+  first).  The memory comes back for the sound.
+* **Pitfalls met**: Musashi does not fault a word access at an odd address (`clr.w` at `bb_ssg+9`; Hatari did), so
+  start every BSS block of new code with `even`; a recording of a few seconds says nothing about a game whose attract
+  mode is silent for its first 25 s (Black Tiger) — look at the reference's commands before calling Hatari silent; a
+  driver may read back the SSG registers or wait for the second chip's timer at boot (Bubble Bobble); a game's asset
+  builder may put another game's tools first in `sys.path` (1943's: 1942's `sound.py`).

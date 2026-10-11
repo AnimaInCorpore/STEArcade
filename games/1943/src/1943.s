@@ -11,6 +11,12 @@ TA_DATA = 98
 TA_NOPS = 84
 PIC_LINES = 256
 BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's first line, off after its last)
+; The screen buffer (render.s) begins in the data section: its first part holds the dispatch entries (gen.py's
+; g_entries_data, last in the data section), which init_dispatch reads once before anything uses the screen; the
+; rest is the first thing in the BSS, which follows the data directly (start checks it).
+    section bss,bss
+screen_tail: ds.b 3*RING_SIZE+256-(init_only_end-screen_area)
+    section text,code
     include "borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
@@ -57,6 +63,13 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
+    move.l #init_only_end,d0     ; (the screen's two parts must be contiguous: see screen_tail)
+    cmp.l #screen_tail,d0
+    beq.s .contiguous
+    illegal
+.contiguous:
+    bsr init_dispatch            ; (first: its entries are in the screen buffer)
+    bsr cs_init
     lea fixed_rom,a0
     lea G_Z80,a1
     move #$8000/4-1,d0
@@ -66,7 +79,6 @@ start:
     bsr init_hardware
     bsr init_video
     bsr mcu_init
-    bsr init_dispatch
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
@@ -219,6 +231,11 @@ z80_hook:
 .deliver:
     subq.b #1,vbl_pending
     addq.w #1,cnt_ticks
+    ifnd NOSOUND
+    movem.l d0-d7/a0-a4,-(sp)
+    bsr cs_tick                  ; (the sound driver's tick: the latch the last tick left)
+    movem.l (sp)+,d0-d7/a0-a4
+    endc
     ifd AUTOPLAY
     bsr autoplay
     endc
@@ -414,6 +431,11 @@ dbg_counters:
     include "hardware.s"
     include "mcu.s"
     include "render.s"
+; the sound (engine/rt/capsnd.s; the data from tools/sound.py)
+CS_LATCH = G_Z80-$3800           ; C800: the main CPU's sound latch
+    include "cs_data.s"
+    section text,code
+    include "capsnd.s"
     include "code_1943.s"
     include "rtlib.s"
 z80_badpc:
@@ -454,6 +476,10 @@ fixed_rom:
     incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
+    even
+screen_area:                     ; (the screen buffer's first part: the dispatch entries until init_dispatch has run)
+    g_entries_data
+init_only_end:
     section bss,bss
 old_ssp: ds.l 1
 old_screen: ds.l 1

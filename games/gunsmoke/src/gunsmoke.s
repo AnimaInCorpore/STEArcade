@@ -124,6 +124,7 @@ start:
 	stage	$00f
 	bsr	init_dispatch
 	bsr	gs_latch
+	bsr	cs_init
 
 	move.b	#$FF,Z_SYSTEM
 	move.b	#$FF,Z_SYSTEM+1
@@ -348,6 +349,7 @@ restore_hardware:
 	move.l	old_acia,$118.w
 	move.l	old_timer_b,$120.w
 	move.l	old_timer_a,$134.w
+	bsr	cs_off
 
 	ifnd SIM
 .w1:	btst	#1,$fffffc00.w
@@ -479,6 +481,9 @@ z80_hook:
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 .deliver:
+	ifnd NOSOUND
+	bsr	cs_tick			; (the sound driver's tick: the latch the last tick left)
+	endc
 	movem.l	(sp)+,d0-d7/a0-a6
 	lea	own_stack_top,sp	; (the hook's continuation is dropped: the handler returns to $00B0 by itself)
 	subq.b	#1,vbl_pending
@@ -834,6 +839,15 @@ z80_unsupported:
 	bra	crash_common
 
 	include "render.s"
+
+; ------------------------------------------------------------------------------
+; The sound (engine/rt/capsnd.s; the data from tools/sound.py)
+
+CS_LATCH = G_Z80-$3800			; C800: the main CPU's sound latch
+	include	"cs_data.s"
+	section text,code
+	include	"capsnd.s"
+	section text,code
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch lists in the data section).
