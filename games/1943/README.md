@@ -9,7 +9,7 @@ i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter 
 python port.py prepare 1943                 # auto: US archive if present, otherwise Euro
 python port.py prepare 1943 --set 1943       # explicitly choose the available Euro set
 python port.py prepare 1943 --set 1943u      # requires the US Rev C program ROMs
-python port.py cover 1943                   # 20 coverage runs (seeds 6-20: MAME's cheats, one stage each)
+python port.py cover 1943                   # 40 coverage runs (seeds 6-20: MAME's cheats, one stage each; 21-40: play that dies)
 python port.py build 1943                   # assets + translation -> run/1943/1943.PRG (--sim: the Musashi build)
 python port.py test 1943                    # ROMs, graphics, reference, lock-step logic and pictures
 python port.py run 1943                     # Hatari (tools/hatari.sh)
@@ -62,10 +62,12 @@ See [hardware notes](docs/hardware-notes.md).
 
 ## Translation and schedule
 
-`tools/gen.py` (`translate.compile_code`, `z80x.FAST`, the banked window rules of Black Tiger): 14,103 instructions
+`tools/gen.py` (`translate.compile_code`, `z80x.FAST`, the banked window rules of Black Tiger): 14,314 instructions
 from the fixed ROM and banks 0, 1, 4, 6, none unsupported.  Besides the coverage roots, discovery adds the
 continuations of the object allocators (`06EC` and relatives: `pop hl; inc hl` x3; `jp (hl)` returns to the call + 6
-on success, `skips()`); random play reached one (bank 0 `A000`) that no coverage run had seen.
+on success, and the compare `03C0` to + 3 / + 6: `discover.skip_returns`); random play reached one (bank 0 `A000`) that no coverage run had seen.  It also adds every
+entry of the fixed ROM's jump tables (`JUMP_TABLES`: `59BC`, an object's type, and `5C18`): random play reached
+`5AE2` after 6 minutes (2026-10-10, a quit to the desktop for a player: `z80_badpc`), 11 entries were untranslated.
 
 The program is Capcom's task kernel (as Black Tiger): the scheduler at `00B6` runs the ready tasks of the table at
 `EF80` and loops at `00D4` when none is ready.  `src/1943.s` hooks `00D4`: it draws the frame, then delivers a tick:

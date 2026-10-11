@@ -36,7 +36,7 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
 
     engine/            shared: Z80 / 6801 emulators and disassemblers, translators (z80x, translate, m6801x), STE simulator on
                        Musashi (sim.py), Blitter sprite code generator, ROM preparation (roms.py), paths and toolchain;
-                       rt/: the shared 68000 runtime (rtlib.s, borders.s, jagpad.s); *_test.py: the engine's tests
+                       rt/: the shared 68000 runtime (rtlib.s, borders.s, jagpad.s, ikbd.s); *_test.py: the engine's tests
     games/<game>/      one folder per port, all alike:
       README.md        state, controls, method, measurements (a screenshot at the top)
       src/             <game>.s (start, VBL schedule, input, hooks) and the parts it includes, named by topic without a

@@ -7,7 +7,7 @@
     port.py cover  <game> [seeds ...]        coverage runs the translator is seeded from (parallel; ~15 min for dkong)
     port.py build  <game> [build.py args]    translate + assemble + link -> run/<game>/   (--sim: the simulator build)
     port.py test   <game> [frames]           the tests that compare the build with the reference machine
-    port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader)
+    port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader, the IKBD stream)
     port.py run    <game> [item@s ...]       Hatari (tools/hatari.sh): screenshots, key presses, memory dumps
     port.py mame   <game> [frames ...]       reference renderer against MAME's own picture (needs `mame`)
     port.py release <version> [--no-build]  every port built and packed: release/STEArcade-<version>.zip (tools/release.py)
@@ -33,7 +33,8 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
-    "1943": [("ref/cover.py", list(range(1, 21)), 20000)],     # 4-5: attract, the test inputs; 6-20: cheats, one stage each
+    "1943": [("ref/cover.py", list(range(1, 21)), 20000),      # 4-5: attract, the test inputs; 6-20: cheats, one stage each
+             ("ref/cover.py", list(range(21, 41)), 60000)],    # 21-40: random play that dies, every start stage
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
@@ -82,7 +83,7 @@ TESTS = {
              ("tools/sprite_test.py", [], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py"]
+ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py"]
 assert set(COVER) == set(TESTS) == set(GAMES)
 
 

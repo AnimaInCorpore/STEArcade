@@ -287,6 +287,7 @@ def generate(extra_roots=()):
     roots = {0, 0x38, 0x66, IDLE, *extra_roots}
     saved = discover.decode
     discover.decode = decode
+    skip_cache = {}
     try:
         while True:
             code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
@@ -358,6 +359,10 @@ def generate(extra_roots=()):
                 if nxt and (nxt.mn in ('jp','call') and nxt.target in SCRIPT_ENTRIES
                             or nxt.mn == 'ld' and list(nxt.ops) == [('ind','ix',30),('r8','l')]):
                     script(ins.ops[1][1], bank)
+            # Functions that return past the caller's next bytes (pop hl; inc hl ...; jp (hl)): the compares of
+            # 8 / 4 bytes at 03B2 return to the call + 2 / + 4 (a jr each) when equal / greater (2026-10-10: 15 of
+            # these continuations were untranslated).
+            continuations |= discover.skip_returns(rom, code, lambda pc: pc < 0x8000 or pc >= VBASE, skip_cache)
             missing = continuations - set(code)
             if not missing:
                 break

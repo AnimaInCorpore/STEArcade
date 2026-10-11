@@ -88,3 +88,32 @@ z80_daa:
 	ori.b	#4,d6
 .nz:	rts
 
+
+; After a crash, the hardware given back to TOS: says that CRASH.TXT has the details and waits for Return
+; (crash_wait: the wait alone).  Keys still pressed from the game would take a "press a key" away at once.
+crash_notice:
+	pea	crash_notice_text(pc)
+	move	#9,-(sp)		; Cconws
+	trap	#1
+	addq	#6,sp
+crash_wait:
+.flush:	move	#11,-(sp)		; Cconis: drop what was typed before
+	trap	#1
+	addq	#2,sp
+	tst	d0
+	beq.s	.wait
+	move	#8,-(sp)		; Cnecin
+	trap	#1
+	addq	#2,sp
+	bra.s	.flush
+.wait:	move	#8,-(sp)
+	trap	#1
+	addq	#2,sp
+	cmp.b	#13,d0
+	bne.s	.wait
+	rts
+
+crash_notice_text:
+	dc.b	13,10,"Crashed: CRASH.TXT has the details.",13,10	; (40 columns in low resolution)
+	dc.b	"Press Return.",13,10,0
+	even

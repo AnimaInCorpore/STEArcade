@@ -293,6 +293,19 @@ the arcade's input bytes, active high), the two IKBD joysticks (port 1 player 1,
 Galaga OR them into one player), Esc quits.  The IKBD gives a joystick one fire button: button 2 (and Gun.Smoke's
 third) is on the keyboard, or Bubble Bobble's joystick up.
 
+The byte stream itself is framed by `engine/rt/ikbd.s` (`ikbd_byte` at the top of every handler's loop, `ikbd_vars`
+in the bss): a data byte read as a key is a key, and a joystick's "up" byte is $01 = Esc ("down" $02 = the key 1).
+So every packet is skipped by its length ($F6-$FD too), an ACIA overrun (OVRN after a read: the next byte was lost)
+drops the packet being read and the next byte when it can be a joystick data byte, and Esc quits only on its release
+right after its press.  `engine/ikbd_test.py` feeds it streams with lost bytes (the MC6850's / Hatari's overrun: the
+byte arriving into a full buffer is lost).  In Hatari the handlers read every byte within 2 lines (an overrun needs
+~20), so this is a guard, not a cure: a "sudden quit" is more likely a crash (below).
+
+A crash (an exception: `crash_stubs`; or `z80_badpc`, the vector 99) writes `CRASH.TXT` next to the program, gives the
+hardware back and then shows `crash_notice` (`engine/rt/rtlib.s`): the message waits for Return, after dropping what
+was typed, since a key still pressed from the game would take a "press a key" away at once (the ports quit
+silently before).
+
 The pads of the STE's enhanced joystick ports (Jaguar pad / PowerPad: pad A player 1, pad B player 2, A / B / C the
 buttons, Option coin, Pause start, keypad 1 / 2 / 5 / 6 as the number keys, * + # quit) are read once a VBL by
 `engine/rt/jagpad.s`.  The port only says which bits a pad button sets (`JP1_UP` ... `JP_COIN2`, longs in its

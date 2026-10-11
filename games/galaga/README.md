@@ -142,6 +142,14 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
   `star_count` when the program rewrote the screen for several frames before a screen was
   drawn (bus error in `erase_stars`): a full list now sets `list_full` and the draw screen
   redraws every cell.
+- Restart at the end of every game (2026-10-10, a player's "quit in the middle of the game"): the code behind the
+  `halt` at $06DE (the 51XX back to its credit mode, the games counter $99E1) was never translated, discovery ended
+  every flow at a `halt`, and the translation fell through into $0728, whose `ret nz` popped 0 from an empty stack:
+  the program booted again.  The `halt` at $055F fell into $0562 the same way.  The translator now continues after a
+  `halt` (`z80dis`: flow `seq`) and has `rrd` (the end-of-game code's $0A27).  Found by random keys in Hatari with
+  `-D RESETTRAP=1` (a jump to $0000 of either CPU ends in CRASH.TXT, vector 97 / 96, the Z80 stack in its stack
+  words) and Hatari's CPU history: a breakpoint on `reset_trap1` (map address + $188e4) with `:trace :file` running
+  `history save`, the 68000 pcs mapped back to the Z80 labels through `build/galaga/galaga.map`.
 - Boot: the main CPU's RAM test is skipped (`--full-selftest` keeps it), the grid screen
   and the handshake wait ($3719 loops, ~200 frames) remain.
 - Sprite path (2026-10-09, Hatari's profiler, VBL 3500-3800, the formation): 242.7k -> 208.0k cycles a render, 81 ->

@@ -62,6 +62,7 @@ JP_START2 = $08<<16
 JP_COIN1 = $80<<16
 JP_COIN2 = JP_COIN1			; (one coin slot)
 	include	"jagpad.s"
+	include	"ikbd.s"
 
 stage	macro
 	ifd DEBUG
@@ -519,33 +520,7 @@ acia_isr:
 	movem.l	d0-d2/a0,-(sp)
 
 .again:
-	move.b	$fffffc00.w,d0
-	btst	#0,d0
-	beq	.done
-
-	moveq	#0,d1
-	move.b	$fffffc02.w,d1
-
-	move.b	ikbd_state,d0
-	bne	.packet_byte
-
-	cmp.b	#$fe,d1
-	beq	.header_joy0
-	cmp.b	#$ff,d1
-	beq	.header_joy1
-	cmp.b	#$f6,d1
-	bhs	.again			; other packets are not expected
-
-	; Scancode.
-
-	move.b	d1,d2
-	and.b	#$7f,d1
-	cmp.b	#KEY_ESC,d1
-	bne	.not_esc
-	tst.b	d2
-	bmi	.again
-	st	quit_flag
-	bra	.again
+	ikbd_byte
 
 .not_esc:
 	lea	key_table,a0
@@ -575,14 +550,6 @@ acia_isr:
 	move.b	2(a0),d0
 	not.b	d0
 	and.b	d0,in2_kbd
-	bra	.again
-
-.header_joy0:
-	move.b	#1,ikbd_state
-	bra	.again
-
-.header_joy1:
-	move.b	#2,ikbd_state
 	bra	.again
 
 .packet_byte:
@@ -707,6 +674,7 @@ crash_common:
 	addq	#4,sp
 
 	bsr	restore_hardware
+	bsr	crash_notice
 	clr	-(sp)
 	trap	#1
 
@@ -823,9 +791,7 @@ z80_unsupported:
 	move	#9,-(sp)
 	trap	#1
 	addq	#6,sp
-	move	#1,-(sp)
-	trap	#1
-	addq	#2,sp
+	bsr	crash_wait
 	bra	quit
 
 	include "render.s"
@@ -852,7 +818,7 @@ rom_cpu:	incbin	"rom_cpu.rom"
 
 bad_text:
 	dc.b	13,10,"Donkey Kong: the translated program reached an unknown address.",13,10
-	dc.b	"Press a key.",13,10,0
+	dc.b	"Press Return.",13,10,0
 
 	include "dk_assets.s"
 
@@ -891,7 +857,7 @@ freeze_flag:	ds.b	1
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
 in2_kbd:	ds.b	1
-ikbd_state:	ds.b	1
+	ikbd_vars
 joy0_state:	ds.b	1
 joy1_state:	ds.b	1
 	even

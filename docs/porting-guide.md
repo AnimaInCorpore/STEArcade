@@ -19,8 +19,8 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
    what static recursive descent finds; anything coverage found but discovery missed is a hook or a table.
 5. **Translate** (`tools/gen.py` of the game, config in `engine/z80x.py`, pipeline `translate.compile_code`): memory
    model, register map (`z80x.FAST`, see below), hooks for I/O writes and yields, window/bank handling for banked ROMs.  `port.py test <game>`: lock-step against the reference (RAM every frame).
-6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input (the IKBD handler and key_table, the
-   pads through `engine/rt/jagpad.s`: the `JP1_*` ... `JP_COIN2` bits, `jagpad_poll` and `jp_merge` in the VBL), border
+6. **Runtime** (`src/<game>.s`): loader, dispatch tables, VBL schedule, input (the IKBD handler around `ikbd_byte`
+   of `engine/rt/ikbd.s` and key_table, the pads through `engine/rt/jagpad.s`: the `JP1_*` ... `JP_COIN2` bits, `jagpad_poll` and `jp_merge` in the VBL), border
    removal, hooks.  A new port gets a line in `port.py`'s `GAMES` (and its tables), `tools/release.py`'s list and the
    README's tables; its folder follows the README's "Layout" (ROMs: `tools/prepare.py` + `docs/rom_manifest.json`).
 7. **Renderer**: exact against the reference bitmap through the colour table first (`render_test.py` style:
@@ -150,6 +150,21 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
   read makes the translation stop with an `unsupported` entry (it never guesses).
 * **Jump tables behind a call** (`call T` with the words following it, T pops the return address) are found statically
   (`discover.py table_calls`); anything the coverage does not see stops the lock-step at `z80_badpc` and names the pc.
+* **Coverage misses table entries**: Capcom's `ld hl,T; add hl,de; ld e,(hl); inc hl; ld d,(hl); ex de,hl; jp (hl)`
+  tables have entries that no coverage run reaches (1943's object types 10-14 at `59BC`: a player's random play hit
+  `5AE2` after 6 minutes).  `discover.py hl_tables` finds the form, but in a banked program it also reads data and the
+  window's tables as tables; 1943 names its fixed tables (`gen.py JUMP_TABLES`).  Check every translated `jp (hl)`:
+  its table's entries (or, behind a byte table of offsets as in Gun.Smoke, the entries those offsets select) must all
+  be translated.  A random-input run in Hatari (keys through `--cmd-fifo`, a few minutes) finds what the coverage seeds
+  did not.
+* **Functions that return past the call** (`pop hl`, k x `inc hl`, `jp (hl)`, also across a `jr`): Capcom's
+  allocators and the 8 / 4-byte compares (1943 `03C0`, Black Tiger `03B2`, Gun.Smoke `0365`: the caller has a `jr` /
+  `jp` for less, equal, greater) continue at call + 3 + k.  `discover.skip_returns` finds those continuations; a port
+  adds them as roots and discovers again until none is missing (1943, Black Tiger and Gun.Smoke do).  Before, only
+  1943 had it, and only without the `jr`: 31 continuations of the compares were untranslated.
+* **Coverage that dies**: random play with invincibility (1943 seeds 6-20) never runs what dying runs; seeds 21-40
+  (play that dies, every start stage, faster input changes) found 1038 more bank/pc pairs, among them both targets the
+  Hatari runs had crashed on.
 * **Dirty flags by coverage**: the renderer only diffs the video RAM after a store to it; the sites are coverage results, the lock-step test checks
   that every change had its flag, and the renderer rescans now and then.
 * **Test windows that wrap.**  The first renderer test passed for 1000+ frames and the wrapped half of the scroll ring was never drawn: a window
@@ -227,6 +242,11 @@ the rules its runtime must keep:
 * **An interrupt's `push af` saves d6**, which need not hold the interrupted code's flags at that moment (they may be in
   the CCR; the 68000's own interrupt restores them).  The pushed byte is not state: compare it in a test only where the
   translation makes the flags exact (1942: hooks, `jp (hl)`).
+* **`halt` goes on with the next instruction** (it waits for an interrupt).  Discovery used to end a flow there and the
+  emitter put no jump behind it, so the code after a `halt` was translated only if a coverage run had reached it, and
+  otherwise the translation fell into whatever was translated next: Galaga restarted at the end of every game, and
+  Bubble Bobble's `11E6`, Commando's `2F4D` and 1942's `7953` (data read as code) fell into the wrong code too.
+  `z80dis` gives `halt` the flow `seq` now; `x_halt` keeps the CCR across the runtime's wait.
 * **Unforeseen entries stop loudly**: a computed jump to a pc the analysis did not count as an entry (joins: entries,
   return points, jump table targets, code addresses held as numbers) now ends at `z80_badpc` with the pc in d7 when the
   pc is inside a merge.  The cure is the same as for the CCR analysis: make it a join (a table root or a hook).

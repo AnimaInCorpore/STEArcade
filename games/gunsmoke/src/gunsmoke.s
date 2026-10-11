@@ -55,6 +55,7 @@ JP_START2 = $02<<24
 JP_COIN1 = $40<<24
 JP_COIN2 = $80<<24
 	include	"jagpad.s"
+	include	"ikbd.s"
 
 ; The Z80 address space as 68k addresses ("signed" model: a6 = G_Z80 = the Z80 address 0, 8000-FFFF below it).
 
@@ -512,31 +513,7 @@ acia_isr:
 	movem.l	d0-d2/a0,-(sp)
 
 .again:
-	move.b	$fffffc00.w,d0
-	btst	#0,d0
-	beq	.done
-
-	moveq	#0,d1
-	move.b	$fffffc02.w,d1
-
-	move.b	ikbd_state,d0
-	bne	.packet_byte
-
-	cmp.b	#$fe,d1
-	beq	.header_joy0
-	cmp.b	#$ff,d1
-	beq	.header_joy1
-	cmp.b	#$f6,d1
-	bhs	.again
-
-	move.b	d1,d2
-	and.b	#$7f,d1
-	cmp.b	#KEY_ESC,d1
-	bne	.not_esc
-	tst.b	d2
-	bmi	.again
-	st	quit_flag
-	bra	.again
+	ikbd_byte
 
 .not_esc:
 	lea	key_table,a0
@@ -573,14 +550,6 @@ acia_isr:
 	not.b	d0
 	and.b	d0,p2_kbd
 	bsr	compose_inputs
-	bra	.again
-
-.header_joy0:
-	move.b	#1,ikbd_state
-	bra	.again
-
-.header_joy1:
-	move.b	#2,ikbd_state
 	bra	.again
 
 .packet_byte:
@@ -740,6 +709,7 @@ crash_common:
 	addq	#4,sp
 
 	bsr	restore_hardware
+	bsr	crash_notice
 	clr	-(sp)
 	trap	#1
 
@@ -917,7 +887,7 @@ render_skips:	ds.b	1		; the ticks since the last frame was drawn
 frame_dirty:	ds.b	1		; the tasks of the last tick have run: draw
 frame_ready:	ds.b	1		; a frame is drawn, to be shown at the VBL (its ring + 1)
 g_bank:		ds.b	1
-ikbd_state:	ds.b	1
+	ikbd_vars
 joy0_state:	ds.b	1
 joy1_state:	ds.b	1
 sys_kbd:	ds.b	1

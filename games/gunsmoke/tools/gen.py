@@ -188,8 +188,17 @@ def generate():
     roots = {0, 0x38, IDLE, RESCAN} | jumps
     saved = discover.decode
     discover.decode = decode
+    skip_cache = {}
     try:
-        code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
+        while True:
+            code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
+            # functions that return past the caller's next bytes (pop hl; inc hl ...; jp (hl)): the compares of
+            # 8 / 4 bytes at 0365 return to the call + 2 / + 4 (a jr each) when equal / greater (2026-10-10: 15
+            # of these continuations were untranslated)
+            missing = discover.skip_returns(rom, code, lambda pc: pc < WIN_LO or pc >= VBASE, skip_cache) - set(code)
+            if not missing:
+                break
+            roots |= missing
     finally:
         discover.decode = saved
     code = {pc: ins for pc, ins in code.items() if pc < WIN_LO or pc >= VBASE}

@@ -35,6 +35,7 @@ JP_START2 = $02<<24
 JP_COIN1 = $40<<24
 JP_COIN2 = $80<<24
 	include	"jagpad.s"
+	include	"ikbd.s"
 BUSY = $80
 HOG = $40
 G_Z80 = g_block+$8000
@@ -494,7 +495,7 @@ g_control: ds.b 1
 g_layers: ds.b 1
 g_mcu_response: ds.b 1
 mcu_command: ds.b 1
-ikbd_state: ds.b 1
+	ikbd_vars
 joy0_state: ds.b 1
 joy1_state: ds.b 1
 sys_kbd: ds.b 1

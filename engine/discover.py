@@ -110,7 +110,7 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
                 work.append(ins.target)
                 pc = nxt
                 continue
-            if fl in ("ret", "ijmp", "halt"):
+            if fl in ("ret", "ijmp"):
                 break
             if fl == "cret":
                 pc = nxt
@@ -167,3 +167,58 @@ def hl_jump_tables(rom, code, tables, known=(), verbose=False):
             print("hl table at %04X (jump at %04X, limit %s): %s" % (ldhl, pc, limit, ["%04X" % t for t in tbl]))
         new += [t for t in tbl if t not in code]
     return new
+
+
+def skip_offsets(rom, target, inside, cache):
+    """The return offsets of a function that returns past its caller's next bytes: `pop hl`, k x `inc hl` (on a
+    straight path, across `jr` / `jp`), `jp (hl)`, on a path from `target` (calls stepped over).  Capcom's object
+    allocators return to the call + 3 + 3 on success (1943 06EC); the compares of 8 / 4 bytes (1943 03C0, Black Tiger
+    03B2, Gun.Smoke 0365) return to the call + 3 when less, + 3 + 2 (or 3) when equal, + 3 + 4 (6) when greater, where
+    the caller has a `jr` (`jp`) for each.  inside(pc): the addresses that hold code (a banked port's virtual ones)."""
+    if target in cache:
+        return cache[target]
+    found, seen, work = set(), set(), [target]
+    while work and len(seen) < 400:
+        pc = work.pop()
+        while pc not in seen and inside(pc):
+            seen.add(pc)
+            ins = decode(rom, pc)
+            if ins.mn == 'pop' and ins.ops == [('r16', 'hl')]:
+                k, q = 0, pc + ins.length
+                for _ in range(16):
+                    i2 = decode(rom, q)
+                    if i2.text == 'inc hl':
+                        k += 1
+                    elif i2.mn in ('jp', 'jr') and len(i2.ops) == 1 and i2.target is not None:
+                        q = i2.target
+                        continue
+                    elif i2.text == 'jp (hl)':
+                        if k:
+                            found.add(k)
+                        break
+                    else:
+                        break
+                    q += i2.length
+            nxt = pc + ins.length
+            if ins.mn in ('ret', 'reti', 'retn') and not ins.ops or ins.mn == 'jp' and ins.ops and ins.ops[0][0] == 'ind':
+                break
+            if ins.mn in ('jp', 'jr') and len(ins.ops) == 1 and ins.target is not None:
+                pc = ins.target
+                continue
+            if ins.mn in ('jp', 'jr', 'djnz') and ins.target is not None:
+                work.append(ins.target)
+            pc = nxt
+    cache[target] = found
+    return found
+
+
+def skip_returns(rom, code, inside=lambda pc: True, cache=None):
+    """The continuations after the calls of such functions (see skip_offsets): add them as roots and discover again
+    until none is missing."""
+    cache = {} if cache is None else cache
+    out = set()
+    for pc, ins in code.items():
+        if ins.mn == 'call' and ins.target is not None:
+            for k in skip_offsets(rom, ins.target, inside, cache):
+                out.add(pc + ins.length + k)
+    return out

@@ -919,7 +919,10 @@ class Emitter:
         pass
 
     def x_halt(self, ins):
-        self.e("jsr z80_halt")           # the runtime: wait for the next interrupt
+        # the runtime waits for the next interrupt; the flags the translation keeps in the CCR survive its wait loop
+        self.e("move sr,-(a7)")
+        self.e("jsr z80_halt")
+        self.e("move (a7)+,ccr")
 
     def x_ld_a_r(self, ins):
         self.e("jsr z80_rnd")            # the runtime: a pseudo random byte in d0 (the refresh register)
@@ -940,6 +943,23 @@ class Emitter:
         self.e("lsr.w #8,d7")
         self.e("and.b #$F0,d0")
         self.e("or.b d7,d0")             # new A = A & $F0 | old (hl) >> 4
+        self.flags(S | Z, const_clear=H | N)
+
+    def x_rrd(self, ins):
+        pre, ea = self.read8(("ind", "hl", 0), io_read=False)
+        for l in pre:
+            self.e(l)
+        self.e("moveq #0,d7")
+        self.e("move.b %s,d7" % ea)
+        self.e("ror.w #4,d7")            # (hl) $XY -> $Y00X
+        self.e("move.b d0,d5")
+        self.e("lsl.b #4,d5")
+        self.e("or.b d5,d7")
+        self.e("move.b d7,%s" % ea)      # new (hl) = (A & 15) << 4 | old (hl) >> 4
+        self.e("lsr.w #8,d7")
+        self.e("lsr.b #4,d7")
+        self.e("and.b #$F0,d0")
+        self.e("or.b d7,d0")             # new A = A & $F0 | old (hl) & 15
         self.flags(S | Z, const_clear=H | N)
 
     # ---- loads ------------------------------------------------------------

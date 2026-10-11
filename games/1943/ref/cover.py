@@ -5,7 +5,9 @@
 Seeds 1-3: random play on the arcade schedule (run_frame).  The rest run the port's schedule (run_frame_port):
 seed 4 the attract mode alone (no coin), seed 5 logic_test.py's default inputs, seeds 6-20 random play with MAME's
 cheats (1943.xml: infinite energy F206, invincibility F214, "select next level" E450 = seed - 6 while the game
-starts), one stage each.
+starts), one stage each.  Seeds 21-40: random play that dies (only the stage cheat, E450 = (seed - 21) % 15; the
+inputs change every 4-40 frames, coins and starts keep coming): what invincible play never runs (the random play of
+2026-10-10 in Hatari reached two object handlers that seeds 1-20 had not seen).
 """
 import pickle
 import random
@@ -16,6 +18,7 @@ from machine import Game1943
 from paths import build_dir
 
 CHEAT_SEEDS = range(6, 21)
+DYING_SEEDS = range(21, 41)
 
 
 def main():
@@ -46,12 +49,20 @@ def main():
     if port:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
         from logic_test import inputs
+    nxt = 0
     for frame in range(frames):
         if seed == 5:
             m.inputs[:3] = inputs(frame)
+        elif seed in DYING_SEEDS and frame >= 700:
+            m.inputs[0] = 255 & ~(64 if frame%300 < 5 else 0) & ~(1 if frame%300 in range(20, 25) else 0)
+            if frame >= nxt:
+                m.inputs[1] = 255 ^ rng.choice([0,1,2,4,8,16,32,17,18,20,24,33,34,48,5,6,9,10])
+                nxt = frame + rng.randrange(4, 41)
         elif seed != 4 and frame >= 700:
             m.inputs[0] = 255 & ~(64 if frame%180 < 5 else 0) & ~(1 if frame%120 < 5 else 0)
             if frame%30 == 0: m.inputs[1] = 255 ^ rng.choice([0,1,2,4,8,16,32,17,18,20,24,33,34])
+        if seed in DYING_SEEDS and 700 <= frame < 1100:
+            m.mem[0xe450] = (seed - 21) % 15
         if seed in CHEAT_SEEDS:
             if 700 <= frame < 1100:
                 m.mem[0xe450] = seed - 6

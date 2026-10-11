@@ -189,45 +189,27 @@ class GameEmitter(Emitter):
         raise Unsupported('1943 has no mapped output ports')
 
 
-def skips(rom, target, cache={}):
-    """The return offsets of a function that returns past its caller's next bytes: `pop hl; inc hl` (k times); `jp (hl)`
-    on a path from `target` (calls stepped over).  The object allocators (06EC and its relatives) return normally on a
-    failure and to the call + 3 + 3 on success (the 3 bytes after the call are `ret; nop; nop` or a `jp`)."""
-    if target in cache:
-        return cache[target]
-    found, seen, work = set(), set(), [target]
-    while work and len(seen) < 400:
-        pc = work.pop()
-        while pc not in seen and (pc < 0x8000 or pc >= VBASE):
-            seen.add(pc)
-            ins = decode(rom, pc)
-            if ins.mn == 'pop' and ins.ops == [('r16', 'hl')]:
-                k, q = 0, pc + ins.length
-                while rom[q] == 0x23:
-                    k, q = k + 1, q + 1
-                if k and rom[q] == 0xe9:
-                    found.add(k)
-            nxt = pc + ins.length
-            if ins.mn in ('ret', 'reti', 'retn') and not ins.ops or ins.mn == 'jp' and ins.ops and ins.ops[0][0] == 'ind':
-                break
-            if ins.mn in ('jp', 'jr') and len(ins.ops) == 1:
-                pc = ins.target
-                continue
-            if ins.mn in ('jp', 'jr', 'djnz') and ins.target is not None:
-                work.append(ins.target)
-            pc = nxt
-    cache[target] = found
-    return found
+def inside(pc):
+    """the addresses of code: the fixed ROM and the banks' virtual copies"""
+    return pc < 0x8000 or pc >= VBASE
 
 
-def skip_returns(rom, code):
-    """the continuations after the calls of such functions"""
-    out = set()
-    for pc, ins in code.items():
-        if ins.mn == 'call' and ins.target is not None:
-            for k in skips(rom, ins.target):
-                out.add(pc + ins.length + k)
-    return out
+# The fixed ROM's jump tables (`ld hl,T; add hl,de; ld e,(hl); inc hl; ld d,(hl); ex de,hl; jp (hl)`) whose entries the
+# coverage runs did not all reach: T -> entries.  Random play reached 5AE2 (2026-10-10: z80_badpc, a silent quit);
+# discover's hl_tables finds them too, but also reads data and the banked tables (all covered) as tables.
+JUMP_TABLES = {0x59bc: 15,              # 59A4: by (ix+10) & $0F, the type of an object
+               0x5c18: 8}               # 5BDE: by e - 1
+
+
+def table_roots(rom):
+    return {rom[t + 2*i] | rom[t + 2*i + 1] << 8 for t, n in JUMP_TABLES.items() for i in range(n)}
+
+
+def script_handler_roots(rom):
+    """The objects' scripts (7-byte records read at 5773, 5D89, 61C1, 6417; 5 bytes at 68D3) call a handler with a
+    record 00, lo, hi; most handlers sit right behind their record (the word points 2 bytes on).  The scripts come
+    from tables and the banked stage data too, so they are not walked; random play reached 7877 (2026-10-10)."""
+    return {a + 2 for a in range(0x100, 0x7ffe) if rom[a - 1] == 0 and rom[a] | rom[a + 1] << 8 == a + 2}
 
 
 def generate(extra_roots=()):
@@ -247,13 +229,14 @@ def generate(extra_roots=()):
             wdata.add(virt(pc, bank) if bank >= 0 else pc)
         for bank, pc in d.get('twrites', ()):
             twrites.add(virt(pc, bank) if bank >= 0 else pc)
-    roots = {0, 0x38, 0x66, IDLE, *extra_roots}
+    roots = {0, 0x38, 0x66, IDLE, *extra_roots, *table_roots(rom), *script_handler_roots(rom)}
     saved = discover.decode
     discover.decode = decode
+    skip_cache = {}
     try:
         while True:
             code, tables = discover.discover(rom, sorted(roots | pcs), known=pcs, rst28_tables=False)
-            missing = skip_returns(rom, code) - set(code)
+            missing = discover.skip_returns(rom, code, inside, skip_cache) - set(code)  # (the allocators, the compares)
             if not missing:
                 break
             roots.update(missing)

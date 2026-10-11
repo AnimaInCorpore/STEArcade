@@ -152,7 +152,7 @@ def decode(rom, pc):
     # --- main table -------------------------------------------------------
     if x == 1:
         if op == 0x76:
-            return mk(1 + i, "halt", [], "halt")
+            return mk(1 + i, "halt", [], "seq")     # (waits for an interrupt, then goes on with the next instruction)
         if z == 6:
             m, nb = mem_operand(base)
             return mk(nb, "ld", [r8(y, False), m])
