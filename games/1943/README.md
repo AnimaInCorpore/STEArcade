@@ -15,6 +15,7 @@ python port.py build 1943                   # assets + translation -> run/1943/1
 python port.py test 1943                    # ROMs, graphics, reference, lock-step logic and pictures
 python port.py run 1943                     # Hatari (tools/hatari.sh)
 python port.py mame 1943                    # pixel checks at frames 100, 700 and 1500
+games/1943/tools/bench.sh                   # Hatari speed: ticks and frames a second (DEBUG + AUTOPLAY, 6000 VBLs)
 ```
 
 Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2),
@@ -152,6 +153,9 @@ Short Blitter passes (2026-10-11): no HOG pass is longer than ~256 bus cycles (`
 56-word copies of `restore_damage` and `ff_clean` run in two halves), so the top border interrupt is never held back
 long.  It cost ~1% of a frame in Musashi (`perf_test.py 1600 1200`: 227k -> 230k) and in Hatari (DEBUG + AUTOPLAY, 6000
 VBLs) 8.4 -> 7.9 drawn frames a second, the ticks unchanged (51.3); no border event started late in that run.
+`tools/bench.sh` runs that benchmark (a DEBUG + AUTOPLAY build of 6000 VBLs in `run/1943_bench`, the counters
+reported; `EXTRA="-D STAGE=n"` for a stage with the cheats): 2026-10-11, with the sound, the short passes and
+the window guards at the coverage's sites, 51.4 ticks (86%) and 7.9 frames a second.
 
 ## Sound (2026-10-11)
 
