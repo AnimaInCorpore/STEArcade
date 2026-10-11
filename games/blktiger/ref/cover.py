@@ -29,11 +29,20 @@ def main():
     site = [(-1, 0)]
 
     def rd8(a):
-        if 0x8000 <= a < 0xc000:
+        if 0x8000 <= a < 0xd000:         # the banked window and the background bank: the sites gen.py guards
             wread.add(site[0])
         return original_read(a)
 
     m.cpu.rd8 = rd8
+    wwrite = set()                       # the sites that write the background bank (gen.py guards them: bg_note)
+    original_write = m.cpu.wr8
+
+    def wr8_bg(a, v):
+        if 0xc000 <= a < 0xd000:
+            wwrite.add(site[0])
+        return original_write(a, v)
+
+    m.cpu.wr8 = wr8_bg
     original = m.cpu.step
 
     fresh = []                           # (the pairs first seen in the current frame)
@@ -96,7 +105,8 @@ def main():
             print(f'frame {frame}: {len(seen)} bank/PC pairs', flush=True)
     output = build_dir('blktiger') / ('cover_auto.pkl' if auto else 'cover_walk.pkl' if walk else f'cover{seed}.pkl')
     with output.open('wb') as f:
-        pickle.dump({'pcs': seen, 'wread': wread, 'io': m.io_log, 'seed': seed, 'frames': frames}, f)
+        pickle.dump({'pcs': seen, 'wread': wread, 'wwrite': wwrite, 'bg_sites': True, 'io': m.io_log, 'seed': seed,
+                     'frames': frames}, f)
     print(output)
 
 

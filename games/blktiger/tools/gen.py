@@ -1,5 +1,6 @@
 """Bank-aware whole-program Black Tiger Z80 -> 68000 translation."""
 from pathlib import Path
+import os
 import sys
 import pickle
 import json
@@ -282,14 +283,16 @@ class BTEmitter(Emitter):
 def generate(extra_roots=()):
     rom = image()
     pcs = {virt(pc, bank) if bank >= 0 else pc for bank,pc in json.loads((Path(__file__).resolve().parents[1]/"docs"/"translation-roots.json").read_text())}
-    wread = set()
-    for path in BUILD.glob('cover*.pkl'):
+    wread, bg_sites = set(), False      # (bg_sites: coverage files that record the background bank's sites too)
+    covers = list(BUILD.glob('cover*.pkl'))
+    for path in covers:
         with path.open('rb') as f:
             d = pickle.load(f)
         for bank, pc in d['pcs']:
             pcs.add(virt(pc, bank) if bank >= 0 else pc)
-        for bank, pc in d.get('wread', ()):
+        for bank, pc in set(d.get('wread', ())) | set(d.get('wwrite', ())):
             wread.add(virt(pc, bank) if bank >= 0 else pc)
+        bg_sites |= d.get('bg_sites', False)
     roots = {0, 0x38, 0x66, IDLE, *extra_roots}
     saved = discover.decode
     discover.decode = decode
@@ -379,8 +382,26 @@ def generate(extra_roots=()):
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0xc000,
                       iyaddr=0x10000, fshadow=0x10002, io_read_redirect={}, write_hooks=[],
                       rst28_tables=False, bit_s=True, **z80x.FAST)
-    # Every indirect read is guarded: coverage must not decide memory semantics.
-    sites = {pc for pc, ins in code.items() if any(o[0]=='ind' for o in ins.ops) or ins.mn in ('ldir','lddr','ldi','ldd','cpi','cpir')}
+    # The indirect accesses guarded (the window, the background bank): with the coverage's access sites (cover.py:
+    # the instructions seen reading 8000-CFFF or writing C000-CFFF, all stages with cheats), those and the known
+    # writers only, the rest are plain reads of the image; without them (or with old coverage files) every one.
+    # logic_test.py --audit finds sites the coverage missed on Musashi runs (bt_wsites_audit_*.pkl).
+    # The sites are kept in docs/window-sites.json (a fresh build needs no coverage files); coverage files that have
+    # them (and audit files) write it again.
+    indirect = {pc for pc, ins in code.items() if any(o[0]=='ind' for o in ins.ops) or ins.mn in ('ldir','lddr','ldi','ldd','cpi','cpir')}
+    sites_file = Path(__file__).resolve().parents[1] / 'docs' / 'window-sites.json'
+    if os.environ.get('BT_GUARD_ALL'):
+        sites = indirect
+    elif covers and bg_sites:
+        sites = indirect & wread
+        for f in BUILD.glob('bt_wsites_audit_*.pkl'):
+            with f.open('rb') as h:
+                sites |= indirect & set(pickle.load(h))
+        sites_file.write_text(json.dumps(sorted(sites)) + '\n')
+    elif sites_file.exists():
+        sites = indirect & set(json.loads(sites_file.read_text()))
+    else:
+        sites = indirect
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
@@ -407,7 +428,7 @@ def generate(extra_roots=()):
         out += ['\tdc.w $ffff']
     out += ['\tendm', '\tsection data,data', '\teven',
             'bt_entry_banks:', '\tdc.l '+','.join(f'bt_entries_bank{b}' for b in range(16))]
-    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites),
+    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'indirect':len(indirect),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
     out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_window_dispatch{b}+$8000' if b in banks else 'bt_invalid_dispatch+$8000' for b in range(16)),

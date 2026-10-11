@@ -22,7 +22,7 @@ size, CRC32 and SHA1 manifest before extracting or constructing regions. Build
 uses the repository Python environment, numpy, Pillow, vasm and vlink. MAME is
 only needed for `mame`; its executable can be overridden with `MAME`.
 The executable is `run/blktiger/BLKTIGER.PRG`; its ROMs and graphics are embedded.
-Committed instruction roots make a fresh build independent of coverage files.
+Committed instruction roots and window-guard sites (`docs/`) make a fresh build independent of coverage files.
 
 Controls: **5/6** insert coins, **1/2** start, **arrow keys** move,
 **Space/Ctrl** attack, **Alt** jumps, **Escape** returns to the desktop.
@@ -188,3 +188,18 @@ Bobble uses them, would make most of them plain moves.  Tests: `logic_test.py 16
 `render_test.py --frames 3 --step 375 --scroll-sweep --flip-layout-sweep --sprite-edges` all match.  The first build
 with the new translator did not boot: each gen's own window wrapper saved a0 in the middle of `ld (hl),c`'s stack use
 (see `docs/architecture.md`, "Banked windows"); the engine's wrapper fixed it for all ports.
+
+### Window guards at the coverage's sites (2026-10-11)
+
+The guards are now emitted only at the indirect accesses the coverage saw reading the window or the background
+bank (8000-CFFF) or writing the bank (`ref/cover.py` records the sites: seeds 1-11 with every stage, `--walk`,
+`--auto`); the other 2,800 of the 5,242 indirect accesses are plain reads of the Z80 image.  The sites are kept
+in `docs/window-sites.json` (a fresh build needs no coverage files; coverage files that record the sites write
+it again; `BT_GUARD_ALL=1` guards every access as before).  `logic_test.py --audit` traces a Musashi run and
+reports every translated instruction that touches the image of the window and the bank (`g_block` to +$4FFF),
+where an unguarded access would read the wrong memory: `bt_wsites_audit_*.pkl`, which gen adds to the sites; the
+1600-frame and the 4000-frame walk runs report only the eight block copies whose source is the bank's image.
+The logic in play: 80.7k -> 65.3k Musashi cycles a tick (-19%), the start screen's 26.8k -> 21.7k; Hatari
+(`tools/bench.sh`, DEBUG + AUTOPLAY, 6000 VBLs): 23.8 -> 26.3 frames and 54.0 -> 55.1 game ticks (92%) a second, 0 late
+border events.  (Like stedaimakaimura, which runs the arcade's 68000 code as it is and
+handles the few special accesses by their faulting PC: the common path pays nothing, the exceptions are enumerated.)

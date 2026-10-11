@@ -34,6 +34,11 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
   error) and has no MFP timers or border removal.  Test for odd accesses (`games/bublbobl/tools/align_test.py`) and
   build the simulator variant with `-DSIM`.  Crashes that appear only in Hatari have been: stack overflow by nested
   VBLs, window-read sites coverage missed, odd word loads in translated MCU code.
+* **Guard only the coverage's window sites, and audit the rest** (Bubble Bobble, Black Tiger 2026-10-11): a check at every
+  indirect access costs a quarter of the translated cycles.  Record the sites in the coverage runs (reads of the window and
+  the banked RAM, writes of the latter), keep them in the repository (`docs/window-sites.json`) so a build needs no
+  coverage files, and trace a simulator run for accesses to the unused image of the window (`logic_test.py --audit`): any
+  such access is a site the coverage missed.  Black Tiger's play logic: 80.7k -> 65.3k cycles a tick.
 * **Self-tests flood the renderer** (video RAM test) and run ~700 frames: skip them in the reference and the
   translation, compensate any ROM checksum the game runs later, load the patched ROM files in the runtime.
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;

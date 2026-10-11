@@ -175,8 +175,9 @@ the high bytes.  Donkey Kong's code was lean already (16 cycles a Z80 instructio
 cheaper).  Not done, by expected gain: inlining small leaf functions (call + ret = ~65 cycles; ~8% for Bubble Bobble),
 the MCU translator `m6801x.py` (9% of Bubble Bobble's translated cycles, untouched), keeping the Z80 stack words in
 68000 order so `push`/`pop` of DE/HL/IX need no `ror.w #8` (3-5%; but code that reads the stack as memory would break),
-Black Tiger guards every indirect access as a possible window read (a window check of ~40 cycles each: a quarter of its
-translated cycles); coverage-found sites as in Bubble Bobble would make that cheap.  A factor of 2 for every
+Black Tiger guarded every indirect access as a possible window read (a window check of ~40 cycles each: a quarter of its
+translated cycles); since 2026-10-11 only the coverage's sites are guarded, as in Bubble Bobble (`docs/window-sites.json`,
+`logic_test.py --audit`: the logic in play 80.7k -> 65.3k cycles a tick).  A factor of 2 for every
 port is not in reach of the translation alone; the renderers are the larger part of most frames anyway.
 
 ## Runtime schedule (all ports)
