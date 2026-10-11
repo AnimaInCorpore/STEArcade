@@ -76,6 +76,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	bsr	cs_off
 	lea	old_exceptions,a0
 	lea	$08.w,a1
 	moveq	#9,d0

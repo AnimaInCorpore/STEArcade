@@ -8,7 +8,7 @@ STRIDE = 384
 RING_LINES = 544
 TEXT_RUNS = 8                    ; runs a text row (at most 7: four blanks split a run)
 TEXT_ROW_POOL = 2048             ; strip bytes a text row (at most about 2000)
-TEXT_CELLS = 1280                ; text cells a ring records (with repeats: runs sharing a cell)
+RECTS = 128+TEXT_RUNS*28         ; rectangles a ring restores at its next use: the sprites, and the text when it is redone
 RING_SIZE = STRIDE*RING_LINES
 GUARD = 16*STRIDE
 COLS = 48
@@ -20,7 +20,7 @@ WIN_ROWS = 15                    ; and the 224 lines
 TILE_ENTRIES = 512
     endc
 TILE_SETS = TILE_ENTRIES/4
-BYTE_LUTS = 16                   ; cached byte tables of bake_pixels (4 KB each)
+BYTE_LUTS = 32                   ; cached byte tables of bake_pixels (2 KB each: tiles 0-15, sprites 16-23, characters 24-31)
     ifnd SPRITE_ENTRIES
 SPRITE_ENTRIES = 512
     endc
@@ -124,10 +124,10 @@ render_frame:
     lea ring_tables,a0
     tst.w d0
     beq.s .ring0
-    lea 24(a0),a0
+    lea 40(a0),a0
 .ring0:
     lea cur_flags,a1
-    rept 6
+    rept 10
     move.l (a0)+,(a1)+
     endr
     moveq #0,d0
@@ -200,6 +200,7 @@ render_frame:
     bsr strip_unmask
     bsr text_prepare
     bsr ring_restore
+    bsr strip_columns
     bsr sprite_pass
     bsr front_pass
     bsr character_pass
@@ -225,9 +226,11 @@ render_frame:
 ; The palette writers set pal_dirty (gen.PAL_WRITERS); 128 bytes a frame are compared in case one is missing.
 penmap_update:
     tst.b pal_dirty
-    bne.s .full_compare
+    bne .full_compare
     tst.b palette_valid
-    beq.s .full_compare
+    beq .full_compare
+    tst.w pal_noted_n
+    bne .noted
     moveq #0,d0
     move.w pal_roll,d0
     add.w #128,d0
@@ -241,56 +244,84 @@ penmap_update:
 .roll:
     cmpm.l (a0)+,(a1)+
     dbne d0,.roll
-    bne.s .full_compare
+    bne .full_compare
     rts
+.noted:
+    ; the blocks of 128 entries the game's block writes touched (pal_note: the ranges), compared and mapped
+    moveq #0,d5
+    move.w pal_noted_n,d0
+    clr.w pal_noted_n
+    subq.w #1,d0
+    lea pal_noted,a0
+.range:
+    move.w (a0)+,d1              ; its first and last address, D800-DFFF (the entry: the address' low 10 bits)
+    move.w (a0)+,d2
+    and.w #$3ff,d1
+    and.w #$3ff,d2
+    lsr.w #7,d1
+    lsr.w #7,d2
+.mark:
+    bset d1,d5                   ; (a range over both halves: the blocks of the first to the last entry)
+    addq.w #1,d1
+    cmp.w d2,d1
+    bls.s .mark
+    dbf d0,.range
+    bra.s .blocks
 .full_compare:
+    ; in blocks of 128 entries (their low bytes at $5800, high bytes at $5c00): a block that differs is copied and
+    ; mapped again
     clr.b pal_dirty
-    lea g_block+$5800,a0
-    lea palette_shadow,a1
-    move #511,d0
-.compare_palette:
-    cmpm.l (a0)+,(a1)+
-    dbne d0,.compare_palette
-    bne.s .changed
-    tst.b palette_valid
-    beq.s .map_palette
-    rts
-.changed:
-    subq.l #4,a0
-    subq.l #4,a1
-.copy_palette:
-    move.l (a0)+,(a1)+
-    dbf d0,.copy_palette
-.map_palette:
-    st palette_valid
+    clr.w pal_noted_n
+    moveq #-1,d5                 ; all blocks
+.blocks:
     lea palette_dirty,a0
     moveq #15,d0
 .clear_dirty:
     clr.l (a0)+
     dbf d0,.clear_dirty
+    moveq #0,d6                  ; the block's first entry
+    sf d7                        ; a block mapped
+.block:
+    lsr.w #1,d5
+    bcc .next_block
     lea g_block+$5800,a0
-    lea g_block+$5c00,a1
-    lea pen_map,a2
-    lea rgb_map,a3
-    lea palette_dirty,a4
-    move #1023,d0
-    moveq #0,d6
-.next:
-    moveq #0,d1
-    move.b (a1)+,d1
-    lsl.w #8,d1
-    move.b (a0)+,d1
-    and.w #$fff,d1
-    move.b (a3,d1.w),d2
-    cmp.b (a2),d2
-    beq.s .same
-    move.w d6,d3
-    lsr.w #4,d3
-    st (a4,d3.w)
-.same:
-    move.b d2,(a2)+
-    addq.w #1,d6
-    dbf d0,.next
+    add.w d6,a0
+    lea palette_shadow,a1
+    add.w d6,a1
+    tst.b palette_valid
+    beq.s .map                   ; (the first frame: all)
+    moveq #128/4-1,d0
+.low:
+    cmpm.l (a0)+,(a1)+
+    dbne d0,.low
+    bne.s .map
+    lea $400-128(a0),a0
+    lea $400-128(a1),a1
+    moveq #128/4-1,d0
+.high:
+    cmpm.l (a0)+,(a1)+
+    dbne d0,.high
+    bne.s .map
+    bra.s .next_block
+.map:
+    st d7
+    lea g_block+$5800,a0
+    add.w d6,a0
+    lea palette_shadow,a1
+    add.w d6,a1
+    moveq #128/4-1,d0
+.copy:
+    move.l (a0)+,(a1)+
+    move.l $400-4(a0),$400-4(a1)
+    dbf d0,.copy
+    bsr map_block
+.next_block:
+    add.w #128,d6
+    cmp.w #1024,d6
+    blo.s .block
+    st palette_valid
+    tst.b d7
+    beq .done
     lea palette_dirty,a0
     lea palette_epoch,a1
     moveq #63,d0
@@ -302,6 +333,41 @@ penmap_update:
 .unchanged:
     addq.l #1,a1
     dbf d0,.epochs
+.done:
+    rts
+
+; map_block: the pens of palette entries d6 .. d6+127 from the game's palette; a colour whose pens change is marked in
+; palette_dirty.  Uses d0-d3/a0-a4.
+map_block:
+    lea g_block+$5800,a0
+    add.w d6,a0
+    lea g_block+$5c00,a1
+    add.w d6,a1
+    lea pen_map,a2
+    add.w d6,a2
+    lea rgb_map,a3
+    lea palette_dirty,a4
+    move.w d6,d3
+    lsr.w #4,d3
+    add.w d3,a4                  ; its first colour
+    moveq #7,d0                  ; eight colours of sixteen pens
+.colour:
+    moveq #15,d3
+.pen:
+    moveq #0,d1
+    move.b (a1)+,d1
+    lsl.w #8,d1
+    move.b (a0)+,d1
+    and.w #$fff,d1
+    move.b (a3,d1.w),d2
+    cmp.b (a2),d2
+    beq.s .same
+    st (a4)
+.same:
+    move.b d2,(a2)+
+    dbf d3,.pen
+    addq.l #1,a4
+    dbf d0,.colour
     rts
 
 ; epoch_lookup: colour 63-d0 has a new pen mapping -> its epoch (a1): the number it had when the colour last
@@ -591,6 +657,9 @@ clean_update:
     bra check_rect
 .full:
     clr.w bg_noted_n                ; (all cells checked)
+    ifd DEBUG
+    addq.l #1,dbg_full
+    endc
     move.w win_c0,d4
     move.w win_r0,d5
     moveq #WIN_COLS,d6
@@ -609,6 +678,7 @@ check_noted:
     bne .none                       ; (the background off: no keys; switching it on checks all)
     subq.w #1,d0
     lea bg_noted,a4
+    st no_twins                     ; (an animated tile is drawn where it shows; its twins when the page jumps there)
 .next:
     move.w d0,-(sp)
     move.l a4,-(sp)
@@ -671,6 +741,7 @@ check_noted:
     addq.l #2,a4
     move.w (sp)+,d0
     dbf d0,.next
+    clr.b no_twins
 .none:
     rts
 
@@ -696,6 +767,9 @@ check_rect:
 ; check_cell: the clean cell d4, d5 against its key; a new tile goes to the
 ; cell and to its twins outside the window.  Keeps d4/d5.
 check_cell:
+    ifd DEBUG
+    addq.l #1,dbg_checks
+    endc
     bsr cell_key
     move.w d5,d6
     add.w d6,d6
@@ -717,6 +791,8 @@ check_cell:
 .got:
     move.l a1,cell_src
     bsr draw_at
+    tst.b no_twins
+    bne.s .no_twins
     movem.w d4-d5,-(sp)
     lea twin_offsets,a2
     moveq #7,d7
@@ -756,6 +832,7 @@ check_cell:
 .skip:
     dbf d7,.twin
     movem.w (sp)+,d4-d5
+.no_twins:
     rts
 
 mark_both macro
@@ -771,25 +848,40 @@ mark_both macro
 .mb\@:
     endm
 
-; draw_at: cell_src (0: blank) with key cell_keyv into clean cell d6, both rings
-; restore it.  Uses d0-d2/a0/a1/a3.
+; draw_at: cell_src (0: blank) with key cell_keyv into clean cell d6 (the Blitter: a copy of the baked tile, or
+; zeroes), both rings restore it.  Uses d0-d2/a0/a1/a3.
 draw_at:
+    ifd DEBUG
+    addq.l #1,dbg_draws
+    endc
     move.w d6,d0
     lsl.w #2,d0
     lea clean_tags,a0
     move.l cell_keyv,(a0,d0.w)
     lea cell_offsets,a0
     move.l (a0,d0.w),d0
-    move.l clean_base,a0
-    add.l d0,a0
+    add.l clean_base,d0
+    move.l d0,$ffff8a32.w
+    move.w #2,$ffff8a2e.w
+    move.w #STRIDE-6,$ffff8a30.w
+    moveq #-1,d0
+    move.w d0,$ffff8a28.w
+    move.w d0,$ffff8a2a.w
+    move.w d0,$ffff8a2c.w
+    clr.b $ffff8a3d.w
+    move.w #4,$ffff8a36.w
     move.l cell_src,d1
     beq .blank
-    move.l d1,a1
-    rept 16
-    move.l (a1)+,REPTN*STRIDE(a0)
-    move.l (a1)+,REPTN*STRIDE+4(a0)
-    endr
-    lea 32(a1),a1                ; the front masks
+    move.l d1,$ffff8a24.w
+    move.w #2,$ffff8a20.w
+    move.w #2,$ffff8a22.w
+    move.w #$0203,$ffff8a3a.w    ; the source
+    move.w #8,$ffff8a38.w        ; (two pieces)
+    move.b #$c0,$ffff8a3c.w
+    move.w #8,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+    move.l cell_src,a1
+    lea 160(a1),a1               ; the front masks (after the planes and the transparency masks)
     moveq #0,d0
     move.w d6,d0
     lsl.l #5,d0
@@ -806,17 +898,15 @@ draw_at:
     sne (a3,d6.w)
     bra .mark
 .blank:
-    rept 16
-    clr.l REPTN*STRIDE(a0)
-    clr.l REPTN*STRIDE+4(a0)
-    endr
+    move.w #$0000,$ffff8a3a.w    ; all ones AND nothing: zeroes
+    move.w #16,$ffff8a38.w       ; (64 words: one piece)
+    move.b #$c0,$ffff8a3c.w
     lea cell_has_front,a3
     clr.b (a3,d6.w)
 .mark:
     mark_both dmg_flag0,dmg_list0,dmg_count0
     mark_both dmg_flag1,dmg_list1,dmg_count1
     rts
-
 ; mark_ring: this ring restores cell d6 at its next use (uses d0/a0/a1).
 mark_ring:
     move.l cur_applied,a0
@@ -836,13 +926,30 @@ mark_ring:
 .listed:
     rts
 
-; The ring's damage list: copy the cells from the clean screen.
+; The ring's damage list (cells) and its rectangle list (what sprites and the text covered: word columns by lines):
+; copied from the clean screen by the Blitter.
 ring_restore:
+    move.w #2,$ffff8a20.w        ; a copy: the four planes of each word column
+    move.w #2,$ffff8a2e.w
+    moveq #-1,d0
+    move.w d0,$ffff8a28.w
+    move.w d0,$ffff8a2a.w
+    move.w d0,$ffff8a2c.w
+    move.w #$0203,$ffff8a3a.w
+    clr.b $ffff8a3d.w
     move.l cur_count,a0
     move.w (a0),d7
+    ifd DEBUG
+    moveq #0,d0
+    move.w d7,d0
+    add.l d0,dbg_restored
+    endc
     clr.w (a0)
     subq.w #1,d7
-    bmi .done
+    bmi .rects
+    move.w #STRIDE-6,$ffff8a22.w
+    move.w #STRIDE-6,$ffff8a30.w
+    move.w #4,$ffff8a36.w
     move.l cur_list,a3
     move.l cur_flags,a4
     move.l cur_applied,a5
@@ -850,27 +957,202 @@ ring_restore:
     move.l clean_base,d4
     move.l work_base,d5
     lea restored_tag,a2
-    move.b frame_tag,d1
+    move.b frame_tag,d2
+    moveq #0,d3                  ; the halftone loaded (the visible bits of a part-masked column)
 .cell:
     move.w (a3)+,d6
     clr.b (a4,d6.w)
-    move.b d1,(a2,d6.w)          ; (the text pass redraws the runs over restored cells)
+    move.b d2,(a2,d6.w)          ; (the text pass redraws the runs over restored cells)
+    ; a cell in one of the window's margin columns gets its mask with the restore: black, or the clean screen AND
+    ; the visible bits (the halftone)
+    lea cell_col,a0
+    moveq #0,d0
+    move.b (a0,d6.w),d0
+    sub.w strip_w0,d0
+    cmp.w #21,d0
+    bhs .plain
+    lea cell_row,a0
+    moveq #0,d1
+    move.b (a0,d6.w),d1
+    sub.w win_r0,d1
+    cmp.w #WIN_ROWS,d1
+    bhs .plain
+    add.w d0,d0
+    lea strip_mask_tab,a0
+    move.w (a0,d0.w),d1          ; its black bits
+    beq .plain
+    move.w d6,d0
+    add.w d0,d0
+    move.w d1,(a5,d0.w)
+    addq.w #1,d1
+    beq .black
+    subq.w #1,d1
+    cmp.w d1,d3
+    beq.s .loaded
+    move.w d1,d3
+    not.w d1
+    move.w d1,d0
+    swap d1
+    move.w d0,d1
+    lea $ffff8a00.w,a0
+    rept 8
+    move.l d1,(a0)+
+    endr
+.loaded:
+    move.w #$0303,$ffff8a3a.w    ; the source AND the halftone
+    add.w d6,d6
+    add.w d6,d6
+    move.l (a6,d6.w),d0
+    move.l d0,d1
+    add.l d4,d0
+    move.l d0,$ffff8a24.w
+    add.l d5,d1
+    move.l d1,$ffff8a32.w
+    move.w #8,$ffff8a38.w        ; (two pieces)
+    move.b #$c0,$ffff8a3c.w
+    move.w #8,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+    move.w #$0203,$ffff8a3a.w
+    dbf d7,.cell
+    bra .rects
+.black:
+    move.w #$0000,$ffff8a3a.w    ; zeroes
+    add.w d6,d6
+    add.w d6,d6
+    move.l (a6,d6.w),d1
+    add.l d5,d1
+    move.l d1,$ffff8a32.w
+    move.w #16,$ffff8a38.w       ; (64 words of zeroes: one piece)
+    move.b #$c0,$ffff8a3c.w
+    move.w #$0203,$ffff8a3a.w
+    dbf d7,.cell
+    bra .rects
+.plain:
     add.w d6,d6
     clr.w (a5,d6.w)
     add.w d6,d6
     move.l (a6,d6.w),d0
-    move.l d4,a0
-    add.l d0,a0
-    move.l d5,a1
-    add.l d0,a1
-    rept 16
-    move.l REPTN*STRIDE(a0),REPTN*STRIDE(a1)
-    move.l REPTN*STRIDE+4(a0),REPTN*STRIDE+4(a1)
-    endr
+    move.l d0,d1
+    add.l d4,d0
+    move.l d0,$ffff8a24.w
+    add.l d5,d1
+    move.l d1,$ffff8a32.w
+    move.w #8,$ffff8a38.w        ; (two pieces)
+    move.b #$c0,$ffff8a3c.w
+    move.w #8,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
     dbf d7,.cell
+.rects:
+    move.l cur_rect_count,a0
+    move.w (a0),d7
+    clr.w (a0)
+    subq.w #1,d7
+    bmi .done
+    move.l cur_rect,a3
+    move.l clean_base,a4
+    move.l work_base,a5
+    lea bd_lines,a6              ; (engine/rt/borders.s: the lines a piece by the words a line)
+.rect:
+    move.l (a3)+,d0              ; the offset of its first word
+    move.w (a3)+,d6              ; its first cell
+    move.w (a3)+,d3              ; its shape
+    move.w d3,-(sp)
+    moveq #8,d2                  ; the lines
+    btst #1,d3
+    beq.s .lines
+    moveq #16,d2
+.lines:
+    move.w d3,d4
+    lsr.w #8,d4
+    addq.w #1,d4                 ; the word columns
+.chunk:
+    move.w d4,d5                 ; up to eight a pass (32 words: one piece a line)
+    cmp.w #8,d5
+    bls.s .width
+    moveq #8,d5
+.width:
+    sub.w d5,d4
+    lsl.w #2,d5                  ; the words a line
+    move.w d5,$ffff8a36.w
+    move.w #STRIDE+2,d1
+    sub.w d5,d1
+    sub.w d5,d1
+    move.w d1,$ffff8a22.w
+    move.w d1,$ffff8a30.w
+    lea (a4,d0.l),a0
+    move.l a0,$ffff8a24.w
+    lea (a5,d0.l),a0
+    move.l a0,$ffff8a32.w
+    moveq #0,d1
+    move.b (a6,d5.w),d1          ; the lines a piece
+    move.w d2,d3
+.piece:
+    cmp.w d3,d1
+    bls.s .lines_left
+    move.w d3,d1
+.lines_left:
+    move.w d1,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+    sub.w d1,d3
+    bne.s .piece
+    moveq #0,d1
+    move.w d5,d1
+    add.l d1,d0                  ; (the next chunk: 8 bytes a column)
+    add.l d1,d0
+    tst.w d4
+    bne.s .chunk
+    move.w (sp)+,d3
+    bsr touch_cells
+    dbf d7,.rect
 .done:
     rts
 
+; touch_cells: cell d6 and the shape d3 (bits 8-12: word columns - 1, bit 0: a second cell row) change their pixels
+; this frame (restored, or drawn over): restored_tag (the text pass redraws the runs there), and the side-margin
+; mask is applied again (applied = 0).  Uses d0-d2/a0/a1.
+touch_cells:
+    lea restored_tag,a0
+    move.l cur_applied,a1
+    move.b frame_tag,d2
+    move.w d3,d1
+    lsr.w #8,d1
+    move.w d6,d0
+.col:
+    move.b d2,(a0,d0.w)
+    add.w d0,d0
+    clr.w (a1,d0.w)
+    lsr.w #1,d0
+    addq.w #1,d0
+    dbf d1,.col
+    btst #0,d3
+    beq.s .done
+    move.w d3,d1
+    lsr.w #8,d1
+    move.w d6,d0
+    add.w #COLS,d0
+.col2:
+    move.b d2,(a0,d0.w)
+    add.w d0,d0
+    clr.w (a1,d0.w)
+    lsr.w #1,d0
+    addq.w #1,d0
+    dbf d1,.col2
+.done:
+    rts
+
+; add_rect: the rectangle d0.l (the buffer offset of its first word), first cell d6, shape d3 (touch_cells; bit 1: 16
+; lines, else 8) to this ring's list: restored at its next use.  Uses d0-d2/a0/a1.
+add_rect:
+    move.l cur_rect_count,a0
+    move.w (a0),d1
+    addq.w #1,(a0)
+    lsl.w #3,d1
+    move.l cur_rect,a1
+    add.w d1,a1
+    move.l d0,(a1)+
+    move.w d6,(a1)+
+    move.w d3,(a1)
+    bra.s touch_cells
 ; strip_desired: the side-margin mask of cell d4, d5 in this frame -> d3 (uses d0/a0).
 strip_desired:
     moveq #0,d3
@@ -889,7 +1171,8 @@ strip_desired:
     rts
 
 ; Margin cells of this ring's last frame that are no longer black where they
-; were go to the damage list (before the restore).
+; were go to the damage list (before the restore); not those of the two part-masked
+; word columns, strip_columns does them whole.
 strip_unmask:
     move.b strip_w0+1,d0
     lsl.w #8,d0
@@ -898,37 +1181,167 @@ strip_unmask:
     move.w win_r0,d0
     lea strip_state,a0
     add.w ring_index,a0
-    cmp.l (a0),d0
-    beq.s .done
+    move.l (a0),d1               ; the last frame's: its window word and fine scroll, its first row
+    cmp.l d1,d0
+    beq .done
     move.l d0,(a0)
+    st strip_changed
     move.l cur_strip_count,a3
     move.w (a3),d7
+    beq .done
     clr.w (a3)
-    subq.w #1,d7
-    bmi.s .done
+    ; the list: the six margin columns of the last frame (strip_words, in that order), WIN_ROWS cells each
     move.l cur_strip,a3
     move.l cur_applied,a4
+    lea strip_words,a2
+    lea strip_mask_tab,a6
+    move.l d1,d2
+    swap d2
+    lsr.w #8,d2
+    sub.w strip_w0,d2            ; the last window's first word in this one
+    swap d1
+    and.w #15,d1                 ; the fine scroll then
+    moveq #5,d7
+.column:
+    move.w (a2)+,d0              ; the column's word of the last window
+    moveq #-1,d3                 ; its black bits then: all, or the fine scroll's part
+    cmp.w #2,d0
+    beq.s .part_left
+    cmp.w #18,d0
+    bne.s .was
+    lsr.w d1,d3
+    bra.s .was
+.part_left:
+    lsr.w d1,d3
+    not.w d3
+.was:
+    add.w d2,d0                  ; its word of this window
+    moveq #0,d4                  ; its black bits now
+    cmp.w #21,d0
+    bhs.s .now
+    cmp.w #2,d0
+    beq .skip                    ; (the part-masked columns: strip_columns)
+    cmp.w #18,d0
+    beq .skip
+    add.w d0,d0
+    move.w (a6,d0.w),d4
+.now:
+    not.w d4
+    and.w d4,d3                  ; black then where it may not be now: the column's cells
+    beq.s .rows_out
+    moveq #WIN_ROWS-1,d5
 .cell:
     move.w (a3)+,d6
-    lea cell_col,a0
-    moveq #0,d4
-    move.b (a0,d6.w),d4
-    lea cell_row,a0
-    moveq #0,d5
-    move.b (a0,d6.w),d5
-    bsr strip_desired
     move.w d6,d0
     add.w d0,d0
-    move.w (a4,d0.w),d1
-    not.w d3
-    and.w d3,d1
-    beq.s .keep
+    move.w (a4,d0.w),d0
+    and.w d4,d0                  ; (a touched cell: no black bits)
+    beq.s .next
+    ifd DEBUG
+    addq.l #1,dbg_strip_cells
+    endc
     bsr mark_ring
-.keep:
-    dbf d7,.cell
+.next:
+    dbf d5,.cell
+    dbf d7,.column
+    bra.s .done
+.rows_out:
+    ; the mask stays: only the cells whose row left the window lose it
+    lea cell_row,a5
+    moveq #WIN_ROWS-1,d5
+.row:
+    move.w (a3)+,d6
+    moveq #0,d0
+    move.b (a5,d6.w),d0
+    sub.w win_r0,d0
+    cmp.w #WIN_ROWS,d0
+    blo.s .inside
+    move.w d6,d0
+    add.w d0,d0
+    tst.w (a4,d0.w)
+    beq.s .inside
+    ifd DEBUG
+    addq.l #1,dbg_strip_cells
+    endc
+    bsr mark_ring
+.inside:
+    dbf d5,.row
+    dbf d7,.column
+    bra.s .done
+.skip:
+    lea 2*WIN_ROWS(a3),a3
+    dbf d7,.column
 .done:
     rts
 
+; The two word columns the fine scroll masks in part (words 2 and 18 of the window), when the window moved: the
+; Blitter copies the window's rows from the clean screen with the visible bits (the halftone) only.
+strip_columns:
+    tst.b strip_changed
+    beq .done
+    clr.b strip_changed
+    move.w #2,$ffff8a20.w
+    move.w #2,$ffff8a2e.w
+    move.w #STRIDE-6,$ffff8a22.w
+    move.w #STRIDE-6,$ffff8a30.w
+    moveq #-1,d0
+    move.w d0,$ffff8a28.w
+    move.w d0,$ffff8a2a.w
+    move.w d0,$ffff8a2c.w
+    move.w #$0303,$ffff8a3a.w    ; source AND halftone
+    clr.b $ffff8a3d.w
+    move.w #4,$ffff8a36.w
+    moveq #2,d7
+.column:
+    move.w d7,d0
+    add.w d0,d0
+    lea strip_mask_tab,a0
+    move.w (a0,d0.w),d3          ; the black bits
+    move.w d3,d1
+    not.w d1
+    move.w d1,d2
+    swap d1
+    move.w d2,d1
+    lea $ffff8a00.w,a0
+    rept 8
+    move.l d1,(a0)+
+    endr
+    move.w win_r0,d0
+    add.w d0,d0
+    lea row_cells,a0
+    move.w (a0,d0.w),d6
+    add.w strip_w0,d6
+    add.w d7,d6                  ; the column's first cell
+    move.w d6,d0
+    lsl.w #2,d0
+    lea cell_offsets,a0
+    move.l (a0,d0.w),d0
+    move.l d0,d1
+    add.l clean_base,d0
+    move.l d0,$ffff8a24.w
+    add.l work_base,d1
+    move.l d1,$ffff8a32.w
+    moveq #WIN_ROWS*2-1,d1       ; (two pieces a cell)
+.piece:
+    move.w #8,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+    dbf d1,.piece
+    lea restored_tag,a0
+    move.l cur_applied,a1
+    move.b frame_tag,d2
+    moveq #WIN_ROWS-1,d1
+.cell:
+    move.b d2,(a0,d6.w)
+    move.w d6,d0
+    add.w d0,d0
+    move.w d3,(a1,d0.w)
+    add.w #COLS,d6
+    dbf d1,.cell
+    add.w #16,d7
+    cmp.w #18,d7
+    beq .column
+.done:
+    rts
 ; After all drawing: black the side margins where this ring's cells lack the mask.
 strip_mask:
     move.l cur_strip,a3
@@ -942,7 +1355,7 @@ strip_mask:
     add.w d0,d0
     lea strip_mask_tab,a0
     move.w (a0,d0.w),d3
-    beq .next_column
+    beq .list                    ; (a part-masked column with the fine scroll 0: nothing to black, listed still)
     move.w d3,d1
     swap d1
     move.w d3,d1
@@ -963,6 +1376,9 @@ strip_mask:
     cmp.w (a4,d6.w),d3
     beq .masked
     move.w d3,(a4,d6.w)
+    ifd DEBUG
+    addq.l #1,dbg_ands
+    endc
     add.w d6,d6
     move.l (a5,d6.w),d0
     move.l work_base,a1
@@ -973,8 +1389,24 @@ strip_mask:
     endr
 .masked:
     dbf d2,.row
-.next_column:
     dbf d5,.column
+    bra.s .listed
+.list:
+    move.w strip_w0,d4
+    add.w -2(a2),d4
+    move.w win_r0,d2
+    add.w d2,d2
+    lea row_cells,a0
+    add.w d2,a0
+    moveq #WIN_ROWS-1,d2
+.list_row:
+    move.w (a0)+,d6
+    add.w d4,d6
+    move.w d6,(a3)+
+    addq.w #1,d7
+    dbf d2,.list_row
+    dbf d5,.column
+.listed:
     move.l cur_strip_count,a0
     move.w d7,(a0)
     rts
@@ -1064,19 +1496,35 @@ tile_get:
     move.l cache_result,a1
     rts
 
-; a0 packed pixels, a1 output planes, a2 colour LUT; masks at +128/+160.
+; bake_pixels: a0 = packed pixels (two a byte, the first in the high nibble), a2 = the colour's 16 pens (pen_map),
+; a1 = the output: a row's four planes as words (128 bytes), at 128(a1) the rows' transparency masks (a word each, a
+; set bit an opaque pixel), at 160(a1) their front masks.  bake_width 8 or 16, bake_rows, bake_flip (mirrored),
+; bake_vflip, bake_transparent, bake_limit (the pens below it are front pens).
+; A byte table of the colour gives two pixels at once: a long with the four planes' two bits in its four bytes (plane
+; 0 in the high byte), and a word with the two transparency bits in its high byte and the front bits in its low byte;
+; a row's eight pixels are accumulated with two-bit shifts, then movep puts the four bytes into the plane words.
 bake_pixels:
     addq.l #1,bake_calls
-    ; The byte table of this colour (two pixels a lookup): cached in BYTE_LUTS slots, valid while the colour's
-    ; 16 pens, the transparent pen and the front limit are the same.
+    ; The byte table of this colour: cached in BYTE_LUTS slots, valid while the colour's 16 pens, the transparent pen
+    ; and the front limit are the same.
     move.l a2,d0
-    lsr.w #4,d0
+    sub.l #pen_map,d0
+    lsr.w #4,d0                  ; the colour: tiles 0-15, sprites 32-39, characters 48-55 (four pens each)
+    cmp.w #48,d0
+    blo.s .not_char
+    sub.w #24,d0
+    bra.s .slot
+.not_char:
+    cmp.w #32,d0
+    blo.s .slot
+    sub.w #16,d0
+.slot:
     and.w #BYTE_LUTS-1,d0
     move.w d0,d1
     mulu #20,d1
     lea byte_lut_tags,a5
     add.w d1,a5
-    moveq #12,d1
+    moveq #11,d1
     lsl.l d1,d0
     add.l #byte_luts,d0
     move.l d0,byte_lut
@@ -1111,61 +1559,56 @@ bake_pixels:
     ifd DEBUG
     addq.l #1,dbg_byte_luts
     endc
-    ; Expand this colour's sixteen pens once, then build two planes per long.
-    lea bake_lut+64,a5
-    lea mapped_bits,a6
+    ; Each pen once: its planes spread over the four bytes (spread4), its masks
+    lea bake_lut,a5
+    lea spread4,a6
     moveq #0,d0
 .lut:
-    move.w d0,d4
-    lsl.w #2,d4
     moveq #0,d1
-    moveq #0,d2
     moveq #0,d3
     cmp.b bake_transparent,d0
     beq.s .lut_save
-    moveq #1,d3
+    move.w #$100,d3              ; opaque
     cmp.b bake_limit,d0
     bhs.s .lut_back
-    or.l #$10000,d3
+    addq.w #1,d3                 ; a front pen
 .lut_back:
     move.b (a2,d0.w),d1
-    lsl.w #3,d1
-    move.l 4(a6,d1.w),d2
+    lsl.w #2,d1
     move.l (a6,d1.w),d1
 .lut_save:
-    move.l d1,-64(a5,d4.w)
-    move.l d2,(a5,d4.w)
-    move.l d3,64(a5,d4.w)
+    move.w d0,d4
+    lsl.w #2,d4
+    move.l d1,(a5,d4.w)
+    move.w d0,d4
+    add.w d4,d4
+    move.w d3,64(a5,d4.w)        ; (the masks: words after the 16 longs)
     addq.w #1,d0
     cmp.w #16,d0
     blo.s .lut
-    ; byte b: its high pixel first (the first pixel shifted once more), entries of 16 bytes: planes 0/1, 2/3, mask
+    ; byte b: its high pixel first (shifted once more); entries of 8 bytes: the planes, the masks, a pad
     move.l byte_lut,a4
-    lea bake_lut+64,a3
     moveq #0,d0
 .byte_hi:
     move.w d0,d4
     lsl.w #2,d4
-    move.l -64(a3,d4.w),d1
+    move.l (a5,d4.w),d1
     add.l d1,d1
-    move.l (a3,d4.w),d2
-    add.l d2,d2
-    move.l 64(a3,d4.w),d3
-    add.l d3,d3
+    move.w d0,d4
+    add.w d4,d4
+    move.w 64(a5,d4.w),d2
+    add.w d2,d2
     lea bake_lut,a6
+    lea bake_lut+64,a3
     moveq #15,d5
 .byte_lo:
-    move.l (a6),d6
+    move.l (a6)+,d6
     or.l d1,d6
     move.l d6,(a4)+
-    move.l 64(a6),d6
-    or.l d2,d6
-    move.l d6,(a4)+
-    move.l 128(a6),d6
-    or.l d3,d6
-    move.l d6,(a4)+
-    addq.l #4,a4
-    addq.l #4,a6
+    move.w (a3)+,d6
+    or.w d2,d6
+    move.w d6,(a4)+
+    addq.l #2,a4
     dbf d5,.byte_lo
     addq.w #1,d0
     cmp.w #16,d0
@@ -1173,82 +1616,99 @@ bake_pixels:
 .rows:
     move.l byte_lut,a5
     lea nibble_swap,a6
-    lea 128(a1),a3
-    lea 160(a1),a4
+    lea 128(a1),a3               ; the transparency masks
+    lea 160(a1),a4               ; the front masks
     move.w bake_rows,bake_row_count
     move.w bake_width,d0
     lsr.w #1,d0
-    move.w d0,bake_stride
+    move.w d0,bake_stride        ; bytes a row
     tst.b bake_vflip
-    beq.s .row
+    beq.s .from_top
     move.w bake_rows,d1
     subq.w #1,d1
     mulu d0,d1
-    add.l d1,a0
+    add.l d1,a0                  ; (the last row first)
+.from_top:
+    lea .half,a2
+    tst.b bake_flip
+    beq.s .row
+    lea .half_mirrored,a2
 .row:
-    moveq #0,d2
-    moveq #0,d3
-    moveq #0,d5
-    move.w bake_stride,d7
-    subq.w #1,d7
     tst.b bake_flip
     beq.s .forward
-    add.w bake_stride,a0
-.reverse:
-    moveq #0,d6
-    move.b -(a0),d6
-    move.b (a6,d6.w),d6          ; (mirrored: the low pixel first)
-    lsl.w #4,d6
-    lsl.l #2,d2
-    lsl.l #2,d3
-    lsl.l #2,d5
-    or.l (a5,d6.w),d3
-    or.l 4(a5,d6.w),d5
-    or.l 8(a5,d6.w),d2
-    dbf d7,.reverse
-    add.w bake_stride,a0
-    bra.s .save
+    add.w bake_stride,a0         ; (mirrored: the row's bytes from its end)
 .forward:
-    moveq #0,d6
-    move.b (a0)+,d6
-    lsl.w #4,d6
-    lsl.l #2,d2
-    lsl.l #2,d3
-    lsl.l #2,d5
-    or.l (a5,d6.w),d3
-    or.l 4(a5,d6.w),d5
-    or.l 8(a5,d6.w),d2
-    dbf d7,.forward
-.save:
+    jsr (a2)                     ; pixels 0-7
+    movep.l d2,0(a1)
+    move.w d4,d5
+    lsr.w #8,d5
+    move.b d5,(a3)+
+    move.b d4,(a4)+
     cmp.w #8,bake_width
-    bne.s .full
-    lsl.l #8,d2
-    lsl.l #8,d3
-    lsl.l #8,d5
-.full:
-    swap d3
-    move.w d3,(a1)+
-    swap d3
-    move.w d3,(a1)+
-    swap d5
-    move.w d5,(a1)+
-    swap d5
-    move.w d5,(a1)+
-    move.w d2,(a3)+
-    swap d2
-    move.w d2,(a4)+
-    tst.b bake_vflip
+    beq.s .narrow
+    jsr (a2)                     ; pixels 8-15
+    movep.l d2,1(a1)
+    move.w d4,d5
+    lsr.w #8,d5
+    move.b d5,(a3)+
+    move.b d4,(a4)+
+    bra.s .next_row
+.narrow:
+    moveq #0,d2
+    movep.l d2,1(a1)
+    clr.b (a3)+
+    clr.b (a4)+
+.next_row:
+    addq.l #8,a1
+    tst.b bake_flip
     beq.s .advance
-    sub.w bake_stride,a0
-    sub.w bake_stride,a0
+    add.w bake_stride,a0         ; (mirrored: back to the row's end)
 .advance:
+    tst.b bake_vflip
+    beq.s .counted
+    sub.w bake_stride,a0
+    sub.w bake_stride,a0
+.counted:
     subq.w #1,bake_row_count
     bne .row
+    rts
+; eight pixels: d2 = the planes (a byte each), d4 = the masks (the transparency byte over the front byte)
+.half:
+    moveq #0,d2
+    moveq #0,d4
+    rept 4
+    moveq #0,d6
+    move.b (a0)+,d6
+    lsl.w #3,d6
+    lsl.l #2,d2
+    or.l (a5,d6.w),d2
+    lsl.w #2,d4
+    or.w 4(a5,d6.w),d4
+    endr
+    rts
+.half_mirrored:                  ; (the bytes from the row's end, each with its two pixels swapped)
+    moveq #0,d2
+    moveq #0,d4
+    rept 4
+    moveq #0,d6
+    move.b -(a0),d6
+    move.b (a6,d6.w),d6
+    lsl.w #3,d6
+    lsl.l #2,d2
+    or.l (a5,d6.w),d2
+    lsl.w #2,d4
+    or.w 4(a5,d6.w),d4
+    endr
     rts
 
 ; Front pens over the sprites: only the cells sprites touched, from the clean screen.
 front_pass:
     move.w front_count,d7
+    ifd DEBUG
+    moveq #0,d0
+    move.w d7,d0
+    add.l d0,dbg_fronts
+    endc
     clr.w front_count
     subq.w #1,d7
     bmi .done
@@ -1307,46 +1767,95 @@ object_cell:
     add.w d0,d6
     rts
 
-; A sprite's cells (2 by 2, 1 column when it is on a word, 1 row on a cell line) go to this
-; ring's damage list; those with front pens to the front list.
+; A sprite's rectangle (one word column when it is on a word, else two; 16 lines) goes to this ring's rectangle list;
+; its cells with front pens to the front list.
 mark_sprite:
-    bsr.s object_cell
-    bsr.s .row
+    ifd DEBUG
+    addq.l #1,dbg_sprite_cells
+    endc
+    bsr object_cell
+    moveq #0,d0
     move.w object_y,d0
-    and.w #15,d0
+    mulu #STRIDE,d0
+    moveq #0,d1
+    move.w object_x,d1
+    lsr.w #4,d1
+    lsl.w #3,d1
+    add.l d1,d0
+    moveq #2,d3                  ; 16 lines
+    move.w object_x,d1
+    and.w #15,d1
+    beq.s .one_column
+    or.w #$100,d3
+.one_column:
+    move.w object_y,d1
+    and.w #15,d1
+    beq.s .one_row
+    bset #0,d3
+.one_row:
+    bsr add_rect
+    ; its cells with front pens (cell_has_front: few) to the front list
+    lea cell_has_front,a0
+    move.w d6,d1
+    tst.b (a0,d1.w)
+    bne.s .fronts
+    btst #8,d3
+    beq.s .second_row
+    tst.b 1(a0,d1.w)
+    bne.s .fronts
+.second_row:
+    btst #0,d3
     beq.s .done
-    add.w #COLS,d6
-.row:
-    bsr.s .one
-    move.w object_x,d0
-    and.w #15,d0
+    add.w #COLS,d1
+    tst.b (a0,d1.w)
+    bne.s .fronts
+    btst #8,d3
     beq.s .done
-    addq.w #1,d6
+    tst.b 1(a0,d1.w)
+    beq.s .done
+.fronts:
+    move.w d6,d1
     bsr.s .one
-    subq.w #1,d6
+    btst #8,d3
+    beq.s .row_done
+    addq.w #1,d1
+    bsr.s .one
+    subq.w #1,d1
+.row_done:
+    btst #0,d3
+    beq.s .done
+    add.w #COLS,d1
+    bsr.s .one
+    btst #8,d3
+    beq.s .done
+    addq.w #1,d1
+    bsr.s .one
 .done:
     rts
 .one:
-    bsr mark_ring
     lea cell_has_front,a0
-    tst.b (a0,d6.w)
+    tst.b (a0,d1.w)
     beq.s .no
     lea front_flag,a0
-    tst.b (a0,d6.w)
+    tst.b (a0,d1.w)
     bne.s .no
-    st (a0,d6.w)
+    st (a0,d1.w)
     move.w front_count,d0
     addq.w #1,front_count
     add.w d0,d0
     lea front_list,a0
-    move.w d6,(a0,d0.w)
+    move.w d1,(a0,d0.w)
 .no:
     rts
-
 ; Sprites in descending RAM order; an entry with y = 0 is off the screen in both orientations.
 sprite_pass:
     btst #2,g_video_enable
     bne .done
+    move.w #2,$ffff8a20.w        ; (sprite_blit: the registers every sprite shares)
+    move.w #2,$ffff8a22.w
+    move.w #8,$ffff8a2e.w
+    move.w #$ffff,$ffff8a2a.w
+    move.w #$0203,$ffff8a3a.w
     lea bt_sprites+$1fc,a3
     moveq #127,d7
 .next:
@@ -1399,6 +1908,9 @@ sprite_pass:
     and.w #7,d1
     move.w d1,object_colour
     movem.l d7/a3,-(sp)
+    ifd DEBUG
+    addq.l #1,dbg_sprites
+    endc
     bsr sprite_get
     move.l a1,object_source
     bsr mark_sprite
@@ -1410,8 +1922,7 @@ sprite_pass:
 .done:
     rts
 
-sprite_get:
-    movem.l d0-d7/a0-a6,-(sp)
+sprite_get:                      ; (sprite_pass keeps nothing in the registers: none saved)
     moveq #0,d0
     move.w object_code,d0
     moveq #0,d1
@@ -1514,7 +2025,6 @@ sprite_get:
     add.l d3,a1
     move.l a1,cache_result
 .done:
-    movem.l (sp)+,d0-d7/a0-a6
     move.l cache_result,a1
     rts
 
@@ -1530,11 +2040,6 @@ sprite_blit:
     add.l work_base,d0
     move.l d0,BLT_DST_ADDR.w
     move.l object_source,BLT_SRC_ADDR.w
-    move.w #2,$ffff8a20.w
-    move.w #2,$ffff8a22.w
-    move.w #8,$ffff8a2e.w
-    move.w #$ffff,$ffff8a2a.w
-    move.w #$0203,$ffff8a3a.w
     moveq #0,d6
     move.w object_x,d6
     and.w #15,d6
@@ -1703,7 +2208,7 @@ text_row_build:
 .gather:
     move.w d4,d0
     tst.b text_flip
-    beq.s .column
+    beq .column
     neg.w d0
     add.w #31,d0
 .column:
@@ -1795,6 +2300,7 @@ text_row_build:
     dbf d0,.clear
     move.l a0,pool_next
     move.w (a1),run_x0
+    clr.b run_planes
 .char:
     move.w 2(a1),object_code
     move.w 4(a1),object_colour
@@ -1804,6 +2310,14 @@ text_row_build:
     lsr.w #3,d0                  ; byte in the line
     move.l a1,-(sp)
     bsr char_get                 ; a1 = planes (pixels in the high bytes), +128 masks
+    move.w object_colour,d2      ; the planes its pens can set
+    lsl.w #2,d2
+    lea pen_map+$300,a2
+    add.w d2,a2
+    move.b (a2)+,d2
+    or.b (a2)+,d2
+    or.b (a2),d2
+    or.b d2,run_planes
     lea 128(a1),a3
     lea 2(a4,d0.w),a0
     moveq #7,d4
@@ -1826,6 +2340,8 @@ text_row_build:
     addq.l #6,a1
     subq.w #1,run_chars
     bne .char
+    move.l run_next,a0
+    move.b run_planes,-8(a0)     ; (the high byte of the run's N: the planes to draw)
     move.w chars_left,d5
     bra .run
 .next_row:
@@ -1856,38 +2372,53 @@ character_pass:
     add.w #64,d0
     move.w (a3)+,d1
     add.w physical_y,d1
-    move.w (a3)+,d2              ; N
+    move.w (a3)+,d2              ; N, the planes to draw in the high byte
     move.w (a3)+,d3              ; bytes a line
     move.l (a3)+,a2              ; the mask block
     movem.l d0-d3/d7/a2-a3,-(sp)
-    ; the cells: words x>>4 .. +N, lines y .. y+7 (text_cell: recorded, or checked when the ring keeps its text)
-    clr.b text_hit
+    ; its rectangle: words x>>4 .. +N, lines y .. y+7; its cells: two rows when the lines cross a cell line
     move.w d0,object_x
     move.w d1,object_y
     bsr object_cell
-    move.w d2,d5
-.mark_top:
-    bsr text_cell
-    addq.w #1,d6
-    dbf d5,.mark_top
+    moveq #0,d3
+    move.b d2,d3
+    lsl.w #8,d3
     move.w object_y,d0
     and.w #15,d0
     cmp.w #8,d0
     bls.s .one_row
-    add.w #COLS-1,d6
-    sub.w d2,d6
-    move.w d2,d5
-.mark_bottom:
-    bsr text_cell
-    addq.w #1,d6
-    dbf d5,.mark_bottom
+    bset #0,d3
 .one_row:
-    movem.l (sp)+,d0-d3/d7/a2-a3
     tst.b text_keep
-    beq.s .draw
+    bne.s .check
+    moveq #0,d0                  ; drawing whole: recorded for the ring (text_prepare restores it when the text is redone)
+    move.w object_y,d0
+    mulu #STRIDE,d0
+    moveq #0,d1
+    move.w object_x,d1
+    lsr.w #4,d1
+    lsl.w #3,d1
+    add.l d1,d0
+    move.l cur_text_count,a0
+    move.w (a0),d1
+    addq.w #1,(a0)
+    lsl.w #3,d1
+    move.l cur_text,a1
+    add.w d1,a1
+    move.l d0,(a1)+
+    move.w d6,(a1)+
+    move.w d3,(a1)
+    movem.l (sp)+,d0-d3/d7/a2-a3
+    bra.s .draw
+.check:
+    bsr text_cells_hit           ; kept: drawn again when a cell was restored or drawn over this frame
+    movem.l (sp)+,d0-d3/d7/a2-a3
     tst.b text_hit
-    beq .skip                    ; kept: none of its cells restored or drawn over this frame
+    beq .skip
 .draw:
+    ifd DEBUG
+    addq.l #1,dbg_runs
+    endc
     moveq #0,d4
     move.w d1,d4
     mulu #STRIDE,d4
@@ -1900,53 +2431,69 @@ character_pass:
     and.w #15,d0
     or.w #$80,d0                 ; FXSR
     move.b d0,$ffff8a3d.w
-    move.w d2,d5
-    addq.w #1,d5
-    move.w d5,$ffff8a36.w
-    move.w d2,d5
+    moveq #0,d5
+    move.b d2,d5                 ; N
     lsl.w #3,d5
     neg.w d5
     add.w #STRIDE,d5
     move.w d5,$ffff8a30.w
+    moveq #0,d5
+    move.b d2,d5
+    addq.w #1,d5                 ; the words a line
+    move.w d5,$ffff8a36.w
+    lea bd_lines_d,a0            ; (engine/rt/borders.s: the lines a piece of a pass reading the screen)
+    moveq #0,d6
+    move.b (a0,d5.w),d6
+    bne.s .fits
+    moveq #1,d6
+.fits:
+    lsr.w #8,d2                  ; the planes to draw
     lsl.w #3,d3                  ; bytes a block
     move.l a2,a1
     add.w d3,a1                  ; plane 0
-    moveq #3,d6
+    moveq #3,d0
 .plane:
     move.l a2,$ffff8a24.w
     move.l d4,$ffff8a32.w
-    move.w #8,$ffff8a38.w
     move.b #4,$ffff8a3b.w        ; NOT mask AND screen
-    jsr blit_go                  ; (up to ~17 x 8 words: in pieces)
+    bsr.s .pieces
+    lsr.w #1,d2
+    bcc.s .next_plane            ; (no pixel of the run in this plane)
     move.l a1,$ffff8a24.w
     move.l d4,$ffff8a32.w
-    move.w #8,$ffff8a38.w
     move.b #7,$ffff8a3b.w        ; pixels OR screen
-    jsr blit_go
+    bsr.s .pieces
+.next_plane:
     add.w d3,a1
     addq.l #2,d4
-    dbf d6,.plane
+    dbf d0,.plane
 .skip:
     dbf d7,.run
+    bra.s .done
+.pieces:
+    ; the eight lines in HOG pieces of d6 (at most ~256 bus cycles each, engine/rt/borders.s)
+    moveq #8,d1
+.piece:
+    move.w d6,d5
+    cmp.w d1,d5
+    bls.s .lines
+    move.w d1,d5
+.lines:
+    move.w d5,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+    sub.w d5,d1
+    bne.s .piece
+    rts
 .done:
     tst.b text_keep
     bne.s .kept
-    move.w ring_index,d1         ; the ring's text record: what it shows, the cells it covers
-    lea ring_txt_count,a0
-    move.l txt_list_ptr,d0
-    sub.l txt_list_base,d0
-    lsr.l #1,d0
-    move.l d0,(a0,d1.w)
+    move.w ring_index,d1         ; the ring's text record: what it shows (the rectangles it covers: cur_text)
     lea ring_txt_key1,a0
     move.w scroll_x,d0
     swap d0
     move.w scroll_y,d0
     move.l d0,(a0,d1.w)
     bsr text_key2
-    tst.b txt_overflow
-    beq.s .whole
-    move.b #2,d0                 ; (the list full, the rest in the damage list: restored, never kept)
-.whole:
     lea ring_txt_key2,a0
     move.l d0,(a0,d1.w)
 .kept:
@@ -1963,7 +2510,7 @@ text_key2:
     rts
 
 ; text_prepare (before ring_restore): the text layer's rows; whether this ring keeps the text it shows (the same text,
-; scroll and flip as when it was drawn there) - else its old text cells are restored and the text drawn whole.
+; scroll and flip as when it was drawn there) - else its old text rectangles are restored and the text drawn whole.
 text_prepare:
     addq.b #1,frame_tag
     clr.b text_keep
@@ -1988,58 +2535,60 @@ text_prepare:
     rts
 .redo:
     move.w ring_index,d1
-    lea ring_txt_lists,a2
-    tst.w d1
-    beq.s .ring0
-    lea TEXT_CELLS*2(a2),a2
-.ring0:
-    move.l a2,txt_list_base
-    move.l a2,txt_list_ptr
-    lea TEXT_CELLS*2(a2),a0
-    move.l a0,txt_list_end
-    clr.b txt_overflow
     lea ring_txt_key2,a0
-    tst.b 3(a0,d1.w)
-    bne.s .restore               ; (1: a record, 2: one that overflowed, 0: none)
-    rts
-.restore:
     clr.l (a0,d1.w)
-    lea ring_txt_count,a0
-    move.l (a0,d1.w),d5
+    move.l cur_text_count,a0     ; the ring's text rectangles to its restore list (ring_restore, next)
+    move.w (a0),d5
+    clr.w (a0)
     subq.w #1,d5
     bmi.s .restored
+    move.l cur_text,a2
+    move.l cur_rect_count,a0
+    move.w (a0),d1
+    move.w d1,d0
+    add.w d5,d0
+    addq.w #1,d0
+    move.w d0,(a0)
+    lsl.w #3,d1
+    move.l cur_rect,a1
+    add.w d1,a1
 .old:
-    move.w (a2)+,d6              ; the old text cells to this ring's damage list
-    bsr mark_ring
+    ifd DEBUG
+    addq.l #1,dbg_text_cells
+    endc
+    move.l (a2)+,(a1)+
+    move.l (a2)+,(a1)+
     dbf d5,.old
 .restored:
     rts
 
-; text_cell, cell d6 of a text run: drawing whole, the cell recorded for the ring (mark_ring when the list is full);
-; keeping, text_hit set when the cell was restored or drawn over (a sprite: its flag in this ring's list) this frame.
-text_cell:
-    tst.b text_keep
-    bne.s .check
-    move.l txt_list_ptr,a0
-    cmp.l txt_list_end,a0
-    bhs.s .full
-    move.w d6,(a0)+
-    move.l a0,txt_list_ptr
-    rts
-.full:
-    st txt_overflow
-    bra mark_ring
-.check:
+; text_cells_hit: cell d6 and the shape d3 (touch_cells) of a text run the ring keeps: text_hit when one of its cells
+; was restored or drawn over this frame (restored_tag) or is on the damage list.  Uses d0-d2/a0/a1.
+text_cells_hit:
+    clr.b text_hit
+    movem.l d3/d6,-(sp)
+.row:
     lea restored_tag,a0
-    move.b frame_tag,d0
-    cmp.b (a0,d6.w),d0
+    move.l cur_flags,a1
+    move.b frame_tag,d2
+    move.w d3,d1
+    lsr.w #8,d1
+    move.w d6,d0
+.col:
+    cmp.b (a0,d0.w),d2
     beq.s .hit
-    move.l cur_flags,a0
-    tst.b (a0,d6.w)
-    beq.s .done
+    tst.b (a1,d0.w)
+    bne.s .hit
+    addq.w #1,d0
+    dbf d1,.col
+    add.w #COLS,d6
+    bclr #0,d3
+    bne.s .row
+    bra.s .done
 .hit:
     st text_hit
 .done:
+    movem.l (sp)+,d3/d6
     rts
 
 char_get:
@@ -2115,12 +2664,17 @@ NS set 0
     dc.b ((NS&15)<<4)|(NS>>4)
 NS set NS+1
     endr
-mapped_bits: dc.l 0,0,65536,0,1,0,65537,0,0,65536,65536,65536,1,65536,65537,65536,0,1,65536,1,1,1,65537,1,0,65537,65536,65537,1,65537,65537,65537
+spread4:                         ; a pen's four plane bits, one a byte (plane 0 in the high byte)
+SP4 set 0
+    rept 16
+    dc.l ((SP4&1)<<24)|((SP4&2)<<15)|((SP4&4)<<6)|((SP4&8)>>3)
+SP4 set SP4+1
+    endr
 front_limits: dc.b 12,12,8,8,4,4,0,0,0,0,0,0,0,0,0,0
     even
 ring_tables:
-    dc.l dmg_flag0,dmg_list0,dmg_count0,applied0,strip_list0,strip_count0
-    dc.l dmg_flag1,dmg_list1,dmg_count1,applied1,strip_list1,strip_count1
+    dc.l dmg_flag0,dmg_list0,dmg_count0,applied0,strip_list0,strip_count0,rect_list0,rect_count0,text_list0,text_count0
+    dc.l dmg_flag1,dmg_list1,dmg_count1,applied1,strip_list1,strip_count1,rect_list1,rect_count1,text_list1,text_count1
 twin_offsets:
     dc.w -16,0,16,0,0,-16,0,16,-16,-16,-16,16,16,-16,16,16
 row_cells:
@@ -2156,6 +2710,10 @@ cur_count: ds.l 1
 cur_applied: ds.l 1
 cur_strip: ds.l 1
 cur_strip_count: ds.l 1
+cur_rect: ds.l 1
+cur_rect_count: ds.l 1
+cur_text: ds.l 1
+cur_text_count: ds.l 1
 ring_index: ds.w 1
 strip_state: ds.l 2              ; per ring: the window word, the fine scroll and the first row of its last frame
 frame_ready: ds.b 1
@@ -2164,6 +2722,7 @@ view_flip: ds.b 1
 map_dirty: ds.b 1
 epoch_changed: ds.b 1
 prev_mode: ds.b 1
+no_twins: ds.b 1
 text_flip: ds.b 1
 text_valid: ds.b 1
     even
@@ -2212,7 +2771,7 @@ palette_dirty: ds.b 64
 bake_lut: ds.l 48
 byte_lut: ds.l 1
 byte_lut_tags: ds.b 20*BYTE_LUTS
-byte_luts: ds.b 4096*BYTE_LUTS
+byte_luts: ds.b 2048*BYTE_LUTS
 bake_calls: ds.l 1
     ifd SIM
 bake_n_tile: ds.l 1                ; (perf_test frames: the bakes by kind)
@@ -2255,17 +2814,20 @@ text_roll: ds.w 1
 text_relist: ds.b 1
 text_keep: ds.b 1                ; this frame: the ring keeps its text, only runs over restored cells drawn
 text_hit: ds.b 1
-txt_overflow: ds.b 1
+strip_changed: ds.b 1
 frame_tag: ds.b 1
     even
 text_gen: ds.w 1
-txt_list_base: ds.l 1
-txt_list_ptr: ds.l 1
-txt_list_end: ds.l 1
 ring_txt_key1: ds.l 2            ; per ring: the scroll its text was drawn at
 ring_txt_key2: ds.l 2            ; text_gen, flip, valid
-ring_txt_count: ds.l 2
-ring_txt_lists: ds.w 2*TEXT_CELLS
+rect_count0: ds.w 1
+rect_count1: ds.w 1
+text_count0: ds.w 1
+text_count1: ds.w 1
+rect_list0: ds.b RECTS*8         ; a rectangle: the buffer offset of its first word (long), its first cell, its shape
+rect_list1: ds.b RECTS*8
+text_list0: ds.b TEXT_RUNS*28*8
+text_list1: ds.b TEXT_RUNS*28*8
 restored_tag: ds.b CELLS         ; the frame_tag of the last restore of each cell
     even
 draw_list: ds.b TEXT_RUNS*12*28
@@ -2281,6 +2843,8 @@ run_count: ds.w 1
 run_chars: ds.w 1
 chars_left: ds.w 1
 run_x0: ds.w 1
+run_planes: ds.b 1
+    even
 row_y: ds.w 1
 text_row: ds.w 1
 pal_roll: ds.w 1
@@ -2295,5 +2859,18 @@ tile_cache: ds.b TILE_ENTRIES*192
 sprite_cache: ds.b SPRITE_ENTRIES*128
 char_cache: ds.b 128*192
 bake_scratch: ds.b 192
-ring_area: ds.b 3*RING_SIZE+256
+    ifd DEBUG
+dbg_restored: ds.l 1
+dbg_draws: ds.l 1
+dbg_checks: ds.l 1
+dbg_sprites: ds.l 1
+dbg_fronts: ds.l 1
+dbg_runs: ds.l 1
+dbg_text_cells: ds.l 1
+dbg_full: ds.l 1
+dbg_sprite_cells: ds.l 1
+dbg_strip_cells: ds.l 1
+dbg_ands: ds.l 1
+    endc
+; ring_area: 3*RING_SIZE+256 bytes, in blktiger.s (its first part in the data section)
     section text,code

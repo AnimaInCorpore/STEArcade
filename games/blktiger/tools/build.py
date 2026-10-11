@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
+import sound                    # (first: assets may put other games' tools in the path)
 import gen
 import assets
 from prepare import prepare
@@ -15,11 +16,16 @@ def main():
     ap.add_argument('--sim', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--frames', type=int, default=0)
+    ap.add_argument('--sound', action='store_true', help='record the sound driver again (tools/sound.py, ~6 min)')
     ap.add_argument('-D', dest='defines', action='append', default=[])
     args = ap.parse_args()
     prepare()
     assets.build()
     build = build_dir('blktiger')
+    if args.sound:
+        sound.all_effects(True)
+        sound.all_tunes(True)
+    print('bt_sound.s: %d bytes' % sound.emit(build / 'bt_sound.s'))     # (from build/blktiger/fx.pkl, music.pkl)
     maincpu = (build / 'maincpu.rom').read_bytes()
     (build / 'fixed.rom').write_bytes(maincpu[:0x8000])
     (build / 'banks.rom').write_bytes(maincpu[0x10000:])

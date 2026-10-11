@@ -4,7 +4,8 @@
 
 STE port of MAME set `blktiger`, with a bank-aware translation of the unmodified
 main Z80 and an i8751 interpreter running the dumped protection firmware.
-Requires a 4 MB STE. Sound is not implemented.
+Requires a 4 MB STE. The sound driver's effects and music play on the YM2149
+(see "Sound").
 
 ```sh
 python port.py build blktiger         # verify ROMs, build assets and BLKTIGER.PRG
@@ -44,24 +45,37 @@ Everything is drawn whole into hidden margins, nothing is clipped. Per frame
   window comes with a new 256-pixel page, a mode (flip, layout, background
   off), map or palette change. A new tile is also drawn to its twins 16 cells
   away outside the window, so the jump to the next page finds them ready.
-* **Each ring** keeps a damage list: cells the clean screen changed, the
-  cells sprites and text covered two frames ago, margin cells that must lose
-  their black. Only those are copied from the clean screen.
+* **Each ring** keeps a damage list of cells (those the clean screen changed,
+  margin cells that must lose their black) and a list of rectangles (what its
+  sprites covered, and its text runs once the text is redone: a run's 8 lines,
+  a sprite's 16). Only those are copied from the clean screen, by the Blitter
+  in short HOG pieces; a damage cell in a margin column gets its black bits
+  with the copy (zeroes, or the clean screen AND a halftone mask).
 * **Front pens** (the background's priority half) are in the clean tiles; they
   are drawn again only over the cells sprites touched (a mask per cell).
 * **The text layer** is a list of runs (characters on one row, gaps of up to
   three blanks), composed into planar strips when the text RAM or the flip
-  changes; a frame draws each run with the Blitter, shifted, two passes a plane.
+  changes; a frame draws each run with the Blitter, shifted, two passes a plane
+  (the OR pass only for the planes the run's pens can set). A ring keeps its
+  text while the scroll and the text are the same; else the runs' rectangles
+  are restored and the text drawn whole.
 * **The black side margins** (32 pixels each side of the 320-pixel window) are
-  a mask per cell and ring, changed only where the window moved.
-* **Change detection**: the translated writers of the background RAM and the
-  palette set `bg_dirty` / `pal_dirty` (`gen.BG_WRITERS`, `gen.PAL_WRITERS`,
-  from coverage); 256 / 128 bytes a frame are compared in case one is missing
-  (a DEBUG build counts what that finds). The text RAM (about 80 writers) is
-  compared each frame.
+  a mask per cell and ring, changed only where the window moved; the two word
+  columns the fine scroll masks in part are copied whole by the Blitter (the
+  clean screen AND the visible bits) when the window moved.
+* **Change detection**: the translated writers of the background RAM set
+  `bg_dirty` (`gen.BG_WRITERS`, from coverage) and the block copies to the
+  palette note their ranges before they run (`pal_note`, `gen.PAL_WRITERS`:
+  only those blocks of 128 entries are compared and mapped again); 256 / 128
+  bytes a frame are compared in case a writer is missing (a DEBUG build counts
+  what that finds). The text RAM (about 80 writers) is compared each frame.
+  A tile the game changes (an animation) is drawn where it shows only; its
+  twins are found stale when the page jumps there.
 
 Whole sprites use precomputed shifted masks and equal-mask row groups, including
-mirrored variants. Background split priority and viewport-anchored text follow
+mirrored variants. Tiles, sprites and characters are baked into planes with a
+byte table a colour (two pixels a lookup, `movep` for the plane bytes; 32 tables
+cached). Background split priority and viewport-anchored text follow
 MAME. A fixed 16-colour STE palette approximates the arcade palette; renderer
 comparisons use that same colour mapping.
 
@@ -77,13 +91,32 @@ pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frame
 | a game tick (logic) | 54 k | 47 k |
 | Hatari (`tools/bench.sh`, 6000 VBLs of play) | | 38.9 ticks/s (65% of the arcade), 12.3 frames/s |
 
-`MAX_SKIPS=2` gives 33.5 ticks/s and 14.0 frames/s. The logic is now the larger
+`MAX_SKIPS=2` gave 33.5 ticks/s and 14.0 frames/s. The logic is the larger
 part: the bank switches of the background RAM (4 KB copied out and in, the game
 reads its map for collisions) and the guarded window reads. `perf_test.py`
-takes `profile` (render_frame by routine), `logic [regions]` (the tick by
-routine or Z80 page), `frames` (a frame's cost, map / palette changes, tiles
-baked). `render_test.py --consecutive --walk` draws every frame (the
-incremental paths) and checks the black margins too.
+takes `profile` (render_frame by routine; `PERF_CPU=1` without the Blitter's
+bus cycles), `logic [regions]` (the tick by routine or Z80 page), `frames` (a
+frame's cost and the renderer's DEBUG counters: bakes, cells restored, tiles
+drawn, sprites, text runs, margin cells, with `build.py --sim --debug`).
+`render_test.py --consecutive --walk` draws every frame (the incremental paths)
+and checks the black margins too.
+
+### Renderer work of 2026-10-11
+
+In play the game logic takes about 80k Musashi cycles a tick (108k in Hatari:
+78% of the STE at 60 ticks a second), so the frames get what is left. The
+renderer was cut where the per-frame counters (`perf_test.py frames`) showed
+the work: a scrolling play frame restored 118 cells a frame (52 under the text,
+34 under sprites, 35 margin cells whose partial mask moved, 34 new tiles and
+their twins), redrew 12.7 text runs and baked 2.5 sprites. Now sprites and text
+runs are restored as rectangles, the part-masked margin columns as two Blitter
+passes, damage cells in margin columns with their mask, every copy by the
+Blitter; a changed tile is not drawn to its twins; the palette is compared in
+the blocks the game's block copies touched; `bake_pixels` uses `movep`.
+A scrolling play frame (`PERF_EVERY=3 perf_test.py 1600 1430`): 552k -> 437k
+Musashi cycles (320k CPU + 118k Blitter bus); a frame of the start screen
+251k -> 210k. The Blitter's bus time and the half-line pieces are now a quarter
+of a frame: the restores and the text's eight passes a run are bus bound.
 
 ## Validation and limitations
 
@@ -95,7 +128,7 @@ and whole sprites at viewport edges. The independent MAME comparison validates
 reference pixels using MAME's actual memory and saved video state; it does not
 validate the reference CPU's timing.
 
-The audio Z80 and YM2203s are omitted. MCU transactions are synchronous rather
+The audio Z80 runs only in `tools/sound.py` (its output recorded, see "Sound"). MCU transactions are synchronous rather
 than cycle accurate. The watchdog, coin counters and board timing are not
 fully emulated. Instruction discovery combines committed coverage and static
 control flow, including allocator return-address adjustment; a missed dynamic
@@ -103,6 +136,44 @@ target produces `CRASH.TXT` instead of silently continuing.
 
 See [hardware notes](docs/hardware-notes.md) for the F030Arcade MAME sources and
 stedaimakaimura scrolling references.
+
+## Sound (2026-10-11)
+
+The sound board (MAME `capcom/blktiger.cpp`): a Z80 at 3.58 MHz, two YM2203 at 3.58 MHz (the default prescaler: FM
+at 3.58 MHz / 72, the SSG at / 4), interrupts from the first chip's timers: timer A (~250 Hz) runs the effects and
+the music, timer B (~259 Hz) reads the latch.  A later Capcom driver than Commando's (`tools/sound.py` has the
+details): commands through a table with a header byte each; effects one slot a chip with a priority (byte 31, cleared
+when the effect ends), the SSG only; tunes six FM channels in a main slot (C100) and a backup (C300): a tune of the
+main one's priority replaces it, a higher one moves it to the backup, a lower one goes to the backup unless that holds
+a higher one; when the main tune ends the backup takes over, and a main tune with header bit 6 lets the backup step on
+silently.  `tools/sound.py` models the board (the timers, the busy flag) and records with `engine/capsnd.py`'s forms:
+
+* 40 effects, each alone in the four phases of C022 (12 values a driver step: the SSG registers and the priority).
+  $14 repeats 564 steps for 144 s and $3C 68 steps 255 times: one period is kept with a loop and the total
+  (`compact`, 250 KB less).
+* 25 tunes, each channel alone through `engine/opn.py` (a YM2149 period and volume a driver step), with its loop;
+  a channel at 30 Hz or lower (FM without a frequency, the carriers' level left from the tune before) counts as silent.
+
+`src/sound.s` plays them in the VBL, five driver steps a VBL (250 Hz), in the driver's scheme (`Player` in
+`tools/sound.py` is that code in Python).  The tunes would take 158 KB: they are packed (`engine/lz.py`, a
+byte-aligned LZ77, 57 KB) and unpacked when they start into one of two 17.7 KB buffers (the main and the backup
+slot); the unpacking runs in the idle hook (`bt_snd_load`, up to 0.5 M cycles), not in the VBL: a tune starts when it
+is unpacked.  Data 91 KB, the buffers 35 KB; the player ~9,500 cycles a VBL (Musashi, random commands).  `tools/bench.sh` (DEBUG + AUTOPLAY, 6000 VBLs): 51.5 game ticks (86%) and 21.2 frames a
+second; without the sound (`EXTRA="-D NOSOUND=1"`) 52.8 and 22.9 (the renderer work of 2026-10-09 and later
+made the 65% / 12 frames above out of date).  With the renderer work of 2026-10-11 (see "Speed"): 54.0 ticks
+(90%) and 23.8 frames a second.
+
+Memory: the program leaves about 16 KB from the desktop.  The dispatch entries (115 KB, read once by
+`init_dispatch`) are the first part of the ring buffers: `gen.py` emits them as a macro that `src/blktiger.s` places
+last in the data section under `ring_area`; the rest of the rings is the first thing in the BSS (the start checks
+that the two parts meet, runs `init_dispatch` first and clears the entries afterwards).
+
+Checks: `sound.py check 120` runs the real driver beside the model, a step at a time: the effects 0 of 59,958
+chip-steps differ audibly (random commands and the game's own); the music 794 of 102,068 sounding channel-steps differ
+in the game's commands, all by one volume step (an envelope carried over from the note before), 1-3% with random
+commands (also tunes that start on another tune's chip state).  `sound_test.py` (in `port.py test`): the 68000 player
+against the model, 0 of 6,000 VBLs differ.  Hatari: coin, start and play have music and effects (the attract mode's first
+command comes at game tick 1509, its demo play: the first ~40 s on the STE are silent, as the arcade's first 25).  `build.py --sound` records again (~6 min).
 
 ## Translator speed (2026-10-09)
 

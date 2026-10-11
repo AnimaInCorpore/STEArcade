@@ -8,6 +8,12 @@ BD_PALETTE = 1
 ; Border removal and the palette on / off: engine/rt/borders.s.  Its events come early and sync themselves to the
 ; video, so a Blitter pass may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces
 ; (blit_go, there).
+; The ring buffers (render.s) begin in the data section: their first part holds the dispatch entries (gen.py's
+; bt_entries_data, last in the data section), which init_dispatch reads once and start then clears; the rest is the
+; first thing in the BSS, which follows the data directly (start checks it).
+    section bss,bss
+ring_tail: ds.b 3*RING_SIZE+256-(init_only_end-ring_area)
+    section text,code
     include "borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
@@ -51,6 +57,18 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
+    move.l #init_only_end,d0     ; (the rings' two parts must be contiguous: see ring_tail)
+    cmp.l #ring_tail,d0
+    beq.s .contiguous
+    illegal
+.contiguous:
+    bsr init_dispatch            ; (first: its entries are in the ring buffers)
+    lea ring_area,a0             ; then they are the rings' memory: clear
+.clear:
+    clr.l (a0)+
+    cmp.l #init_only_end,a0
+    blo.s .clear
+    bsr bt_snd_init
     lea fixed_rom,a0
     lea G_Z80,a1
     move #$8000/4-1,d0
@@ -60,7 +78,6 @@ start:
     bsr init_hardware
     bsr init_video
     bsr mcu_init
-    bsr init_dispatch
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
@@ -177,6 +194,12 @@ z80_hook:
     jsr sim_frame_done
     endc
 .check:
+    tst.b bt_load_req             ; (a tune to unpack: tools/sound.py, src/sound.s)
+    beq.s .loaded
+    movem.l d0-d3/a0-a3,-(sp)
+    bsr bt_snd_load
+    movem.l (sp)+,d0-d3/a0-a3
+.loaded:
     tst.b vbl_pending
     bne.s .deliver
     ifd SIM
@@ -345,6 +368,34 @@ bg_note:
     st map_dirty
     bra.s .done
 
+; A translated block copy to the palette (gen.py PAL_WRITERS, hooked before it runs): d2 = DE (its first address),
+; d1 = BC (the count; the translator keeps BC with its bytes swapped).  The range goes to pal_noted (the renderer
+; maps those blocks), pal_dirty (all) when the list is full.  All registers and the CCR kept.
+PAL_NOTES = 8
+pal_note:
+    move sr,-(sp)
+    movem.l d0-d1/a0,-(sp)
+    move.w d1,d0
+    ror.w #8,d0                  ; the count
+    add.w d2,d0
+    subq.w #1,d0                 ; the last address
+    move.w pal_noted_n,d1
+    cmp.w #PAL_NOTES,d1
+    bhs.s .full
+    addq.w #1,pal_noted_n
+    lsl.w #2,d1
+    lea pal_noted,a0
+    add.w d1,a0
+    move.w d2,(a0)+
+    move.w d0,(a0)
+.done:
+    movem.l (sp)+,d0-d1/a0
+    move (sp)+,ccr
+    rts
+.full:
+    st pal_dirty
+    bra.s .done
+
 ; Block instructions (gen.py block_win): when the source or the destination range of one meets C000-CFFF, the
 ; background bank is copied into the image there for it and back afterwards (bt_bg_post, which marks the map).
 ; d3 = HL, d2 = DE, d5.w = the count - 1; bt_bg_bwd: the ranges end at HL / DE.  All registers and the CCR kept.
@@ -435,6 +486,11 @@ vbl:
     jp_merge in_p2,bt_inputs+2,2
     endc
     bsr vbl_video
+    ifnd NOSOUND
+    movem.l a1-a4,-(sp)
+    bsr bt_snd_vbl               ; (the sound driver's five steps of a VBL)
+    movem.l (sp)+,a1-a4
+    endc
     cmp.b #32,vbl_pending
     bhs.s .cap
     addq.b #1,vbl_pending
@@ -506,6 +562,7 @@ dbg_counters:
     include "hardware.s"
     include "mcu.s"
     include "render.s"
+    include "sound.s"            ; (the sound: tools/sound.py's data)
     include "code_blktiger.s"
     include "rtlib.s"
 z80_badpc:
@@ -554,6 +611,11 @@ fixed_rom:
     incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
+    even
+ring_area:                       ; (the rings' first part: the dispatch entries until init_dispatch has run)
+    bt_entries_data
+    even
+init_only_end:
     section bss,bss
 old_ssp: ds.l 1
 old_screen: ds.l 1
@@ -615,6 +677,8 @@ in_p2: ds.b 1
 cnt_acia: ds.w 1
 bg_noted_n: ds.w 1               ; the background entries written since the last frame (bg_note)
 bg_noted: ds.w BG_NOTES
+pal_noted_n: ds.w 1              ; the palette ranges block-copied since the last frame (pal_note)
+pal_noted: ds.w 2*PAL_NOTES
 crash_vector: ds.w 1
 crash_sp: ds.l 1
 crash_regs: ds.l 16

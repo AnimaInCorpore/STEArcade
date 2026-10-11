@@ -205,8 +205,14 @@ class BTEmitter(Emitter):
     def emit_ins(self, pc, live_out_override=None, with_label=True):
         n0 = len(self.lines)
         super().emit_ins(pc, live_out_override, with_label)
+        if pc in DIRTY_FLAGS and self.code[pc].mn == 'ldir':
+            # (a block copy to the palette: pal_note takes its range from DE and BC before it runs, after the labels)
+            i = n0
+            while i < len(self.lines) and re.match(r'^[A-Za-z]+[0-9A-F]{4,5}(_r)?:', self.lines[i]):
+                i += 1
+            self.lines.insert(i, '\tjsr pal_note')
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
-        if pc in DIRTY_FLAGS:
+        if pc in DIRTY_FLAGS and self.code[pc].mn != 'ldir':
             self.e('st %s' % DIRTY_FLAGS[pc])  # (Scc leaves the flags alone)
         if pc in TEXT_PCS:
             self.text_mark(self.code[pc])
@@ -386,7 +392,9 @@ def generate(extra_roots=()):
         # (a jump into the window from fixed code: the bank's table directly, g_wdispatch is its middle)
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tmove.w d7,g_dispatch_pc', '\tmove.l g_wdispatch,a0',
                 f'\tmove.l {(pc - 0x8000) * 4 - 0x8000}(a0),a0', '\tjmp (a0)']
-    out += ['\tsection data,data', '\teven', 'bt_entries_fixed:']
+    # The entries are read once (init_dispatch): a macro the runtime puts last in the data section, where the ring
+    # buffers begin (src/blktiger.s: their memory is the rings' afterwards).
+    out += ['bt_entries_data macro', 'bt_entries_fixed:']
     for pc in sorted(code):
         if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
             out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
@@ -397,7 +405,8 @@ def generate(extra_roots=()):
             if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
                 out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
         out += ['\tdc.w $ffff']
-    out += ['bt_entry_banks:', '\tdc.l '+','.join(f'bt_entries_bank{b}' for b in range(16))]
+    out += ['\tendm', '\tsection data,data', '\teven',
+            'bt_entry_banks:', '\tdc.l '+','.join(f'bt_entries_bank{b}' for b in range(16))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']

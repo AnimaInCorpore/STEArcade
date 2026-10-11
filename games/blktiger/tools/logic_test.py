@@ -113,7 +113,8 @@ def main():
         return True
 
     # The renderer checks the background cells the translated writes noted (bg_note, gen.py win_check), all of them
-    # after map_dirty, and the palette after a hooked writer (gen.PAL_WRITERS): a change without its note is a miss.
+    # after map_dirty, and the palette blocks the hooked block copies noted (pal_note, gen.PAL_WRITERS; pal_dirty: all):
+    # a change without its note is a miss.
     regions = [('pal_dirty', block+0x5800, 0x800)]
     last = {}
     text_checked = [0]
@@ -130,12 +131,15 @@ def main():
         mem.w16(sym['bg_noted_n'], 0)
         for flag, a, size in regions:
             now = bytes(mem.r_block(a, size))
+            noted = [(mem.r16(sym['pal_noted'] + 4*i), mem.r16(sym['pal_noted'] + 4*i + 2)) for i in range(mem.r16(sym['pal_noted_n']))]
             if flag in last and now != last[flag] and not mem.r8(sym[flag]):
-                i = next(i for i in range(size) if now[i] != last[flag][i])
-                print(f'frame {frame}: {flag} not set, {a:06x}+{i:04x} changed')
-                return False
+                miss = [i for i in range(size) if now[i] != last[flag][i] and not any(s <= 0xd800+i <= e for s, e in noted)]
+                if miss:
+                    print(f'frame {frame}: {flag} not set, {a:06x}+{miss[0]:04x} changed outside the noted ranges {noted}')
+                    return False
             last[flag] = now
             mem.w8(sym[flag], 0)
+            mem.w16(sym['pal_noted_n'], 0)
         # The text layer rebuilds only the rows the hooked stores marked (gen.TEXT_WRITERS): right after the frame's
         # text_scan the renderer's copy of rows 2-29 must equal the text RAM, else a writer is missing there.
         if mem.r8(sym['text_valid']):
