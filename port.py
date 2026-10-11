@@ -41,7 +41,7 @@ COVER = {
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
-    "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8], 60000)],     # 5-8: with MAME's cheats (later stages)
+    "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
@@ -80,7 +80,9 @@ TESTS = {
     "1942": [("tools/build.py", ["--sim"], None),
              ("tools/logic_test.py", ["{n}"], 6000),
              ("tools/logic_test.py", ["9000", "--cheat"], None),      # MAME's cheats: the later stages
+             ("tools/logic_test.py", ["6000", "--two"], None),        # a two-player game
              ("tools/sprite_test.py", [], None),
+             ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
 ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py"]

@@ -4,7 +4,7 @@
 ;
 ; The arcade's main Z80 program is translated to 68000 code by tools/gen.py (engine/z80x.py); this
 ; file is the machine around it: STE video, input, the schedule, the ROM banks.  (The sound CPU is not
-; translated: the main CPU only writes commands to it.)
+; translated: its driver's output is recorded, src/sound.s plays it on the YM2149 from the main CPU's commands.)
 ;
 ; The schedule.  The program is a small cooperative kernel: tasks that sleep with `rst $18`, a scheduler
 ; that scans the task table in an idle loop ($0084-$009A, interrupts enabled) and two interrupts, RST 08
@@ -297,10 +297,12 @@ init_hardware:
 	move.b	#$12,$fffffc02.w
 	bsr	jagpad_init		; (the STE pads: absent on a plain ST)
 	endc
+	bsr	snd_init
 	rts
 
 restore_hardware:
 	move	#$2700,sr
+	bsr	snd_off
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -509,6 +511,9 @@ z80_hook:
 	endc
 	subq.b	#1,vbl_pending
 	st	frame_dirty
+	movem.l	d0-d7/a0-a3,-(sp)	; (the alternates of the Z80 registers are in the upper words)
+	bsr	snd_tick		; the sound driver's four IRQs of the tick: the command of the tick before
+	movem.l	(sp)+,d0-d7/a0-a3
 	lea	own_stack_top,sp	; the hook's frame is dropped
 	clr.b	g_iff			; (an interrupt disables the interrupts until the handler's ei)
 	move.b	#1,isr_stage
@@ -951,6 +956,7 @@ z80_unsupported:
 	bra	crash_common		; dispatch miss: the swapped pc * 4), the stack
 
 	include "render.s"
+	include "sound.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch list in the data section).

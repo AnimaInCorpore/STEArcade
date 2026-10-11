@@ -245,9 +245,41 @@ sprite_entry:
 	move.w	d2,spr_xs
 	move.w	d0,spr_pcode
 	bsr.s	draw_part
+	move.w	spr_xs,d3			; a part across an edge of the game area: its chunk in the margin is
+	bmi.s	.left				; cleared (the arcade's monitor shows 224 of the 256 pixels)
+	cmp.w	#208,d3
+	ble.s	.next
+	moveq	#14*8,d0
+	bsr	spr_clip
+	bra.s	.next
+.left:	moveq	#-8,d0
+	bsr	spr_clip
 .next:	subq.w	#1,spr_n
 	bpl.s	.part
 	rts
+
+; The margin chunk at byte d0.w of the game area (-8: left, 112: right) cleared for the 16 lines of the part just drawn
+; (the Blitter is done: HOG mode).  Clobbers d0-d2, a0.
+
+spr_clip:
+	move.w	spr_ytop,d2
+	cmp.w	#-15,d2
+	blt.s	.out
+	cmp.w	#256,d2
+	bge.s	.out
+	ext.l	d2
+	lsl.l	#8,d2
+	add.l	spr_toff,d2
+	ext.l	d0
+	add.l	d0,d2
+	add.l	w_base,d2
+	move.l	d2,a0
+	moveq	#15,d1
+.c:	clr.l	(a0)
+	clr.l	4(a0)
+	lea	STRIDE(a0),a0
+	dbf	d1,.c
+.out:	rts
 
 ; ------------------------------------------------------------------------------
 ; One whole part: spr_pcode, spr_col, spr_xs (screen x), spr_ytop (screen y of the top line).  Records the rectangle, then draws the

@@ -214,7 +214,7 @@ set_bank:
 flush_caches:
 	movem.l	d0-d7/a0-a5,-(sp)
 	lea	tile_ptr,a0
-	move.l	#(65536*4+8192*4+32768*4)/32-1,d0	; (the three pointer tables follow each other)
+	move.l	#(65536*2+8192*4+32768*4)/32-1,d0	; (the three pointer tables follow each other)
 	moveq	#0,d1
 	move.l	d1,d2
 	move.l	d1,d3
@@ -246,11 +246,15 @@ flush_caches:
 tile_get:
 	moveq	#0,d1
 	move.w	d0,d1
-	lsl.l	#2,d1
+	add.l	d1,d1
 	lea	tile_ptr,a0
-	move.l	(a0,d1.l),d1
+	add.l	d1,a0
+	moveq	#0,d1
+	move.w	(a0),d1			; the tile's number in the pool + 1, 0: not baked
 	beq.s	bake_tile
-	move.l	d1,a0
+	lsl.l	#7,d1
+	lea	tile_pool-128,a0
+	add.l	d1,a0
 	rts
 
 bake_tile:
@@ -316,9 +320,12 @@ bake_tile:
 	move.l	(sp)+,a0			; the baked tile
 	moveq	#0,d0
 	move.w	(sp)+,d0
-	lsl.l	#2,d0
+	add.l	d0,d0
 	lea	tile_ptr,a1
-	move.l	a0,(a1,d0.l)
+	move.l	a0,d1
+	sub.l	#tile_pool-128,d1
+	lsr.l	#7,d1
+	move.w	d1,(a1,d0.l)
 	rts
 
 ; ------------------------------------------------------------------------------

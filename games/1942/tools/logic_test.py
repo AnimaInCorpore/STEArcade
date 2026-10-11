@@ -2,8 +2,9 @@
 foreground's idle point after every frame's interrupts and tasks (the runtime's `sim_frame_done`) the RAM, the video RAM, the
 sprite RAM and the latches are compared.
 
-    python logic_test.py [frames] [--stop] [--cheat]
+    python logic_test.py [frames] [--stop] [--cheat] [--two]
 
+--two: a two-player game (two coins, start 2, both joysticks played at random; the turns change at every death).
 --cheat: MAME's cheats for 1942b, applied to both machines before every frame: lives E101, invincibility E0A5 and every 600 frames
 (from frame 1000) "Finish Current Level Now!" (EBD0, E099, E102), to reach the later stages, bosses and the ending.
 """
@@ -32,6 +33,27 @@ def inputs(f, rnd):
         if f % 400 < 3:
             p1 &= ~0x20
     return sys_in, p1, 0xFF
+
+
+def inputs_two(f, rnd):
+    """(SYSTEM, P1, P2): two coins, start 2, then both players at random (and coins and start 2 again after the game over)"""
+    sys_in, p1, p2 = 0xFF, 0xFF, 0xFF
+    if 900 <= f < 905 or 920 <= f < 925 or (f > 3000 and f % 2500 in (0, 1, 2, 20, 21, 22)):
+        sys_in &= 0x7F
+    if 940 <= f < 945 or (f > 3000 and f % 2500 in (40, 41, 42)):
+        sys_in &= 0xFD
+    if f >= 1000:
+        p1 = (0xFF, 0xFF, 0xFE, 0xFD, 0xFB, 0xF7, 0xFA, 0xF6)[(f // 20 + rnd.randrange(2)) % 8]
+        p2 = (0xFF, 0xFE, 0xFD, 0xFB, 0xF7, 0xFA, 0xF6, 0xFF)[(f // 23 + rnd.randrange(2)) % 8]
+        if rnd.random() < 0.3:
+            p1 &= ~0x10
+        if rnd.random() < 0.3:
+            p2 &= ~0x10
+        if f % 400 < 3:
+            p1 &= ~0x20
+        if f % 500 < 3:
+            p2 &= ~0x20
+    return sys_in, p1, p2
 
 
 CYCLES = [0]                  # 68000 cycles run so far (the frame loop reports the cost of a frame)
@@ -79,6 +101,7 @@ def main():
     ap.add_argument("--prg", default=str(RUN / "1942.PRG"))
     ap.add_argument("--stop", action="store_true")
     ap.add_argument("--cheat", action="store_true")
+    ap.add_argument("--two", action="store_true")
     a = ap.parse_args()
     s = Sim(a.prg, run_dir=RUN)
     s.mem.set_trace_mode(False)
@@ -146,7 +169,7 @@ def main():
     f = 0
     costs = []
     while f < a.frames:
-        sys_in, p1, p2 = inputs(f, rnd)
+        sys_in, p1, p2 = (inputs_two if a.two else inputs)(f, rnd)
         cyc0 = CYCLES[0]
         ref.sys_in, ref.p1, ref.p2 = sys_in, p1, p2
         if a.cheat:

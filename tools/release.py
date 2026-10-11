@@ -34,7 +34,7 @@ GAMES = [
      "exact logic and picture, but too slow to play on a plain STE; no sound",
      "jump: Space, Control, joystick fire, pad A.  bubble: Alternate, joystick up, pad B, pad up."),
     ("1942", "1942.PRG", "1942 (Capcom 1984)",
-     "the arcade's speed (60 ticks a second), 34-43 frames a second; no sound",
+     "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
      "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
     ("1943", "1943.PRG", "1943: The Battle of Midway (Capcom 1987)",
      "93% of the arcade's speed, 11 frames a second; no sound",

@@ -2,8 +2,11 @@
 read the banked ROM window ($8000-$BFFF) as data, and the stores to the latches C800-C806.
 python ref/cover.py <seed> <frames>  ->  build/1942/cover_<seed>.pkl
 
-Seeds 5 and up play with MAME's cheats for 1942b (lives E101, invincibility E0A5, "Finish Current Level Now!" EBD0 / E099 / E102
-every 400 frames of play) so that the later stages, the bosses and the ending are covered too.
+Seeds 5-8 play with MAME's cheats for 1942b (lives E101, invincibility E0A5, "Finish Current Level Now!" EBD0 / E099 / E102
+every 400 frames of play) so that the later stages, the bosses and the ending are covered too.  Seeds 9-12 play two-player
+games (two coins, start 2, both joysticks, no cheats: the turns change at every death, game over for each player).
+Seeds 13-16 play long games with the lives cheat only (no invincibility, no level skips): the stages reached by playing,
+with deaths, continues of the scroll and the bonus counts on the way.
 
 Scripted play: attract mode, a coin and the start button now and then, random joystick, fire and loop (bomb) buttons.
 Service mode (DSWB bit 3, code in bank 2) is not exercised: the DIP switch stays off.
@@ -16,7 +19,9 @@ from machine import Machine1942
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 rnd = random.Random(seed)
-cheats = seed >= 5
+cheats = 5 <= seed <= 8
+two = 9 <= seed <= 12
+lives_only = seed >= 13
 m = Machine1942()
 c = m.cpu
 pcs = set()
@@ -59,7 +64,7 @@ c.wr8 = wr
 
 coin_at = 700 + rnd.randrange(300)
 state = "attract"
-joy = 0xFF
+joy = joy2 = 0xFF
 t0 = 0
 for f in range(frames):
     m.sys_in = 0xFF
@@ -68,10 +73,10 @@ for f in range(frames):
     if state == "attract" and f >= coin_at:
         state, t0 = "coin", f
     if state == "coin":
-        if f < t0 + 4:
-            m.sys_in &= 0x7F                          # coin 1
+        if f < t0 + 4 or (two and 15 <= f - t0 < 19):
+            m.sys_in &= 0x7F                          # coin 1 (twice for two players)
         elif 30 <= f - t0 < 34:
-            m.sys_in &= 0xFE                          # start 1
+            m.sys_in &= 0xFD if two else 0xFE         # start 2 / start 1
         elif f - t0 >= 34:
             state, t0 = "play", f
     if state == "play":
@@ -79,6 +84,16 @@ for f in range(frames):
         if g % 25 == 0:
             joy = rnd.choice([0xFF, 0xFF, 0xFE, 0xFD, 0xFB, 0xF7, 0xFA, 0xF6, 0xF9, 0xF5])
         m.p1 = joy
+        if two:
+            if g % 25 == 12:
+                joy2 = rnd.choice([0xFF, 0xFF, 0xFE, 0xFD, 0xFB, 0xF7, 0xFA, 0xF6, 0xF9, 0xF5])
+            m.p2 = joy2
+            if rnd.random() < 0.3:
+                m.p2 &= ~0x10
+            if rnd.random() < 0.02:
+                m.p2 &= ~0x20
+        if lives_only:
+            m.ram[0x101] = 6
         if cheats:
             m.ram[0x101] = 6                                  # lives
             m.ram[0x0A5] = 2                                  # invincible
@@ -90,10 +105,10 @@ for f in range(frames):
             m.p1 &= ~0x10
         if rnd.random() < 0.02:
             m.p1 &= ~0x20                              # loop
-        if g % 2500 < 3 and g > 5000:
+        if g > 5000 and (g % 2500 < 3 or (two and 15 <= g % 2500 < 18)):
             m.sys_in &= 0x7F                          # more coins
         if g > 1500 and g % 700 < 3:
-            m.sys_in &= 0xFE
+            m.sys_in &= 0xFD if two else 0xFE
         if g > 30000:
             state, coin_at = "attract", f + 200
     m.run_frame_port()

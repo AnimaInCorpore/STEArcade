@@ -60,6 +60,7 @@ def main():
     last = {}
     bad = 0
     drawn = 0
+    margin_bad = 0
     f = 0
     cyc = []
     while drawn < frames:
@@ -112,6 +113,10 @@ def main():
         mine = window(mem, ring, top)
         want = oracle.frame(ref)
         diff = np.argwhere(mine != want)
+        raw = np.frombuffer(bytes(mem.r_block(ring + top * 256, 256 * 256)), np.uint8).reshape(256, 256)
+        if raw[:, 16:24].any() or raw[:, 136:144].any():  # the margin chunks beside the game area: black (sprites clipped)
+            margin_bad += 1
+            print("frame %d: pixels in the margins beside the game area" % f)
         drawn += 1
         if len(diff):
             bad += 1
@@ -125,12 +130,14 @@ def main():
                 break
         else:
             print("frame %d ok (T %d, bank %d, %d cycles)" % (f, top, ref.palette_bank, cyc[-1]), flush=True)
-    print("drawn %d frames, %d differ" % (drawn, bad))
+    print("drawn %d frames, %d differ, %d with pixels in the margins" % (drawn, bad, margin_bad))
+    bad += margin_bad
     if cyc:
         c = sorted(cyc)
         print("render_frame: mean %d cycles, max %d; median %d, 90%% %d, 99%% %d; %d frames over 100k" % (
             sum(cyc) // len(cyc), max(cyc), c[len(c) // 2], c[len(c) * 9 // 10], c[len(c) * 99 // 100], sum(1 for v in cyc if v > 100000)))
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

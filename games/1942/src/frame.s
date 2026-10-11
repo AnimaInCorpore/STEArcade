@@ -350,7 +350,7 @@ fg_shadow:	ds.b	2048
 rects:		ds.b	3*MAX_RECTS*16
 chr_list:	ds.b	448*12
 chunk_pool:	ds.b	448*96
-tile_ptr:	ds.l	65536
+tile_ptr:	ds.w	65536		; per key (attribute << 8 | code): the baked tile's number in tile_pool + 1, 0: none
 spr_ptr:	ds.l	8192
 chr_ptr:	ds.l	32768
 tile_pool:	ds.b	TILE_POOL_SIZE

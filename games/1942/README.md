@@ -7,9 +7,10 @@ Fourth port (started 2026-10-08), the first with a **hardware scrolled** backgro
 shared pieces are described in `docs/architecture.md`, the method in `docs/porting-guide.md`.
 
 * `src/` the runtime and renderer: `1942.s` (start, schedule, input, timers), `render.s` (video, palette banks, baking),
-  `bg.s`, `chr.s` + `chr2.s`, `spr.s`, `frame.s` (one frame, data, variables)
+  `bg.s`, `chr.s` + `chr2.s`, `spr.s`, `frame.s` (one frame, data, variables), `sound.s` (the YM2149)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` / `palettes.py` (graphics, palettes), `build.py`,
-  `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari)
+  `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari),
+  `sound.py` (the sound driver's programs recorded, the player model), `sound_test.py`
 * `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump.lua`), `palette_stats.py`
 * `docs/` `palette_stats.json` (how often every palette entry shows) and `palettes.json` (the four 16 colour palettes)
 
@@ -18,8 +19,8 @@ plays player 1, port 0 player 2 (fire = fire).
 Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** loop, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 Tap the coin key: the game ignores a coin held for 40 ticks (the reference machine credits 3-20).
 
-Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, 8 runs of 60000 frames, about 30 minutes;
-seeds 5-8 play with MAME's cheats, see "Later stages" below):
+Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, 16 runs of 60000 frames, about an hour;
+seeds 5-8 play with MAME's cheats, 9-12 two-player games, 13-16 long games with the lives cheat, see "Later stages" below):
 
     python port.py cover 1942
     python port.py build 1942              # -> run/1942/1942.PRG (the ROMs embedded)
@@ -28,7 +29,7 @@ seeds 5-8 play with MAME's cheats, see "Later stages" below):
 
 ## What runs
 
-* **One Z80** (the sound CPU is not translated: the main CPU only writes commands to it).  15k translated instructions
+* **One Z80** (the sound CPU is not translated: its output is recorded, see "Sound").  15k translated instructions
   (`tools/gen.py`, "signed" memory model: the 64 KB block with the video RAM and RAM below `a6`).  The program is a small
   cooperative kernel (tasks that sleep with `rst $18`, a scheduler that scans a 16 entry task table, `$0084-$009A`) with two
   interrupts: RST 08 (line 109, a sound command) and RST 10 (the vertical blank: sprite DMA `$EB00 -> $CC00`, scroll, timers).
@@ -87,13 +88,40 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
   the 16 shifts are a stream per (code, shift) (`spr_code_tab`, 202 KB), baked, nothing is computed at runtime.  Parts are drawn whole
   into the virtual ring without clipping.  The routines add to the low word of the destination address, so a part that reaches a 64 KB
   boundary of the ring (1 in 16) goes through `generic_part` (a Blitter call per row with the full address, same streams, rows from
-  the shift independent `spr_plan`).  `spritegen.py` runs every (code, shift) routine against a model of the Blitter (stale source
+  the shift independent `spr_plan`).  A part across a side edge of the game area spills into the 16 pixel chunk beside it:
+  that chunk is cleared for its 16 lines (`spr_clip`; the arcade's monitor shows 224 of the 256 pixels).  `render_test.py`
+  checks that the margin chunks stay black (without the clipping 212 of 1500 frames showed sprite pixels there).  `spritegen.py` runs every (code, shift) routine against a model of the Blitter (stale source
   buffer bits, skew, NFSR, endmasks) over noise and refuses to write anything that fails.
+
+## Sound (2026-10-11)
+
+The sound board (MAME capcom/1942.cpp): a Z80 at 3 MHz, two AY-3-8910 at 1.5 MHz, four IRQs a frame; the STE's YM2149 is
+the same chip with three channels instead of six.  Translating the driver would cost about 1700 Z80 instructions a tick
+(as much as the game logic itself), so `tools/sound.py` records its output: every program (11 tunes, 14 effects) alone,
+in ticks of four IRQs, as YM register images (periods x 4/3 for the YM's 2 MHz, tones clamp at 4095, noise at 31), until
+its slot ends or its RAM repeats (a loop).  `src/sound.s` plays them in the driver's scheme (`sound.py` `Player` is the same
+in Python): music slots `$4480 > $4300 > $4580 > $4600` and effect slots `$4100 > $4200 > $4180 > $4080`, only the highest
+active one of each steps (the lower ones pause), `$4180` / `$4080` restart their effect every 32 / 8 IRQs, the stop
+commands.  Six channels to three: the in-game drums (command `$11`) and the other first-chip tunes are the music, and
+every channel an effect (second chip) sounds on replaces the music's channel of the same letter; the two-chip jingles
+play three fixed channels each (`PICKS`: octave doublings dropped, the louder kept).  37 KB (2130 images of 12 bytes,
+8.8 KB of program words).  The latch is read at every tick (`.deliver`, the command of the tick before), the YM gets
+the registers that changed; no interrupt handler of the port touches the YM.
+
+Room for it: `tile_ptr` holds word numbers of the baked tiles instead of pointers (128 KB less); the program leaves
+about 125 KB free from the desktop (`tools/memfree.sh`).
+
+Checks: `sound.py check 3000` (the model against the driver run beside the game and with random commands): 273 of 3000
+game ticks differ, 230 of them by a volume step of 1-2 (an effect that resumes in the middle of a tick: the model steps
+whole ticks), the random command runs 15 and 0; `sound_test.py 3000` (in `port.py test`): the 68000 player against the
+model, 0 of 9000 ticks differ.  `build.py --sound` records the programs again.
 
 ## Tests
 
     python port.py test 1942                       # build --sim, logic_test (6000 frames), render_test seq 200
     python games/1942/tools/logic_test.py 40000    # whole program on Musashi against the Z80 reference, RAM compared every frame
+    python games/1942/tools/logic_test.py 12000 --two   # the same with a two-player game
+    python games/1942/tools/sound_test.py 3000     # the YM player against tools/sound.py's model
     python games/1942/tools/sprite_test.py         # every sprite code, shift, many positions (edges, 64 KB boundaries, re-baking), restore
     python games/1942/tools/spritegen.py           # sizes and the Blitter model check of all 8000 generated routine / stream pairs
     python games/1942/tools/render_test.py seq 600 1 1200   # picture of every frame against the reference renderer through the palette map
@@ -147,6 +175,13 @@ every 400 frames) and add 1800 program addresses.  `logic_test.py --cheat` (1200
 `profile.py [n] [first] cheat|finish` use the same cheats on both machines.  `render_test.py` takes `ATTRACT=1` (no coin) and `SCROLLRND=1`
 (random scroll jumps: every sign and size of the window's move between two visits of a ring).
 
+Two players and long games (2026-10-11): seeds 9-12 play two-player games (two coins, start 2, both joysticks, the turns
+change at every death), seeds 13-16 long games with the lives cheat only (no invincibility, no level skips: the stages are
+reached by playing, with deaths on the way).  They reach 69 program addresses the first eight runs did not (the two-player
+turn change among them), but the static discovery had translated all of them already: the generated code is the same,
+and no new window reads or video stores turned up.  `logic_test.py --two` (in `port.py test`) runs a two-player game in
+lock-step (12000 frames, 0 differences).
+
 ## Debug options of the build (`build.py -D ...`)
 
 `DEBUG=1` counters (`COUNTERS.BIN`) and assertions (list entries, Blitter rectangles), `AUTOPLAY=1` scripted play, `FINISH=n` level skips
@@ -156,8 +191,8 @@ skipped or repeated), `NOTICK60=1` one tick per VBL, `STAGES=1` progress as colo
 
 ## Not done
 
-Sound; the flip screen (cocktail / DIP switch); the service mode (code in ROM bank 2); the arcade's wrap around of sprites at the raw
-256 pixel edges (they spill into the black margins instead of being clipped, entirely outside parts are not drawn); a palette per
+The two AYs' six channels (three play); the flip screen (cocktail / DIP switch); the service mode (code in ROM bank 2); the arcade's
+wrap around of sprites at the raw 256 pixel edges (entirely outside parts are not drawn); a palette per
 scanline band (the HUD's colours are quantized with the playfield's); real hardware (only Hatari was used).  Ideas for speed: native
 replacements for the kernel's hot routines, characters of the HUD rows drawn only when they change (static bands), pre-baked tiles for the
 common colour codes.
