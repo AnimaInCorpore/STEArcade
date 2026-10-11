@@ -202,6 +202,12 @@ Rules learned the hard way (details in `docs/porting-guide.md`):
   checksums ROM while running is compensated by a dead byte.  Never use frames of a self-test as a performance
   reference: they fill video RAM and load the renderer unrealistically.
 
+Compared with F030Arcade's spare-time renderer (a preemptible render thread on its own stack, started by Timer B once
+the game is parked, its pages queued for the VBL) this schedule is the Heavy Barrel case there: the frame is the
+interrupt handlers, so their return is the "frame is done" point and no park test is needed.  Bubble Bobble's three
+screens are the queued pages; in the other ports a VBL nested into the drawing runs the game, so the drawing may go on
+with a changed state (not checked port by port).  See `docs/porting-guide.md`, "Two related projects compared".
+
 ## Blitter sprite renderer (`games/dkong/src/sprites.s`, `engine/sprite_codegen.py`)
 
 Blitter, like the bob routines of `stefastbobs2/main.s`: one blit per sprite line writes the

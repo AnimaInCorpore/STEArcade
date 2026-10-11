@@ -43,6 +43,10 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
   69.8k with every access guarded -> 61.0k; 1942's 26.6k -> 23.8k a frame and Bubble Bobble's main CPU 67.7k -> 62.4k
   (both had the sites since their ports; now the sites file, `W_GUARD_ALL`, and 1942's `logic_test.py --audit`);
   Gun.Smoke's 40.5k -> 37.3k a frame (229 of 1479 sites).  Commando's ROM is flat: no window, nothing to guard.
+* **Coverage must reach every phase of the game, not only the attract mode and the play**: Galaga 0.2 stopped at the
+  high-score name entry (a score above 20000), whose two jump tables no coverage run had reached (see
+  `games/galaga/README.md`).  Seed the states a short run never gets to (a high score, a game over, the ending) by poking
+  the arcade's RAM in `ref/cover.py`, and keep a crash dump (CRASH.TXT) that names the unknown pc.
 * **Self-tests flood the renderer** (video RAM test) and run ~700 frames: skip them in the reference and the
   translation, compensate any ROM checksum the game runs later, load the patched ROM files in the runtime.
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;
@@ -393,3 +397,35 @@ Bubble Bobble's own players).  Regenerating Commando's data with it gives Comman
   mode is silent for its first 25 s (Black Tiger) — look at the reference's commands before calling Hatari silent; a
   driver may read back the SSG registers or wait for the second chip's timer at boot (Bubble Bobble); a game's asset
   builder may put another game's tools first in `sys.path` (1943's: 1942's `sound.py`).
+
+## Two related projects compared (2026-10-11)
+
+Read, not built or run: `stedaimakaimura` (Daimakaimura, Capcom 1988, an STE / Falcon test from 2017-2020) and
+F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
+
+* **A 68000 board needs no translation.**  Daimakaimura's program is a traced disassembly (every byte marked code, data
+  or pointer) reassembled at its own addresses: the inputs, the CPS-A/B registers, the graphics RAM and the work RAM are
+  labels in STE RAM, the arcade's vectors point to the STE's VBL / HBL / IKBD / Timer B handlers, and the part that
+  overlaps the TOS system variables (`$400-$84E`) moved to `$100000` behind `jmp` stubs.  The game's code runs natively.
+* **Patches instead of the arcade's code**: `relocate_rom.js` lists the words in which the assembled program differs from
+  the ROM; at start the program loads the user's ROM files, swaps their bytes and applies the list.  The renderer and the
+  graphics are in a separate data file.  An alternative to the self-contained programs of the releases.
+* **Its sprite renderer is this project's**: one Blitter copy per run of a line, the end masks as the mask (precomputed
+  for the 16 shifts), a line with the edges of the line before only moves the destination.  Its sprites were grabbed
+  from the running game, so a sprite never seen is not drawn: the graphics side of the coverage problem above.  The ports
+  here bake their graphics from the ROM sets instead.
+* **Its colours**: nearest colour in CIELAB, plus 50/50 checkerboard mixes of palette pairs that are close enough (for a
+  CRT).  The ports here use exact palettes or a fixed Oklab palette (Bubble Bobble), no dithering.
+* **"The frame is done"**: Daimakaimura patches one instruction into the game's task scheduler (all tasks idle ->
+  `request_next_frame`); the VBL handler then draws, stops when Timer B's line count says the beam is close, and resumes
+  at the next VBL.  F030Arcade generalises it: the VBL shows a completed page, runs one game step and asks for a picture;
+  Timer B, ~0.5 ms later, starts or resumes the renderer on its own stack at IPL 3 once the game is parked; the renderer
+  queues its page.  An overloaded renderer drops pictures, never logic.  The park test is per board (Nemesis: the
+  command-queue wait with an empty queue; Snow Bros: a coroutine whose registers matter; Heavy Barrel: none, the frame is
+  the VBL handler), and parking a wait loop can lose a side effect (DoDonPachi's loop advanced a random index).
+* **What applies here**: the Z80 ports already run each frame as interrupt handlers to completion, so the end of the
+  handlers is the end of the frame (see `docs/architecture.md`, "Runtime schedule").  Bubble Bobble already has the
+  completed-page queue (three screens).  The cases left are the ports whose foreground does work (Galaga's main CPU draws
+  text before it idles at `$038D`; 1942's cooperative kernel) and the ports that skip pictures to keep the game's speed
+  (1943, Bubble Bobble).  Not measured: whether their drawing waits for logic it could overlap.
+

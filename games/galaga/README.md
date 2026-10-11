@@ -321,3 +321,17 @@ display): 0 of 64512 pixels differ at 1500, 2200, 3000, 3600, 4400, 5200, 6400 a
 `schedule_test.py` compares the pictures of the port's schedule and of the interleaved reference: they differ from frame
 900 on (the stars one scroll step apart, as before; the same with the committed reference).
 
+
+## The high-score name entry (2026-10-11, the 0.2 report)
+
+Eero Tamminen's report on 0.2: Galaga stops after a short play with "the translated program reached an unknown
+address".  A score above 20000 (the fifth default high score) enters the name entry, which no coverage run had reached,
+and two jump tables of it had escaped the discovery: the rank check at `$3000` (`ld hl,$31A6; rst 08; call $3118`, the
+called routine reading the table twice before its `jp (hl)`; `discover.py`'s `callee_jphl` takes it, five ranks) and the
+sub CPU's script interpreter at `$090E` (opcodes $EF-$FF through the word table at `$0920`, jumping with
+`ex (sp),hl; ret`; 17 opcodes, `$094E` the one that stopped the game-over sequence).  `z80_badpc` writes CRASH.TXT
+like the other crashes (vector 98, d7 = the swapped pc * 4, a4 = the CPU's table, the Z80 stack): the two tables were
+found from those dumps.  Coverage seeds 4-6 of `ref/cover.py` poke the score (six digits in the video RAM, `$83F8` up)
+and play the name entry (one player, two players, the timeout); `port.py cover galaga 4` runs one seed with its group's
+frame count.  Checked in Hatari with the score forced to 30000: game over, name entry, Best 5 and seven minutes of the
+attract mode.  Released in 0.2.1.

@@ -21,7 +21,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 
 ## Download
 
-[Release 0.1](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.1): `STEArcade-0.1.zip` with one
+[Release 0.2.1](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.2.1): `STEArcade-0.2.1.zip` with one
 self-contained TOS program per game (the arcade's code and graphics are built in: no separate ROM files are needed)
 and a README.TXT with the controls.  Requirements: an Atari STE with 4 MB.
 
