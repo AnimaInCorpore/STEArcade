@@ -414,7 +414,23 @@ blit_copy:
 .good:
 	endc
 	stage	$044
-	move.w	#2,BLT_SRC_XINC.w
+	cmp.w	#BLIT_PIECE,d0
+	bls.s	.part
+	movem.l	d0-d1/a0-a1,-(sp)		; (wider than a piece: in two halves, no pass longer than ~half a line)
+	move.w	d0,d2
+	lsr.w	#1,d0
+	sub.w	d0,d2				; the right half's words
+	move.w	d2,-(sp)
+	bsr.s	.part
+	move.w	(sp)+,d2
+	add.w	d0,d0
+	add.w	d0,a0
+	add.w	d0,a1
+	move.w	d2,d0
+	bsr.s	.part
+	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+.part:	move.w	#2,BLT_SRC_XINC.w
 	move.w	#2,BLT_DST_XINC.w
 	move.w	d0,d2
 	add.w	d2,d2
@@ -431,7 +447,7 @@ blit_copy:
 	move.w	#$0203,BLT_HOP_OP.w
 	clr.b	BLT_SKEW.w
 	move.w	d1,BLT_COUNT+2.w
-	bra	blit_go				; (rows of more than BLIT_PIECE words: a line a pass)
+	bra	blit_go
 
 	include "bg.s"
 	include "chr.s"

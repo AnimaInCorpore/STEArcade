@@ -30,6 +30,7 @@ class Blitter:
         self.cycles = 0
         self.upper = 0
         self.lower = 0
+        self.stats = {} if os.environ.get("BLIT_STATS") else None   # PC -> [passes, longest (bus cycles), its words]
 
     def reg16(self, off):
         io = self.sim.io
@@ -65,6 +66,19 @@ class Blitter:
         nfsr = bool(io[0xA3D] & 0x40)
         skew = io[0xA3D] & 15
         usesrc = hop >= 2
+        if self.stats is not None and hasattr(self.sim, "cpu"):
+            # a HOG pass holds the CPU (and its interrupts) for its bus cycles: a write, a destination read unless the
+            # op ignores it, a source read
+            per = 4 + (0 if op in (0, 3, 12, 15) else 4) + (4 if usesrc else 0)
+            c = xcount * ycount * per + (4 * ycount if usesrc and fxsr else 0)
+            # (a pass without HOG shares the bus: it runs on during the interrupts, under the border code's timing)
+            pc = self.sim.cpu.r_pc()
+            if os.environ.get("BLIT_CALLER"):        # (inside blit_go: its caller, above the saved d0-d2)
+                pc = mem.r32((self.sim.cpu.r_reg(R.A7) + 12) & 0xFFFFFF)
+            e = self.stats.setdefault((pc, bool(ctrl & 0x40)), [0, 0, 0])
+            e[0] += 1
+            if c > e[1]:
+                e[1], e[2] = c, (xcount, ycount)
         r16 = mem.r16
         w16 = mem.w16
         for _ in range(ycount):
@@ -135,6 +149,36 @@ class Blitter:
         io[0xA3C] = (ctrl & ~0x80 & ~0x0F) | ln
 
 
+def blit_stats(sim, mapfile=None, limit=512):
+    """BLIT_STATS=<limit>: the HOG passes longer than `limit` bus cycles (a scanline: 512), every shared-bus pass; by the
+    PC after their start"""
+    st = sim.blitter.stats
+    if not st:
+        return
+    names = []
+    if mapfile:
+        names = sorted((v + sim.base, k) for k, v in sim.symbols(mapfile).items())
+
+    def where(pc):
+        best = None
+        for a, k in names:
+            if a > pc:
+                break
+            best = (a, k)
+        return "%s+%X" % (best[1], pc - best[0]) if best else "%06X" % pc
+    for hog in (True, False):
+        sel = {pc: e for (pc, h), e in st.items() if h == hog}
+        if not sel:
+            print("Blitter: no %s passes" % ("HOG" if hog else "shared-bus"))
+            continue
+        long_ = [(e[1], pc, e) for pc, e in sel.items() if e[1] > limit or not hog]
+        print("Blitter: %d %s passes from %d places, longest %d bus cycles; over %d: %d places" % (
+            sum(e[0] for e in sel.values()), "HOG" if hog else "shared-bus", len(sel),
+            max(e[1] for e in sel.values()), limit, sum(1 for c, pc, e in long_ if c > limit)))
+        for c, pc, e in sorted(long_, reverse=True)[:12]:
+            print("  %-28s %6d passes, longest %5d cycles (%d words x %d lines)" % (where(pc), e[0], c, *e[2]))
+
+
 class Sim:
     def __init__(self, prg, ram_kib=4096, run_dir=RUN):
         self.run_dir = Path(run_dir)
@@ -145,6 +189,10 @@ class Sim:
         self.files = {}
         self.next_handle = 6
         self.blitter = Blitter(self)
+        self.mapfile = None
+        if self.blitter.stats is not None:
+            import atexit
+            atexit.register(lambda: blit_stats(self, self.mapfile, int(os.environ["BLIT_STATS"])))
         self.extra_cycles = 0
         self.terminated = False
         self.mem.set_invalid_func(lambda mode, width, addr: 0)
@@ -220,6 +268,7 @@ class Sim:
         self.cpu.w_pc(self.entry)
 
     def symbols(self, mapfile):
+        self.mapfile = self.mapfile or mapfile
         syms = {}
         for line in Path(mapfile).read_text().splitlines():
             m = re.match(r"\s+0x([0-9a-f]{8})\s+(\S+?):", line)

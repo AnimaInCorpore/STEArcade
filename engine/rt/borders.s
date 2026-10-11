@@ -14,9 +14,13 @@
 ;   bottom border did not (the first frame, or a frame whose top border stayed closed).
 ;
 ; A HOG pass must stay well under ~1.5 lines: a Timer B event has ~750 cycles from its interrupt to its first look
-; at the counter (the palette events load the palette first).  Longer passes run in pieces (borders_blit_go: at most
-; BLIT_PIECE words, at least a line each; the Blitter keeps its addresses between them).  With 64-word pieces (up to
-; ~770 cycles with the destination read) Gun.Smoke still had palette events late now and then, with 32 none.
+; at the counter (the palette events load the palette first), and the top border handler that the VBL arms (the
+; fallback) has less than a line.  Every pass is short (stefastbobs2's rule: only short line passes): longer ones run
+; in pieces of at most ~256 bus cycles (borders_blit_go: lines, or column strips of a wide line; the Blitter keeps
+; its addresses between them).  With 64-word pieces (up to ~770 cycles with the destination read) Gun.Smoke still had
+; palette events late now and then, with 32 none.  And every pass is HOG: one that shares the bus runs on during the
+; interrupts and stretches the timed code that opens the borders.  BLIT_STATS=256 (engine/sim.py) lists the passes
+; of a simulator run that are longer, and every pass without HOG.
 ;
 ; The port defines TA_DATA, TA_NOPS (the old handler's tuning), PIC_TOP / PIC_LINES and BD_PALETTE (1: shown_pal and
 ; black_pal are the palettes), and places borders_vbl first in its VBL, borders_handlers in its text, borders_vars
@@ -213,8 +217,15 @@ timer_b:
 	rte
 	endm
 
-; blit_go: starts the HOG pass set up in the Blitter's registers (the lines in its Y count): whole when it is at most
-; BLIT_PIECE words, else in pieces of as many lines as fit in that (at least one).  Keeps all registers.
+; blit_go: starts the HOG pass set up in the Blitter's registers (the lines in its Y count): whole when it is at most a
+; piece, else in pieces of as many lines as fit in one (at least one).  A piece is BLIT_PIECE words, half that when the
+; op reads the destination (a masked draw: three bus accesses a word).  A line wider than a piece is cut into column
+; strips of at most a piece when the pass has no skew, FXSR or NFSR (the copies and fills: a strip is then the same
+; pass on fewer words); with them it runs a line a pass.  The registers end as one pass would leave them.  Keeps all
+; registers.
+;
+; So no HOG pass holds the CPU longer than ~half a line (32 words of a copy: 256 bus cycles), the rule of
+; stefastbobs2: only short line passes, whenever the top border's interrupt may come.
 	ifnd BLIT_PIECE
 BLIT_PIECE = 32
 	endc
@@ -224,12 +235,41 @@ blit_go_lines:
 	movem.l	d0-d2,-(sp)
 	move.w	$ffff8a38.w,d0		; the lines
 	bra.s	blit_go_split
+; the lines a piece by the words a line (0-BLIT_PIECE): a copy or fill, an op that reads the destination
+bd_lines:
+BD_W	set	1
+	dc.b	0
+	rept	BLIT_PIECE
+	dc.b	BLIT_PIECE/BD_W
+BD_W	set	BD_W+1
+	endr
+bd_lines_d:
+BD_W	set	1
+	dc.b	0
+	rept	BLIT_PIECE
+	dc.b	(BLIT_PIECE/2)/BD_W
+BD_W	set	BD_W+1
+	endr
+	even
 blit_go:
 	movem.l	d0-d2,-(sp)
 	move.w	$ffff8a38.w,d0		; the lines
+	moveq	#15,d1
+	and.b	$ffff8a3b.w,d1
+	move.w	#%1001000000001001,d2	; (the ops 0, 3, 12, 15 do not read the destination)
+	btst	d1,d2
+	beq.s	.h
 	move.w	$ffff8a36.w,d2		; the words a line
-	moveq	#BLIT_PIECE,d1
-	divu	d2,d1			; the lines a piece
+	moveq	#BLIT_PIECE,d1		; the words a piece
+	cmp.w	d1,d2
+	bhi.s	blit_go_wide
+	move.b	bd_lines(pc,d2.w),d1	; the lines a piece
+	bra.s	blit_go_split
+.h:	move.w	$ffff8a36.w,d2
+	moveq	#BLIT_PIECE/2,d1	; (a destination read too: half)
+	cmp.w	d1,d2
+	bhi.s	blit_go_wide
+	move.b	bd_lines_d(pc,d2.w),d1
 blit_go_split:
 	cmp.w	d0,d1
 	bhs.s	.whole
@@ -239,19 +279,111 @@ blit_go_split:
 	tst.w	d1
 	bne.s	.n
 	moveq	#1,d1
-.n:	move.w	d1,d2
+.n:	bsr.s	bd_pieces
+	movem.l	(sp)+,d0-d2
+	rts
+.whole:	move.b	#$c0,$ffff8a3c.w
+	movem.l	(sp)+,d0-d2
+	rts
+; d0.w lines in pieces of d1.w (at least 1).  Uses d0 / d2.
+bd_pieces:
+	move.w	d1,d2
 	cmp.w	d0,d2
 	bls.s	.go
 	move.w	d0,d2
 .go:	move.w	d2,$ffff8a38.w
 	move.b	#$c0,$ffff8a3c.w
 	sub.w	d2,d0
-	bne.s	.n
+	bne.s	bd_pieces
+	rts
+; a line of more than a piece (d0 the lines, d1 the words a piece, d2 the words a line)
+blit_go_wide:
+	move.w	d1,bd_c_piece
+	ifd DEBUG
+	addq.l	#1,bd_pieced
+	endc
+	moveq	#1,d1
+	tst.b	$ffff8a3d.w		; (skew, FXSR, NFSR: the source words of a strip would differ)
+	bne	.n
+	movem.l	d3-d7/a0-a1,-(sp)
+	move.w	d0,d7			; the lines
+	move.w	d2,d6			; the words a line
+	move.l	$ffff8a24.w,a0		; the first source and destination words
+	move.l	$ffff8a32.w,a1
+	move.w	$ffff8a22.w,bd_c_syi
+	move.w	$ffff8a30.w,bd_c_dyi
+	move.w	$ffff8a28.w,bd_c_em1
+	move.w	$ffff8a2c.w,bd_c_em3
+	moveq	#0,d3			; the strip's first word
+.strip:	move.w	d6,d4
+	sub.w	d3,d4
+	cmp.w	bd_c_piece,d4
+	bls.s	.w
+	move.w	bd_c_piece,d4		; its words
+.w:	move.w	d4,$ffff8a36.w
+	move.w	$ffff8a20.w,d5		; its first words: + its first word x the X increments
+	muls	d3,d5
+	add.l	a0,d5
+	move.l	d5,$ffff8a24.w
+	move.w	$ffff8a2e.w,d5
+	muls	d3,d5
+	add.l	a1,d5
+	move.l	d5,$ffff8a32.w
+	move.w	d6,d2			; the Y increments: + the words it leaves out x the X increments
+	sub.w	d4,d2
+	move.w	$ffff8a20.w,d5
+	muls	d2,d5
+	add.w	bd_c_syi,d5
+	move.w	d5,$ffff8a22.w
+	move.w	$ffff8a2e.w,d5
+	muls	d2,d5
+	add.w	bd_c_dyi,d5
+	move.w	d5,$ffff8a30.w
+	move.w	$ffff8a2a.w,d5		; the end masks: the middle one but at the line's ends
+	move.w	d5,$ffff8a28.w
+	move.w	d5,$ffff8a2c.w
+	tst.w	d3
+	bne.s	.m1
+	move.w	bd_c_em1,$ffff8a28.w
+.m1:	cmp.w	d3,d2			; (the last strip: the words it leaves out are those before it)
+	bne.s	.m3
+	move.w	bd_c_em3,$ffff8a2c.w
+	cmp.w	#1,d4
+	bne.s	.m3
+	move.w	bd_c_em3,$ffff8a28.w	; (a strip of one word has endmask 1 only)
+.m3:	move.w	bd_c_piece,d1
+	divu	d4,d1			; its lines a piece
+	move.w	d7,d0
+	bsr	bd_pieces
+	add.w	d4,d3
+	cmp.w	d6,d3
+	blo	.strip
+	move.w	d6,$ffff8a36.w		; the registers as one pass leaves them
+	move.w	bd_c_em1,$ffff8a28.w
+	move.w	bd_c_em3,$ffff8a2c.w
+	move.w	bd_c_syi,$ffff8a22.w
+	move.w	bd_c_dyi,$ffff8a30.w
+	subq.w	#1,d6
+	move.w	$ffff8a2e.w,d5		; the destination: + the lines x ((words - 1) x X increment + Y increment)
+	muls	d6,d5
+	add.w	bd_c_dyi,d5
+	muls	d7,d5
+	add.l	a1,d5
+	move.l	d5,$ffff8a32.w
+	move.l	a0,$ffff8a24.w
+	moveq	#2,d5
+	and.b	$ffff8a3a.w,d5		; (the source moves only when the HOP reads it)
+	beq.s	.x
+	move.w	$ffff8a20.w,d5
+	muls	d6,d5
+	add.w	bd_c_syi,d5
+	muls	d7,d5
+	add.l	a0,d5
+	move.l	d5,$ffff8a24.w
+.x:	movem.l	(sp)+,d3-d7/a0-a1
 	movem.l	(sp)+,d0-d2
 	rts
-.whole:	move.b	#$c0,$ffff8a3c.w
-	movem.l	(sp)+,d0-d2
-	rts
+.n:	bra	blit_go_split
 	endm
 
 ; bd_report (DEBUG, for ports without a counters file of their own; call it at the quit, after the hardware is
@@ -285,6 +417,12 @@ bd_rname:
 borders_vars	macro
 bd_ta_state:	ds.b	1
 bd_tb_state:	ds.b	1
+	even
+bd_c_syi:	ds.w	1		; (blit_go's column strips: the pass's Y increments and end masks)
+bd_c_dyi:	ds.w	1
+bd_c_em1:	ds.w	1
+bd_c_em3:	ds.w	1
+bd_c_piece:	ds.w	1
 	ifd DEBUG
 	even
 bd_fallbacks:	ds.w	1

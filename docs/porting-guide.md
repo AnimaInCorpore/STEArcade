@@ -170,7 +170,7 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
 * **Test windows that wrap.**  The first renderer test passed for 1000+ frames and the wrapped half of the scroll ring was never drawn: a window
   position (T > 256) that the sampled frames had not covered hid a garbage upper register word.  Sweep the whole range of a scroll register.
 * **Hatari**: a Blitter pass that hogs the bus delays the VBL and the border timers by more than half a scanline, the screen then flickers between
-  open and closed borders.  Keep passes short or run them without HOG and wait for them; look at Hatari's own screenshot (RightAlt+G) of
+  open and closed borders.  Keep every pass short (see "Only short HOG passes" below); look at Hatari's own screenshot (RightAlt+G) of
   several frames, not one.  A 768 line, 56 word Blitter copy hung the emulation for good in one go (32 lines at a time are fine).
 * **Generated sprite routines with streams** (`games/1942/tools/spritegen.py`, `FAST_BLITTER_SPRITES.md`).  Constants inside 8000 routines
   (one per sprite code and shift) took 995 KB, too much for the 4 MB machine next to the rings and caches; the routines are shared by row
@@ -314,6 +314,14 @@ Also seen in Black Tiger (2026-10-09):
   instead (`blit_go`: the Blitter keeps its addresses; the CPU takes its interrupts between pieces), which keeps HOG and
   loses no time (waiting had cost 12%).  Changing the top border routine's instructions moves the palette switches
   (Timer A is restarted at its end): keep its cycle count.
+* **Only short HOG passes, in every port** (the rule of stefastbobs2, whose top border handler runs beside one-line bob
+  passes): the top border interrupt may come at any moment of the foreground, and a HOG pass holds it back until the
+  pass ends.  `blit_go` (`engine/rt/borders.s`) cuts every pass into pieces of at most 32 words of a copy, 16 when the op
+  reads the destination (~256 bus cycles, half a line), and a line wider than that into column strips (1942's and
+  1943's 56-word copies).  No pass shares the bus: one without HOG runs on during the interrupts and stretches the timed
+  code that opens the borders (Commando's margin clear was one).  Check with `BLIT_STATS=256` (`engine/sim.py`): a
+  simulator run then lists every HOG pass longer than 256 bus cycles and every pass without HOG; all seven bordered
+  ports list none (2026-10-11).
 * **Generated sprite code is large for big sprite sets**: 2008 shapes (x 16 shifts) would take 2.85 MB.  Generate the
   routines and streams for the shapes coverage drew most within a budget (1074 shapes, 96.5% of the draws, 830 KB) and
   draw the rest with the same Blitter calls a row at a time, end masks from the stored opaque rows.

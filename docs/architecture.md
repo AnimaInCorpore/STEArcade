@@ -282,7 +282,8 @@ Timer A must arrive in the *middle* of scanline 31 (`TA_DATA`), its handler then
 the next scanline start.  The VBL handler arms both timers first thing, and the rest of
 the frame runs below the VBL level, so a frame that overruns the next VBL is interrupted
 by it (`vbl_skip`) and the borders keep being removed.  Blits do not start while Timer A
-is pending or Timer B is within 5 lines (`wait_borders`).  A measurement for all of this:
+is pending or Timer B is within 5 lines (`wait_borders`).  (Now: `engine/rt/borders.s`, whose events come early and
+sync themselves; every Blitter pass is HOG and at most ~256 bus cycles, `blit_go`.)  A measurement for all of this:
 the top row of the game area in a Hatari AVI of 1800 VBLs is 0 for 1788 frames, 58 (border
 not removed) for none.
 

@@ -622,8 +622,8 @@ ff_clean:
  move.w #$ffff,BLT_END3.w
  move.w #2,BLT_SRC_XINC.w
  move.w #2,BLT_DST_XINC.w
- move.w #STRIDE+2-2*56,BLT_SRC_YINC.w
- move.w #STRIDE+2-2*56,BLT_DST_YINC.w
+ move.w #STRIDE+2-2*28,BLT_SRC_YINC.w	; (the 56 words of a line in two halves: no pass longer than ~half a line)
+ move.w #STRIDE+2-2*28,BLT_DST_YINC.w
  move.w #$0203,BLT_HOP_OP.w
  clr.b BLT_SKEW.w
 .burst:
@@ -634,9 +634,16 @@ ff_clean:
 .n:
  move.l d0,d2
  add.l d4,d2
- move.w #56,BLT_COUNT.w
+ move.w #28,BLT_COUNT.w
  move.l d2,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
+ move.w d1,BLT_COUNT+2.w
+ bsr blit_go
+ add.l #2*28,d2
+ move.l d2,BLT_SRC_ADDR.w
+ move.l d0,d2
+ add.l #2*28,d2
+ move.l d2,BLT_DST_ADDR.w
  move.w d1,BLT_COUNT+2.w
  bsr blit_go
  add.l #16*STRIDE,d0
@@ -699,6 +706,22 @@ restore_damage:
  bsr.s .opaque
  bne .test			; (covered: left)
 .copy:
+ cmp.w #BLIT_PIECE,d2
+ bls.s .whole
+ move.w d2,d5			; (wider than a piece: in two halves, no pass longer than ~half a line)
+ lsr.w #1,d2
+ sub.w d2,d5			; the right half's words
+ bsr.s .part
+ add.w d2,d2
+ ext.l d2
+ add.l d2,d0
+ add.l d2,d1
+ move.w d5,d2
+.whole:
+ bsr.s .part
+ bra.s .test
+; the copy of d2 words x d3 lines, d1 -> d0
+.part:
  move.w d2,d4
  add.w d4,d4
  neg.w d4
@@ -709,7 +732,7 @@ restore_damage:
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- bsr blit_go
+ bra blit_go
 .test:
  cmp.l a3,a2
  blo .rect
@@ -2307,5 +2330,5 @@ ring_base: ds.l 3
 draw_base: ds.l 1
 flip_addr: ds.l 1
 shown_pal: ds.w 16
-screen_area: ds.b 3*RING_SIZE+256
+; screen_area: 3*RING_SIZE+256 bytes, in 1943.s (its first part in the data section)
  section text,code

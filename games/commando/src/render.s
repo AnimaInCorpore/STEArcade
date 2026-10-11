@@ -155,7 +155,8 @@ render_frame:
  rts
 
 ; a0 = a line, d0 = segments of 32 lines - 1: the chunk columns beside the window (where whole sprites and tiles reach)
-; are cleared, in bursts of 32 lines (the border timers).
+; are cleared, in bursts of 32 lines, each a HOG pass in pieces (blit_go).  (A pass without HOG would run on beside
+; the border interrupts and stretch their timed code: every pass is HOG and short.)
 clear_margins:
  move.w #$ffff,BLT_END1.w
  move.w #$ffff,BLT_END2.w
@@ -174,10 +175,7 @@ clear_margins:
 .segment:
  move.l a0,BLT_DST_ADDR.w
  move.w #32,BLT_COUNT+2.w
- move.b #$80,BLT_CTRL.w
-.wait:
- btst #7,BLT_CTRL.w
- bne .wait
+ bsr blit_go
  lea 32*256(a0),a0
  dbf d1,.segment
  rts
