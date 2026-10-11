@@ -41,8 +41,11 @@ seeds 5-8 play with MAME's cheats, 9-12 two-player games, 13-16 long games with 
   the next frame is drawn (at most `MAX_SKIP` + 1 ticks per frame, at most `MAX_PENDING` waiting): a game that is behind loses frames, not
   speed.  `-D NOTICK60` builds the old schedule, one tick per VBL.  The scheduler's search for a ready task is done natively (`scan_native`, saves 10% of the logic).
 * **ROM banks**: `$8000-$BFFF` is a window onto three 16 KB banks (`$C806`); the program only reads them as data (the service mode
-  is the one place that runs code from them, not translated).  Window reads go through `g_winbase` at the 87 instruction sites the
-  coverage found (the mechanism of Bubble Bobble's main CPU); every store to `$C806` (`ld ($C806),a`, `ld (hl),n`, `ld ($C805),hl`)
+  is the one place that runs code from them, not translated).  Window reads go through `g_winbase` at the 97 instruction sites the
+  coverage found (the mechanism of Bubble Bobble's main CPU), kept in `docs/window-sites.json` (read from there when no coverage file
+  is present; `W_GUARD_ALL=1` guards every indirect access: the translated code 26.6k instead of 23.8k cycles a frame, `engine/xprof.py`);
+  `tools/logic_test.py --audit` traces a run for reads of the block's own window area, which only an unguarded site makes (none in
+  600 frames each of the attract, the cheats and two players).  Every store to `$C806` (`ld ($C806),a`, `ld (hl),n`, `ld ($C805),hl`)
   calls `g_bank_w`.
 * **Translator changes** (`engine/z80x.py`, `engine/discover.py`, all opt-in so that the other ports generate the same code): the P/V flag
   of `and/or/xor` as parity in `d6` bit 7 for `jp pe/po` (also through the `ex af,af'` pair at `$261A` -> `$262D`), `bit` sets S as the

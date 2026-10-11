@@ -21,7 +21,9 @@ Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad 
   offset`), a jump from fixed code into the window goes through a stub that picks the bank's label, `ret` and
   `jp (hl)` through the dispatch table of the current bank (`a4` follows the bank register `$FB40`).  Reads of the
   window as data use `g_winbase` (through a0, `Emitter.window_wrap`: with `z80x.FAST` a0 is free, no save); the sites
-  are those the coverage runs and `tools/window_audit.py` found.
+  are those the coverage runs and `tools/window_audit.py` found, kept in `docs/window-sites.json` (`W_GUARD_ALL=1`
+  guards every indirect access: the main CPU's translated code 67.7k instead of 62.4k cycles a frame, `engine/xprof.py`;
+  the audit of seed 7, 3000 frames: no site missed).
 * **Sub CPU** (1.4k instructions): the same shared RAM (`g_ram`), "long" memory model.
 * **MCU** (`engine/m6801x.py`, 940 instructions): the firmware translated 6801 -> 68000, the self-test that
   can never pass on the board skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write)

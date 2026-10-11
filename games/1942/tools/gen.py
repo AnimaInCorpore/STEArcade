@@ -12,7 +12,7 @@ The kernel switches tasks with `ld sp,hl` / `ret` / `jp (hl)` through the dispat
 by the runtime at the foreground's idle point (see machine.py run_frame_port).
 Coverage from ref/cover.py (build/1942/cover_*.pkl).
 """
-import argparse, glob, os, pickle, re, sys
+import argparse, glob, json, os, pickle, re, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 import z80x, z80dis, discover
 from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
@@ -211,10 +211,21 @@ def video_sites():
 
 
 def window_sites():
+    """the pcs whose indirect accesses get the window guard: the coverage's window-read sites and the audit's
+    (logic_test.py --audit), kept in docs/window-sites.json (read from there when no coverage file is present;
+    W_GUARD_ALL=1: every pc)"""
+    sites_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "window-sites.json")
+    if os.environ.get("W_GUARD_ALL"):
+        return set(range(0x20000))
+    if not glob.glob(os.path.join(BUILD, "cover_*.pkl")) and os.path.exists(sites_file):
+        return set(json.load(open(sites_file)))
     pcs, wread = coverage()
     sites = {pc for pc, bank in wread}
-    for f in glob.glob(os.path.join(BUILD, "wsites_audit_*.pkl")):      # tools/window_audit.py
-        sites |= {int(name[1:], 16) for name in pickle.load(open(f, "rb"))}
+    for f in glob.glob(os.path.join(BUILD, "wsites_audit_*.pkl")):      # logic_test.py --audit
+        sites |= set(pickle.load(open(f, "rb")))
+    with open(sites_file, "w") as f:
+        json.dump(sorted(sites), f)
+        f.write("\n")
     return sites
 
 

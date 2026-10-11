@@ -102,6 +102,8 @@ def main():
     ap.add_argument("--stop", action="store_true")
     ap.add_argument("--cheat", action="store_true")
     ap.add_argument("--two", action="store_true")
+    ap.add_argument("--audit", action="store_true", help="record the translated instructions that touch the block's unused window "
+                    "area (an access there is a site gen.py left unguarded) -> build/wsites_audit_*.pkl")
     a = ap.parse_args()
     s = Sim(a.prg, run_dir=RUN)
     s.mem.set_trace_mode(False)
@@ -111,7 +113,27 @@ def main():
     block = sym["g_block"]
     s.mem.w16(sym["render_frame"], 0x4E75)          # (rts: the renderer has its own test, render_test.py)
     mem, cpu = s.mem, s.cpu
+    audit = {}
     ref = Machine1942()
+    if a.audit:
+        import bisect, pickle, re
+        labels = sorted((v, k) for k, v in sym.items() if re.fullmatch(r"Z[0-9A-F]{4,5}", k))
+        lv = [v for v, _ in labels]
+        on_access = s.on_access
+
+        def watch(mode, width, addr, value):
+            # (the block holds the Z80's $8000-$FFFF first, then $0000-$7FFF: the window area is its first 16 KB, unused
+            # but for IY and F' at $BFF0; it holds $FF, which is bank 3: a read of it with bank 3 selected is right as it is)
+            if mode == "R" and block <= addr < block + 0x3FE0 and mem.r8(sym["g_bank"]) != 3:
+                i = bisect.bisect_right(lv, cpu.r_pc()) - 1
+                if i >= 0:
+                    audit[labels[i][1]] = audit.get(labels[i][1], 0) + 1
+                    if os.environ.get("AUDIT_VERBOSE") and audit[labels[i][1]] < 3:
+                        print("  audit", labels[i][1], mode, width, "Z80 %04x" % ((addr - block + 0x8000) & 0xFFFF), "pc %06x" % (cpu.r_pc() - s.base),
+                              "g_bank", mem.r8(sym["g_bank"]), "ref bank", ref.bank, "latch", mem.r8(block + 0xC806))
+            return on_access(mode, width, addr, value)
+        mem.set_trace_func(watch)
+        mem.set_trace_mode(True)
     rnd = random.Random(1)
 
     def z80(addr):                        # Z80 address of the RAM half -> 68k address
@@ -206,6 +228,10 @@ def main():
             print("frame %d ok (%s) pc %06X" % (f, "mismatch" if bad else "same", cpu.r_pc()), flush=True)
         f += 1
     print("compared %d frames, %d with differences" % (f, bad))
+    if a.audit:
+        out = build_dir("1942") / ("wsites_audit_%s.pkl" % ("two" if a.two else "cheat" if a.cheat else "0"))
+        pickle.dump({int(k[1:], 16) for k in audit}, out.open("wb"))
+        print("audit: accesses to the unguarded window area by", len(audit), "instructions", sorted(audit.items())[:20], "->", out)
     if costs:
         costs.sort()
         print("68000 cycles per frame (game logic, no drawing; a 50 Hz frame is 160256): mean %d, median %d, 95%% %d, max %d" % (
