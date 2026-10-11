@@ -140,9 +140,12 @@ of 2000 pictures, a few pixels each).
 | a frame, a cloud bank (`--cheat 9`, ticks 2600-2650) | 562k | 246k |
 | Hatari, DEBUG + AUTOPLAY, 4000 VBLs | 31.9 ticks/s (53%), 6.4 frames/s | 55.7 ticks/s (93%), 11.2 frames/s |
 
-The logic gains: the i8751 firmware translated (`tools/mcux.py`), the window guard only at the 291 sites the
-coverage saw reading the banked window (and sites it never ran; block instructions always), a signed one-compare
-guard, a table bank switch.  `MAX_SKIPS` 8 (4 gave 87% speed and 15.5 frames/s).  `-D STAGE=n` makes the AUTOPLAY
+The logic gains: the i8751 firmware translated (`tools/mcux.py`), the window guard only at the sites the
+coverage saw reading the banked window (and sites it never ran; since 2026-10-11 block instructions on the same
+terms: 883 of 3,784 indirect accesses, kept in `docs/window-sites.json` so a build takes them from there when the
+coverage files have none; `W_GUARD_ALL=1` guards every access: 69.8k instead of 61.0k cycles a tick; `logic_test.py
+--audit` traces a run for accesses to the image of the window, which only an unguarded site makes: none in 3000
+random and 4000 stage-13 frames), a signed one-compare guard, a table bank switch.  `MAX_SKIPS` 8 (4 gave 87% speed and 15.5 frames/s).  `-D STAGE=n` makes the AUTOPLAY
 build play stage n with the cheats; `engine/xprof.py 1943` profiles the translated code (`X1943_STAGE=n`).
 
 Short Blitter passes (2026-10-11): no HOG pass is longer than ~256 bus cycles (`engine/rt/borders.s` `blit_go`; the

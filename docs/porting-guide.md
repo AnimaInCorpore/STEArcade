@@ -38,7 +38,9 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
   indirect access costs a quarter of the translated cycles.  Record the sites in the coverage runs (reads of the window and
   the banked RAM, writes of the latter), keep them in the repository (`docs/window-sites.json`) so a build needs no
   coverage files, and trace a simulator run for accesses to the unused image of the window (`logic_test.py --audit`): any
-  such access is a site the coverage missed.  Black Tiger's play logic: 80.7k -> 65.3k cycles a tick.
+  such access is a site the coverage missed.  Black Tiger's play logic: 80.7k -> 65.3k cycles a tick; 1943's (whose
+  gen had the site policy since 2026-10-09; now `docs/window-sites.json`, `W_GUARD_ALL=1`, `logic_test.py --audit`)
+  69.8k with every access guarded -> 61.0k.
 * **Self-tests flood the renderer** (video RAM test) and run ~700 frames: skip them in the reference and the
   translation, compensate any ROM checksum the game runs later, load the patched ROM files in the runtime.
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;

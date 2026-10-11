@@ -5,6 +5,7 @@ import pickle
 import re
 import json
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
+import os
 import z80x, z80dis, discover
 from z80x import Emitter, compute_liveness, Unsupported, hx, swap16
 from translate import compile_code
@@ -253,9 +254,24 @@ def generate(extra_roots=()):
     # The indirect reads that may read the banked window get its guard: the block instructions, every site the coverage
     # saw reading the window (data, not its own bytes) and every site it never ran.  A site it ran only with other
     # addresses reads the block directly (a miss would show in logic_test.py: the reference reads the bank).
+    # The sites are kept in docs/window-sites.json (a build without coverage files takes them from there; coverage
+    # files write it again; W_GUARD_ALL=1 guards every indirect access).  logic_test.py --audit finds sites the coverage
+    # missed on Musashi runs (w_sites_audit_*.pkl).
     blocks = ('ldir', 'lddr', 'ldi', 'ldd', 'cpi', 'cpir')
-    sites = {pc for pc, ins in code.items() if ins.mn in blocks or
-             any(o[0] == 'ind' for o in ins.ops) and (pc in wdata or pc not in pcs)}
+    indirect = {pc for pc, ins in code.items() if ins.mn in blocks or any(o[0] == 'ind' for o in ins.ops)}
+    sites_file = Path(__file__).resolve().parents[1] / 'docs' / 'window-sites.json'
+    if os.environ.get('W_GUARD_ALL'):
+        sites = indirect
+    elif pcs:
+        sites = {pc for pc in indirect if pc in wdata or pc not in pcs}
+        for f in BUILD.glob('w_sites_audit_*.pkl'):
+            with f.open('rb') as h:
+                sites |= indirect & set(pickle.load(h))
+        sites_file.write_text(json.dumps(sorted(sites)) + '\n')
+    elif sites_file.exists():
+        sites = indirect & set(json.loads(sites_file.read_text()))
+    else:
+        sites = indirect
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)

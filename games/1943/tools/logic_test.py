@@ -44,6 +44,8 @@ def main():
     ap.add_argument('--trace-lines', type=lambda t: [int(x) for x in t.split(',')], default=[40])
     ap.add_argument('--watch', help='ring,line,chunk: report the writes and blits there (debug)')
     ap.add_argument('--save', help='with --render: write the first differing picture pair to this PNG')
+    ap.add_argument('--audit', action='store_true', help='record the translated instructions that touch the image of the banked '
+                    'window (g_block to +$3FFF: an access there is a site gen.py left unguarded) -> build/w_sites_audit_*.pkl')
     args = ap.parse_args()
     run = ROOT / 'run' / '1943_sim'
     sim = Sim(str(run / '1943.PRG'), ram_kib=16384, run_dir=run)
@@ -326,6 +328,22 @@ def main():
     if not compare(-1):
         return 1
     print('boot matched', flush=True)
+    audit = {}
+    if args.audit:
+        import bisect, pickle
+        g0 = sym['g_block']
+        labels = sorted((v, k) for k, v in sym.items() if re.fullmatch(r'Z[0-9A-F]{4,5}', k))
+        lv = [v for v, _ in labels]
+        on_access1 = sim.on_access
+
+        def audit_watch(mode, width, addr, value):
+            if g0 <= addr < g0 + 0x4000:
+                i = bisect.bisect_right(lv, cpu.r_pc()) - 1
+                if i >= 0:
+                    audit[labels[i][1]] = audit.get(labels[i][1], 0) + 1
+            return on_access1(mode, width, addr, value)
+        sim.mem.set_trace_func(audit_watch)
+        sim.mem.set_trace_mode(True)
     if args.watch:
         ring_n, line, chunk = (int(x) for x in args.watch.split(','))
         lo = mem.r32(sym['ring_base'] + 4 * ring_n) + line * 256 + 24 + 8 * chunk
@@ -422,6 +440,10 @@ def main():
             print('frame', frame, 'matched', flush=True)
     print(args.frames, 'frames matched' + (f'; {pictures[0]} pictures compared, all equal' if args.render else '') +
           (f' ({approx[0]} only in the drawing order of overlapping sprites behind / before the front layer)' if approx[0] else ''))
+    if args.audit:
+        out = build_dir('1943') / f"w_sites_audit_{args.cheat if args.cheat is not None else args.seed or 0}.pkl"
+        pickle.dump({int(k[1:], 16) for k in audit}, out.open('wb'))
+        print('audit: accesses to the unguarded image by', len(audit), 'instructions', sorted(audit.items())[:20], '->', out)
     return 0
 
 
