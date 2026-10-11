@@ -41,7 +41,8 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
   such access is a site the coverage missed.  Black Tiger's play logic: 80.7k -> 65.3k cycles a tick; 1943's (whose
   gen had the site policy since 2026-10-09; now `docs/window-sites.json`, `W_GUARD_ALL=1`, `logic_test.py --audit`)
   69.8k with every access guarded -> 61.0k; 1942's 26.6k -> 23.8k a frame and Bubble Bobble's main CPU 67.7k -> 62.4k
-  (both had the sites since their ports; now the sites file, `W_GUARD_ALL`, and 1942's `logic_test.py --audit`).
+  (both had the sites since their ports; now the sites file, `W_GUARD_ALL`, and 1942's `logic_test.py --audit`);
+  Gun.Smoke's 40.5k -> 37.3k a frame (229 of 1479 sites).  Commando's ROM is flat: no window, nothing to guard.
 * **Self-tests flood the renderer** (video RAM test) and run ~700 frames: skip them in the reference and the
   translation, compensate any ROM checksum the game runs later, load the patched ROM files in the runtime.
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;

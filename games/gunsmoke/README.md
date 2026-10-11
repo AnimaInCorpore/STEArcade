@@ -42,10 +42,15 @@ it idles again.
 `tools/gen.py` translates the fixed ROM and the code of banks 0 and 2 (8294
 instructions, `z80x.FAST`) with virtual pcs per bank, as Black Tiger's generator does:
 a jump from fixed code into the window dispatches by the current bank, `ret` and
-`jp (hl)` go through `gs_dispatch` with the natural pc. Every indirect read checks for
+`jp (hl)` go through `gs_dispatch` with the natural pc. An indirect read checks for
 the window (`(hl)`, `(de)`, `(bc)`, `(ix+d)` and `(iy+d)`: with `FAST`, IY is the low
 word of a2, which the first version did not check: `ld a,(iy+7)` read RAM instead of bank
-2 at frame 683). Stores are not checked. The bank latch and the layer latch share one
+2 at frame 683) at the sites the coverage saw reading the window as data and at the sites
+it never ran (since 2026-10-11: 229 of 1,479 indirect accesses, kept in
+`docs/window-sites.json`; `W_GUARD_ALL=1` checks every one: the logic 40.5k instead of
+37.3k cycles a frame in `logic_test.py 3000`, 44.3k instead of 40.4k with `--seed 9`;
+`logic_test.py --audit` traces a run for reads of the block's own window area, which only
+an unguarded site makes: none in either run). Stores are not checked. The bank latch and the layer latch share one
 `ld (de),a` (0295 / 02B1), which calls `gs_latch` after the store. E0F8 is a trampoline
 the program writes into RAM (`call nnnn / ret`, the round scripts' code): it is native
 (`gen.TRAMPOLINE`), and coverage records where computed jumps went (502 entries). The

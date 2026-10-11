@@ -5,8 +5,10 @@
 The main CPU's program: 0000-7FFF fixed, 8000-BFFF a window onto one of four 16 KB banks (C804 bits 2-3).  Code runs
 from the window too (banks 0 and 2), so window code has virtual pcs VBASE + bank * $4000 + (pc - $8000), the way Black
 Tiger's generator does it (games/blktiger/tools/gen.py): a jump from fixed code into the window goes through a stub
-that dispatches by the current bank, a computed jump (ret, jp (hl)) through gs_dispatch with the natural pc.  Every
-indirect read is guarded as a possible window read (coverage does not decide memory semantics).  The program is a
+that dispatches by the current bank, a computed jump (ret, jp (hl)) through gs_dispatch with the natural pc.  An
+indirect read is guarded as a possible window read at the sites the coverage saw reading the window as data and at
+the sites it never ran (docs/window-sites.json keeps them; W_GUARD_ALL=1 guards every one; tools/logic_test.py --audit
+finds sites the coverage missed).  The program is a
 cooperative kernel; the interrupt (RST 38) is delivered by the runtime at the scheduler's idle point (IDLE, see
 machine.py run_frame_port).  The service mode (DSW1 bit 7, code in bank 3 at 8000) is not exercised and not translated:
 its jump lands on a `z80_badpc` stub.
@@ -14,6 +16,7 @@ its jump lands on a `z80_badpc` stub.
 from pathlib import Path
 import sys
 import pickle
+import os
 import json
 import re
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
@@ -81,9 +84,10 @@ class GSEmitter(Emitter):
     """Window accesses use the marker register `aW` (Emitter.window_wrap: a0 = g_winbase, the current bank's copy +
     $8000, so the Z80 address - $10000 is the offset)."""
 
-    def __init__(self, *a, text_sites=(), **k):
+    def __init__(self, *a, text_sites=(), window_sites=(), **k):
         super().__init__(*a, **k)
         self.text_sites = set(text_sites)
+        self.window_sites = set(window_sites)
         self.stubs = set()
 
     def label_of(self, pc):
@@ -118,6 +122,8 @@ class GSEmitter(Emitter):
         return ['lea (a6),aW', 'cmp.w #$C000,%s' % reg, 'bge.s %s' % l, 'move.l g_winbase,aW', l + ':']
 
     def block_win(self, fn, ins):
+        if ins.pc not in self.window_sites:
+            return fn(ins)
         for line in self.win_check('d3'):
             self.lines.append(line) if line.endswith(':') else self.e(line)
         self.win_src = 'd3'
@@ -146,7 +152,7 @@ class GSEmitter(Emitter):
         """every read through (hl) / (de) / (bc) / (ix+d) / (iy+d) checks for the window (also bit n,(hl) and the
         read-modify-write forms, whose read8 calls pass io_read=False)"""
         pre, ea = Emitter.read8(self, op, io_read)
-        if op[0] == 'ind' and not self.storing:
+        if op[0] == 'ind' and not self.storing and self.cur is not None and self.cur.pc in self.window_sites:
             match = re.fullmatch(r'(-?\d+)?\(a6,(d\d|a2)\.w\)', ea)
             if match:
                 reg = match[2]
@@ -173,18 +179,19 @@ class GSEmitter(Emitter):
 
 def coverage():
     require_coverage('gunsmoke', [f'cover{s}.pkl' for s in range(1, 15)])
-    pcs, text, jumps = set(), set(), set()
+    pcs, text, jumps, wread = set(), set(), set(), set()
     for path in sorted(BUILD.glob('cover*.pkl')):
         d = pickle.loads(path.read_bytes())
         pcs |= {virt(pc, bank) if bank >= 0 else pc for bank, pc in d['pcs']}
         text |= {virt(pc, bank) if bank >= 0 else pc for bank, pc, a in d['writes'] if 0xd000 <= a < 0xd800}
         jumps |= {virt(pc, bank) if bank >= 0 else pc for bank, pc in d.get('jumps', ())}
-    return pcs - {0xe0f8, 0xe0fb}, text, jumps
+        wread |= {virt(pc, bank) if bank >= 0 else pc for bank, pc in d.get('wread', ())}
+    return pcs - {0xe0f8, 0xe0fb}, text, jumps, wread
 
 
 def generate():
     rom = image()
-    pcs, text_sites, jumps = coverage()
+    pcs, text_sites, jumps, wread = coverage()
     roots = {0, 0x38, IDLE, RESCAN} | jumps
     saved = discover.decode
     discover.decode = decode
@@ -208,8 +215,21 @@ def generate():
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
+    # The window guard: at the indirect accesses the coverage saw reading the window as data and at those it never
+    # ran (a site it ran only with other addresses reads the block: a miss would show in logic_test.py, whose --audit
+    # traces the block's window area), kept in docs/window-sites.json; W_GUARD_ALL=1: at every one.
+    blocks = ('ldir', 'lddr', 'ldi', 'ldd', 'cpi', 'cpir')
+    indirect = {pc for pc, ins in code.items() if ins.mn in blocks or any(o[0] == 'ind' for o in ins.ops)}
+    sites_file = Path(__file__).resolve().parents[1] / 'docs' / 'window-sites.json'
+    if os.environ.get('W_GUARD_ALL'):
+        sites = indirect
+    else:
+        sites = {pc for pc in indirect if pc in wread or pc not in pcs}
+        for f in BUILD.glob('w_sites_audit_*.pkl'):
+            sites |= indirect & set(pickle.loads(f.read_bytes()))
+        sites_file.write_text(json.dumps(sorted(sites)) + '\n')
     em = compile_code(code, joins, cfg, {IDLE}, emitter=GSEmitter, ijmp_flags=True, flags_at={IDLE},
-                      text_sites=text_sites)
+                      text_sites=text_sites, window_sites=sites)
     seen_unsupported = [u for u in em.unsupported if u[0] in pcs]
     if seen_unsupported:
         raise RuntimeError(f'Observed instructions cannot be translated: {seen_unsupported}')
@@ -239,7 +259,7 @@ def generate():
         out += [f'gs_window_dispatch{bank}: ds.l 16384']
     out += ['\tsection text,code']
     report = {'instructions': len(code), 'unsupported': em.unsupported, 'banks': banks,
-              'text_sites': len(text_sites), 'missing': [hex(real(p)) for p in sorted(em.refs - set(code) - {0xe0f8})],
+              'text_sites': len(text_sites), 'window_sites': len(sites), 'indirect': len(indirect), 'missing': [hex(real(p)) for p in sorted(em.refs - set(code) - {0xe0f8})],
               'jumps': len(jumps)}
     return '\n'.join(out) + '\n', report, code
 

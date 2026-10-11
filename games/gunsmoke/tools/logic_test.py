@@ -8,6 +8,7 @@ of the text RAM must come with fg_written (the translated writers, gen.py text_s
 """
 from pathlib import Path
 import argparse
+import pickle
 import random
 import re
 import sys
@@ -24,6 +25,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--audit', action='store_true', help="record the translated instructions that read the block's own window area "
+                    "(a read there is a site gen.py left unguarded) -> build/w_sites_audit_*.pkl")
     args = ap.parse_args()
     run = ROOT / 'run' / 'gunsmoke_sim'
     s = Sim(str(run / 'GUNSMOKE.PRG'), run_dir=run)
@@ -36,6 +39,23 @@ def main():
 
     def addr(a):
         return a6 + (a if a < 0x8000 else a - 0x10000)
+
+    audit = {}
+    if args.audit:
+        import bisect
+        labels = sorted((v, k) for k, v in sym.items() if re.fullmatch(r'Z[0-9A-F]{4,5}', k))
+        lv = [v for v, _ in labels]
+        on_access = s.on_access
+        g0 = addr(0x8000)
+
+        def watch(mode, width, a, value):
+            if mode == 'R' and g0 <= a < g0 + 0x4000:
+                i = bisect.bisect_right(lv, cpu.r_pc()) - 1
+                if i >= 0:
+                    audit[labels[i][1]] = audit.get(labels[i][1], 0) + 1
+            return on_access(mode, width, a, value)
+        mem.set_trace_func(watch)
+        mem.set_trace_mode(True)
 
     m = GunSmoke()
     m.cpu.afmask = 0xc1
@@ -76,12 +96,15 @@ def main():
 
     m.cpu.step, m.cpu.wr8 = ref_step, ref_write
 
+    cycles = [0]                               # (the 68000's cycles of the frames: the logic, no drawing)
+
     def run_to(targets):
         total = 0
         while total < 400_000_000:
             total += cpu.execute(2000).cycles
             pc = cpu.r_pc()
             if pc in targets:
+                cycles[0] += total
                 return pc
             if pc in (bad, bad + 4) or s.terminated:
                 raise RuntimeError(f'CPU stopped at {pc - s.base:06x}, d7={cpu.r_reg(R.D7):08x}, log={s.log[-3:]}')
@@ -127,6 +150,7 @@ def main():
     compare(-1)
     text_flag(-1)
     state = {}
+    cycles[0] = 0
     for f in range(args.frames):
         m.inputs[0], m.inputs[1] = cover.inputs(f, rnd, state)
         for a, v in zip((0xc000, 0xc001), m.inputs[:2]):
@@ -150,6 +174,11 @@ def main():
     print(f'PASS: {args.frames} frames (seed {args.seed}, round pointer E06A {m.mem[0xe06a] | m.mem[0xe06b] << 8:04x}); '
           'RAM, video RAM, latches, bank and sprite latch exact; '
           'every text RAM change flagged')
+    print(f'68000 cycles a frame (the game logic, no drawing; Musashi): {cycles[0] // args.frames}')
+    if args.audit:
+        out = build_dir('gunsmoke') / f'w_sites_audit_{args.seed}.pkl'
+        out.write_bytes(pickle.dumps({int(k[1:], 16) for k in audit}))
+        print('audit: reads of the unguarded window area by', len(audit), 'instructions', sorted(audit.items())[:20], '->', out)
 
 
 if __name__ == '__main__':
