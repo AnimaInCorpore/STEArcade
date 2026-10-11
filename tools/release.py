@@ -12,6 +12,7 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -143,10 +144,14 @@ def main():
                          games=game_text(), sums="\n".join(sums) + "\n")
     (out / "README.TXT").write_bytes(text.replace("\n", "\r\n").encode("ascii"))
 
+    # The files in the archive carry the commit's date (reproducible, and the date the programs were built from)
+    stamp = int(subprocess.run(["git", "log", "-1", "--format=%ct"], cwd=ROOT, capture_output=True,
+                               text=True).stdout.strip() or "0")
+    date_time = time.localtime(stamp)[:6] if stamp else (2026, 1, 1, 0, 0, 0)
     archive = ROOT / "release" / (name + ".zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for f in ["README.TXT"] + [g[1] for g in GAMES]:
-            info = zipfile.ZipInfo("%s/%s" % (name, f), date_time=(2026, 1, 1, 0, 0, 0))
+            info = zipfile.ZipInfo("%s/%s" % (name, f), date_time=date_time)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             z.writestr(info, (out / f).read_bytes(), compresslevel=9)

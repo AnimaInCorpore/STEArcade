@@ -39,7 +39,7 @@ COVER = {
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
-    "galaga": [("ref/cover.py", [1, 2, 3], 20000)],
+    "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000)],   # 4-6: high scores, the name entry
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
@@ -142,9 +142,12 @@ def main():
         return call([PY, game_script(game, "tools/build.py")] + rest)
     if cmd == "cover":
         jobs = []
+        wanted = [int(x) for x in rest]
         for script, seeds, frames in COVER[game]:
-            for s in (int(x) for x in rest) if rest else seeds:
+            for s in [x for x in wanted if x in seeds] if wanted else seeds:   # (a seed given: its group's frames)
                 jobs.append([PY, game_script(game, script), str(s), str(frames)])
+        if wanted and len(jobs) < len(wanted):
+            sys.exit("port.py cover %s: not every seed is in COVER[%r]" % (game, game))
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:
             codes = list(ex.map(lambda j: call(j, cwd=ROOT), jobs))
         return max(codes)

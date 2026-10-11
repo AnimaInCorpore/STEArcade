@@ -1486,17 +1486,16 @@ reset_trap:
 	bra	crash_common
 	endc
 
+; A Z80 pc without translated code (the dispatch table's default): CRASH.TXT with vector 98, d7 = the byte swapped
+; pc times 4, a4 = the dispatch table of the CPU (g1/g2/g3_dispatch_sw), the stack words the Z80's (a5, return
+; addresses byte swapped).
 z80_badpc:
 z80_badjump:
 z80_unsupported:
 	move	#$2700,sr
-	bsr	restore_hardware
-	pea	bad_text
-	move	#9,-(sp)
-	trap	#1
-	addq	#6,sp
-	bsr	crash_wait
-	bra	quit
+	moveq	#98,d0
+	move.l	a5,sp
+	bra	crash_common
 
 	include "render.s"
 	include "sprites.s"
@@ -1523,10 +1522,6 @@ rom_cpu1:	incbin	"rom_cpu1.rom"
 rom_cpu2:	incbin	"rom_cpu2.rom"
 rom_cpu3:	incbin	"rom_cpu3.rom"
 	even
-
-bad_text:
-	dc.b	13,10,"Galaga: the translated program reached an unknown address.",13,10
-	dc.b	"Press Return.",13,10,0
 
 	include "galaga_assets.s"
 

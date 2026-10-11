@@ -62,7 +62,8 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
     hl_tables: `ld hl,T; rst $08|$10; ld a,(hl); inc hl; ld h,(hl); ld l,a; jp (hl)` (or
     `ld e,(hl)..ld d,(hl); ex de,hl`, or the index added to l inline) is a jump through
     the word table T indexed by A (rst $08 / inline: words, rst $10: bytes; an `and a,N`
-    before it bounds the index) - Galaga; `call`/`jp` to a `jp (hl)` counts as the jump."""
+    before it bounds the index) - Galaga; `call`/`jp` to a `jp (hl)` (or to a routine that does the double read
+    before its `jp (hl)`, callee_jphl) counts as the jump, so does `ex (sp),hl; ret` (Galaga's sub CPU 091E)."""
     global ROMSIZE
     ROMSIZE = len(rom)
     code = {}
@@ -136,12 +137,13 @@ def hl_jump_tables(rom, code, tables, known=(), verbose=False):
     for pc, ins in sorted(code.items()):
         if pc in tables:
             continue
+        reads = set()                   # the double read: (hl) into a / e, then h / d
         is_jphl = ins.text == "jp (hl)" or (ins.flow in ("jmp", "call") and ins.target < ROMSIZE
-                                           and decode(rom, ins.target).text == "jp (hl)")
+                                           and callee_jphl(rom, ins.target, reads)) \
+            or ins.text == "ret" and prev.get(pc) in code and code[prev[pc]].text == "ex (sp),hl"
         if not is_jphl:
             continue
         ldhl = rst_idx = mask = None
-        reads = set()                   # the double read: (hl) into a / e, then h / d
         p = pc
         for _ in range(12):
             p = prev.get(p)
@@ -167,6 +169,26 @@ def hl_jump_tables(rom, code, tables, known=(), verbose=False):
             print("hl table at %04X (jump at %04X, limit %s): %s" % (ldhl, pc, limit, ["%04X" % t for t in tbl]))
         new += [t for t in tbl if t not in code]
     return new
+
+
+def callee_jphl(rom, target, reads):
+    """Whether the straight code at `target` is a `jp (hl)` within a few instructions, the double read of the
+    table entry allowed in it (Galaga 3118: `ld a,(hl); inc hl; ld h,(hl); ld l,a; jp (hl)`, called with HL on the
+    entry): its (hl) reads go into `reads`."""
+    pc, found = target, set()
+    for _ in range(6):
+        if not 0 <= pc < ROMSIZE:
+            return False
+        i = decode(rom, pc)
+        if i.text == "jp (hl)":
+            reads |= found
+            return True
+        if i.mn == "ld" and len(i.ops) == 2 and i.ops[1] == ("ind", "hl", 0) and i.ops[0][0] == "r8":
+            found.add(i.ops[0][1])
+        elif i.flow != "seq" or i.text not in ("inc hl", "ld l,a", "ld h,a", "ex de,hl") and i.mn != "ld":
+            return False
+        pc += i.length
+    return False
 
 
 def skip_offsets(rom, target, inside, cache):
