@@ -13,7 +13,7 @@ python port.py cover gunsmoke        # coverage: 14 seeded runs of 20000 frames 
 python port.py build gunsmoke        # -> run/gunsmoke/GUNSMOKE.PRG (ROMs and graphics embedded)
 python port.py test gunsmoke         # reference, lock-step translation, renderer against the reference
 python port.py mame gunsmoke         # the reference renderer against MAME's own picture (needs `mame`)
-games/gunsmoke/tools/bench.ps1       # Hatari speed (Windows): ticks and frames a second
+games/gunsmoke/tools/bench.sh        # Hatari speed: ticks and frames a second (bench.ps1 on Windows)
 ```
 
 Controls: **5/6** insert coins, **1/2** start, **arrow keys** move, **Ctrl** or **Z**
@@ -126,9 +126,12 @@ Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
 
 ## Speed (2026-10-09)
 
-`tools/bench.ps1` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
+`tools/bench.sh` (`bench.ps1` on Windows; DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
 included): 53-54 game ticks a second (~90% of the arcade's 59.6) and 26-28 drawn frames a
-second (the autoplay run differs from build to build). `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
+second (the autoplay run differs from build to build).  With the sound and the short Blitter
+passes (2026-10-11): 49.3 ticks (83%) and 23.3 frames a second; the window guards at the
+coverage's sites only (the logic 8% cheaper) changed that by less than the run-to-run variation,
+the frames being the larger part. `render_test.py` (Musashi, CPU + Blitter): a frame of consecutive play costs
 84-380k cycles (median 89k in round 1, 251k in round 3), a frame of a D802 slide 238k, a
 full redraw about 1M (the scroll sweep, with tile offsets above D802 192, 1.5-1.8M).
 
