@@ -36,11 +36,12 @@ GAMES = {
     "commando": ("run/commando_sim/COMMANDO.PRG", "commando_sim.map", ["code_commando.s"], "Z"),
     "blktiger": ("run/blktiger_sim/BLKTIGER.PRG", "blktiger_sim.map", ["code_blktiger.s"], "Z"),
     "1943": ("run/1943_sim/1943.PRG", "1943_sim.map", ["code_1943.s"], "Z"),
+    "gunsmoke": ("run/gunsmoke_sim/GUNSMOKE.PRG", "gunsmoke_sim.map", ["code_gunsmoke.s"], "Z"),
 }
 # the ports whose foreground is the game (a kernel with an idle hook): the harness stops at sim_wait, sets vbl_pending
 # (1942: and the inputs) and returns; a game frame is one such round (Black Tiger: attract mode, no inputs; Commando: the inputs of ref/cover.py, into the play;
-# 1943: the default inputs of its logic_test.py)
-KERNEL = {"1942", "commando", "blktiger", "1943"}
+# 1943: the default inputs of its logic_test.py; Gun.Smoke: ref/cover.py's attract / coin / play schedule)
+KERNEL = {"1942", "commando", "blktiger", "1943", "gunsmoke"}
 HEAD = re.compile(r"^([A-Z])([0-9A-F]{4,5}):\s*;\s*(.*)$")       # (5 digits: banked code at virtual pcs)
 LABEL = re.compile(r"^([A-Za-z_][\w]*):")
 
@@ -148,6 +149,13 @@ class Driver:
                 for addr, value, f0 in ((0xE450, int(stage), 700), (0xF206, 0x40, 0), (0xF214, 2, 0)):
                     if f0 <= self.f and (addr != 0xE450 or self.f < 1100):
                         self.mem.w8(block + addr, value)
+        if self.game == "gunsmoke" and pc == self.sym["sim_wait"]:
+            if not hasattr(self, "cover"):
+                sys.path.insert(0, str(ROOT / "games/gunsmoke/ref"))
+                from cover import inputs
+                self.cover, self.cover_state = inputs, {}
+            for a, v in zip((0xC000, 0xC001), self.cover(self.f, self.rnd, self.cover_state)):
+                self.mem.w8(self.block + a - 0x8000, v)
         if self.game in KERNEL and pc == self.sym["sim_wait"] and self.game != "1942":
             self.mem.w8(self.sym["vbl_pending"], 1)
             self.resume()
@@ -305,7 +313,7 @@ def main():
         return dkong(a)
     # defaults: past the boot, into the attract demo / the play of the tests' input scripts
     skip, frames = {"galaga": (800, 400), "bublbobl": (500, 300), "1942": (1100, 400), "commando": (1000, 1000),
-                    "blktiger": (600, 400), "1943": (1100, 300)}[a.game]
+                    "blktiger": (600, 400), "1943": (1100, 300), "gunsmoke": (1300, 400)}[a.game]
     if a.skip >= 0:
         skip = a.skip
     if a.frames:
