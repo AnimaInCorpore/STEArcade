@@ -1,7 +1,10 @@
 """MC6809 disassembler / decoder (the instruction set of m6809.py; text in MAME's syntax).
 
-decode(rd, pc, dp=None) -> Ins(pc, op, length, mn, mode, arg, flow, target, text)
+decode(rd, pc, dp=None, rd_op=None) -> Ins(pc, op, length, mn, mode, arg, flow, target, text)
   rd(addr) -> byte; op includes the page ($10xx, $11xx); mn lowercase (MAME's name); length as the CPU executes it
+  rd_op(addr) -> the opcode bytes (the first byte, the byte after a $10/$11 prefix) when they differ from the data
+        bytes: the KONAMI-1 (m6809.konami1_opcode); operands and postbytes are read with rd.  The text is MAME's for
+        the decrypted code (its disassembler's SPLIT_DECRYPTION: opcodes decrypted, params not)
   mode: inh, imm8, imm16, dir, ext, idx, rel8, rel16, stack (PSH/PUL postbyte), regs (TFR/EXG postbyte)
   arg:  the value / address / signed offset; for idx an Idx(post, reg, kind, offset, indirect, inc, addr):
         reg x y u s, 'pc' (pcr8/pcr16) or None (abs = extended indirect [n] or the undocumented $8F);
@@ -176,11 +179,12 @@ def _idx_text(rd, pb, p):
     return t, p
 
 
-def mame_text(rd, pc):
+def mame_text(rd, pc, rd_op=None):
     """The text MAME's 6809 disassembler prints for the instruction at pc (trailing blanks stripped)."""
-    e, opcode, p = _fetch(rd, pc)
+    rd_op = rd_op or rd
+    e, opcode, p = _fetch(rd_op, pc)
     if e is None:
-        return ",".join(["FCB    $%02X" % rd(pc & 0xFFFF)] + ["$%02X" % rd(q & 0xFFFF) for q in range(pc + 1, p)])
+        return ",".join(["FCB    $%02X" % rd_op(pc & 0xFFFF)] + ["$%02X" % rd_op(q & 0xFFFF) for q in range(pc + 1, p)])
     name, mode, ln = e
     ppc = p
     p += ln
@@ -264,12 +268,13 @@ BRANCH = {"bra", "lbra", "xlbra"}
 SWIS = {"swi", "swi2", "swi3", "xswi2", "xfirq", "xres"}
 
 
-def decode(rd, pc, dp=None):
+def decode(rd, pc, dp=None, rd_op=None):
     # the CPU's view of the prefixes: repeated $10/$11 keep the first page; an unknown page 2/3 opcode
     # skips that byte and runs the next one as a page 1 opcode (MAME's m6809 core)
     p, page = pc, 0
+    rdo = rd_op or rd
     while True:
-        b = rd(p & 0xFFFF)
+        b = rdo(p & 0xFFFF)
         p += 1
         if page == 0:
             if b in (0x10, 0x11):
@@ -335,7 +340,7 @@ def decode(rd, pc, dp=None):
         m, arg = "regs", rd(ppc & 0xFFFF)
         if (arg & 15) == 5 or (mn == "exg" and (arg >> 4) == 5):
             flow = "ijmp"
-    return Ins(pc, opcode, p - pc, mn, m, arg, flow, target, mame_text(rd, pc))
+    return Ins(pc, opcode, p - pc, mn, m, arg, flow, target, mame_text(rd, pc, rd_op))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ after it.  snapshot.bin holds, in this order:
     vio      $28000 bytes: the virtual space $2E0000-$307FFF (the CPU-visible bytes; the C116 registers in their first copy)
     per CPU (main, sub): 8 words the virtual page in each slot, A B X Y U S (words), CC (word)
     key      8 bytes the key custom's registers, 4 bytes MAME's rand() seed
-    mcu      the MCU model's state (tools/mcu.py, when there)
+    mcu      src/mcu.s's mcu_state (tools/mcu.py MCUNative.state_image: the MCU's RAM, its channels, port 1)
 The runtime copies vio to its image and fills the contexts (src/splatter.s, snapshot_load).
 """
 import struct
@@ -40,7 +40,9 @@ def capture(m=None):
         cpus += struct.pack(">8H", *[o >> 13 for o in m.offsets[i]])
         cpus += struct.pack(">7H", c.a, c.b, c.x, c.y, c.u, c.s, c.cc)
     key = bytes(m.key[:8]) + struct.pack(">I", m.rand_seed)
-    return bytes(vio) + cpus + key, m
+    from mcu import MCUNative
+    mcu = MCUNative.from_board(m).state_image()
+    return bytes(vio) + cpus + key + mcu, m
 
 
 def write(build=None):

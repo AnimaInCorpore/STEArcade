@@ -1,0 +1,104 @@
+[
+ {
+  "name": "361b16.f1",
+  "size": 32,
+  "crc32": "d55f30b5",
+  "sha1": "4d6a851f4886778307f75771645078b97ad55f5f"
+ },
+ {
+  "name": "361b17.b16",
+  "size": 256,
+  "crc32": "d2ba4d32",
+  "sha1": "894b5cedf01ba9225a0d6215291857e455b84903"
+ },
+ {
+  "name": "361b18.e15",
+  "size": 256,
+  "crc32": "053e5861",
+  "sha1": "6740a62cf7b6938a4f936a2fed429704612060a5"
+ },
+ {
+  "name": "a01_e01.bin",
+  "size": 8192,
+  "crc32": "2882f6d4",
+  "sha1": "f7ddae2c5412a2849efd7f9629e92a5b0328e7cb"
+ },
+ {
+  "name": "a02_e02.bin",
+  "size": 8192,
+  "crc32": "1743b5ee",
+  "sha1": "31301031a525f893c31461f634350f01a9492ef4"
+ },
+ {
+  "name": "a03_k03.bin",
+  "size": 8192,
+  "crc32": "6c0d1ee9",
+  "sha1": "380ab2162153a61910a6fe5b6d091ca9451ad4fd"
+ },
+ {
+  "name": "a04_e04.bin",
+  "size": 8192,
+  "crc32": "21d6c448",
+  "sha1": "6c42cc76302485954a31520bdd08469fa948c72f"
+ },
+ {
+  "name": "a05_e05.bin",
+  "size": 8192,
+  "crc32": "f08c7b7e",
+  "sha1": "50e65d9b0ea37d2afb2dfdf1f3e1378e3290bc81"
+ },
+ {
+  "name": "c11_d06.bin",
+  "size": 8192,
+  "crc32": "82e2185a",
+  "sha1": "1da9ea20e7af0b49c62fb39834a7ec686491af04"
+ },
+ {
+  "name": "c12_d07.bin",
+  "size": 8192,
+  "crc32": "800ff1f1",
+  "sha1": "33d73b18903e3e6bfb30f1a06db4b8105d4040d8"
+ },
+ {
+  "name": "c13_d08.bin",
+  "size": 8192,
+  "crc32": "d9faf183",
+  "sha1": "4448b6242790783d37acf50704d597af5878c2ab"
+ },
+ {
+  "name": "c14_d09.bin",
+  "size": 8192,
+  "crc32": "5886c802",
+  "sha1": "884a12a8f63600da4f23b29be6dbaacef37add20"
+ },
+ {
+  "name": "c2_d13.bin",
+  "size": 8192,
+  "crc32": "95bf79b6",
+  "sha1": "ea9135acd7ad162c19c5cdde356e69792d61b675"
+ },
+ {
+  "name": "c9_d15.bin",
+  "size": 8192,
+  "crc32": "f546a56b",
+  "sha1": "caee3d8546eb7a75ce2a578c6a1a630246aec6b8"
+ },
+ {
+  "name": "h14_e10.bin",
+  "size": 8192,
+  "crc32": "c2166a5c",
+  "sha1": "5ba25900e653ce4edcf35f1fbce758a327a715ce"
+ },
+ {
+  "name": "h15_e11.bin",
+  "size": 8192,
+  "crc32": "dda9e29f",
+  "sha1": "0f41cde82bb60c3f1591ee14dc3cff4642bbddc1"
+ },
+ {
+  "name": "h16_e12.bin",
+  "size": 8192,
+  "crc32": "50075768",
+  "sha1": "dfff92c0f59dd3d8d3d6256944bfd48792cef6a9"
+ }
+]

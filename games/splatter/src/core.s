@@ -230,15 +230,16 @@ mame_rand:
 	move.l	d5,-(sp)			; (the translation may hold a carry in d5: ADC / SBC)
 	move.l	rand_seed,d5
 	move.w	d5,d6
-	mulu	#$660D,d6
+	mulu	#$660D,d6			; lo * $660D (32 bits)
 	move.l	d5,d7
 	swap	d7
-	mulu	#$660D,d7
-	swap	d7
-	clr.w	d7
-	add.l	d7,d6
-	move.w	d5,d7
-	mulu	#$0019,d7
+	mulu	#$660D,d7			; hi * $660D (its low word counts)
+	move.w	d5,-(sp)			; lo * $19 = lo << 4 + lo << 3 + lo (its low word counts)
+	lsl.w	#3,d5
+	add.w	d5,d7
+	add.w	d5,d5
+	add.w	d5,d7
+	add.w	(sp)+,d7
 	swap	d7
 	clr.w	d7
 	add.l	d7,d6
@@ -374,6 +375,7 @@ page_base:
 	rts
 
 	include	"m6809rt.s"
+	include	"natives.s"
 	include	"code_main.s"
 	include	"code_sub.s"
 	include	"tables_main.s"

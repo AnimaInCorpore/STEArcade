@@ -5,6 +5,9 @@ opcodes (XNC XDEC XCLR XST XADD X18 XANDCC XRES XSWI2 XFIRQ; the free-run opcode
 error). As in MAME, repeated $10/$11 prefixes keep the first page, and a byte after $10/$11 that is no page 2/3
 opcode is skipped: the byte after it runs as a page 1 opcode (MAME's disassembler shows that byte instead).
 Memory goes through rd(addr)/wr(addr, v) callbacks over the 64 KB space (the board does the banking).
+rd_op(addr), when given, answers the opcode fetches instead of rd: the first byte of an instruction, the byte after a
+$10/$11 prefix and the byte run after a skipped one (MAME's read_opcode; operands, postbytes and data go through rd).
+That is the KONAMI-1 (konami1_opcode below: opcode bytes XORed by address bits 1 and 3).
 
 Cycles are MAME's mc6809e core: one per bus cycle including the dummy and VMA cycles of its microcode
 (base6x09.lst, m6809.lst). The dummy reads themselves are not issued (they read the opcode stream, $FFFF or the
@@ -28,8 +31,9 @@ class M6809Error(Exception):
 
 
 class M6809:
-    def __init__(self, rd, wr):
+    def __init__(self, rd, wr, rd_op=None):
         self.rd, self.wr = rd, wr
+        self.rd_op = rd_op or rd               # opcode fetches (KONAMI-1: decrypting)
         self.a = self.b = self.dp = 0
         self.x = self.y = self.u = self.s = 0
         self.pc = 0
@@ -210,7 +214,7 @@ class M6809:
             if n:
                 return n
         pc = self.pc
-        op = self.rd(pc)
+        op = self.rd_op(pc)
         self.pc = (pc + 1) & 0xFFFF
         n = P1[op](self)
         self.cycles += n
@@ -222,7 +226,7 @@ class M6809:
         (MAME's abort_timeslice)."""
         start = self.cycles
         self.end = start + n
-        rd = self.rd
+        rd = self.rd_op
         while self.cycles < self.end:
             if self.attn:
                 if self.wait and not self.can_wake():
@@ -238,6 +242,28 @@ class M6809:
 
     def state(self):
         return (self.a, self.b, self.x, self.y, self.u, self.s, self.dp, self.cc, self.pc)
+
+
+# ---- KONAMI-1 ---------------------------------------------------------------
+def konami1_xor(addr):
+    """The KONAMI-1 opcode key of an address (MAME konami1.cpp): by address bits 1 and 3."""
+    return (0x22, 0x82, 0x28, 0x88)[((addr >> 1) & 1) | ((addr >> 2) & 2)]
+
+
+KONAMI1_XOR = bytes(konami1_xor(a) for a in range(16))
+
+
+def konami1_opcode(rd, boundary=0):
+    """rd_op for a KONAMI-1: opcode bytes at or above `boundary` are decrypted (XOR $22/$82/$28/$88 by A1, A3)."""
+    key = KONAMI1_XOR
+    if boundary:
+        def rd_op(a):
+            v = rd(a)
+            return v ^ key[a & 15] if a >= boundary else v
+    else:
+        def rd_op(a):
+            return rd(a) ^ key[a & 15]
+    return rd_op
 
 
 # ---- TFR / EXG (MAME's rules for mixed register sizes) ----------------------
@@ -773,12 +799,12 @@ for _f, (_t, _op) in _names.items():
 def _page(tbl, own):
     def h(c):
         pc = c.pc
-        op = c.rd(pc)
+        op = c.rd_op(pc)
         c.pc = (pc + 1) & 0xFFFF
         f = tbl[op]
         if f is None:                          # not a page 2/3 opcode: MAME fetches the next byte as a page 1 opcode
             pc = c.pc
-            op = c.rd(pc)
+            op = c.rd_op(pc)
             c.pc = (pc + 1) & 0xFFFF
             return 2 + P1[op](c)
         return f(c)

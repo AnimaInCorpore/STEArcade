@@ -418,8 +418,9 @@ def load_trace(path):
 VECS = {0xFFF8: "irq", 0xFFF6: "firq", 0xFFFC: "nmi"}
 
 
-def replay(part, stats, opcount, name, skip_pcs=(), strict=False):
-    """Each trace step from the logged state before it: registers, writes and cycles must match the next line."""
+def replay(part, stats, opcount, name, skip_pcs=(), strict=False, boundary=None):
+    """Each trace step from the logged state before it: registers, writes and cycles must match the next line.
+    boundary: a KONAMI-1 (its opcodes from that address on are encrypted; engine/konami1_test.py)."""
     cyc, regs, opb, acc, off, tix, texts = part["cyc"], part["regs"], part["opb"], part["acc"], part["off"], part["tix"], part["texts"]
     reads = defaultdict(deque)
     mine = []
@@ -434,7 +435,7 @@ def replay(part, stats, opcount, name, skip_pcs=(), strict=False):
 
     def wr(a, v):
         mine.append((a, v))
-    c = M6809(rd, wr)
+    c = M6809(rd, wr, None if boundary is None else m6809.konami1_opcode(rd, boundary))
     seen = {}
     bad = 0
     prev_text = None
@@ -476,7 +477,8 @@ def replay(part, stats, opcount, name, skip_pcs=(), strict=False):
             for k in range(5):
                 mem[(r[8] + k) & 0xFFFF] = pcb[k]
             try:
-                ins = m6809dis.decode(mem.__getitem__, r[8])
+                ins = m6809dis.decode(mem.__getitem__, r[8], rd_op=None if boundary is None else
+                                      m6809.konami1_opcode(mem.__getitem__, boundary))
                 t = ins.text
                 opcount[ins.op] += 1
             except Exception as e:

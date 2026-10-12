@@ -95,6 +95,22 @@ prints 0 differing pixels for all four frames now.  Notes:
   stays in the log; Galaga's comes from the blank MCU ROMs below, Bubble Bobble's from the PAL dumps nobody has.
 * **The MAME source in `F030Arcade/third_party/mame` is older than the binary** (Galaga's blue channel differs:
   the source says 0x47/0x97, MAME 0.289 produces 0x51/0xAE).  The installed `mame` is the truth.
+* **Several frames in one run, write logs with the beam line** (`engine/mame_frames.lua` + `engine/mame_cmp.py`, used
+  by Track & Field, Hyper Sports, Gyruss, 2026-10-12): dumps of any CPU's ranges, snapshots and pens at a list of
+  frames, and a log of the writes to TAPS ranges.  Two MAME 0.289 Lua traps found on the way: a write tap installed
+  while the autoboot script loads is silently lost (install it at the first `frame_done`), and the screen has no
+  `vpos()`/`hpos()` in Lua (an error inside a tap callback is swallowed: the log just stays empty); the line is
+  `(-screen:time_until_pos(0, 0) / screen.scan_period) % vtotal`.  Run MAME in a fresh directory per capture: it
+  writes `nvram/` there and reads it back next time (high scores, NVRAM games boot differently).
+* **Partial updates**: a driver whose RAM write handler calls `screen.update_partial(vpos)` (Gyruss's sprite RAM: the
+  sub CPU writes sprites until line ~36) draws the lines up to the write's line with the old values.  A reference
+  render of one end-of-frame memory dump then differs in a few pixels; render per band of lines from the previous
+  frame's dump plus the logged writes (`games/gyruss/tools/machine.py: sprite_bands`).  The same driver marks the
+  whole tilemap dirty only at the first band, so tile RAM is effectively sampled once per frame.
+* **Encrypted opcodes** (Konami's KONAMI-1: Track & Field, Hyper Sports, Gyruss's sub CPU, and Circus Charlie, Juno
+  First, Megazone, Jail Break, Finalizer, Roc'n Rope): `M6809(rd, wr, rd_op=konami1_opcode(rd, boundary))` and
+  `m6809dis.decode(..., rd_op=...)`; only the opcode bytes (the first byte and the byte after $10/$11) go through
+  `rd_op`, operands do not.  A translator reading code bytes must do the same (`engine/konami1_test.py`).
 
 #### Frames from an old MAME without Lua snapshots (F030Arcade `wolfmame-0162`, Windows)
 

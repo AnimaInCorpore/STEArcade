@@ -7,7 +7,8 @@
 ; sound CPU in the reference and calls port_frame once a frame.
 ; Otherwise the program: the snapshot loaded, then per arcade frame (one per VBL at most: the arcade's 60 Hz on the
 ; STE's 50 when the logic keeps up) the vertical blank's work (the sprite list latch, the MCU), the main CPU, the sub
-; CPU.  The picture (render.s) is not there yet; the background colour beats with the game's frame counter.
+; CPU.  The MCU is native (mcu.s).  The picture (render.s) is not there yet; the background colour beats with the
+; game's frame counter.
 
 KEY_ESC = $01
     ifnd SIM
@@ -64,29 +65,13 @@ vblank_work:
 	move.w	8(a0),14(a0)
 	lea	16(a0),a0
 	dbf	d0,.copy
-.mcu:	bra	mcu_frame
+.mcu:	bra	mcu_call
 
-; The MCU until its native replacement: what main reads of it (TRIRAM, its frame copies one frame late): $026 / $027
-; the controls (active high), $028 / $029 the DIP switches (all off: 0), $02A the coin and service bits; $039 cleared.
-mcu_frame:
+; the MCU (src/mcu.s): TRIRAM and the arcade's input ports (CONTROL0, CONTROL1, COIN, DIPSW, active low)
+mcu_call:
 	lea	vio+$1F000,a0
-	move.b	mcu_last,$26(a0)
-	move.b	mcu_last+1,$27(a0)
-	clr.b	$28(a0)
-	clr.b	$29(a0)
-	move.b	mcu_last+2,$2A(a0)
-	clr.b	$39(a0)
-	move.b	in_control0,d0
-	not.b	d0
-	move.b	d0,mcu_last
-	move.b	in_control1,d0
-	not.b	d0
-	move.b	d0,mcu_last+1
-	move.b	in_coin,d0
-	not.b	d0
-	and.b	#$78,d0
-	move.b	d0,mcu_last+2
-	rts
+	lea	in_control0,a1
+	bra	mcu_frame
 
 ; ---- the snapshot (tools/snapshot.py) ----
 snapshot_load:
@@ -104,6 +89,10 @@ snapshot_load:
 .key:	move.b	(a0)+,(a1)+
 	dbf	d0,.key
 	move.l	(a0)+,rand_seed
+	lea	mcu_state,a1
+	move.w	#mcu_state_end-mcu_state-1,d0
+.mcu:	move.b	(a0)+,(a1)+
+	dbf	d0,.mcu
 	rts
 
 ; a0 -> 8 page words, A B X Y U S CC (words); a6 = the context
@@ -148,6 +137,7 @@ init_hardware:
 	move.b	#$FF,in_control0
 	move.b	#$FF,in_control1
 	move.b	#$FF,in_coin
+	move.b	#$FF,in_dipsw
 .w1:	btst	#1,$fffffc00.w
 	beq.s	.w1
 	move.b	#$14,$fffffc02.w	; joystick events
@@ -255,6 +245,9 @@ key_table:
     endc
 
 	include	"core.s"
+    ifnd SIM
+	include	"mcu.s"
+    endc
 
 	section data,data
     ifnd SIM
@@ -270,13 +263,13 @@ old_acia:	ds.l	1
 ticks:		ds.w	1
 old_iera:	ds.b	1
 old_imra:	ds.b	1
-in_control0:	ds.b	1
+in_control0:	ds.b	1		; (mcu_frame reads these four in this order)
 in_control1:	ds.b	1
 in_coin:	ds.b	1
+in_dipsw:	ds.b	1
 kbd_control:	ds.b	1
 kbd_coin:	ds.b	1
 joy_control:	ds.b	1
-mcu_last:	ds.b	4
 quit_flag:	ds.b	1
 	even
     ifnd SIM

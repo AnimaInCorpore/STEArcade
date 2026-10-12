@@ -1,0 +1,92 @@
+[
+ {
+  "name": "gyrussk.1",
+  "size": 8192,
+  "crc32": "c673b43d",
+  "sha1": "7c464fb154bac35dd6e2f547e157addeb8798194"
+ },
+ {
+  "name": "gyrussk.1a",
+  "size": 8192,
+  "crc32": "f4ae1c17",
+  "sha1": "ae568c96a31d910afe30d2b7eeb9ed1ed07290e3"
+ },
+ {
+  "name": "gyrussk.2",
+  "size": 8192,
+  "crc32": "a4ec03e4",
+  "sha1": "08c33ad7fcc2ad5e5787a1050284e3f8164f4618"
+ },
+ {
+  "name": "gyrussk.2a",
+  "size": 8192,
+  "crc32": "ba498115",
+  "sha1": "9cd1f42898cc590f39ba7cb3c975b0b3d3062eba"
+ },
+ {
+  "name": "gyrussk.3",
+  "size": 8192,
+  "crc32": "27454a98",
+  "sha1": "030c7df225652ee20d5ef64d005eb011dc89a27d"
+ },
+ {
+  "name": "gyrussk.3a",
+  "size": 4096,
+  "crc32": "3f9b5dea",
+  "sha1": "6e807da02c2885b18e8cc2199f12f6be9040bf75"
+ },
+ {
+  "name": "gyrussk.4",
+  "size": 8192,
+  "crc32": "27d8329b",
+  "sha1": "564ff945465a23d93a93137ad277298770dfa06a"
+ },
+ {
+  "name": "gyrussk.5",
+  "size": 8192,
+  "crc32": "4f22411a",
+  "sha1": "763bcd039f8c1838a0d7da7d4dadc14a26e25596"
+ },
+ {
+  "name": "gyrussk.6",
+  "size": 8192,
+  "crc32": "c949db10",
+  "sha1": "fcb8bcbd2bdd751fecb322a33c8a92fb6f07a7ab"
+ },
+ {
+  "name": "gyrussk.7",
+  "size": 8192,
+  "crc32": "8e8d388c",
+  "sha1": "8f2928d71c02aba977d67575d6e34d69bda2b9d4"
+ },
+ {
+  "name": "gyrussk.8",
+  "size": 8192,
+  "crc32": "47cd1fbc",
+  "sha1": "8203c4ff0b1cd7b4dbc708e300bfeac1e7366e09"
+ },
+ {
+  "name": "gyrussk.9",
+  "size": 8192,
+  "crc32": "822bf27e",
+  "sha1": "36d5bea2392a7d3476dd797dc05602705cfa23ef"
+ },
+ {
+  "name": "gyrussk.pr1",
+  "size": 256,
+  "crc32": "7ed057de",
+  "sha1": "c04069ae1e2c62f9b3048844cd8cf5e1b03b7d3c"
+ },
+ {
+  "name": "gyrussk.pr2",
+  "size": 256,
+  "crc32": "de823a81",
+  "sha1": "1af94b2a6a319a89b238a5076a2867f1cfd279b0"
+ },
+ {
+  "name": "gyrussk.pr3",
+  "size": 32,
+  "crc32": "98782db3",
+  "sha1": "b891e43b25187faca8002919ccb44d744daa3594"
+ }
+]

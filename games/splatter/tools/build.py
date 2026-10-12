@@ -21,6 +21,10 @@ def main():
     if not (ROOT / "assets" / "roms" / "extracted" / "splatter").is_dir():
         subprocess.run([sys.executable, str(Path(__file__).with_name("prepare.py"))], check=True)
     report = gen.generate()
+    import mcu
+    from namcos1 import load_regions
+    r = load_regions("splatter")
+    mcu.write_tables(build_dir("splatter") / "mcu_samples.s", r["voice"], r["mcu"])
     if not args.sim:
         import snapshot
         snapshot.write()

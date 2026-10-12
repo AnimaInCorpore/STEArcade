@@ -55,6 +55,13 @@ def main():
     print("by page / runtime routine:")
     for k, n in groups.most_common(16):
         print("  %-24s %5.1f%%" % (k, 100 * n / total))
+    regions = collections.Counter()
+    for k, n in prof.items():
+        if not k.startswith("rt:"):
+            regions[k[:5]] += n                 # (the CPU letter + the virtual address's top 4 digits: 256 bytes)
+    print("by 256 byte region of code:")
+    for k, n in regions.most_common(24):
+        print("  %s00-%sFF  %5.1f%%" % (k, k[1:], 100 * n / total))
     import re
     from paths import build_dir
     text = {}

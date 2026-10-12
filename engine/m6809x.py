@@ -52,6 +52,7 @@ INV = {"bhi": "bls", "bls": "bhi", "bcc": "bcs", "bcs": "bcc", "bne": "beq", "be
 REG8 = {"a": "d0", "b": "d1"}
 REG16 = {"x": "d2", "y": "d3", "u": "d4"}
 VB_OFF, CCHI_OFF = 32, 112
+TBL_OFF, PID_OFF, TABLES_OFF = 64, 96, 152        # (the runtime's context block: games/splatter/src/core.s)
 
 
 class Unsupported(Exception):
@@ -140,7 +141,7 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None):
+                 hook_next=None, static_read=None, inline_banks=False):
         self.name, self.prefix = name, prefix
         self.page_bytes = page_bytes
         self.slot_of = dict(slot_of)
@@ -156,6 +157,7 @@ class Program:
         self.hook_flags = hook_flags              # what a hook reads (the tests: H too)
         self.hook_next = dict(hook_next or {})    # hook -> where the code goes on after it (its flags are those read there)
         self.static_read = static_read            # (page, offset) -> 68000 lines leaving the byte in d7, or None
+        self.inline_banks = inline_banks          # static MMU writes inline (the runtime has page_base_table)
         self.slot_pages = collections.defaultdict(set)
         for p, s in self.slot_of.items():
             self.slot_pages[s].add(p)
@@ -488,8 +490,8 @@ class Emitter:
     def acc_add_d7(self, kind):
         """d7 (16 bit, upper word 0) += the accumulator offset (A and B signed)"""
         if kind == "acc_d":
-            self.e("move.b d0,d6")
-            self.e("lsl.w #8,d6")
+            self.e("move.b d0,-(sp)")
+            self.e("move.w (sp)+,d6")
             self.e("move.b d1,d6")
             self.e("add.w d6,d7")
         else:
@@ -560,11 +562,24 @@ class Emitter:
             elif x.kind in ("acc_a", "acc_b", "acc_d"):
                 self.acc_add_d7(x.kind)
         if x.indirect:
-            # the pointer: two bytes at d7
-            self.slot_base_dyn()
-            self.e("move.b (a0,d7.l),d6")
-            self.e("lsl.w #8,d6")
-            self.e("move.b 1(a0,d7.l),d6")
+            # the pointer: two bytes at d7 (its slot from the coverage when the instruction reads nothing else: a
+            # computed jump or call)
+            ptr = None
+            if ins.mn in ("jmp", "jsr"):
+                reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
+                if len(reads) == 1:
+                    ptr = next(iter(reads))
+            if ptr in (0, 1):
+                b = ("a3", "a4")[ptr]
+            elif ptr is not None:
+                self.e("move.l %d(a6),a0" % (VB_OFF + 4 * ptr))
+                b = "a0"
+            else:
+                self.slot_base_dyn()
+                b = "a0"
+            self.e("move.b (%s,d7.l),-(sp)" % b)
+            self.e("move.w (sp)+,d6")
+            self.e("move.b 1(%s,d7.l),d6" % b)
             self.e("moveq #0,d7")
             self.e("move.w d6,d7")
 
@@ -623,6 +638,9 @@ class Emitter:
         slot * 2, d5 = the value), the registers the port needs (SUBRES $F000, FIRQ $FA00, the sub CPU's slot 7
         $FC00: <cpu>_io_w, which stops a test build), the others (watchdog, IRQ acknowledges) only set the flags"""
         reg = (a >> 9) & 0xF
+        if reg < 8 and self.p.inline_banks:
+            self.bank_inline(reg, a & 1, src, word)
+            return
         if reg < 8:
             self.stats["bank write"] += 1
             self.e("move.%s %s,d5" % ("w" if word else "b", src))
@@ -633,6 +651,44 @@ class Emitter:
             self.e("move.%s %s,d5" % ("w" if word else "b", src))
             self.e("bsr %s_io_w" % self.p.name)
         self.e("tst.%s %s" % ("w" if word else "b", src))
+
+    def bank_inline(self, k, odd, src, word):
+        """slot k's page from a static store, inline: PID, PB (page_base_table), VB, the dispatcher's table when code
+        runs from the slot, the cached registers (a3 and the stack: slot 0, a4: slot 1, a2: slot 7)"""
+        self.stats["bank write inline"] += 1
+        e = self.e
+        if word:
+            e("move.w %s,d7" % src)
+            e("and.w #$3FF,d7")
+        elif odd:
+            e("move.w %d(a6),d7" % (PID_OFF + 2 * k))
+            e("move.b %s,d7" % src)
+        else:
+            e("move.b %s,d7" % src)
+            e("and.w #3,d7")
+            e("lsl.w #8,d7")
+            e("move.b %d(a6),d7" % (PID_OFF + 2 * k + 1))
+        e("move.w d7,%d(a6)" % (PID_OFF + 2 * k))
+        e("add.w d7,d7")
+        e("add.w d7,d7")
+        if k in set(self.p.slot_of.values()):
+            e("move.l %d(a6),a1" % TABLES_OFF)
+            e("move.l (a1,d7.w),%d(a6)" % (TBL_OFF + 4 * k))
+        e("lea page_base_table,a0")
+        e("move.l (a0,d7.w),a0")
+        e("move.l a0,%d(a6)" % (4 * k))
+        if k == 7:
+            e("move.l a0,a2")
+        if k:
+            e("suba.l #$%X,a0" % (k * 0x2000))
+        e("move.l a0,%d(a6)" % (VB_OFF + 4 * k))
+        if k == 0:
+            e("suba.l a3,a5")
+            e("adda.l a0,a5")
+            e("move.l a0,a3")
+        elif k == 1:
+            e("move.l a0,a4")
+        e("tst.%s %s" % ("w" if word else "b", src))
 
     def store8(self, v, ins, src, off=0):
         """the byte in register src to the operand (a move: N Z right, V C cleared)"""
@@ -794,8 +850,10 @@ class Emitter:
                 self.e("jmp %s" % self.p.hooks[v])
                 continue
             if v in self.p.natives:
+                # a hand-written routine replaces the code from here; the translation stays under <label>_t (its
+                # fallback, and what the native tests compare it with)
                 self.e("jmp %s" % self.p.natives[v])
-                continue
+                self.lines.append("%s_t:" % self.p.label(v))
             try:
                 self.emit(v, ins)
             except Unsupported as ex:

@@ -27,6 +27,8 @@ from paths import build_dir
 VIO_FIRST, VIO_LAST = 0x170, 0x183                  # virtual pages of vio ($2E0000-$307FFF)
 IO_PAGES = {0x17C, 0x17E}
 IRQ = {0: 0xE0DF, 1: 0xE0A1}                        # the IRQ handlers (slot 7)
+# hand-written 68000 routines (src/natives.s) in place of translated code; NO_NATIVES=1 builds the translation only
+NATIVES = {0: {}, 1: {0x6EF714: "sub_sprites"}}
 NAMES = {0: ("main", "M"), 1: ("sub", "S")}
 
 
@@ -114,7 +116,8 @@ def program(cpu, regions, cover):
     prog = m6809x.Program(name, prefix, page_bytes, slot_of, roots=[irq_v, idle_v],
                           exec_cover={v for v, s in exec_[cpu]}, acc_cover=acc[cpu], targets=tg[cpu],
                           io_pages=IO_PAGES, hooks={idle_v: "%s_idle" % name}, page_addr=page_addr,
-                          hook_next={idle_v: idle_v + 3}, static_read=key_read,
+                          hook_next={idle_v: idle_v + 3}, static_read=key_read, inline_banks=True,
+                          natives={} if os.environ.get("NO_NATIVES") else NATIVES[cpu],
                           io_sites={v for v, s in ioacc[cpu].items() if io_site(s)} if any(ioacc[cpu].values()) else None)
     return prog, irq_v, idle_v
 
