@@ -471,3 +471,42 @@ frames exact, no stray pixels around the picture (the check finds 14 at frame 51
 6,000; `BLIT_STATS=256` over 300 frames: 28,117 HOG passes, the longest 256 bus cycles, none sharing the bus;
 `tools/bench.sh 1500` in Hatari: no late border event, no pass in pieces, no crash file.  Memory: 3,931,904 bytes
 (+4 KB: the epochs and the cells' bank masks).
+
+## Native routines (2026-10-12)
+
+`src/natives.s` holds hand-written 68000 routines that replace Z80 code (`tools/gen.py` `MAIN_NATIVES` /
+`SUB_NATIVES`, the engine's `natives`, see docs/architecture.md; `BB_NO_NATIVES=1` builds the translation alone).
+`tools/native_test.py` runs each against the translation it replaces (`y_near`: 3,000 random object tables, memory, IY,
+the registers, S Z C; the dispatches: every combination of their tested bits, the handler reached, A, F, the CCR, the
+Z80 stack); `logic_test.py` in `port.py test` now runs 2,000 frames, into the play where they run.
+
+* `y_near`, the sub CPU's `$0849`-`$089B` (from the object loop `$03CF` through the jump table at `$0785`): for each of
+  the `($E76B)` objects, is it near IX (same +29 excluded, |dx| < 13, dy 0..12): `+19` counts up.  The translation
+  pays ~210 cycles an object (IY lives in memory, `add iy,de` keeps C for the `bit`s after it); native ~50: IY in an
+  address register, IX+33's bits 4/5 tested once (the loop writes only +19 of objects 40 bytes apart), C of the last
+  `add iy,de` is 0 (objects past `$FFFF` run the translation).
+* `z_state` / `y_state`, the objects' state dispatch of the main CPU (`$5C37`-`$5C75`) and the sub CPU
+  (`$03CF`-`$03F9`): after the loop counter's `push af`, the first set bit of a list of bits of (IX+33) and (IX+0)
+  picks the handler.  Translated, each `bit` merges Z into F and each `jp nz` loads the CCR from it (~58 cycles a test,
+  11 / 7 tests for an object with none set); native, an object with none set costs two tests, and F, A and the CCR
+  are left as the translation leaves them.
+
+`engine/xprof.py bublbobl --frames 300 --skip 900` (cycles a game frame): translated code 170.8k -> 115.8k (main CPU
+108.6k -> 92.1k, sub CPU 54.5k -> 15.9k), the natives 16.0k (`y_near` 8.5k, `y_state` 3.8k, `z_state` 3.8k): 39k less of
+the ~320k a game frame.  `tools/profile.py 2400` (Musashi, the real VBL schedule; game rounds per VBL / pictures a
+second; the windows are VBLs, so after a faster window the game is further on):
+
+| Frames | Before | `y_near` | All three |
+|---|---|---|---|
+| 900–1199 | 0.75 / 15.7 | 0.75 / 15.7 | 0.75 / 15.7 |
+| 1200–1499 | 0.56 / 18.5 | 0.56 / 19.2 | **0.67** / 15.3 |
+| 1500–1799 | 0.50 / 17.2 | 0.50 / 19.8 | **0.59** / 19.3 |
+| 1800–2099 | 0.50 / 16.5 | 0.50 / 20.3 | **0.70** / 16.7 |
+| 2100–2399 | 0.50 / 17.8 | 0.50 / 20.8 | **0.59** / 20.3 |
+
+The scheduler puts the game's pace first: with `y_near` alone the saved time went to the pictures, with all three the
+game runs 18-40% more rounds a VBL in these windows.  `tools/bench.sh 3000` (Hatari; rounds per VBL / pictures a
+second, before -> after): VBLs 1200-1499 0.95 / 27.5 -> 0.95 / 34.0, 1500-1799 1.00 / 31.3 -> 1.00 / 40.3, 1800-2099
+0.98 / 21.0 -> 1.00 / 34.2, 2100-2399 0.87 / 14.8 -> 1.00 / 29.7; later the faster build is in a heavier scene (2400-2999:
+0.98 / 23.0 and 0.97 / 27.3 before, 0.89 / 14.0 and 0.82 / 11.2 after).  Next candidate: the object table copy `$04B6`
+(`ldir`, 5k).

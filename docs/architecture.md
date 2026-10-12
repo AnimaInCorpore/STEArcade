@@ -137,6 +137,22 @@ does the same), so an entry the analysis did not foresee stops loudly instead of
   each instead of the conversions to and from the Z80 F byte, -112 cycles a pair; `pair_af`).
 * A `bra` to the label right behind it and a `tst.b R` right before a `move.b R,...` are dropped.
 
+### Native replacements (`natives`)
+
+A port can replace Z80 code by a hand-written 68000 routine: `compile_code(..., natives={pc: label})` (the games'
+gen.py) makes the translated label of `pc` a `jmp label`; the translation of the code behind it stays (its other
+entries, a fallback the routine may jump into).  The pc is a boundary (no merge across it) and the CCR analysis knows
+nothing after it.  The routine must leave what the code after it reads as the Z80 code would: the registers in the
+port's map (`Emitter.regmap`), memory, and the flags its return point reads (`live_out` of the replaced code's `ret`; a
+ret reached by `jp (hl)` reads S Z C), and continue there (a `ret` pops the Z80 stack and jumps through the dispatch
+table, as the translation does).  Worth it where the translation pays for the Z80's limits: a loop with an index
+register kept in memory, tests whose result does not change in the loop, flags merged for a later reader.  Each port
+tests its routines against the translation they replace (random states: memory, registers, live flags) besides the
+lock-step test.  Bubble Bobble (`games/bublbobl/src/natives.s`, 2026-10-12): the sub CPU's count of objects near IX
+(`$0849`, ~210 -> ~50 cycles an object) and both CPUs' object state dispatch (`$5C37`, `$03CF`: a chain of `bit` /
+`jp nz` with Z merged into F at each test, two tests native for an object with none set): the translated code 171k ->
+116k + 16k native cycles a game frame in play, the game 18-40% more rounds a VBL there.
+
 ### Tests and measurements of the translator
 
 * `engine/xbench.py`: every Z80 opcode (operand bytes random) and random straight-line sequences with forward jumps

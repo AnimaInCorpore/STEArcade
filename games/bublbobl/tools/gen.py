@@ -29,6 +29,14 @@ IY_MAIN = 0xBFF0                 # unused cells of the window area of the block:
 IY_SUB = 0xBFF8
 MAIN_HOOKS = {0x0158, 0x01ED}    # the handshake with the MCU (boot turns), the idle loop
 SUB_HOOKS = {0x000A}             # the sub CPU's idle loop
+# hand-written 68000 routines that replace Z80 code (src/natives.s; BB_NO_NATIVES=1: all translated)
+MAIN_NATIVES = {} if os.environ.get("BB_NO_NATIVES") else {
+    0x5C37: "z_state",           # the objects' state dispatch ($5C37-$5C75)
+}
+SUB_NATIVES = {} if os.environ.get("BB_NO_NATIVES") else {
+    0x03CF: "y_state",           # the objects' state dispatch ($03CF-$03F9)
+    0x0849: "y_near",            # the count of objects near IX ($0849-$089B)
+}
 TOKEN = 0x7FFE                   # the return address token of the interrupt entry (the handler checks that its high byte is below $C0)
 ENTRIES = 0xC002
 
@@ -339,7 +347,8 @@ def generate():
     DYN.clear()
     DYN.update(vpc_of_cover(p) for p in main_dyn)
     code, tables, em = translate(img, [0, 0x38, 0x66], DYN, cfg_main,
-                                 BBEmitter, decode_main, hooks=MAIN_HOOKS, window_sites=wsites)
+                                 BBEmitter, decode_main, hooks=MAIN_HOOKS, window_sites=wsites,
+                                 natives=MAIN_NATIVES)
     for ins in code.values():
         pass
     out.append("; ---------------- main CPU")
@@ -376,7 +385,8 @@ def generate():
 
     # ---- sub CPU
     scode, stables, sem = translate(sub_rom + bytes(0x10000 - len(sub_rom)), [0, 0x38, 0x66],
-                                    {p for p in sub_dyn}, cfg_sub, hooks=SUB_HOOKS)
+                                    {p for p in sub_dyn}, cfg_sub, hooks=SUB_HOOKS,
+                                    natives=SUB_NATIVES)
     out.append("; ---------------- sub CPU")
     out += sem.lines
     missing = sorted(p for p in sem.refs if p not in scode)

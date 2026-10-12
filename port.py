@@ -90,7 +90,8 @@ TESTS = {
                ("tools/render_test.py", [], None)],               # the picture at frozen moments of the attract mode
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
-                 ("tools/logic_test.py", ["{n}"], 700),
+                 ("tools/logic_test.py", ["{n}"], 2000),          # (into the play: src/natives.s runs there)
+                 ("tools/native_test.py", [], None),               # src/natives.s against the translations they replace
                  ("tools/render_test.py", ["seq", "1500", "20"], None),
                  ("tools/sprite_test.py", [], None),
                  ("tools/align_test.py", ["{n}"], 900),

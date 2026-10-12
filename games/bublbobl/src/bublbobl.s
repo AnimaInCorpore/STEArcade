@@ -1534,6 +1534,7 @@ z80_unsupported:
 
 	include "bb_code.s"
 	include "bb_mcu.s"
+	include "natives.s"
 
 	section text,code
 	include "rtlib.s"

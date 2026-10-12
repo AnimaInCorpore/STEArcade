@@ -11,12 +11,14 @@ from z80x import Emitter, compute_liveness, ret_targets
 from discover import discover
 
 
-def compile_code(code, joins, cfg, hooks=(), emitter=Emitter, ijmp_flags=False, flags_at=(), precise_rets=True, **kw):
+def compile_code(code, joins, cfg, hooks=(), emitter=Emitter, ijmp_flags=False, flags_at=(), precise_rets=True, natives=None,
+                 **kw):
     """Emit the 68000 code of `code` (pc -> Ins).  joins: pcs entered from outside the straight flow (entries,
     hooks, jump table targets); return points and code addresses held as numbers are added here.  emitter / kw:
     the Emitter class and its extra arguments; ijmp_flags / flags_at: see compute_liveness.  precise_rets: the flag
     liveness follows calls into their callees and rets back to their return points (ret_targets).  -> the Emitter
-    (em.lines)."""
+    (em.lines).  natives: pc -> label of a hand-written 68000 routine that replaces the code from pc on (z80x
+    Emitter.natives)."""
     foreign = set(joins)
     for pc, ins in code.items():
         for op in ins.ops:
@@ -27,6 +29,7 @@ def compile_code(code, joins, cfg, hooks=(), emitter=Emitter, ijmp_flags=False, 
     live_in, live_out = compute_liveness(code, **live)
     em = emitter(code, live_in, live_out, cfg=cfg, **kw)
     em.hooks = set(hooks)
+    em.natives = dict(natives or {})
     # where the flags in the CCR are unknown: entries, return points, targets of computed
     # jumps (the jump tables, any code address the program holds as a number), hooks
     joins = set(foreign)

@@ -480,6 +480,7 @@ class Emitter:
         self.no_entry = set()   # pcs that must not be entered (merges): no table entry (z80_badpc)
         self.merged = set()     # of those, the ones whose label is not in the code (emitted as a stub)
         self.raw_af = set()     # push af / pop af pairs that keep the flags in the d6 format (pair_af)
+        self.natives = {}       # pc -> label: a hand-written 68000 routine replaces the code from pc on (natives)
 
     def regmap(self):
         """where the registers that are not plain data registers are kept (for the tests)"""
@@ -770,7 +771,7 @@ class Emitter:
     # entry (no_entry: the table generators put z80_badpc there), so a jump the analysis did not see stops loudly.
 
     def boundaries(self):
-        b = set(self.joins) | set(self.hooks)
+        b = set(self.joins) | set(self.hooks) | set(self.natives)
         for pc, ins in self.code.items():
             if ins.flow in ("jmp", "jcc", "call", "ccall", "rst") and ins.target is not None:
                 b.add(ins.target)
@@ -880,6 +881,13 @@ class Emitter:
                 self.e("move.w #%s,d7" % hx(pc))
                 self.e("jmp z80_hook")
                 self.lines.append("%s%04X_r:" % (self.cfg.prefix, pc))
+            if pc in self.natives:
+                # a native replacement: it leaves the registers, memory and the flags the code after it reads as the
+                # Z80 code from pc on would, and continues where that code would (the code stays, for its other entries)
+                self.e("jmp %s" % self.natives[pc])
+                if self.transfer is not None:
+                    self.transfer[pc] = (None, False, None, 0, ALLF)
+                return
         start = len(self.lines)
         self.core_at = None
         self.core_provided = 0
