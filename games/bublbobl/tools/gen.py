@@ -29,6 +29,8 @@ IY_MAIN = 0xBFF0                 # unused cells of the window area of the block:
 IY_SUB = 0xBFF8
 MAIN_HOOKS = {0x0158, 0x01ED}    # the handshake with the MCU (boot turns), the idle loop
 SUB_HOOKS = {0x000A}             # the sub CPU's idle loop
+# calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves)
+INLINE = 0 if os.environ.get("BB_NO_INLINE") else 16
 # hand-written 68000 routines that replace Z80 code (src/natives.s; BB_NO_NATIVES=1: all translated)
 MAIN_NATIVES = {} if os.environ.get("BB_NO_NATIVES") else {
     0x5C37: "z_state",           # the objects' state dispatch ($5C37-$5C75)
@@ -229,14 +231,17 @@ class BBEmitter(Emitter):
             self.emit_vmark(form)
             self.e('else')
             if pc in SPRITE_WRITER_BURSTS:
-                self.e('move sr,-(sp)')
+                keep = self.ccr_kept(pc)
+                if keep:
+                    self.e('move sr,-(sp)')
                 self.e('lea vmarks,a0')
                 for off in (12, 79):
                     self.e('move.w a2,d7')
                     self.e('add.w #%d,d7' % off)
                     self.e('lsr.w #7,d7')
                     self.e('st (a0,d7.w)')
-                self.e('move (sp)+,ccr')
+                if keep:
+                    self.e('move (sp)+,ccr')
             self.e('endc')
             return
         self.emit_vmark(form)
@@ -247,14 +252,24 @@ class BBEmitter(Emitter):
         elif form and form[0] == 'abs':
             self.e('st vmarks+%d' % (form[1] >> 7))
         elif form:
-            self.e('move sr,-(sp)')
+            keep = self.ccr_kept(self.cur.pc)
+            if keep:
+                self.e('move sr,-(sp)')
             self.e('move.w %s,d7' % {'hl': 'd3', 'de': 'd2', 'iy': 'a2'}[form[0]])
             if form[1]:
                 self.e('add.w #%d,d7' % form[1])
             self.e('lsr.w #7,d7')
             self.e('lea vmarks,a0')
             self.e('st (a0,d7.w)')
-            self.e('move (sp)+,ccr')
+            if keep:
+                self.e('move (sp)+,ccr')
+
+    def ccr_kept(self, pc):
+        """whether a mark after the instruction at pc must keep the CCR: the analysis (it sees the CCR kept) and
+        where the next instruction expects flags in it (ccr_in); elsewhere the mark's move / lsr may change it"""
+        if self.transfer is not None:
+            return True
+        return bool(self.ccr_in.get(pc + self.code[pc].length))
 
 
 def coverage():
@@ -280,10 +295,10 @@ def configs():
     hooks = [(0xFB40, 0xFB40, "bb_bank", None), (0xFA00, 0xFA00, "bb_snd_put", None)]   # (the sound latch: src/sound.s)
     main = z80x.Config(prefix="Z", table="g1_dispatch", token_sym="g1_ret", mode="signed", block=0x10000,
                        iyaddr=IY_MAIN, fshadow=IY_MAIN + 2, io_read_redirect={}, write_hooks=hooks,
-                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", **z80x.FAST)
+                       nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", inline_leaves=INLINE, **z80x.FAST)
     sub = z80x.Config(prefix="Y", table="g2_dispatch", token_sym="g2_ret", mode="long", block=0x10000,
                       ram_sym="g_ram", iyaddr=IY_SUB, fshadow=IY_SUB + 2, io_read_redirect={}, write_hooks=[],
-                      nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", **z80x.FAST_LONG)
+                      nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", inline_leaves=INLINE, **z80x.FAST_LONG)
     return main, sub
 
 

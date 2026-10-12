@@ -442,6 +442,18 @@ vbl:
 	clr.b	snd_busy
 .snd_done:
 	endc
+	ifd TICK60			; -D TICK60: the arcade's 59.19 rounds a second, six to five VBLs, a counter (at
+	addq.b	#1,ticks_pending	; most MAX_PENDING: a game further behind runs slower), also while the game's
+	addq.b	#1,tick_phase		; interrupts of the last VBL still run; the default: one round a VBL
+	cmp.b	#5,tick_phase
+	blo.s	.tick
+	clr.b	tick_phase
+	addq.b	#1,ticks_pending
+.tick:	cmp.b	#MAX_PENDING,ticks_pending
+	bls.s	.ticked
+	move.b	#MAX_PENDING,ticks_pending
+.ticked:
+	endc
 	tst.b	in_logic		; the game's interrupts of the last VBL still run (they are not masked
 	bne	vbl_late		; against the VBL): this one only arms the timers, the game runs slower
 	st	in_logic
@@ -514,6 +526,16 @@ vbl:
 
 	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
 	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
+	ifd TICK60
+	move.b	ticks_pending,d0	; the rounds due, at most two now
+	beq	vbl_render
+	cmp.b	#2,d0
+	bls.s	.due
+	moveq	#2,d0
+.due:	sub.b	d0,ticks_pending
+	move.b	d0,rounds_now
+.round:
+	endc
 	addq.l	#1,logic_rounds
 	ifd RNDTRACE
 	bsr	dbg_rndtrace		; (the random state and inputs at each round: RNDTRACE.BIN)
@@ -597,6 +619,10 @@ vbl:
 	ifd SIM
 	bsr	sim_frame_done
 	endc
+	ifd TICK60
+	subq.b	#1,rounds_now
+	bne	.round
+	endc
 
 vbl_render:
 	clr.b	in_logic
@@ -665,6 +691,8 @@ g1_ret:
 g2_ret:
 	move.l	g2_ret_to,-(sp)
 	rts
+
+MAX_PENDING = 2
 
 ; The top and bottom borders are removed (Timer A in the middle of the last line before the
 ; border, Timer B at the bottom border), as in the Galaga port: 277 lines.
@@ -1335,7 +1363,9 @@ dbg_snapshot:
 	lsl.w	#3,d0
 	lea	dbg_snaps,a0
 	add.w	d0,a0
-	move.w	frame_counter+2,(a0)+
+	move.w	frame_counter+2,d0	; (every VBL: also the late ones, which do not count frame_counter)
+	add.w	cnt_late,d0
+	move.w	d0,(a0)+
 	move.w	logic_rounds+2,(a0)+
 	move.w	dbg_done,(a0)+
 	move.w	dbg_shown,(a0)
@@ -1708,6 +1738,10 @@ display_screen_address:	ds.l	1		; the screen shown
 ready_screen:	ds.l	1		; a complete screen to be shown at the next VBL (0: none)
 last_screen_address:	ds.l	1		; the screen drawn last (complete: the renderers copy from it)
 ready_pal:	ds.w	16		; its colours
+ticks_pending:	ds.b	1		; the rounds due (TICK60)
+tick_phase:	ds.b	1
+rounds_now:	ds.b	1
+	even
 logic_rounds:	ds.l	1		; the game's interrupt rounds run
 render_from:	ds.l	1		; ... when the picture being drawn began
 frame_counter:	ds.l	1

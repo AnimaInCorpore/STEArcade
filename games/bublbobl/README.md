@@ -423,6 +423,9 @@ VBL schedule; game rounds per VBL / pictures a second) and `tools/bench.sh 1500`
 build with the same input script by VBL).  The game's state in a window differs between the two (boot timing), and
 between before and after (a faster renderer changes which pictures are drawn): compare within a column.
 
+(The Hatari columns count only the VBLs the game was not still busy in: too high where it overran, see "Speed, measured
+right (2026-10-12)".)
+
 | VBL window | Musashi before | Musashi after | Hatari before | Hatari after |
 |---|---|---|---|---|
 | 600–899 (coin, start, round 1 intro) | 0.63 / 4.7 | 0.66 / 5.5 | 0.60 / 3.2 | 0.62 / 4.0 |
@@ -536,16 +539,30 @@ the Z80 / 6801 reference) 4,000 frames without a difference; `mcu_test.py` still
 `engine/xprof.py bublbobl --frames 300 --skip 900` (the same game frames, inputs by game frame): the MCU 27k -> 3.9k
 cycles a game frame; with the other three natives the 300 game frames take **398 VBLs instead of 601**.
 
-Hatari (`ROUNDS=1 tools/bench.sh 3600`: the input script by game round, `-D ROUNDPLAY`, so both builds play the same
-game: `-D RNDTRACE` records the random state, inputs and credits at each round, identical over the 1,954 rounds
-compared), totals at the same round, before (`BB_NO_NATIVES=1`) -> after (all four natives):
+Hatari: see "Speed, measured right (2026-10-12)" below (the numbers first given here counted only the VBLs the game
+was not still busy in, and were about twice too high).
 
-| Rounds | VBLs | Pictures shown | Game rounds per VBL | Pictures a second |
-|---|---|---|---|---|
-| 0–1200 (boot, attract, coin, start) | 1549 -> 1560 | 621 -> 595 | 0.77 -> 0.77 | 20.0 -> 19.1 |
-| 1200–2700 (play) | 1767 -> 1554 | 475 -> 680 | 0.85 -> **0.97** | 13.4 -> **21.9** |
-| 0–2700 | 3316 -> 3114 | 1096 -> 1275 | 0.81 -> 0.87 | 16.5 -> 20.5 |
+## Speed, measured right (2026-10-12)
 
-Shorter spans differ by which pictures are drawn and when the renderer's map rebuilds (~3.6M cycles each) fall, so
-compare totals.
+`tools/bench.sh` counted VBLs with `frame_counter`, which a VBL that arrives while the game's interrupts of the last one
+still run (`vbl_late`, counted in `cnt_late`) does not advance.  A play round costs more than a VBL in Hatari, so about
+every other VBL was missing and the rates were about twice too high (all Hatari rates in this file before this section,
+and the release text of 0.3: "67-80% of the arcade's speed and 15-27 frames a second").  COUNTERS.BIN now counts every
+VBL.  `ROUNDS=1 tools/bench.sh 3600` (the same game in every build), rounds 1200-2700 (play):
+
+| Build | Game rounds per VBL | Of the arcade's speed | Pictures a second |
+|---|---|---|---|
+| translated only (`BB_NO_NATIVES=1 BB_NO_INLINE=1`, one round a VBL) | 0.455 | 38% | 7.2 |
+| natives, native MCU, leaf inlining, cheaper video RAM marks (one round a VBL, the default) | 0.532 | 45% | 12.2 |
+| the same with `-D TICK60` (59.19 rounds a second as the arcade: six to five VBLs) | 0.668 | 56% | 5.2 |
+
+Leaf inlining (`z80x` `Config.inline_leaves`, 16 here: a call of a short leaf function is emitted in place, no return
+address, no dispatch) and the video RAM marks without the CCR save where the next instruction expects no flags in it
+(`ccr_kept`): `engine/xprof.py bublbobl --frames 600 --skip 900`, the main CPU's translated code 92.5k -> 80.7k cycles
+a game frame, the 600 game frames 909 -> 775 VBLs.  `logic_test.py` 4,000 frames identical after each step.
+
+`-D TICK60`: a VBL adds one round due (every fifth two), at most `MAX_PENDING` (2) due, at most two run in a VBL; the
+late VBLs count too.  The game's logic is the limit: a play round costs 85-160k cycles on Musashi (~1.35 times that in
+Hatari) of the 160k a VBL has, so the extra rounds take the pictures' time.  It stays an option until a round is much
+cheaper.
 

@@ -1,7 +1,9 @@
 #!/bin/bash
 # Speed of Bubble Bobble in Hatari (the pinned F030Arcade build): a DEBUG + AUTOPLAY build (tools/profile.py's input
 # script by VBL: coin at 400, start at 440, then moving, jumping and blowing bubbles) runs [frames] VBLs in
-# run/bublbobl_bench and writes COUNTERS.BIN (every 300 VBLs: VBLs, game rounds, pictures completed, pictures shown) and
+# run/bublbobl_bench and writes COUNTERS.BIN (every 300 VBLs of frame_counter: all VBLs so far, the late ones too (before
+# 2026-10-12 only frame_counter, which the VBLs that arrive while the game still runs do not advance: rates about twice
+# too high), game rounds, pictures completed, pictures shown) and
 # BORDERS.BIN (engine/rt/borders.s: late border events, blit_go passes run in pieces).
 #
 #   games/bublbobl/tools/bench.sh [frames]          EXTRA="-D ..." extra build.py options; WAIT=300: seconds to wait at most

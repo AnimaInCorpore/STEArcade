@@ -154,8 +154,17 @@ lock-step test.  Bubble Bobble (`games/bublbobl/src/natives.s`, 2026-10-12): the
 116k + 16k native cycles a game frame in play, the game 18-40% more rounds a VBL there.  The same port replaces its MCU's
 VBL interrupt (`src/mcu_native.s`, 6801 firmware, not through `natives`: the runtime calls it instead of the
 translation): the bus cycles the firmware clocks through its ports become moves on the shared RAM, 27k -> 3.9k cycles
-a game frame; with the natives, in play in Hatari (the same game: inputs by game round) 0.85 -> 0.97 game rounds a VBL
-and 13.4 -> 21.9 pictures a second.
+a game frame; with the natives and leaf inlining, in play in Hatari (the same game: inputs by game round; every VBL
+counted) 0.455 -> 0.532 game rounds a VBL and 7.2 -> 12.2 pictures a second.
+
+### Leaf functions emitted in place (`Config.inline_leaves`)
+
+A call of a short leaf function (straight code and conditional rets up to a ret, no stack use, calls or jumps, no
+hooks or natives, in the fixed code) is emitted as the function's instructions, its rets as branches to the return
+point: no return address pushed, no dispatch at the ret (~70 cycles a call).  The callee's liveness and its CCR
+knowledge (the meet over its callers) hold at every call; only the final emission inlines, the analysis sees ordinary
+calls.  The return address the Z80 would leave below SP is not written (dead).  `ret_cands` leaves out the inlined
+calls' return points.  Off by default (0); Bubble Bobble uses 16: its main CPU 92.5k -> ~83.5k cycles a game frame.
 
 ### Tests and measurements of the translator
 

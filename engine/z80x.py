@@ -75,8 +75,9 @@ class Config:
                  block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
                  table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
-                 alt_af="a3", alt_regs="areg", iy_reg=None):
+                 alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0):
         self.prefix = prefix
+        self.inline_leaves = inline_leaves  # calls of leaf functions of up to this many instructions emitted in place
         self.alt_af = alt_af            # "a3" | "upper" (see the module docs)
         self.alt_regs = alt_regs        # "areg" | "upper"
         self.iy_reg = iy_reg            # None (the block) | "a0".."a2"
@@ -1842,7 +1843,7 @@ class Emitter:
         code = self.code
         rps = {}
         for pc, ins in code.items():
-            if ins.flow in ("call", "ccall") and ins.target in code:
+            if ins.flow in ("call", "ccall") and ins.target in code and not self.inline_body(ins.target):
                 rps.setdefault(ins.target, set()).add(pc + ins.length)
         cands = {}
         for tgt, points in rps.items():
@@ -1928,16 +1929,72 @@ class Emitter:
     def x_call(self, ins):
         ops = ins.ops
         nxt = ins.pc + ins.length
+        tgt = ops[0][1] if ops[0][0] == "addr" else ops[1][1]
+        body = self.inline_body(tgt) if self.transfer is None else None
         if ops[0][0] == "addr":
+            if body:
+                self.emit_inline(body, nxt)
+                return
             self.push_ret(nxt)
-            self.jmp_to(ops[0][1])
+            self.jmp_to(tgt)
             return
-        cc, tgt = ops[0][1], ops[1][1]
+        cc = ops[0][1]
         skip = self.new_label()
         self.branch(cc, skip, inv=True)
-        self.push_ret(nxt)
-        self.jmp_to(tgt)
+        if body:
+            self.emit_inline(body, nxt)
+        else:
+            self.push_ret(nxt)
+            self.jmp_to(tgt)
         self.lines.append(skip + ":")
+
+    # ---- leaf functions emitted in place (Config.inline_leaves) -------------------------------------
+    #
+    # A call of a short leaf function (straight code, conditional rets, a ret at its end: no stack use, no calls or
+    # jumps, no hooks or natives, in the fixed code) emits the function's instructions at the call, its rets as
+    # branches to the return point: no return address, no dispatch (a call and a ret cost ~70 cycles).  The return
+    # address the Z80 would leave below SP is not written (that stack word is dead).  The instructions are emitted with
+    # the callee's liveness (it holds for every caller) and its CCR knowledge (the meet over its callers, so it holds
+    # here); the final emission only: the analysis sees an ordinary call (the return point is a join either way).
+
+    def inline_body(self, t):
+        """the pcs of the function at t if its calls are emitted in place, else None"""
+        cache = self.__dict__.setdefault("_inline", {})
+        if t in cache:
+            return cache[t]
+        cache[t] = None
+        n = self.cfg.inline_leaves
+        natives = getattr(self, "natives", {})
+        if not n or t not in self.code or t >= 0x8000 or t in natives:
+            return None
+        pcs, pc = [], t
+        while len(pcs) < n:
+            ins = self.code.get(pc)
+            if ins is None or pc in self.hooks or pc in natives or "sp" in ins.text \
+                    or ins.mn in ("push", "pop", "halt", "ei", "di", "reti", "retn"):
+                return None
+            pcs.append(pc)
+            if ins.mn == "ret" and not ins.ops:
+                cache[t] = pcs
+                return pcs
+            if not (ins.flow == "seq" or (ins.mn == "ret" and ins.flow == "cret")):
+                return None
+            pc += ins.length
+        return None
+
+    def emit_inline(self, body, nxt):
+        cur, lo = self.cur, self.lo
+        cont = self.label_of(nxt)
+        for pc in body:
+            ins = self.code[pc]
+            if ins.mn == "ret":
+                if ins.ops:
+                    self.cur, self.lo = ins, self.live_out[pc]
+                    self.branch(ins.ops[0][1], cont)
+                continue
+            self.emit_ins(pc, with_label=False)
+        self.jmp_to(nxt)                    # (dropped when the return point follows)
+        self.cur, self.lo = cur, lo
 
     def x_ret(self, ins):
         ops = ins.ops
