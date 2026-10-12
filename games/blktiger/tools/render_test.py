@@ -78,8 +78,12 @@ class Renderer:
         self.call('vbl_video')
         assert self.sim.io[0x265]==x&15
         assert self.sim.io[0x20f]==112-(4 if x&15 else 0)
-        # The 32-pixel side margins of the 320-pixel window are black (pen 0).
-        assert not pixels[:,x-32:x].any() and not pixels[:,x+256:x+288].any(),'side margins not black'
+        # The window's words 0, 1 and 19, 20 (side bands) are always black (pen 0); words 2 and 18 in part, and whole
+        # sprites over them: tools/sprite_test.py.
+        f=x&15
+        band=np.hstack((pixels[:,x-32:x-f],pixels[:,x-f+272:x+288]))
+        if band.any() and not getattr(self,'no_band_check',False):
+            raise AssertionError(f'band words not black: {int(np.count_nonzero(band))} pixels, lines {sorted(set(np.nonzero(band)[0].tolist()))[:8]}')
         return pixels[:,x:x+256].copy(),used
 
 

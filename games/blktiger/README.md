@@ -15,6 +15,7 @@ python port.py mame blktiger 1500     # reference bitmap against MAME state
 python port.py cover blktiger 1       # optional additional bank-aware coverage
 games/blktiger/tools/perf_test.py     # Musashi: a tick's and a frame's cycles (profile, logic, frames)
 games/blktiger/tools/bench.sh         # Hatari: DEBUG + AUTOPLAY build, ticks and frames a second
+games/blktiger/tools/sprite_test.py   # edge sprites: the whole hardware window, side bands included
 ```
 
 Supply `assets/roms/blktiger.zip`. Preparation checks all 20 ROMs against the
@@ -62,7 +63,8 @@ Everything is drawn whole into hidden margins, nothing is clipped. Per frame
 * **The black side margins** (32 pixels each side of the 320-pixel window) are
   a mask per cell and ring, changed only where the window moved; the two word
   columns the fine scroll masks in part are copied whole by the Blitter (the
-  clean screen AND the visible bits) when the window moved.
+  clean screen AND the visible bits) before drawing when the window moved. Whole new sprites may spill
+  into the side bands; no mask is applied after drawing.
 * **Change detection**: the translated writers of the background RAM set
   `bg_dirty` (`gen.BG_WRITERS`, from coverage) and the block copies to the
   palette note their ranges before they run (`pal_note`, `gen.PAL_WRITERS`:
@@ -203,3 +205,75 @@ The logic in play: 80.7k -> 65.3k Musashi cycles a tick (-19%), the start screen
 (`tools/bench.sh`, DEBUG + AUTOPLAY, 6000 VBLs): 23.8 -> 26.3 frames and 54.0 -> 55.1 game ticks (92%) a second, 0 late
 border events.  (Like stedaimakaimura, which runs the arcade's 68000 code as it is and
 handles the few special accesses by their faulting PC: the common path pays nothing, the exceptions are enumerated.)
+
+## Whole sprites at borders (2026-10-11)
+
+Removed the final side-band masking pass. Background restoration still prepares its margin cells before
+sprites are drawn; `strip_track` records those cells for the next camera move without changing pixels.
+Whole sprites/front objects remain visible wherever they enter the 320-pixel hardware window. Sprite
+source rows already use the reordered mask-group method. Reference checks pass the scroll and flip/layout
+sweeps, including 32 combinations of edge sprites and all fine-scroll positions. The longest HOG pass is
+256 bus cycles; none share the bus.
+The rebuilt 4 MB STE Hatari debug run completed 2,500 VBLs without a crash file and with zero late
+border or palette events (two startup fallbacks).
+
+## Sprites clipped at the band words (2026-10-12)
+
+The game's edges lie at window word 2 (18) + the fine scroll, so they are group-aligned only at fine scroll 0. The
+group boundaries next to them, words 1|2 and 18|19, separate the always-black band words (0, 1 and 19, 20) from the
+rest. A sprite across one of them now draws only its inner word (`clip_sprite`, one word a line, as 1943's
+`clip_part`: right, the first word under END1; left, the second word with FXSR and source Y increment 0, the
+stream's END1/END3 registers swapped so END1 gets the second word's mask); its damage is that word column only. The
+band part of words 2 and 18 still shows whole sprites (no runtime edge mask). No sprite can lie wholly in band words:
+the arcade's own range (x -15..255) already culls those. The hot path adds the fine scroll to x and makes one
+unsigned compare instead of the two range compares (`.edge` does the culling and the clipping out of line).
+
+Before, a sprite's part in word 1 or 19 showed in the black band, and its rectangle's restore copied the clean
+screen's background there (`sprite_test.py --whole` on the old build shows the background in word 19). Musashi
+(`perf_test.py`, CPU + Blitter a frame drawn): play 1000-1600 164,658 -> 164,586 (-0.04%), with `PERF_EVERY=3`
+269,392 -> 269,251, attract 400-1200 76,011 -> 76,054 (+0.06%); logic unchanged (37.4k). Hatari (`bench.sh`, 6000
+VBLs): 26.5 -> 26.8 frames and 55.4 -> 55.6 ticks a second, 0 late border or palette events (two startup fallbacks).
+Tests: `sprite_test.py` (4096 edge sprites in 256 frames, 1800 clipped, 172 across 64 KB, two sprites with holes,
+all fine scrolls and shifts, both orientations; fails on the old build), `render_test.py --frames 3 --step 375
+--scroll-sweep --flip-layout-sweep --sprite-edges`, `logic_test.py 1600`, `logic_test.py 4000 --walk`,
+`reference_test.py 700`, `sound_test.py 6000`.
+
+### The side bands black in every frame (2026-10-12)
+
+The four band faults the clipping work found are fixed; all lay in what the earlier removal of the after-drawing
+masking pass left behind, before any drawing:
+
+1. A window step left background in band words 0, 1, 19, 20: cells entering them were never blacked.
+   `strip_enter` (only when the window's word or first row moved since the ring's last frame) blacks those of the
+   four columns' cells not wholly black in that ring (`applied`), 16 lines a Blitter pass, no damage list.
+2. The rows: the lines of background in the left band (flipped, fine scroll 13) were cells of rows that had left
+   the window with their old mask, or entered it unblacked. `strip_unmask` now restores a listed cell whose row left
+   the window while it keeps black bits (any column), `strip_enter` covers rows entering.
+3. `render_test.py --consecutive ... --walk` at frame 1450 (a renderer bug): `touch_cells` cleared a cell's
+   `applied` when a sprite or a restore changed only some of its lines; the rest kept the word-18 mask, so after the
+   window's step `strip_unmask` skipped the cell and 2-5 black columns stayed in the picture (x 240-255, word 17).
+   `applied` now stays what the cell may still hold.
+4. A rectangle's restore over words 0-2 or 18-20 copied the clean screen without the band. Such rectangles are
+   flagged where they are made (the edge sprites' `.edge` path, text runs at the picture's sides; every rectangle
+   after a window step: `rect_all`); `ring_rects`, now before the cell restores, blacks their band bits right after
+   the copy (`rect_band`: zeroes under end masks, 8 or 16 lines a pass), or, for one reaching out of the window's
+   rows, lists its band cells. The front pass keeps front pens out of the band (`front_band_pass`, only after an
+   edge sprite).
+
+The normal sprite path is unchanged in cost (one compare: x 16-240 from window word 2). Musashi (`perf_test.py`,
+CPU + Blitter a frame drawn), the clipped build above -> now (the committed version with its after-drawing pass):
+play 1000-1600 164,586 -> 168,637 (+2.5%; 170,080), `PERF_EVERY=3` 269,251 -> 278,833 (+3.6%; 279,924), attract
+400-1200 76,054 -> 76,222 (+0.2%; 78,809), 1600-3000 169,779 -> 172,531 (+1.6%; 175,348); logic unchanged. The
+cost is in scrolling frames: about 2.7 text rectangles a frame over word 2 or 18 (`rect_band`), the cells blacked at
+window steps (about 3 a frame) and their checks. Hatari (`bench.sh`, 6000 VBLs): 26.8 -> 26.2 frames and 55.6 ->
+55.0 ticks a second, 0 late border or palette events (two startup fallbacks). The longest HOG pass stays at 256 bus
+cycles.
+
+Tests: `sprite_test.py` now checks every band pixel, with the background and text on, two restoring frames without
+sprites after each, window steps every frame, rows jumping, and a 400-frame random walk (3000 also passed): 4096
+edge sprites in 512 frames plus the walk, exact; the build before this fix fails 194 frames (94 of the 512, 100 of
+the walk). `render_test.py` checks words 0, 1, 19, 20 black in all its frames (the old build fails the walk at once);
+`render_test.py --consecutive --first 1100 --step 25 --frames 20 --walk` (20 matched), `--consecutive --first 1600
+--step 50 --frames 28 --walk` (28), `--consecutive --first 700 --step 50 --frames 12` (12), `--frames 3 --step 375
+--scroll-sweep --flip-layout-sweep --sprite-edges` (253), `logic_test.py 1600`, `logic_test.py 4000 --walk`,
+`reference_test.py 700`, `sound_test.py 6000`.

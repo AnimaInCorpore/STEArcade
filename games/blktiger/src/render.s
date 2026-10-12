@@ -2,8 +2,9 @@
 ; The camera moves the Shifter window.  A clean screen holds the background of
 ; the visible window (and its twins 16 cells away, ready for the next page);
 ; each of the two display rings restores only the cells on its damage list.
-; Whole objects draw into hidden margins; the black side margins are masks
-; kept per cell.
+; The black side margins are masks restored before new objects, with camera state kept per cell.  A sprite
+; across the always-black band words (window words 0, 1 | 2 and 18 | 19, 20) draws only its inner word
+; (clip_sprite); the game's own edge (word 2 or 18 + the fine scroll) is not group-aligned: whole there.
 STRIDE = 384
 RING_LINES = 544
 TEXT_RUNS = 8                    ; runs a text row (at most 7: four blanks split a run)
@@ -153,6 +154,15 @@ render_frame:
     move.w d0,d2
     and.w #15,d2
     move.b d2,fine_scroll
+    move.w d2,fine_word
+    sub.w #16,d2
+    move.w d2,fine_m16
+    move.w d0,d2
+    and.w #$f0,d2
+    add.w #64,d2
+    move.w d2,sprite_x0          ; a sprite's x + the fine scroll + this: its buffer x
+    add.w #16,d2
+    move.w d2,sprite_x16
     lsr.w #4,d0
     addq.w #2,d0
     move.w d0,strip_w0           ; the first word of the display window
@@ -204,7 +214,7 @@ render_frame:
     bsr sprite_pass
     bsr front_pass
     bsr character_pass
-    bsr strip_mask
+    bsr strip_track
     moveq #0,d0
     move.w physical_y,d0
     add.w #16,d0
@@ -937,6 +947,7 @@ ring_restore:
     move.w d0,$ffff8a2c.w
     move.w #$0203,$ffff8a3a.w
     clr.b $ffff8a3d.w
+    bsr ring_rects               ; (first: a rectangle over a band cell lists the cell, restored with its mask below)
     move.l cur_count,a0
     move.w (a0),d7
     ifd DEBUG
@@ -946,7 +957,7 @@ ring_restore:
     endc
     clr.w (a0)
     subq.w #1,d7
-    bmi .rects
+    bmi .done
     move.w #STRIDE-6,$ffff8a22.w
     move.w #STRIDE-6,$ffff8a30.w
     move.w #4,$ffff8a36.w
@@ -1014,7 +1025,7 @@ ring_restore:
     move.b #$c0,$ffff8a3c.w
     move.w #$0203,$ffff8a3a.w
     dbf d7,.cell
-    bra .rects
+    rts
 .black:
     move.w #$0000,$ffff8a3a.w    ; zeroes
     add.w d6,d6
@@ -1026,7 +1037,7 @@ ring_restore:
     move.b #$c0,$ffff8a3c.w
     move.w #$0203,$ffff8a3a.w
     dbf d7,.cell
-    bra .rects
+    rts
 .plain:
     add.w d6,d6
     clr.w (a5,d6.w)
@@ -1042,13 +1053,28 @@ ring_restore:
     move.w #8,$ffff8a38.w
     move.b #$c0,$ffff8a3c.w
     dbf d7,.cell
-.rects:
+.done:
+    rts
+
+; ring_rects: the rectangles (sprites, text) from the clean screen.  One flagged (bit 15: it may cover window words
+; 0-2 or 18-20; every rectangle after the window's word moved) lists its cells in those words (rect_band): the cell
+; restore puts their mask back.
+ring_rects:
     move.l cur_rect_count,a0
     move.w (a0),d7
     clr.w (a0)
     subq.w #1,d7
     bmi .done
     move.l cur_rect,a3
+    tst.b rect_all
+    beq.s .flagged
+    move.l a3,a0                 ; (the window's word moved: all flagged)
+    move.w d7,d0
+.all:
+    or.w #$8000,6(a0)
+    addq.l #8,a0
+    dbf d0,.all
+.flagged:
     move.l clean_base,a4
     move.l work_base,a5
     lea bd_lines,a6              ; (engine/rt/borders.s: the lines a piece by the words a line)
@@ -1057,6 +1083,8 @@ ring_restore:
     move.w (a3)+,d6              ; its first cell
     move.w (a3)+,d3              ; its shape
     move.w d3,-(sp)
+    bmi .flag
+.restore:
     moveq #8,d2                  ; the lines
     btst #1,d3
     beq.s .lines
@@ -1102,26 +1130,123 @@ ring_restore:
     tst.w d4
     bne.s .chunk
     move.w (sp)+,d3
+    bmi .band
+.touch:
     bsr touch_cells
     dbf d7,.rect
 .done:
     rts
+.flag:
+    and.w #$7fff,d3
+    bra .restore
+.band:
+    and.w #$7fff,d3
+    bsr rect_band
+    bra .touch
+
+; rect_band: the rectangle just restored (-8(a3): its offset; d6, d3: its first cell, its shape) in window words 0-2
+; and 18-20: its lines there blacked where the side margin is (zeroes under the end masks: the column's black bits;
+; 8 lines a pass when part of the word stays, 16 when all is black).  The Blitter is left as ring_rects has it.
+; A rectangle reaching out of the window's rows lists its cells in those words instead (ring_restore: masked in the
+; window, plain out of it).  Uses d0-d2/d4/d5/a0/a1.
+rect_band:
+    lea cell_row,a0
+    moveq #0,d0
+    move.b (a0,d6.w),d0
+    sub.w win_r0,d0
+    bmi .cells
+    moveq #1,d1
+    and.w d3,d1
+    add.w d1,d0
+    cmp.w #WIN_ROWS,d0
+    bhs .cells
+    lea cell_col,a0
+    moveq #0,d4
+    move.b (a0,d6.w),d4
+    sub.w strip_w0,d4            ; the window word of its first column
+    move.w d3,d5
+    lsr.w #8,d5                  ; its columns - 1
+    move.l -8(a3),d0
+    add.l a5,d0                  ; (work_base) its first column's first word
+    lea strip_mask_tab,a1
+    move.w #$0000,$ffff8a3a.w    ; zeroes
+    move.w #4,$ffff8a36.w
+    move.w #STRIDE-6,$ffff8a30.w
+.col:
+    cmp.w #21,d4
+    bhs.s .next                  ; (outside the window)
+    move.w d4,d1
+    add.w d1,d1
+    move.w (a1,d1.w),d1          ; the black bits
+    beq.s .next
+    move.w d1,$ffff8a28.w
+    move.w d1,$ffff8a2a.w
+    move.w d1,$ffff8a2c.w
+    move.l d0,$ffff8a32.w
+    moveq #8,d2
+    btst #1,d3
+    beq.s .pass
+    addq.w #1,d1
+    bne.s .two
+    moveq #16,d2                 ; (all black: writes only)
+    bra.s .pass
+.two:
+    move.w #8,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+.pass:
+    move.w d2,$ffff8a38.w
+    move.b #$c0,$ffff8a3c.w
+.next:
+    addq.l #8,d0
+    addq.w #1,d4
+    dbf d5,.col
+    moveq #-1,d0
+    move.w d0,$ffff8a28.w
+    move.w d0,$ffff8a2a.w
+    move.w d0,$ffff8a2c.w
+    move.w #$0203,$ffff8a3a.w
+    rts
+.cells:
+    movem.l d3/d6,-(sp)
+    lea cell_col,a0
+    moveq #0,d4
+    move.b (a0,d6.w),d4
+    sub.w strip_w0,d4
+    move.w d3,d5
+    lsr.w #8,d5
+.cell:
+    cmp.w #21,d4
+    bhs.s .next_cell
+    cmp.w #3,d4
+    blo.s .mark
+    cmp.w #18,d4
+    blo.s .next_cell
+.mark:
+    bsr mark_ring
+    btst #0,d3
+    beq.s .next_cell
+    add.w #COLS,d6
+    bsr mark_ring
+    sub.w #COLS,d6
+.next_cell:
+    addq.w #1,d6
+    addq.w #1,d4
+    dbf d5,.cell
+    movem.l (sp)+,d3/d6
+    rts
 
 ; touch_cells: cell d6 and the shape d3 (bits 8-12: word columns - 1, bit 0: a second cell row) change their pixels
-; this frame (restored, or drawn over): restored_tag (the text pass redraws the runs there), and the side-margin
-; mask is applied again (applied = 0).  Uses d0-d2/a0/a1.
+; this frame (restored, or drawn over): restored_tag (the text pass redraws the runs there).  Their side-margin mask
+; (applied) stays: a part of the cell may still have its black bits (strip_unmask restores it when they must go; a
+; restore over a band cell lists the cell, ring_rects).  Uses d0-d2/a0.
 touch_cells:
     lea restored_tag,a0
-    move.l cur_applied,a1
     move.b frame_tag,d2
     move.w d3,d1
     lsr.w #8,d1
     move.w d6,d0
 .col:
     move.b d2,(a0,d0.w)
-    add.w d0,d0
-    clr.w (a1,d0.w)
-    lsr.w #1,d0
     addq.w #1,d0
     dbf d1,.col
     btst #0,d3
@@ -1132,9 +1257,6 @@ touch_cells:
     add.w #COLS,d0
 .col2:
     move.b d2,(a0,d0.w)
-    add.w d0,d0
-    clr.w (a1,d0.w)
-    lsr.w #1,d0
     addq.w #1,d0
     dbf d1,.col2
 .done:
@@ -1182,10 +1304,23 @@ strip_unmask:
     lea strip_state,a0
     add.w ring_index,a0
     move.l (a0),d1               ; the last frame's: its window word and fine scroll, its first row
+    clr.b rect_all
     cmp.l d1,d0
     beq .done
     move.l d0,(a0)
     st strip_changed
+    move.l d0,d2
+    eor.l d1,d2
+    and.l #$ff00ffff,d2
+    beq.s .same_words            ; (the fine scroll only: strip_columns)
+    cmp.l #$01000000,d2
+    blo.s .same_word
+    st rect_all                  ; (the word: the rectangles may lie in other columns now)
+.same_word:
+    movem.l d0-d1,-(sp)
+    bsr strip_enter
+    movem.l (sp)+,d0-d1
+.same_words:
     move.l cur_strip_count,a3
     move.w (a3),d7
     beq .done
@@ -1220,23 +1355,31 @@ strip_unmask:
     cmp.w #21,d0
     bhs.s .now
     cmp.w #2,d0
-    beq .skip                    ; (the part-masked columns: strip_columns)
+    beq .rows_out                ; (the part-masked columns: strip_columns, but for the rows out of the window)
     cmp.w #18,d0
-    beq .skip
+    beq .rows_out
     add.w d0,d0
     move.w (a6,d0.w),d4
 .now:
     not.w d4
     and.w d4,d3                  ; black then where it may not be now: the column's cells
     beq.s .rows_out
+    lea cell_row,a5
     moveq #WIN_ROWS-1,d5
 .cell:
     move.w (a3)+,d6
     move.w d6,d0
     add.w d0,d0
     move.w (a4,d0.w),d0
-    and.w d4,d0                  ; (a touched cell: no black bits)
-    beq.s .next
+    beq.s .next                  ; (no black bits)
+    and.w d4,d0
+    bne.s .mark
+    moveq #0,d0                  ; (they stay: but not out of the window, where it may be any column next time)
+    move.b (a5,d6.w),d0
+    sub.w win_r0,d0
+    cmp.w #WIN_ROWS,d0
+    blo.s .next
+.mark:
     ifd DEBUG
     addq.l #1,dbg_strip_cells
     endc
@@ -1272,6 +1415,70 @@ strip_unmask:
     lea 2*WIN_ROWS(a3),a3
     dbf d7,.column
 .done:
+    rts
+
+; strip_enter: the window's word or first row moved: the cells of its words 0, 1, 19 and 20 not wholly black in
+; this ring (applied: the mask they have) are blacked now (the Blitter: zeroes, 16 lines of a word column a pass, 256
+; bus cycles; the column's next cell below needs no new address), and every rectangle of the ring is checked for the
+; band columns (rect_all).  Uses d0-d6/a0-a2/a4-a6.
+strip_enter:
+    move.w #2,$ffff8a2e.w
+    move.w #STRIDE-6,$ffff8a30.w
+    moveq #-1,d0
+    move.w d0,$ffff8a28.w
+    move.w d0,$ffff8a2a.w
+    move.w d0,$ffff8a2c.w
+    move.w #$0000,$ffff8a3a.w    ; zeroes
+    clr.b $ffff8a3d.w
+    move.w #4,$ffff8a36.w
+    move.l cur_applied,a4
+    lea cell_offsets,a5
+    move.l work_base,d3
+    lea $ffff8a38.w,a6
+    move.w win_r0,d2
+    add.w d2,d2
+    lea row_cells,a0
+    move.w (a0,d2.w),d2
+    add.w strip_w0,d2            ; window word 0, its first row
+    lea strip_black,a2
+    moveq #3,d5
+.column:
+    move.w d2,d6
+    add.w (a2)+,d6
+    move.w d6,d0
+    add.w d0,d0
+    lea (a4,d0.w),a1             ; (its applied word)
+    moveq #WIN_ROWS-1,d4
+    moveq #0,d1                  ; (the destination address follows: the cell above was blacked)
+.cell:
+    cmp.w #-1,(a1)
+    beq.s .black
+    move.w #-1,(a1)
+    tst.w d1
+    bne.s .fill
+    move.w d6,d0
+    lsl.w #2,d0
+    move.l (a5,d0.w),d0
+    add.l d3,d0
+    move.l d0,$ffff8a32.w
+    moveq #1,d1
+.fill:
+    ifd DEBUG
+    addq.l #1,dbg_strip_cells
+    endc
+    move.w #16,(a6)
+    move.b #$c0,$ffff8a3c.w
+    lea 2*COLS(a1),a1
+    add.w #COLS,d6
+    dbf d4,.cell
+    dbf d5,.column
+    rts
+.black:
+    moveq #0,d1
+    lea 2*COLS(a1),a1
+    add.w #COLS,d6
+    dbf d4,.cell
+    dbf d5,.column
     rts
 
 ; The two word columns the fine scroll masks in part (words 2 and 18 of the window), when the window moved: the
@@ -1342,26 +1549,16 @@ strip_columns:
     beq .column
 .done:
     rts
-; After all drawing: black the side margins where this ring's cells lack the mask.
-strip_mask:
+ ; Track background margin cells for the next camera move. Never mask after
+ ; drawing: whole sprites/front tiles can cross into the visible side bands.
+strip_track:
     move.l cur_strip,a3
-    move.l cur_applied,a4
-    lea cell_offsets,a5
     moveq #0,d7
     lea strip_words,a2
     moveq #5,d5
 .column:
-    move.w (a2)+,d0
-    add.w d0,d0
-    lea strip_mask_tab,a0
-    move.w (a0,d0.w),d3
-    beq .list                    ; (a part-masked column with the fine scroll 0: nothing to black, listed still)
-    move.w d3,d1
-    swap d1
-    move.w d3,d1
-    not.l d1
-    move.w strip_w0,d4
-    add.w -2(a2),d4
+    move.w (a2)+,d4
+    add.w strip_w0,d4
     move.w win_r0,d2
     add.w d2,d2
     lea row_cells,a0
@@ -1372,41 +1569,8 @@ strip_mask:
     add.w d4,d6
     move.w d6,(a3)+
     addq.w #1,d7
-    add.w d6,d6
-    cmp.w (a4,d6.w),d3
-    beq .masked
-    move.w d3,(a4,d6.w)
-    ifd DEBUG
-    addq.l #1,dbg_ands
-    endc
-    add.w d6,d6
-    move.l (a5,d6.w),d0
-    move.l work_base,a1
-    add.l d0,a1
-    rept 16
-    and.l d1,REPTN*STRIDE(a1)
-    and.l d1,REPTN*STRIDE+4(a1)
-    endr
-.masked:
     dbf d2,.row
     dbf d5,.column
-    bra.s .listed
-.list:
-    move.w strip_w0,d4
-    add.w -2(a2),d4
-    move.w win_r0,d2
-    add.w d2,d2
-    lea row_cells,a0
-    add.w d2,a0
-    moveq #WIN_ROWS-1,d2
-.list_row:
-    move.w (a0)+,d6
-    add.w d4,d6
-    move.w d6,(a3)+
-    addq.w #1,d7
-    dbf d2,.list_row
-    dbf d5,.column
-.listed:
     move.l cur_strip_count,a0
     move.w d7,(a0)
     rts
@@ -1701,6 +1865,66 @@ bake_pixels:
     endr
     rts
 
+; front_band_pass: front_pass when an edge sprite listed front cells (front_band): those in window words 2 and 18
+; get the front pens only in their visible part (not the band's: the whole sprite shows there).
+front_band_pass:
+.cell:
+    move.w (a3)+,d6
+    lea front_flag,a0
+    clr.b (a0,d6.w)
+    moveq #-1,d2                 ; the visible bits
+    lea cell_col,a0
+    moveq #0,d0
+    move.b (a0,d6.w),d0
+    sub.w strip_w0,d0
+    cmp.w #2,d0
+    beq.s .band
+    cmp.w #18,d0
+    bne.s .visible
+.band:
+    add.w d0,d0
+    lea strip_mask_tab,a0
+    move.w (a0,d0.w),d2
+    not.w d2
+.visible:
+    moveq #0,d0
+    move.w d6,d0
+    lsl.l #5,d0
+    lea cell_front,a2
+    add.l d0,a2
+    move.w d6,d0
+    lsl.w #2,d0
+    lea cell_offsets,a0
+    move.l (a0,d0.w),d0
+    move.l clean_base,a0
+    add.l d0,a0
+    move.l work_base,a1
+    add.l d0,a1
+    moveq #15,d5
+.row:
+    move.w (a2)+,d1
+    and.w d2,d1
+    beq.s .empty
+    move.w d1,d4
+    not.w d4
+    rept 4
+    move.w (a0)+,d3
+    and.w d1,d3
+    and.w d4,(a1)
+    or.w d3,(a1)+
+    endr
+    lea STRIDE-8(a0),a0
+    lea STRIDE-8(a1),a1
+    dbf d5,.row
+    bra.s .next
+.empty:
+    lea STRIDE(a0),a0
+    lea STRIDE(a1),a1
+    dbf d5,.row
+.next:
+    dbf d7,.cell
+    rts
+
 ; Front pens over the sprites: only the cells sprites touched, from the clean screen.
 front_pass:
     move.w front_count,d7
@@ -1710,9 +1934,13 @@ front_pass:
     add.l d0,dbg_fronts
     endc
     clr.w front_count
+    move.b front_band,d0
+    clr.b front_band
     subq.w #1,d7
     bmi .done
     lea front_list,a3
+    tst.b d0
+    bne front_band_pass
 .cell:
     move.w (a3)+,d6
     lea front_flag,a0
@@ -1878,16 +2106,14 @@ sprite_pass:
     add.w #240,d3
     eor.b #8,d1
 .normal_position:
-    cmp.w #-15,d2
-    blt .skip
-    cmp.w #256,d2
-    bge .skip
+    add.w fine_m16,d2            ; x from the window's word 3 (the game's edge: word 2 + the fine scroll)
+    cmp.w #224,d2
+    bhi .edge                    ; (on window word 2 or 18, across 1|2 or 18|19, or off the picture)
     cmp.w #240,d3
     bge .skip
     cmp.w #1,d3
     blt .skip
-    add.w physical_x,d2
-    add.w #64,d2
+    add.w sprite_x16,d2
     move.w d2,object_x
     add.w physical_y,d3
     move.w d3,object_y
@@ -1920,6 +2146,133 @@ sprite_pass:
     subq.l #4,a3
     dbf d7,.next
 .done:
+    rts
+; A sprite off the window's words 3-17 at the left or the right: off the picture (culled); across the 16-pixel
+; group boundary of the always-black band words 0, 1 | 2 or 18 | 19, 20: only its inner word is drawn (the game's
+; own edge, word 2 or 18 + the fine scroll, is not group-aligned: the band part of words 2 and 18 shows it whole);
+; else whole on word 2 or 18.  Its rectangle is flagged: its restore leaves the band parts black (ring_rects).
+.edge:
+    add.w #16,d2                 ; x from the window's word 2
+    move.w d2,d0
+    sub.w fine_word,d0           ; x
+    tst.w d2
+    bmi.s .left
+    cmp.w #16,d2
+    blo.s .whole                 ; (starting on word 2)
+    cmp.w #256,d0
+    bge .skip
+    cmp.w #256,d2
+    bls.s .whole                 ; (across 17|18, or on 18)
+    clr.b clip_mode              ; (across 18|19)
+    bra.s .clip
+.whole:
+    move.b #1,clip_mode
+    bra.s .clip
+.left:
+    cmp.w #-15,d0
+    blt .skip
+    st clip_mode
+.clip:
+    cmp.w #240,d3
+    bge .skip
+    cmp.w #1,d3
+    blt .skip
+    add.w sprite_x0,d2
+    move.w d2,object_x
+    add.w physical_y,d3
+    move.w d3,object_y
+    moveq #0,d2
+    move.b (a3),d2
+    move.w d1,d3
+    and.w #$e0,d3
+    lsl.w #3,d3
+    or.w d3,d2
+    btst #3,d1
+    beq.s .clip_unflipped
+    add.w #2048,d2
+.clip_unflipped:
+    lea sprite_blank,a0
+    tst.b (a0,d2.w)
+    bne .skip
+    move.w d2,object_code
+    and.w #7,d1
+    move.w d1,object_colour
+    movem.l d7/a3,-(sp)
+    ifd DEBUG
+    addq.l #1,dbg_sprites
+    endc
+    bsr sprite_get
+    move.l a1,object_source
+    bsr clip_sprite
+    movem.l (sp)+,d7/a3
+    bra .skip
+
+; clip_sprite: the sprite at object_x, object_y on window word 2 or 18 (clip_mode 1: whole), or (shifted) across a
+; band boundary: its inner word only, one word a line (xcount 1).  Right (clip_mode 0): the first word, skew s,
+; END1 = the first word's mask (the stream's high word).  Left (-1): the second word (+8), FXSR with source Y
+; increment 0 (each line's word read again as the next one's first), END1 = the second word's mask (the stream's low
+; word: its END1/END3 registers swapped).  The damage: the inner word column only.  Its rectangle is flagged.
+clip_sprite:
+    st front_band                ; (its front cells may lie in window word 2 or 18: front_band_pass)
+    tst.b clip_mode
+    bgt .whole
+    move.w object_x,d0
+    move.w d0,-(sp)
+    and.w #$fff0,d0
+    tst.b clip_mode
+    beq.s .mark
+    add.w #16,d0
+.mark:
+    move.w d0,object_x           ; (on a word: one column)
+    bsr mark_sprite
+    move.w (sp)+,object_x
+    moveq #0,d0
+    move.w object_y,d0
+    mulu #STRIDE,d0
+    moveq #0,d1
+    move.w object_x,d1
+    and.w #$fff0,d1
+    lsr.w #1,d1
+    add.l d1,d0
+    add.l work_base,d0
+    moveq #0,d6
+    move.w object_x,d6
+    and.w #15,d6
+    move.w d6,d1
+    mulu #BT_MASK_STRIDE,d1
+    lea bt_sprite_masks,a1
+    add.l d1,a1
+    move.w #2,$ffff8a30.w
+    move.w #1,$ffff8a36.w
+    move.l object_source,BLT_SRC_ADDR.w
+    tst.b clip_mode
+    bne.s .left
+    move.l d0,BLT_DST_ADDR.w
+    or.w #$c000,d6
+    lea $ffff8a28.w,a2
+    lea $ffff8a2c.w,a3
+    bsr sprite_stream
+    bra.s band_flag
+.left:
+    addq.l #8,d0
+    move.l d0,BLT_DST_ADDR.w
+    or.w #$c080,d6
+    clr.w $ffff8a22.w
+    lea $ffff8a2c.w,a2           ; (END1 <- the low word)
+    lea $ffff8a28.w,a3
+    bsr sprite_stream
+    move.w #2,$ffff8a22.w
+    bra.s band_flag
+.whole:
+    bsr mark_sprite
+    bsr sprite_blit
+; band_flag: the rectangle listed last (bit 15 of its shape) may cover the band columns: ring_rects checks its cells.
+band_flag:
+    move.l cur_rect_count,a0
+    move.w (a0),d1
+    lsl.w #3,d1
+    move.l cur_rect,a1
+    or.w #$8000,-2(a1,d1.w)
     rts
 
 sprite_get:                      ; (sprite_pass keeps nothing in the registers: none saved)
@@ -2058,6 +2411,10 @@ sprite_blit:
     move.w #2,$ffff8a30.w
     move.w #1,$ffff8a36.w
 .stream:
+    lea $ffff8a28.w,a2
+    lea $ffff8a2c.w,a3
+; sprite_stream: the sprite's stream of row groups (bt_sprite_draw), the Blitter set but its END1 (a2), END3 (a3).
+sprite_stream:
     moveq #0,d0
     move.w object_code,d0
     btst #6,g_control
@@ -2067,8 +2424,6 @@ sprite_blit:
     lsl.l #2,d0
     lea bt_sprite_streams,a0
     move.l (a0,d0.l),a0
-    lea $ffff8a28.w,a2
-    lea $ffff8a2c.w,a3
     lea $ffff8a32.w,a4
     lea $ffff8a38.w,a5
     lea $ffff8a3c.w,a6
@@ -2391,6 +2746,19 @@ character_pass:
 .one_row:
     tst.b text_keep
     bne.s .check
+    move.w object_x,d1           ; (its columns on window word 2 or 18, or beyond: flagged, see band_flag)
+    sub.w sprite_x0,d1
+    cmp.w #16,d1
+    blo.s .band
+    lsr.w #4,d1
+    move.w d3,d0
+    lsr.w #8,d0
+    add.w d0,d1
+    cmp.w #16,d1
+    blo.s .inner
+.band:
+    or.w #$8000,d3
+.inner:
     moveq #0,d0                  ; drawing whole: recorded for the ring (text_prepare restores it when the text is redone)
     move.w object_y,d0
     mulu #STRIDE,d0
@@ -2683,6 +3051,8 @@ row_cells:
     endr
 strip_words:
     dc.w 0,1,2,18,19,20
+strip_black:
+    dc.w 0,1,19,20
 strip_mask_tab:                  ; per word of the display window (2 and 18 set each frame)
     dc.w -1,-1,0
     dcb.w 15,0
@@ -2718,6 +3088,14 @@ ring_index: ds.w 1
 strip_state: ds.l 2              ; per ring: the window word, the fine scroll and the first row of its last frame
 frame_ready: ds.b 1
 fine_scroll: ds.b 1
+clip_mode: ds.b 1
+front_band: ds.b 1
+rect_all: ds.b 1
+    even
+fine_word: ds.w 1
+sprite_x0: ds.w 1
+fine_m16: ds.w 1
+sprite_x16: ds.w 1
 view_flip: ds.b 1
 map_dirty: ds.b 1
 epoch_changed: ds.b 1
