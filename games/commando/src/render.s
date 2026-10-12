@@ -917,7 +917,8 @@ destination:
  add.l d0,d2
  rts
 
-; Draw complete sprite parts in original priority order, after explicit C806 latch.  The Blitter registers no sprite
+; Draw sprite parts in original priority order, after explicit C806 latch: whole (the top and bottom in guard lines),
+; except across the window's left and right edges (sprite_edge: the inner word only).  The Blitter registers no sprite
 ; routine changes are set once.
 draw_sprites:
  move.w #2,BLT_SRC_XINC.w
@@ -926,6 +927,9 @@ draw_sprites:
  move.w #$ffff,BLT_END2.w
  move.w #$0203,BLT_HOP_OP.w
  lea sprite_buffer+$180,a0
+ bra.s .next
+.to_edge:
+ bra .edge
 .next:
  subq.l #4,a0
  cmp.l #sprite_buffer,a0
@@ -935,8 +939,9 @@ draw_sprites:
  moveq #0,d4
  move.b 2(a0),d4			; x + 16: 0 (the hidden sprites) and 240 .. 255 are outside
  beq.s .next
- cmp.b #240,d4
- bhs.s .next
+ sub.b #16,d4			; x (a byte): 0 .. 208 here; across an edge and 224 .. 239 (hidden) to .edge
+ cmp.b #224-16,d4
+ bhi.s .to_edge			; (the same cycles as the old cull test: zero cost on the hot path)
  moveq #0,d1
  move.b 1(a0),d1			; attribute: bank 6-7 (3 = none), colour 4-5, flips 2-3, x bit 8 in bit 0
  cmp.b #$c0,d1
@@ -953,7 +958,6 @@ draw_sprites:
  ble.s .next
  cmp.w #256,d3
  bge.s .next
- sub.w #16,d4			; x
  move.w d1,d2			; the shape: bank, code, flips
  and.w #$c0,d2
  moveq #0,d0
@@ -1062,6 +1066,149 @@ draw_sprites:
  bsr generic_part
  move.l (sp)+,a0
  bra .next
+.edge:				; d4.b = x: 241 .. 255 = -15 .. -1, 209 .. 223, 224 .. 239 hidden
+ cmp.b #240,d4			; (the loop's set-up again, off the hot path; the baked planes through get_object)
+ bhi.s .left
+ cmp.b #224,d4
+ bhs .next
+ bra.s .attr
+.left:
+ ext.w d4
+.attr:
+ moveq #0,d1
+ move.b 1(a0),d1
+ cmp.b #$c0,d1
+ bhs .next
+ moveq #0,d3
+ move.b 3(a0),d3
+ btst #0,d1
+ beq.s .epositive
+ sub.w #256,d3
+.epositive:
+ neg.w d3
+ add.w #240,d3			; y
+ cmp.w #-16,d3
+ ble .next
+ cmp.w #256,d3
+ bge .next
+ move.w d1,d2			; the shape: bank, code, flips
+ and.w #$c0,d2
+ moveq #0,d0
+ move.b (a0),d0
+ lsl.w #2,d2
+ or.w d0,d2
+ lsl.w #2,d2
+ move.w d1,d5
+ lsr.w #2,d5
+ and.w #3,d5
+ or.w d5,d2
+ move.w d2,spr_pcode
+ ext.l d2
+ lsl.l #4,d2
+ moveq #15,d5
+ and.w d4,d5
+ or.w d5,d2
+ lsl.l #3,d2
+ lea spr_code_tab,a2
+ add.l d2,a2
+ tst.l (a2)
+ beq .next
+ lsl.w #8,d1
+ or.w d1,d0
+ moveq #1,d1
+ bsr get_object
+ move.l a0,-(sp)
+ bsr sprite_edge
+ move.l (sp)+,a0
+ bra .next
+
+; A sprite across the window's left (x -15 .. -1) or right edge (x 209 .. 223; both at chunk boundaries, GAME_X = 24
+; and 224 = 14 chunks; always shifted): only its inner word (clip_part), and only that chunk's damage: the side bands
+; stay clean (no sprite is wholly outside: draw_sprites drops x + 16 = 0 and >= 240).  d3 = y, d4 = x, a1 = the baked
+; planes, a2 = its spr_code_tab entry.
+sprite_edge:
+ move.w d3,d2
+ ext.l d2
+ lsl.l #8,d2			; (STRIDE)
+ add.l draw_base,d2
+ move.w d4,d0
+ asr.w #4,d0
+ lsl.w #3,d0
+ add.w #GAME_X,d0
+ ext.l d0
+ add.l d0,d2
+ moveq #2,d5			; (right edge: the first word)
+ tst.w d4
+ bpl.s .right
+ moveq #1,d5			; (left edge: the second word)
+ addq.l #8,d2
+.right:
+ move.w d3,d0
+ add.w cur_top,d0
+ moveq #16,d1
+ moveq #4,d3
+ bsr add_damage
+ move.l a1,BLT_SRC_ADDR.w
+ move.l 4(a2),a0
+ move.w d4,d3
+
+; A shifted sprite across the window's left (d5 = 1) or right (d5 = 2) edge: only its inner word (at d2), one word a
+; line.  Right: the first word, (previous source word : this one) >> skew under END1 (the previous word's bits fall
+; outside the mask).  Left: the second word, FXSR (this source word : the next) >> skew under the stream's END3 mask;
+; the source Y increment 0 makes the two reads a line advance one word.  Masks from the stream (a0), lines from
+; spr_plan (as 1943's clip_part).  The generated routines set the counts, the Y increment and the skew they use.
+clip_part:
+ move.l d2,a1
+ move.w #1,BLT_COUNT.w
+ move.w #2,BLT_DST_YINC.w
+ move.w d3,d0
+ and.w #15,d0
+ cmp.w #1,d5
+ bne.s .r
+ or.b #$80,d0			; FXSR
+ clr.w BLT_SRC_YINC.w
+.r:
+ move.b d0,BLT_SKEW.w
+ move.l a0,a2
+ moveq #0,d0
+ move.w spr_pcode,d0
+ lsl.l #2,d0
+ lea spr_plan_offsets,a0
+ move.l (a0,d0.l),d0
+ lea spr_plan,a0
+ add.l d0,a0
+ lea BLT_DST_ADDR.w,a3		; (draw_sprites sets a2-a6, d6, d7 again for each sprite)
+ lea BLT_COUNT+2.w,a4
+ lea BLT_CTRL.w,a5
+ moveq #4,d6
+ move.w #$c0,d7
+ moveq #1,d4
+.group:
+ move.w (a0)+,d1
+ beq.s .done
+ move.w (a2)+,d0		; END1
+ move.w (a2)+,d3		; END3
+ cmp.w #1,d5
+ bne.s .m
+ move.w d3,d0
+.m:
+ move.w d0,BLT_END1.w
+ tst.w d4
+ beq.s .rows
+ moveq #0,d4
+ addq.l #2,a2			; (the control word of the first row)
+.rows:
+ subq.w #1,d1
+.row:
+ adda.w (a0)+,a1
+ move.l a1,(a3)
+ move.w d6,(a4)
+ move.b d7,(a5)
+ dbf d1,.row
+ bra.s .group
+.done:
+ move.w #2,BLT_SRC_YINC.w
+ rts
 
 ; Crossing a 64KB boundary uses full addresses; masks still come from baked streams.
 generic_part:
@@ -1265,16 +1412,7 @@ draw_foreground:
  add.w d4,d2
  add.l #GAME_X,d2
  add.w cur_top,d0
- moveq #2,d1
- bsr add_damage
- add.l #2*STRIDE,d2
- addq.w #2,d0
- bsr add_damage
- add.l #2*STRIDE,d2
- addq.w #2,d0
- bsr add_damage
- add.l #2*STRIDE,d2
- addq.w #2,d0
+ moveq #8,d1			; one restore rectangle per character row; short HOG pieces in restore_damage
  bsr add_damage
 .no_row:
  addq.w #1,d6

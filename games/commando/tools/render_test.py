@@ -79,7 +79,12 @@ def main():
             sprite=m.gfx.sprites[code].T[::-1]
             got=pixels[:,48+edge_x:48+edge_x+16]
             mask=sprite!=15
-            assert np.array_equal(got[mask],mapping[128+sprite][mask]), 'whole sprite was clipped in its guard area'
+            if edge_x<0 or edge_x>208:   # (left and right: clipped at the window's chunk-aligned edges, sprite_test.py)
+                inner=np.zeros_like(mask);inner[:,max(0,-edge_x):min(16,224-edge_x)]=True
+                assert np.array_equal(got[mask&inner],mapping[128+sprite][mask&inner]), 'edge sprite: inner part wrong'
+                assert not np.array_equal(got[mask&~inner],mapping[128+sprite][mask&~inner]), 'edge sprite drawn into the band'
+            else:
+                assert np.array_equal(got[mask],mapping[128+sprite][mask]), 'whole sprite was clipped in its guard area'
         diff=np.count_nonzero(mine!=want)
         if diff:
             out=BUILD/f'render_diff_{sample}.png'

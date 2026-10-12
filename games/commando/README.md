@@ -219,3 +219,44 @@ Hatari (`--sound 44100 --avirecord true`, coin and start): its audio against the
 jingle 0.955.  `sound_music.py wav XX` renders a tune through the player (`build/commando/music_XX.wav`).
 Hatari `bench.sh`: 55.1 game ticks (92%) and 25.0 frames a second (before: 55.6 and 27.2; the scripted run differs
 with any timing change, the player's cost is ~2.4% of the CPU).
+
+## Foreground damage batching (2026-10-11)
+
+An 8-pixel character row now adds one damage rectangle instead of four 2-line rectangles. Restoration still uses
+the shared short HOG passes. The existing sprites already use reordered source data; whole sprites and guards
+are unchanged. A damage-bitmap union prototype cost more cycles and was discarded.
+
+On `perf_test.py 1000 900`, the same 100 gameplay ticks: render CPU + Blitter mean 233,717 → 218,556 cycles
+(6.5% less), logic mean 38,889 in both builds. Masked destination reads are now included in the simulator.
+The pinned 8 MHz/4 MB STE Hatari, `DEBUG=1 AUTOPLAY=1 FRAMES=6000`, measured 24.1 → 26.0 pictures/s and
+54.8 → 55.2 game ticks/s. These are whole-run averages, not a guarantee that every scene stays above 25 fps.
+Both builds reported zero late border events. The final renderer matches 300 consecutive reference frames
+(700–999) pixel for pixel. Normal builds retain unlimited play.
+
+## Sprites clipped at the left and right edges (2026-10-12)
+
+The window's left and right edges lie on chunk boundaries (GAME_X = 24 bytes, 224 = 14 chunks), so a sprite across
+one (x -15 .. -1 or 209 .. 223, always shifted) now draws only its inner word, as 1943's `clip_part`: right edge the
+first word under END1, left edge the second word with FXSR, source Y increment 0 and the stream's END3 mask as END1;
+one word a line, the rows from `spr_plan`.  Its damage is that one chunk, so no sprite touches the side bands any
+more.  The top and bottom stay whole sprites in the guard lines.  `clear_margins` stays: it is there for the tiles
+(a horizontal scroll that is no multiple of 16, and the full redraws).
+
+`draw_sprites`' x test became `beq` (hidden) / `sub.b #16` / `cmp.b #208` / `bhi.s` to `.edge` (hidden on the
+right, or across an edge): the same cycles as the old cull test plus `sub.w #16`.  `.edge` repeats the loop's set-up
+off the hot path.  A first try with one more compare per drawn sprite cost +0.46% a frame (~50 sprites a frame);
+one that sent the hidden sprites through the edge test cost +0.6%.
+
+`perf_test.py`, same inputs, CPU + Blitter a frame, exact (profile mode, one instruction a step): ticks 900-999
+217,657 -> 217,686 (no sprite at an edge: +29, the entry `bra.s`); ticks 900-2499 183,204 -> 183,270 (+0.04%;
+`clip_part` 339 and `sprite_edge` 28 a frame, against fewer generated-routine and restore cycles).  The default
+mode (2000-cycle chunks, up to one chunk's overshoot a frame): 218,556 -> 218,688 and 184,154 -> 184,212.  Logic:
+38,889 and 45,204 in both builds.  Hatari `bench.sh` (pinned build, 6000 VBLs): 55.2 -> 55.5 game ticks a second,
+26.0 -> 26.3 frames drawn a second (run-to-run noise), no late border events in either.
+
+Tests: `tools/sprite_test.py` (new, in `port.py test`): 4 sprites with transparent holes, all 16 shifts at both
+edges, plain and across a 64 KB boundary (the generic path): 248 cases, each against the same sprite drawn whole
+in the middle; the bands unchanged and the damage inside the window.  It fails on the old code (the whole sprite
+in the band).  `render_test.py 4 edges` now expects the clipped left/right sprites (top and bottom whole);
+`render_test.py 300 seq` and `20 scroll` exact; `logic_test.py 3000`, `reference_test.py`, `sfx_test.py 1000`,
+`music_test.py 20000` pass.
