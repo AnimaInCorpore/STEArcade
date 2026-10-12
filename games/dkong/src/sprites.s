@@ -23,8 +23,11 @@
 ; The 16 pixel line is two screen words wide (u0 & 15 is the skew); the Blitter's NFSR
 ; lets the second word reuse the one source word of a plane (a skew of 0 is one word).
 ; The empty lines at either end of a shape are left out (dk_spr_span), a blank shape
-; draws nothing.  Sprites are not clipped at the left and right of the game area (they
-; spill into the black margin), only sprites entirely outside it are left out.
+; draws nothing.  The game area's left and right edges lie on chunk boundaries (GAME_X =
+; 3 chunks, 14 chunks wide): a sprite across one draws only its inner word, one word a
+; line (sprite_edge, sprite_draw 1; the side bands stay black and are never restored),
+; a sprite entirely outside is left out.  The common path tests both with one unsigned
+; compare.  Sprites are not clipped at the top and bottom (MARK_ROWS, the 64 KB screens).
 ;
 ; Most of the 128 entries are empty (y = 0), so a frame first lists the entries that are
 ; not (the active list), and each draw screen keeps the list it was last drawn with.
@@ -165,6 +168,309 @@ sprite_slow_line	macro
 	move.l	d3,-2(a3)
 	move	d1,(a5)
 	move.b	d2,(a2)
+	endm
+
+; ------------------------------------------------------------------------------
+; One sprite from its u0 (d0) on, d1 = code | flip y << 7, d2 = colour | flip x << 7, d3 = x, a4 = slot record.
+; \1 = 1: a sprite across the left or right edge of the game area (sprite_edge).
+
+sprite_draw	macro
+
+	; v = code * 2 + flip y; the lines of the shape that are drawn.
+
+	move	d1,d6
+	lsl	#1,d6
+	and	#$100,d6		; flip y (bit 7 of d1) -> bit 8
+	lsr	#8,d6
+	and	#$7f,d1
+	add	d1,d1
+	add	d6,d1			; v
+	lea	dk_spr_span,a6
+	move	d1,d6
+	add	d6,d6
+	move	(a6,d6.w),d5		; first line, number of lines
+	tst.b	d5
+	beq	sprite_loop		; blank shape (nothing to restore either)
+	move	d5,d6
+	and	#$ff,d6
+	move	d6,S_LINES(a4)
+	lsr	#8,d5
+	move	d5,S_FIRST(a4)
+
+	move	d0,d4
+	asr	#4,d4			; chunk of the left word (-1 .. 13)
+	and	#15,d0			; skew
+	ifne \1
+	tst	d4			; edge: -1 left (the second word is drawn), 13 right (the first)
+	bpl.s	.inner
+	moveq	#0,d4			; (the inner chunk: the rectangle and cells are its own)
+	bset	#30,d0			; left
+.inner:
+	endc
+
+	add	#$f8,d3
+	and	#$ff,d3			; v0: display line of the shape's line 0
+	tst.b	d2
+	bpl.s	.top_set
+	moveq	#16,d5			; flip x: the drawn lines are at the far end
+	sub	S_FIRST(a4),d5
+	sub	d6,d5
+.top_set:
+	add	d5,d3			; top display line of the rectangle
+
+	; The cells: rows from the top line on (one to three), cell columns 2 * chunk + 4 on
+	; (four, two if the skew is 0): a window of bits in the row's long at byte 0 or 2.
+
+	move	d3,d5
+	and	#$f8,d5			; row * 8
+	move	d4,d6
+	add	d6,d6
+	addq	#4,d6			; first cell column
+	cmp	#16,d6
+	blt.s	.window0
+	addq	#2,d5
+	sub	#16,d6
+.window0:
+	move	d5,S_MARK(a4)
+	ifeq \1
+	move.l	#$f0000000,d5
+	tst	d0
+	bne.s	.four_cells
+	endc
+	move.l	#$c0000000,d5		; (an edge sprite: the inner chunk's two)
+.four_cells:
+	lsr.l	d6,d5
+	move.l	d5,S_MASK1(a4)
+	move	d3,d6
+	and	#7,d6
+	add	S_LINES(a4),d6
+	subq	#1,d6
+	lsr	#3,d6			; rows - 1
+	beq.s	.one_row
+	move.l	d5,S_MASK2(a4)
+	subq	#1,d6
+	beq.s	.two_rows
+	move.l	d5,S_MASK3(a4)
+	bra.s	.rows_set
+.one_row:
+	clr.l	S_MASK2(a4)
+.two_rows:
+	clr.l	S_MASK3(a4)
+.rows_set:
+
+	; What this screen gets (for restoring later): the rectangle of the drawn lines, both
+	; chunks (one if the skew is 0, or the inner one of an edge sprite).
+
+	lsl	#8,d3			; line offset
+	ext.l	d4
+	lsl.l	#3,d4
+	add.l	d3,d4
+	add.l	#GAME_X,d4		; byte offset of the left word of plane 0
+	move.l	d4,S_RECT(a4)
+	ifeq \1
+	moveq	#8,d3
+	tst	d0
+	bne.s	.two_chunks
+	endc
+	moveq	#4,d3
+.two_chunks:
+	move	d3,S_WORDS(a4)
+	move	bank16,S_BANK(a4)
+
+	moveq	#0,d6
+	move	S_LINES(a4),d6
+	subq	#1,d6
+	lsl.l	#8,d6			; offset of the last line
+	move.l	draw_screen_address,d3
+	add.l	d4,d3			; address of the top line
+	ifeq \1				; (an edge sprite: the generic masks and full addresses)
+	cmp	#$f000,d3		; the lines would cross a 64 KB boundary (low word wraps)
+	bhs.s	.slow_lines
+
+	move	#248,d4			; step from the end of one line's blits to the next line
+	tst.b	d2
+	bpl.s	.lines_set
+	add.l	d6,d3			; flip x: from the last line upwards
+	move	#-264,d4
+	bra.s	.lines_set
+	endc
+
+.slow_lines:
+	bset	#31,d0			; (the skew is in the low word)
+	move.l	#256,d4
+	tst.b	d2
+	bpl.s	.lines_set
+	add.l	d6,d3
+	move.l	#-256,d4
+.lines_set:
+
+	; Shape/skew selects code shared by all colour quads. Boundary sprites
+	; retain the generic masks and full destination address writes.
+	moveq	#0,d6
+	move	d1,d6
+	lsl.l	#4,d6
+	add	d0,d6
+	lsl.l	#2,d6
+	ifeq \1
+	ifnd NOSPRITECODE
+	tst.l	d0
+	bmi.s	.generic_masks
+	add.l	d6,d6			; eight-byte code/mask-stream record
+	lea	dk_spr_code,a0
+	move.l	(a0,d6.l),d5
+	move.l	4(a0,d6.l),a0
+	bra.s	.masks_set
+.generic_masks:
+	endc
+	endc
+	lsl.l	#4,d6
+	move	S_FIRST(a4),d5
+	lsl	#2,d5
+	add	d5,d6
+	lea	dk_spr_masks,a0
+	add.l	d6,a0
+.masks_set:
+
+	; Colour data: (v * variant + quad of the colour code + first * 8) bytes.
+
+	mulu	#SPR_VARIANT,d1
+	and	#15,d2
+	add	bank16,d2
+	add	d2,d2
+	lea	dk_spr_quad,a6
+	moveq	#0,d6
+	move	(a6,d2.w),d6
+	add.l	d6,d1
+	moveq	#0,d6
+	move	S_FIRST(a4),d6
+	lsl.l	#3,d6
+	add.l	d6,d1
+	add.l	#dk_spr_data,d1
+	move.l	d1,BLT_SRC_ADDR.w
+	move.l	d3,BLT_DST_ADDR.w
+
+	ifne \1
+	; An edge sprite: one word a line (X count 1, END1).  Right edge: the first word, the
+	; skewed source word under the line's END1 mask (the bits of the word before it fall
+	; outside the mask).  Left edge: the second word (its address is the rectangle's), FXSR:
+	; (this source word : the next) >> skew under the line's END3 mask, which the line
+	; macros write to END1 after the END1 mask (a6 = END1); the source Y increment 0 makes
+	; the two reads of a plane advance one word.  No other mask is computed: the stored
+	; masks of the shape and skew, the lines of the generic sequence.
+	move	#1,BLT_COUNT.w
+	move	#2,BLT_DST_YINC.w	; next plane
+	lea	BLT_END3.w,a6		; (right: END3 is not used)
+	bclr	#30,d0
+	beq.s	.right
+	or.b	#$80,d0			; FXSR
+	clr	BLT_SRC_YINC.w
+	lea	BLT_END1.w,a6
+.right:
+	move.b	d0,BLT_SKEW.w		; (no NFSR)
+	moveq	#4,d1			; Y count: the four planes
+	moveq	#-64,d2			; BUSY | HOG
+	moveq	#16,d6
+	sub	S_LINES(a4),d6		; lines of the unrolled sequence to leave out
+	move	d6,d5
+	add	d5,d5			; (on at .slow_blits)
+	else
+
+	ifnd NOSPRITECODE
+	tst.l	d0
+	bpl.s	.go			; generated code sets width/skew itself
+	endc
+	tst	d0
+	beq.s	.skew0
+	or.b	#NFSR,d0		; two words from the one source word of a plane
+	move.b	d0,BLT_SKEW.w
+	move	#2,BLT_COUNT.w		; X count (stays: only the Y count counts down)
+	move	#-6,BLT_DST_YINC.w	; from the last word of a plane to the first of the next
+	bra.s	.go
+.skew0:
+	clr.b	BLT_SKEW.w
+	move	#1,BLT_COUNT.w
+	move	#2,BLT_DST_YINC.w
+.go:
+	moveq	#4,d1			; Y count: the four planes
+	moveq	#-64,d2			; BUSY | HOG
+
+	ifnd NOSPRITECODE
+	tst.l	d0
+	bmi.s	.generic_seq
+	move.l	d5,a6
+	jsr	(a6)
+	bra	.blits_done
+.generic_seq:
+	lea	BLT_END3.w,a6
+	moveq	#16,d6
+	sub	S_LINES(a4),d6		; lines of the unrolled sequence to leave out
+	move	d6,d5
+	add	d5,d5
+
+	bra	.slow_blits
+	else
+	lea	BLT_END3.w,a6
+	moveq	#16,d6
+	sub	S_LINES(a4),d6		; lines of the unrolled sequence to leave out
+	move	d6,d5
+	add	d5,d5
+
+	tst.l	d0
+	bmi	.slow_blits
+
+	lsl	#3,d6
+	add	d5,d6			; * 10 bytes
+	sprite_first_line
+	jmp	.lines(pc,d6.w)
+.lines:
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	sprite_line
+	bra	.blits_done
+
+	endc
+	endc
+
+.slow_blits:
+	lsl	#4,d6
+	sub	d5,d6			; * 14 bytes
+	sprite_first_line
+	jmp	.slow_seq(pc,d6.w)
+.slow_seq:
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+	sprite_slow_line
+
+.blits_done:
+	ifne \1
+	move	#2,BLT_SRC_YINC.w	; (the left edge's 0)
+	endc
+	mark_rect			; sprites later in the list that touch it are drawn again
+	bra	sprite_loop
 	endm
 
 ; ------------------------------------------------------------------------------
@@ -313,261 +619,18 @@ sprite_loop:
 	move.b	3(a4),d3		; x
 
 	sub	#23,d0			; u0: left display column (-23 .. 232)
+	cmp	#224-16,d0
+	bhi	sprite_edge		; u0 < 0 or > 208: across the left or right edge, or outside
+	sprite_draw 0
+
+; Sprites across the left (u0 -15 .. -1) or right (209 .. 223) edge of the game area: only the inner word.
+
+sprite_edge:
 	cmp	#-16,d0
 	ble	sprite_loop		; completely left of the game area
 	cmp	#224,d0
 	bge	sprite_loop		; completely right of it
-
-	; v = code * 2 + flip y; the lines of the shape that are drawn.
-
-	move	d1,d6
-	lsl	#1,d6
-	and	#$100,d6		; flip y (bit 7 of d1) -> bit 8
-	lsr	#8,d6
-	and	#$7f,d1
-	add	d1,d1
-	add	d6,d1			; v
-	lea	dk_spr_span,a6
-	move	d1,d6
-	add	d6,d6
-	move	(a6,d6.w),d5		; first line, number of lines
-	tst.b	d5
-	beq	sprite_loop		; blank shape (nothing to restore either)
-	move	d5,d6
-	and	#$ff,d6
-	move	d6,S_LINES(a4)
-	lsr	#8,d5
-	move	d5,S_FIRST(a4)
-
-	move	d0,d4
-	asr	#4,d4			; chunk of the left word (-1 .. 13)
-	and	#15,d0			; skew
-
-	add	#$f8,d3
-	and	#$ff,d3			; v0: display line of the shape's line 0
-	tst.b	d2
-	bpl.s	.top_set
-	moveq	#16,d5			; flip x: the drawn lines are at the far end
-	sub	S_FIRST(a4),d5
-	sub	d6,d5
-.top_set:
-	add	d5,d3			; top display line of the rectangle
-
-	; The cells: rows from the top line on (one to three), cell columns 2 * chunk + 4 on
-	; (four, two if the skew is 0): a window of bits in the row's long at byte 0 or 2.
-
-	move	d3,d5
-	and	#$f8,d5			; row * 8
-	move	d4,d6
-	add	d6,d6
-	addq	#4,d6			; first cell column
-	cmp	#16,d6
-	blt.s	.window0
-	addq	#2,d5
-	sub	#16,d6
-.window0:
-	move	d5,S_MARK(a4)
-	move.l	#$f0000000,d5
-	tst	d0
-	bne.s	.four_cells
-	move.l	#$c0000000,d5
-.four_cells:
-	lsr.l	d6,d5
-	move.l	d5,S_MASK1(a4)
-	move	d3,d6
-	and	#7,d6
-	add	S_LINES(a4),d6
-	subq	#1,d6
-	lsr	#3,d6			; rows - 1
-	beq.s	.one_row
-	move.l	d5,S_MASK2(a4)
-	subq	#1,d6
-	beq.s	.two_rows
-	move.l	d5,S_MASK3(a4)
-	bra.s	.rows_set
-.one_row:
-	clr.l	S_MASK2(a4)
-.two_rows:
-	clr.l	S_MASK3(a4)
-.rows_set:
-
-	; What this screen gets (for restoring later): the rectangle of the drawn lines, both
-	; chunks (one if the skew is 0).
-
-	lsl	#8,d3			; line offset
-	ext.l	d4
-	lsl.l	#3,d4
-	add.l	d3,d4
-	add.l	#GAME_X,d4		; byte offset of the left word of plane 0
-	move.l	d4,S_RECT(a4)
-	moveq	#8,d3
-	tst	d0
-	bne.s	.two_chunks
-	moveq	#4,d3
-.two_chunks:
-	move	d3,S_WORDS(a4)
-	move	bank16,S_BANK(a4)
-
-	moveq	#0,d6
-	move	S_LINES(a4),d6
-	subq	#1,d6
-	lsl.l	#8,d6			; offset of the last line
-	move.l	draw_screen_address,d3
-	add.l	d4,d3			; address of the top line
-	cmp	#$f000,d3		; the lines would cross a 64 KB boundary (low word wraps)
-	bhs.s	.slow_lines
-
-	move	#248,d4			; step from the end of one line's blits to the next line
-	tst.b	d2
-	bpl.s	.lines_set
-	add.l	d6,d3			; flip x: from the last line upwards
-	move	#-264,d4
-	bra.s	.lines_set
-
-.slow_lines:
-	bset	#31,d0			; (the skew is in the low word)
-	move.l	#256,d4
-	tst.b	d2
-	bpl.s	.lines_set
-	add.l	d6,d3
-	move.l	#-256,d4
-.lines_set:
-
-	; Shape/skew selects code shared by all colour quads. Boundary sprites
-	; retain the generic masks and full destination address writes.
-	moveq	#0,d6
-	move	d1,d6
-	lsl.l	#4,d6
-	add	d0,d6
-	lsl.l	#2,d6
-	ifnd NOSPRITECODE
-	tst.l	d0
-	bmi.s	.generic_masks
-	add.l	d6,d6			; eight-byte code/mask-stream record
-	lea	dk_spr_code,a0
-	move.l	(a0,d6.l),d5
-	move.l	4(a0,d6.l),a0
-	bra.s	.masks_set
-.generic_masks:
-	endc
-	lsl.l	#4,d6
-	move	S_FIRST(a4),d5
-	lsl	#2,d5
-	add	d5,d6
-	lea	dk_spr_masks,a0
-	add.l	d6,a0
-.masks_set:
-
-	; Colour data: (v * variant + quad of the colour code + first * 8) bytes.
-
-	mulu	#SPR_VARIANT,d1
-	and	#15,d2
-	add	bank16,d2
-	add	d2,d2
-	lea	dk_spr_quad,a6
-	moveq	#0,d6
-	move	(a6,d2.w),d6
-	add.l	d6,d1
-	moveq	#0,d6
-	move	S_FIRST(a4),d6
-	lsl.l	#3,d6
-	add.l	d6,d1
-	add.l	#dk_spr_data,d1
-	move.l	d1,BLT_SRC_ADDR.w
-	move.l	d3,BLT_DST_ADDR.w
-
-	ifnd NOSPRITECODE
-	tst.l	d0
-	bpl.s	.go			; generated code sets width/skew itself
-	endc
-	tst	d0
-	beq.s	.skew0
-	or.b	#NFSR,d0		; two words from the one source word of a plane
-	move.b	d0,BLT_SKEW.w
-	move	#2,BLT_COUNT.w		; X count (stays: only the Y count counts down)
-	move	#-6,BLT_DST_YINC.w	; from the last word of a plane to the first of the next
-	bra.s	.go
-.skew0:
-	clr.b	BLT_SKEW.w
-	move	#1,BLT_COUNT.w
-	move	#2,BLT_DST_YINC.w
-.go:
-	moveq	#4,d1			; Y count: the four planes
-	moveq	#-64,d2			; BUSY | HOG
-
-	ifnd NOSPRITECODE
-	tst.l	d0
-	bmi.s	.generic_seq
-	move.l	d5,a6
-	jsr	(a6)
-	bra	.blits_done
-.generic_seq:
-	lea	BLT_END3.w,a6
-	moveq	#16,d6
-	sub	S_LINES(a4),d6		; lines of the unrolled sequence to leave out
-	move	d6,d5
-	add	d5,d5
-
-	bra	.slow_blits
-	else
-	lea	BLT_END3.w,a6
-	moveq	#16,d6
-	sub	S_LINES(a4),d6		; lines of the unrolled sequence to leave out
-	move	d6,d5
-	add	d5,d5
-
-	tst.l	d0
-	bmi	.slow_blits
-
-	lsl	#3,d6
-	add	d5,d6			; * 10 bytes
-	sprite_first_line
-	jmp	.lines(pc,d6.w)
-.lines:
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	sprite_line
-	bra	.blits_done
-
-	endc
-
-.slow_blits:
-	lsl	#4,d6
-	sub	d5,d6			; * 14 bytes
-	sprite_first_line
-	jmp	.slow_seq(pc,d6.w)
-.slow_seq:
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-	sprite_slow_line
-
-.blits_done:
-	mark_rect			; sprites later in the list that touch it are drawn again
-	bra	sprite_loop
+	sprite_draw 1
 
 sprites_done:
 	; The active list is what this screen shows now; its old list is free.

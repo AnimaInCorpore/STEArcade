@@ -28,12 +28,36 @@ The coverage and pens runs reproduce the committed logs (`docs/coverage/*.log`) 
 
 Tests: `tools/logic_test.py 3000` (whole program, lock-step against the Z80 reference, the NMI injected at the idle loop head),
 `tools/nmitrace.py N` (the NMIs from frame N on, instruction by instruction, names the first diverging instruction),
-`engine/sprite_blit_test.py` (sprite code against independently masked pixels, DK and Galaga).  `tools/insn_bench.py`
+`engine/sprite_blit_test.py` (sprite code against independently masked pixels, DK and Galaga).  `tools/sprite_test.py`: sprites
+across the game area's left and right edges; `tools/perf_test.py`: CPU + Blitter cycles a frame on Musashi.  `tools/insn_bench.py`
 stops with `KeyError: 'pe'` on a conditional RET/CALL on the parity flag (not translated).
 
 The game itself is not deterministic across builds: its idle loop counts its spins (`inc ($6019)`), so the attract
 sequence and the demo play depend on how much CPU time a frame leaves.  Frame counts of two builds therefore show different
 game phases; what compares exactly is a frozen frame of one build against the reference renderer.
+
+## Sprites clipped at the left and right edges (2026-10-12)
+
+The game area's edges lie on chunk boundaries (GAME_X = 3 chunks, 14 chunks wide), so sprites are clipped there now
+(`docs/architecture.md`, "Update 2026-10-12"): a sprite across an edge (display column u0 -15..-1 or 209..223) draws
+only its inner word, one word a line (`sprite_edge` in `src/sprites.s`; right: the first word, the skewed source under
+the line's END1 mask; left: the second word, FXSR and source Y increment 0 under the line's END3 mask, which the line
+macros write to END1).  Its rectangle and cells are the inner chunk's, so the side bands stay black and are never
+restored; a sprite wholly outside is culled as before.  The common path tests both with one unsigned compare (it was
+two signed ones); the edge path is the same macro (`sprite_draw 1`) with the generic masks and full addresses.
+Before, sprites hung into the visible side bands (4 band pixels in the last frame of the run below, none now).
+
+Measured with `tools/perf_test.py 3000 200` (Musashi, the sim build with AUTOSTART=150, the VBL raised at every third
+idle-loop visit so both builds play the same frames; 2800 frames, ~4 edge sprites drawn a frame): logic 15423.9
+cycles a frame both; picture (render_frame) 34807.6 -> 34818.9 (+0.03%), draw_sprites 24344.7 -> 24356.0; total
+50231.5 -> 50242.8 (+0.02%).  Hatari (TIMES build, AUTOSTART=150, 3000 frames; not the same frames, see above): 50
+fps both, 0.8% frames late both (the full redraws), drawing 59.8 -> 59.0 Timer D ticks a frame.  There is no
+bench script for this port.
+
+Tests: `tools/sprite_test.py` 2048 cases (4 shapes with holes, both flips, 16 shifts, at both edges and outside,
+plain and across a 64 KB boundary, the restore a frame later): exact, bands untouched, on the generated-code and
+the NOSPRITECODE build; the old code fails it (pixels in the left band).  `engine/sprite_blit_test.py`'s DK part
+(8192 checks, 48 renderer comparisons), `port.py test dkong` (3000 frames lock-step).
 
 ## Sound (2026-10-09)
 
