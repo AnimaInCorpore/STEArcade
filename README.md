@@ -9,7 +9,7 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 |---|---|---|---|
 | <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 | plays at 50 fps, pixel exact against MAME; sound (the 8035 board as DMA sound, walk / jump / stomp on the YM) |
 | <a href="games/galaga/README.md"><img src="games/galaga/docs/screenshot.png" width="160" alt="Galaga"></a> | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) | complete: the game's speed (a game frame per VBL), 33 fps on average, 17-21 with the full formation; sound on the YM2149 (the WSG's voices as square waves, the explosion as noise) |
-| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | boots into the attract mode, exact logic and picture; too slow to play on a plain STE; music and effects on the YM2149 (the OPL and FM channels as square waves) |
+| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | exact logic and picture; playable: 67-80% of the arcade's speed and 15-27 frames a second in play in Hatari (slower on the round-start screens); music and effects on the YM2149 (the OPL and FM channels as square waves) |
 | <a href="games/1942/README.md"><img src="games/1942/docs/screenshot.png" width="160" alt="1942"></a> | [1942](games/1942/README.md) | Z80 (a cooperative kernel; the sound driver's output recorded) | attract mode and play with the hardware scrolled background, exact logic and picture; the arcade's speed (60 ticks a second) and 34-43 frames a second in Hatari; music and effects on the YM2149 (three of the six channels) |
 | <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) | attract mode and play with the hardware scrolled background, lock-step logic and pictures exact; 86% of the arcade's speed and 8 frames a second in Hatari; music and effects on the YM2149 |
 | <a href="games/blktiger/README.md"><img src="games/blktiger/docs/screenshot.png" width="160" alt="Black Tiger"></a> | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | STE runtime, banked translation, virtual-screen scrolling and firmware protection; 92% of the arcade's speed and 26 frames a second in Hatari; music and effects on the YM2149 |
@@ -21,7 +21,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 
 ## Download
 
-[Release 0.2.1](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.2.1): `STEArcade-0.2.1.zip` with one
+[Release 0.3](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.3): `STEArcade-0.3.zip` with one
 self-contained TOS program per game (the arcade's code and graphics are built in: no separate ROM files are needed)
 and a README.TXT with the controls.  Requirements: an Atari STE with 4 MB.
 

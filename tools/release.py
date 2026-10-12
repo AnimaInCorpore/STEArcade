@@ -32,7 +32,8 @@ GAMES = [
      "fire: Space, Control, Alternate, joystick fire, pad A/B/C; left and right only.  Players take turns: both\n"
      "  joysticks and both pads move the fighter.  One coin key (5, Option)."),
     ("bublbobl", "BUBBLE.PRG", "Bubble Bobble (Taito 1986)",
-     "exact logic and picture, but too slow to play on a plain STE; music and effects on the YM",
+     "playable: 67-80% of the arcade's speed and 15-27 frames a second in play (slower on the round-start\n"
+     "  screens); exact logic and picture; music and effects on the YM",
      "jump: Space, Control, joystick fire, pad A.  bubble: Alternate, joystick up, pad B, pad up."),
     ("1942", "1942.PRG", "1942 (Capcom 1984)",
      "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
