@@ -13,6 +13,7 @@ python port.py cover gunsmoke        # coverage: 14 seeded runs of 20000 frames 
 python port.py build gunsmoke        # -> run/gunsmoke/GUNSMOKE.PRG (ROMs and graphics embedded)
 python port.py test gunsmoke         # reference, lock-step translation, renderer against the reference
 python port.py mame gunsmoke         # the reference renderer against MAME's own picture (needs `mame`)
+python games/gunsmoke/tools/sprite_test.py  # sprites across the window's sides (not in port.py test yet)
 games/gunsmoke/tools/bench.sh        # Hatari speed: ticks and frames a second (bench.ps1 on Windows)
 ```
 
@@ -90,9 +91,11 @@ gets past round 1's boss.
   Background on/off and jumps of more than 200 lines redraw the band (about 1M cycles).
 * **The screen shows 48 pixels on each side of the 224-pixel window**: whole tiles and
   sprites drawn into the side bars would be visible there, so each tile that reaches a
-  side clears its part there and each sprite over a side clears its 16 lines of 16 pixels
-  (masked: the window's edges are anywhere in a word); the damage list restores them from
-  their black twins. `render_test.py` checks the bars.
+  side clears its part there. A sprite across a side draws only its inner word when the
+  window starts on a 16-pixel group (D802 a multiple of 16: nearly always), else it is
+  drawn whole and clears its 16 lines of 16 pixels beside the window (masked: the edges
+  are inside a word then); the damage list restores them from their black twins
+  (2026-10-12 below). `render_test.py` checks the bars.
 * **Sprites** (128, entry 0 on top, 2048 codes, a y flip that mirrors on the screen):
   `tools/assets.py` generates the Blitter routines and mask streams of
   `games/1942/tools/spritegen.py` for the shapes (code, flip) the coverage drew most,
@@ -140,6 +143,32 @@ masked foreground passes now run in pieces of 16 words), so the top border inter
 (DEBUG + AUTOPLAY, 6000 VBLs, sound on): 50.6 -> 48.9 game ticks and 24.2 -> 23.0 drawn frames a second; no border
 event started late in that run.
 
+## Sprites clipped at the window's sides (2026-10-12)
+
+Where the window's left and right edges lie on 16-pixel groups (`cur_wx & 15 = 0`, D802 0, 16, 32, 48 ...), a sprite
+across an edge (always shifted there) draws only its inner word (`sprite_edge`, after 1943's `clip_part`): one word a
+line; right edge the first word under the stream's END1; left edge the second word, FXSR and the source Y increment 0,
+under the stream's END3; the shapes of `any_part` the same with their row masks.  Its damage is that one chunk, and the
+16 pixels beside the window are no longer cleared (`clear_span`) and restored for it.  Sprites wholly outside are culled
+as before; top and bottom stay whole in the guard lines.  The hot path keeps one unsigned compare (`spr_sx > 208`),
+which replaces the old post-draw test.  During the poster slides (D802 not a multiple of 16) the edges are inside a word:
+there the sprite is drawn whole and its side pixels cleared as before.  (The edge code sits after `any_part`: placed
+between `sprite_part` and `generic_part` it turned `bhi generic_part` into a word branch, +4 cycles a sprite.)
+
+Musashi, `render_test.py` seq, every instruction stepped (picture only; the logic is unchanged), the old build padded to
+the same buffer addresses (a 64 KB crossing sends a sprite to `generic_part`, so the layout alone moves a frame by ~2k):
+seeds 1 / 2 / 6 / 9 / 12 / 14, 3400 frames, 231,154 -> 230,933 cycles a frame (-0.10%; seed 1 -0.26%, seed 6 -0.18%);
+no frame costs more, 125 cost less (up to 15.9k).  An edge sprite: 5.1k -> 3.6-3.8k cycles (a whole sprite inside:
+3.0k).  Hatari (`bench.sh`, 6000 VBLs): before 2794-2795 frames drawn (23.3 /s), 5917 ticks (49.3 /s); after 2775-2787
+(23.1-23.2 /s), 5904-5917 ticks; the new code with the clipping switched off gave 2770 / 5888, so the autoplay run's
+build-to-build variation is larger than the change.  No border event started late.
+
+Tests: `tools/sprite_test.py` (new; fails on the old code): 3600 edge cases, 4 generated and 2 `any_part` shapes with
+holes, both flips, all 16 shifts, both edges, windows at 48 / 64 / 80 (clipped: equal to the whole sprite's columns,
+the bars untouched, one chunk of damage) and 53 / 59 (whole, the bars black), plain and across a 64 KB boundary, every
+changed byte under a damage rectangle.  `port.py test gunsmoke` passes; `render_test.py` seq 3400 frames (seeds 1, 2,
+6, 9, 12, 14), 300 frames through the slides of seeds 1 and 10, 40 samples of seeds 3 and 12: exact, bars black.
+
 ## Sound (2026-10-11)
 
 The sound board (MAME `capcom/gunsmoke.cpp`): a Z80 at 3 MHz, two YM2203 at 1.5 MHz, four IRQs a frame.  Its driver is
@@ -183,7 +212,7 @@ recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again 
   ending.
 * `render_test.py`: pixel exact through the colour map in consecutive play (rounds 1, 3,
   7, the ending), spaced samples (rounds 6, 9), a sweep of S and D802 over their range,
-  and whole sprites at the window's edges; the side bars stay black; consecutive frames
+  and whole sprites at the window's top and bottom; the side bars stay black; consecutive frames
   through the D802 slides of rounds 1 and 7 (the window at every pixel offset 0-48).
 * Hatari (F030Arcade build, STE, 4 MB, TOS 2.06): attract mode, coin, start, the round
   poster with its sideways slide (screenshots in the middle of it: the fine scroll), play;

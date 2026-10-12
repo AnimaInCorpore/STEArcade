@@ -15,9 +15,10 @@
 ; pairs that came into it black, and, when its window moved, the columns that came into the window (only those
 ; columns of the tiles) and black where the side bars went (hw_strips).  A change of the tiles' offset, background
 ; on/off or a jump of more than 200 lines draws the band whole.  The screen shows 48 pixels on each side of the
-; window: they stay black (a tile or a sprite drawn whole over a side clears its part there).
+; window: they stay black (a tile drawn whole over a side clears its part there; a sprite across a side draws only its
+; inner word while the window starts on a 16-pixel group, else whole and clears its 16 pixels there).
 ;
-; Sprites are drawn whole at the window's position, text as a strip per text row (composed with movep.l when the row
+; Sprites are drawn at the window's position (whole into the guard lines above and below), text as a strip per text row (composed with movep.l when the row
 ; changes, drawn with the Blitter at the window's pixel offset: NOT mask AND screen, then the planes ORed in); what they
 ; covered is a damage list per buffer, copied back from the twin lines the next time that buffer is drawn.  Graphics
 ; are baked into STE planes on first use (a hashed cache per kind) from their pixel-value planes through a routine per
@@ -43,6 +44,7 @@ BLT_COUNT = $ffff8a36
 BLT_HOP_OP = $ffff8a3a
 BLT_CTRL = $ffff8a3c
 BLT_SKEW = $ffff8a3d
+FXSR = $80
 
 Z_TEXT = G_Z80-$3000			; D000 codes, D400 attributes
 Z_SCROLL = G_Z80-$2800			; D800 / D801: S, D802: the map rows' offset
@@ -998,11 +1000,21 @@ draw_sprites:
  or.w d1,d0
  moveq #1,d1
  bsr get_object
- bsr sprite_part
- move.w spr_sx,d0		; a sprite over a side of the window: its 16 pixels beside it black again (the screen shows
- bmi.s .left			; the side bars; the damage list restores them from their black twins)
+ move.w spr_sx,d0
  cmp.w #208,d0
- ble.s .next
+ bhi.s .edge			; (unsigned: left of the window too)
+ bsr sprite_part
+ bra.s .next
+.edge:				; across the window's left or right edge
+ moveq #15,d1
+ and.w cur_wx,d1
+ bne.s .unaligned
+ bsr sprite_edge		; (the edges on 16-pixel groups: only the inner word)
+ bra.s .next
+.unaligned:			; (the window at a fine offset, D802 not a multiple of 16: the edges inside a word)
+ bsr sprite_part
+ move.w spr_sx,d0		; drawn whole: its 16 pixels beside the window black again (the screen shows the side
+ bmi.s .left			; bars; the damage list restores them from their black twins)
  move.w cur_wx,d4
  add.w #224,d4
  bra.s .side
@@ -1182,6 +1194,124 @@ any_part:
  addq.l #8,a1
  add.l #STRIDE,d2
  dbf d4,.row
+ rts
+
+; A sprite across the window's left or right edge (spr_sx -15 .. -1 or 209 .. 223, always shifted) when the window
+; starts on a 16-pixel group (cur_wx & 15 = 0): only its inner word, and only that word's damage; the side bars are
+; not touched.  a1 = the baked sprite at dest_x / dest_y.
+sprite_edge:
+ bsr destination
+ moveq #2,d5			; (right edge: the first word)
+ tst.w spr_sx
+ bpl.s .right
+ moveq #1,d5			; (left edge: the second word)
+ addq.l #8,d2
+.right:
+ move.w dest_y,d0
+ add.w cur_top,d0
+ moveq #16,d1
+ moveq #4,d3
+ bsr add_damage
+ move.w dest_x,d3
+ and.w #15,d3
+ move.w #2,BLT_SRC_XINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ move.w #1,BLT_COUNT.w
+ move.w #2,BLT_DST_YINC.w
+ move.b d3,d0			; the skew; left: FXSR and the source Y increment 0 (two reads a line advance one word)
+ move.w #2,BLT_SRC_YINC.w
+ cmp.w #1,d5
+ bne.s .skew
+ or.b #FXSR,d0
+ clr.w BLT_SRC_YINC.w
+.skew:
+ move.b d0,BLT_SKEW.w
+ moveq #0,d0
+ move.w spr_shape_n,d0
+ add.w d0,d0
+ lea spr_shape,a0
+ move.w (a0,d0.w),d0
+ cmp.w #$ffff,d0
+ beq.s .any
+ move.w d0,spr_pcode
+ move.l a1,BLT_SRC_ADDR.w
+ lsl.l #4,d0
+ or.w d3,d0
+ lsl.l #3,d0
+ lea spr_code_tab,a0
+ tst.l (a0,d0.l)
+ beq.s .out
+ move.l 4(a0,d0.l),a0
+ bsr.s clip_part
+.out:
+ move.w #2,BLT_SRC_YINC.w
+ rts
+.any:				; (a shape without generated code: its rows in order, the masks from its opaque rows)
+ lea 128(a1),a2
+ moveq #16,d6
+ sub.w d3,d6
+ moveq #15,d4
+.row:
+ move.w (a2)+,d0
+ beq.s .skip
+ cmp.w #1,d5
+ beq.s .l
+ lsr.w d3,d0			; right: the first word, mask >> shift
+ bra.s .m
+.l:
+ lsl.w d6,d0			; left: the second word, mask << (16 - shift)
+.m:
+ move.w d0,BLT_END1.w
+ move.l a1,BLT_SRC_ADDR.w
+ move.l d2,BLT_DST_ADDR.w
+ move.w #4,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+.skip:
+ addq.l #8,a1
+ add.l #STRIDE,d2
+ dbf d4,.row
+ bra.s .out
+
+; The inner word of an edge sprite with generated code (sprite_edge has set the Blitter: one word a line, the skew),
+; d2 = its address, d5 = 1 left / 2 right.  Right: the first word, (previous source word : this one) >> skew under the
+; stream's END1 (the previous word's bits fall outside it).  Left: the second word, FXSR (this source word : the next)
+; >> skew under the stream's END3.  The masks from the stream (a0), the lines from spr_plan; full addresses (a 64 KB
+; crossing is no matter).
+clip_part:
+ move.l d2,a1
+ move.l a0,a2
+ moveq #0,d0
+ move.w spr_pcode,d0
+ lsl.l #2,d0
+ lea spr_plan_offsets,a0
+ move.l (a0,d0.l),d0
+ lea spr_plan,a0
+ add.l d0,a0
+ moveq #1,d4
+.group:
+ move.w (a0)+,d1
+ beq.s .done
+ move.w (a2)+,d0		; END1
+ move.w (a2)+,d3		; END3
+ cmp.w #1,d5
+ bne.s .m
+ move.w d3,d0
+.m:
+ move.w d0,BLT_END1.w
+ tst.w d4
+ beq.s .rows
+ moveq #0,d4
+ addq.l #2,a2			; (the control word of the first row)
+.rows:
+ subq.w #1,d1
+.row:
+ adda.w (a0)+,a1
+ move.l a1,BLT_DST_ADDR.w
+ move.w #4,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ dbf d1,.row
+ bra.s .group
+.done:
  rts
 
 ; ------------------------------------------------------------------------------
