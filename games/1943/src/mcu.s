@@ -38,9 +38,83 @@ mcu_vblank:
     move.b d0,$81(a0)
     lea mcu_rom,a1
     move.b $e0(a0),d0
+    ifd MCU_XLATE
     bra M0013
+    else
+    bra mcu_int1
+    endc
 .off:
     jmp z80_unsupported            ; (INT1 not enabled: the firmware is not where it should be)
+
+; INT1 ($0013 -> $0200-$023B) in 68000 code: the command (P0) looked up in the 32 (key, value) pairs at ROM $0800; the
+; value of the last pair whose key matches (R4; none: R4 as it was) is the reply (P0, P3 bit 6 low-high).  The
+; firmware walks all 32 pairs each time (~7k cycles translated); here the pairs are searched from the end, and what
+; the walk leaves is set at once: R2 = R7 = the command, R3 = 0, DPTR = $0840, ACC and PSW's CY / AC / OV from the
+; last pair's `subb` (ACC = its value if its key matched, else key - command).  -D MCU_XLATE: the translation.
+    ifnd MCU_XLATE
+mcu_int1:
+    bclr #7,168(a0)                ; clr EA
+    and.b #$e7,208(a0)             ; register bank 0
+    move.b #$ff,128(a0)            ; mov P0,#$ff
+    move.b 176(a0),d2              ; clr P3.7
+    bclr #7,d2
+    bsr mcu_p3
+    move.b mcu_command,d3          ; mov R2,P0 / mov R7,P0
+    and.b 128(a0),d3
+    move.b d3,2(a0)
+    move.b d3,7(a0)
+    move.b 176(a0),d2              ; setb P3.7
+    bset #7,d2
+    bsr mcu_p3
+    move.b #$08,131(a0)            ; DPTR = $0800 + 2 * 32
+    move.b #$40,130(a0)
+    clr.b 3(a0)                    ; R3
+    lea $0800+62(a1),a3            ; the last matching key
+    moveq #31,d7
+.find:
+    cmp.b (a3),d3
+    beq.s .hit
+    subq.l #2,a3
+    dbf d7,.find
+    bra.s .last
+.hit:
+    move.b 1(a3),4(a0)             ; R4
+.last:
+    move.b $0800+62(a1),d0         ; the last pair: clr C, subb A,R2
+    move.b d0,d1
+    sub.b d3,d1
+    move sr,d5
+    and.w #3,d5
+    lea mcu_cvtab,a3
+    move.b 208(a0),d7
+    and.b #$3b,d7
+    or.b (a3,d5.w),d7
+    move.b d3,d2
+    eor.b d1,d2
+    eor.b d0,d2
+    and.b #$10,d2
+    lsl.b #2,d2
+    or.b d2,d7
+    move.b d7,208(a0)
+    move.b d1,d0
+    bne.s .reply
+    move.b $0800+63(a1),d0         ; (its key matched: movc of the value)
+.reply:
+    move.b 4(a0),128(a0)           ; mov P0,R4
+    move.b 176(a0),d2              ; clr P3.6, setb P3.6: the reply
+    bclr #6,d2
+    bsr mcu_p3
+    move.b 176(a0),d2
+    bset #6,d2
+    bsr mcu_p3
+    bclr #3,136(a0)                ; clr IE1
+    bset #7,168(a0)                ; setb EA
+    bsr mcu_reti
+    cmp.w #$011a,d1
+    beq M011A
+    move.l d1,d7
+    jmp z80_unsupported
+    endc
 
 ; reti: d1 = the popped return address
 mcu_reti:

@@ -51,6 +51,7 @@ TESTS = {
              ("tools/build.py", ["--sim"], None),
              ("tools/sprite_test.py", [], None),                  # sprites at the window's edges: clipped, 16 shifts, 64 KB
              ("tools/front_test.py", [], None),                   # front tiles at the window's edges, the same
+             ("tools/mcu_native_test.py", [], None),              # src/mcu.s's native INT1 against the translated firmware
              ("tools/logic_test.py", ["{n}"], 3000),
              ("tools/logic_test.py", ["3000", "--render", "--every", "3"], None),
              ("tools/logic_test.py", ["4000", "--render", "--every", "4", "--cheat", "13"], None),   # front layer scrolls sideways

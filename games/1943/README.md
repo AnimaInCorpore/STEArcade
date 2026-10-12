@@ -229,3 +229,15 @@ two.  Musashi (`perf_test.py`, CPU + Blitter a frame): play 237,061 -> 236,816 (
 the listed damage, the damage inside the window (the old code fails it).  The side bands are now black in every
 compared picture; `logic_test.py --render` also prints the front tiles clipped (`ft_uclips`, `ft_sclips`).
 
+## The MCU's INT1 in 68000 code (2026-10-12)
+
+The i8751's VBL interrupt (`$0013` -> `$0200`-`$023B`) looks the Z80's command up in 32 (key, value) pairs at ROM
+`$0800` and replies with the value of the last matching pair (R4 as it was when none matches).  The firmware walks all
+32 pairs every time; translated, each pass pays the 8051 flag bookkeeping of its `subb` (~10k cycles a tick).
+`src/mcu.s` `mcu_int1` searches the pairs from the end and sets what the walk leaves at once (R2 = R7 = the command,
+R3 = 0, DPTR = `$0840`, ACC and PSW's CY / AC / OV of the last pair's `subb`, P0, the reply through P3 bit 6, IE1, EA).
+`-D MCU_XLATE` builds the translation.  `tools/mcu_native_test.py` (in `port.py test`): every command from 8 random
+MCU states each against the translated firmware (the 256 bytes of RAM and SFRs, the reply, the transaction count, the
+pc), identical; `logic_test.py` 4000 frames matched.  `tools/perf_test.py 1400 1300`: the logic 57.1k -> 48.0k cycles a
+tick (the MCU 1.2k).
+
