@@ -1,8 +1,10 @@
 """MC6801 disassembler / decoder (the instruction set of m6801.py).
 
-decode(rom, pc, base=0xF000) -> Ins(pc, op, length, mn, mode, arg, flow, target)
-  mode: inh, imm8, imm16, dir, idx, ext, rel
+decode(rom, pc, base=0xF000, hd6301=False) -> Ins(pc, op, length, mn, mode, arg, flow, target)
+  mode: inh, imm8, imm16, dir, idx, ext, rel; HD6301 only: imdir, imidx (arg = (imm, address/offset))
   flow: seq, jmp, jcc, call, ret, ijmp (JMP indexed), wai
+hd6301=True decodes the HD6301/63701 set of hd63701.py: + XGDX, SLP (flow wai), AIM OIM EIM TIM, MAME's $12/$13
+(asx1/asx2: X += (S+1)); STAA/STAB/STD/STS/STX immediate are TRAPs there and raise like the other undefined opcodes.
 """
 from collections import namedtuple
 
@@ -18,11 +20,27 @@ UNARY = {0: "neg", 3: "com", 4: "lsr", 6: "ror", 7: "asr", 8: "asl", 9: "rol", 1
 ALU = {0: "sub", 1: "cmp", 2: "sbc", 4: "and", 5: "bit", 6: "ld", 7: "st", 8: "eor", 9: "adc", 10: "ora", 11: "add"}
 
 
-def decode(rom, pc, base=0xF000):
+HD6301_INH = {0x18: "xgdx", 0x1A: "slp", 0x12: "asx1", 0x13: "asx2", 0x3F: "swi"}   # asx: MAME's names
+HD6301_IMM = {1: "aim", 2: "oim", 5: "eim", 11: "tim"}
+
+
+def decode(rom, pc, base=0xF000, hd6301=False):
     def b(i):
         return rom[pc - base + i]
     op = b(0)
     hi, k = op >> 4, op & 15
+    if hd6301:
+        if op in HD6301_INH:
+            t = HD6301_INH[op]
+            return Ins(pc, op, 1, t, "inh", None, {0x1A: "wai", 0x3F: "call"}.get(op, "seq"), None,
+                       t + " 1,s" if op in (0x12, 0x13) else t)
+        if hi in (6, 7) and k in HD6301_IMM:
+            mn, imm, a = HD6301_IMM[k], b(1), b(2)
+            if hi == 6:
+                return Ins(pc, op, 3, mn, "imidx", (imm, a), "seq", None, "%s #$%02X,$%02X,x" % (mn, imm, a))
+            return Ins(pc, op, 3, mn, "imdir", (imm, a), "seq", None, "%s #$%02X,$%02X" % (mn, imm, a))
+        if op in (0xCD, 0xCF):
+            raise ValueError("bad opcode %02X at %04X" % (op, pc))
 
     def mk(length, mn, mode, arg=None, flow="seq", target=None):
         if mode == "inh": t = mn
@@ -94,7 +112,7 @@ def decode(rom, pc, base=0xF000):
     raise ValueError("bad opcode %02X at %04X" % (op, pc))
 
 
-def discover(rom, roots, base=0xF000, stop=()):
+def discover(rom, roots, base=0xF000, stop=(), hd6301=False):
     """Recursive descent from the roots; JMP indexed / unknown flow reported."""
     code, work = {}, list(roots)
     ijmps = []
@@ -103,7 +121,7 @@ def discover(rom, roots, base=0xF000, stop=()):
         while base <= pc < base + len(rom):
             if pc in code:
                 break
-            ins = decode(rom, pc, base)
+            ins = decode(rom, pc, base, hd6301)
             code[pc] = ins
             nxt = pc + ins.length
             if ins.flow == "seq":

@@ -1,0 +1,80 @@
+[
+ {
+  "name": "cus64-64a1.mcu",
+  "size": 4096,
+  "crc32": "ffb5c0bd",
+  "sha1": "7a38c0cc2553c627f4ec507fb6e807cf7d537c02"
+ },
+ {
+  "name": "pn2_c8.bin",
+  "size": 65536,
+  "crc32": "f3afd65d",
+  "sha1": "51daefd8685b49c464130b9e7d93e31cfdda724e"
+ },
+ {
+  "name": "pn2_p7.bin",
+  "size": 65536,
+  "crc32": "462fa4fd",
+  "sha1": "b27bee1ac64ac204c85703c3822de7dbda11b75e"
+ },
+ {
+  "name": "pn2_s0.bin",
+  "size": 65536,
+  "crc32": "c10370fa",
+  "sha1": "f819a31075d3c8df5deee2919cd446b9e678c47d"
+ },
+ {
+  "name": "pn2_s1.bin",
+  "size": 65536,
+  "crc32": "f761ed5a",
+  "sha1": "1487932c86a6094ed01d5032904fd7ae3435d09c"
+ },
+ {
+  "name": "pn2_v0.bin",
+  "size": 65536,
+  "crc32": "1ad5788f",
+  "sha1": "f6b1ccdcc3db11c0ab83e3ff24e772cd2b491468"
+ },
+ {
+  "name": "pn_chr-0.bin",
+  "size": 131072,
+  "crc32": "7c57644c",
+  "sha1": "77d9cc9ffbed47a941e4c5e5645d7d1126f6c302"
+ },
+ {
+  "name": "pn_chr-1.bin",
+  "size": 131072,
+  "crc32": "7eaa67ed",
+  "sha1": "4ad6cfa31d781fa7169663bbc319fc79d8965290"
+ },
+ {
+  "name": "pn_chr-2.bin",
+  "size": 131072,
+  "crc32": "27e739ac",
+  "sha1": "be9dbd22d988b76f7044328e2056c3f26b703401"
+ },
+ {
+  "name": "pn_chr-3.bin",
+  "size": 131072,
+  "crc32": "1dfda293",
+  "sha1": "fa01b0b8a820c1d24ff0f84b857d2784f0dac1cf"
+ },
+ {
+  "name": "pn_obj-0.bin",
+  "size": 131072,
+  "crc32": "fda57e8b",
+  "sha1": "16a72585268159d24f881dbb1aa6ae82bcc4bde7"
+ },
+ {
+  "name": "pn_prg-6.bin",
+  "size": 131072,
+  "crc32": "fe94900c",
+  "sha1": "5ce726baafc5ed24ea4cae33232c97637afb486b"
+ },
+ {
+  "name": "pnx_obj1.bin",
+  "size": 131072,
+  "crc32": "4c08affe",
+  "sha1": "f8f60fdc31779e2abe496e36ba0e4f27546cbc54"
+ }
+]

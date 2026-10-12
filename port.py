@@ -7,7 +7,7 @@
     port.py cover  <game> [seeds ...]        coverage runs the translator is seeded from (parallel; ~15 min for dkong)
     port.py build  <game> [build.py args]    translate + assemble + link -> run/<game>/   (--sim: the simulator build)
     port.py test   <game> [frames]           the tests that compare the build with the reference machine
-    port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader, the IKBD stream)
+    port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader, the IKBD stream, the 6809)
     port.py run    <game> [item@s ...]       Hatari (tools/hatari.sh): screenshots, key presses, memory dumps
     port.py mame   <game> [frames ...]       reference renderer against MAME's own picture (needs `mame`)
     port.py release <version> [--no-build]  every port built and packed: release/STEArcade-<version>.zip (tools/release.py)
@@ -105,7 +105,9 @@ TESTS = {
              ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py"]
+ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
+                "engine/m6809_test.py", "engine/hd63701_test.py",   # (MAME traces: build/m6809/, build/hd63701/)
+                "engine/m6809x_test.py"]
 assert set(COVER) == set(TESTS) == set(GAMES)
 
 
