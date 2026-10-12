@@ -94,6 +94,17 @@ def key_read(page, off):
     return ["moveq #0,d7"]
 
 
+def control_fold(ioacc):
+    """v -> ("vio+$1D000", $1F) for the sites whose stores all go to the CUS123 control (mirrored every 32 bytes over
+    $2FD000-$2FDFFF): the translation folds the address itself"""
+    def fold(v):
+        s = ioacc.get(v)
+        if s and all(rw == "w" and 0x2FD000 <= va < 0x2FE000 for rw, va in s):
+            return ("vio+$1D000", 0x1F)
+        return None
+    return fold
+
+
 def program(cpu, regions, cover):
     exec_, acc, tg, ioacc = cover
     name, prefix = NAMES[cpu]
@@ -117,6 +128,7 @@ def program(cpu, regions, cover):
                           exec_cover={v for v, s in exec_[cpu]}, acc_cover=acc[cpu], targets=tg[cpu],
                           io_pages=IO_PAGES, hooks={idle_v: "%s_idle" % name}, page_addr=page_addr,
                           hook_next={idle_v: idle_v + 3}, static_read=key_read, inline_banks=True,
+                          io_fold=control_fold(ioacc[cpu]),
                           natives={} if os.environ.get("NO_NATIVES") else NATIVES[cpu],
                           io_sites={v for v, s in ioacc[cpu].items() if io_site(s)} if any(ioacc[cpu].values()) else None)
     return prog, irq_v, idle_v

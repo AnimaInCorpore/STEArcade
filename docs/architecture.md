@@ -1,14 +1,15 @@
 # Architecture
 
-The project ports Z80 arcade games to the Atari STE (8 MHz 68000, 4 MB, 16 colours, Blitter).  Every port has three
-parts, and the first two are checked against each other with a lock-step test:
+The project ports Z80 and 6809 arcade games to the Atari STE (8 MHz 68000, 4 MB, 16 colours, Blitter).  Every port
+has three parts, and the first two are checked against each other with a lock-step test:
 
-1. **A reference machine** (`games/<game>/tools/machine.py`, on `engine/z80.py` and, for Bubble Bobble's protection MCU,
-   `engine/m6801.py`): a Python model of the arcade board from the MAME driver.  It is the ground truth for the logic
+1. **A reference machine** (`games/<game>/tools/machine.py`, on `engine/z80.py`, `engine/m6809.py` (KONAMI-1 too),
+   `engine/m6801.py` / `engine/hd63701.py` for the MCUs; the Namco System 1 board is shared: `engine/namcos1.py`): a
+   Python model of the arcade board from the MAME driver.  It is the ground truth for the logic
    (RAM compared every frame) and for the picture (`render_raw`, itself compared with MAME's own screenshot, see
    `docs/porting-guide.md`).
-2. **A static translation** of the Z80 (and 6801) programs to 68000 code (`engine/z80x.py`, `engine/translate.py`,
-   `engine/m6801x.py`; the game specific part in `games/<game>/tools/gen.py`).  No interpreter runs: the arcade program
+2. **A static translation** of the Z80, 6801 and 6809 programs to 68000 code (`engine/z80x.py`, `engine/translate.py`,
+   `engine/m6801x.py`, `engine/m6809x.py`; the game specific part in `games/<game>/tools/gen.py`).  No interpreter runs: the arcade program
    is 68000 code, with the hardware accesses calling runtime routines.
 3. **The STE runtime and renderer** (`games/<game>/src/*.s`, shared `engine/rt/rtlib.s`): video with the borders removed,
    the arcade's interrupts at the vertical blank, input, and a renderer that draws the arcade's tile map and sprite
@@ -423,3 +424,56 @@ cycles before retaining a change. `engine/sprite_reorder_audit.py` tries mask-gr
 DK/Galaga’s shared original-order assets: no variant saves cycles after the extra address moves.
 They retain the generated mask-reuse path and generic 64 KB fallback. Commando, 1942, 1943,
 Gun.Smoke, Black Tiger and Bubble Bobble use reordered source data.
+
+
+## The 6809 translator (`engine/m6809x.py`, Splatterhouse 2026-10-12)
+
+One snippet per 6809 instruction, labelled `<prefix><virtual address>`: on Namco System 1 the code lives in 8 KB pages of
+a 23 bit virtual space that the CUS117 MMU maps into the CPU's eight slots, and a page runs from one slot (the coverage
+says which; a page seen in two slots stops the build).  `Program` describes one CPU: the pages and their slots, the roots,
+the coverage (pcs, the data slots and I/O addresses of each access site, where computed jumps went), the hooks (the idle
+point), natives, and per-game callbacks (static I/O reads, register files folded inline, inline bank switches).
+
+Registers: A = d0, B = d1 (D composed only where needed: `ADDD` is `add.b lo,d1; addx.b hi,d0`, exact N Z V C), X Y U =
+d2-d4 (upper words 0: they index as longs), S = a5 as a 68000 pointer into slot 0's page, a6 = the CPU's context
+(`PB[8]` page addresses, `VB[8]` = PB - slot * $2000, the dispatcher's table per slot, the page numbers, the CC bits E F H
+I; the fields used with an index register stay below 128), a3 = PB[0] (the direct page and the stack), a4 = VB[1],
+a2 = PB[7], each kept by the runtime when its slot changes.
+
+* **Flags** live in the CCR (the 6809's N Z V C are its low nibble).  Each instruction's code leaves some right (`ok`);
+  the live ones it spoils (backward liveness) come back from the SR saved before (`wrap`).  Liveness is per function: an
+  RTS reads what the return points of its callers read (`function_returns`), ANDCC / ORCC define only the bits they
+  force, RTI reads nothing, the idle hook reads what the code after the idle loop reads.  H exists only for DAA.
+* **Memory**: static addresses use PB[slot] + offset (a3 / a4 / a2 without a load); indexed ones VB[slot] + register with
+  the slot the coverage saw at the site, else computed.  16 bit accesses are byte pairs (the 6809 has no alignment), the
+  high byte through the 68000 stack (`move.b x,-(sp); move.w (sp)+,d6`).
+* **I/O**: stores to $E000-$FFFF are the MMU (static ones inline: page number, page_base_table, PB / VB / the dispatcher's
+  table, the cached registers); the sites the coverage saw touching I/O pages call the runtime, or fold inline (the
+  CUS123 control, mirrored every 32 bytes), or read a known register (the key custom's random number).
+* **Control flow**: branches inside a page are 68000 branches; JSR pushes the 6809 return address and branches (into
+  another slot after checking its page); RTS compares the popped address with its callers' return points (the page
+  checked unless the slot is fixed), else the dispatcher (the slot's page table, 32 KB a code page).  `JSR [B,X]` after
+  `LDX #table` uses a 68000 table of the entries when they are code in a fixed slot or in the same page.
+* **Natives** replace a pc with a hand-written routine; the translation stays under `<label>_t` (fallback, tests).
+
+Tests: `engine/m6809x_test.py` (every documented instruction in every mode, random states, against `engine/m6809.py` on
+Musashi; batches of 8 KB pages), the games' `logic_test.py` (frame by frame against the reference's port schedule, with
+`--steplock F`: instruction by instruction inside a frame) and `profile.py` (68000 cycles per 6809 instruction).
+
+## Namco System 1 (`engine/namcos1.py`)
+
+The board after MAME: the CUS117 MMU (a 23 bit virtual space, eight 8 KB slots per CPU), the key customs (types 1-3:
+Dragon Spirit, Pac-Mania / Galaga '88, Splatterhouse), the CUS116 palette with its clip registers, the CUS123 tile layers
+(four scrolling, two fixed, 8 bits a pixel with 1 bit masks), the sprites (CUS48: 32 x 32 cells, 4 bits, sizes and
+offsets within the cell, priorities, the shadow colour) and the reference renderer (0 pixels and 0 pens differ from
+MAME 0.289 for all four games).  The CPUs (two 6809s behind the MMU, the sound 6809, the HD63701 MCU) run on a copy of
+MAME's scheduler: attosecond time, 1/38400 s quanta in device order, timers cut the slices, `set_input_line` is a
+synchronize() timer at the writing instruction's end that aborts the running slice only as the head of the list, the
+MCU's serial clock is a periodic timer of 4 CPU cycles, the YM2151's timers as ymfm runs them, MAME's `machine().rand()`
+for the key custom.  Splatterhouse's RAM equals MAME's for about 3200 frames.  `engine/namcos1_mame.py` compares the
+renderer with MAME's picture (`port.py mame <game>`).
+
+A port's schedule (`games/splatter/tools/machine.py` `run_frame_port`) is simpler: the vertical blank's work, the MCU and
+the sound CPU for a frame, then the main CPU's IRQ until its idle point, then the sub CPU's.  The port starts from the
+reference's state after the boot (`tools/snapshot.py`); the MCU is native (`src/mcu.s`, checked against
+`tools/mcu.py`, which is checked against the real MCU); the sound CPU only reads what the main CPU writes.

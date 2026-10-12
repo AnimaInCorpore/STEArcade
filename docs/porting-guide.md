@@ -469,3 +469,31 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   `render_test.py`); a negative run (the guard restore disabled) shows that the check bites.
 * **Before/after in Hatari**: a DEBUG + AUTOPLAY build that replays the simulator profile's input script by VBL and
   writes counters every 300 VBLs (Bubble Bobble's `tools/bench.sh`) gives windows comparable with `profile.py`'s.
+
+## What the Namco System 1 work added (Splatterhouse, 2026-10-12)
+
+* **CPU cores against MAME traces.**  MAME 0.289 writes per-instruction traces headless: `-debug -debugger none
+  -autoboot_script t.lua` with `manager.machine.debugger:command("trace f.txt,maincpu,noloop,{tracelog \"%d \",totalcycles}")`
+  (set `debugger.visible_cpu` to the traced CPU: tracelog prints for the visible one only; one CPU per run).  The 6809
+  and HD63701 cores replay such traces with 0 mismatches (registers, writes, cycles), and a translator test runs every
+  instruction against the core.
+* **A reference that follows MAME exactly** is worth it on a multi-CPU board: with MAME's scheduler copied (see
+  `docs/architecture.md`, "Namco System 1") the RAM equals MAME's for minutes, so a difference is a bug.  The details that
+  mattered, each found by comparing traces: MAME's frame_done N is at time N frames (with `-debug` it counts one more);
+  a 6809 reset's 4 cycles are time; an input line change takes effect when its synchronize() timer fires, at the end of
+  the writing 6809 instruction (MAME's 6809 counts a bus cycle before it does the access; the 6800 cores count after
+  the instruction), and it aborts the running slice only when it is the first timer; the HD63701's serial clock (RMCR
+  $04) is a periodic timer every 4 CPU cycles that cuts every slice.
+* **Run MAME in a fresh directory for every comparison**: a reused one keeps `nvram/`, and an initialised EEPROM made the
+  MCU take another path.  Lua write taps installed while the autoboot script loads are lost: install them at the first
+  frame_done.
+* **Coverage through the game's own test features**: Splatterhouse's Stage Select DIP switch starts every stage; seven
+  seeds grew the main CPU's translation from 5247 to 7172 instructions.
+* **Test harnesses lie too**: a test of every instruction must make sure every opcode got tests (the first version filled
+  one page and silently left out the rest); a stop address must not be `badpc + 2` when the next routine starts there; a
+  move to memory spoils the flags a stub wants to record (save the SR first).
+* **Speed of the 6809 translation** (68000 cycles per arcade frame for the two CPUs, lock-step identical throughout):
+  play 452k -> 147k, stage 3 244k -> 211k.  What mattered: per-function return liveness (2250 flag wrappers -> 140),
+  static and inline bank switches, I/O sites from the coverage's addresses (the sprite RAM plain), cached slot bases,
+  byte-direct 16 bit operations, jump tables for `JSR [B,X]`, natives for the sub CPU's sprite builder.  Profile by
+  6809 instruction and by 256 byte region (`tools/profile.py`).

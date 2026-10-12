@@ -1,20 +1,27 @@
-# Z80 arcade games on the Atari STE
+# Arcade games on the Atari STE
 
-Static translation of Z80 arcade programs to 68000 code, with a Blitter based renderer, running on an unexpanded
+Static translation of Z80 and 6809 arcade programs to 68000 code, with a Blitter based renderer, running on an unexpanded
 8 MHz Atari STE (4 MB).  Each port is a reference machine written from the MAME driver, a whole-program translation
 checked against it in lock-step, and a runtime that delivers the arcade's interrupts at the vertical blank and draws the
 arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, masks as end masks).
 
-| screenshot (Hatari) | game | CPUs | state |
-|---|---|---|---|
-| <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 | plays at 50 fps, pixel exact against MAME; sound (the 8035 board as DMA sound, walk / jump / stomp on the YM) |
-| <a href="games/galaga/README.md"><img src="games/galaga/docs/screenshot.png" width="160" alt="Galaga"></a> | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) | complete: the game's speed (a game frame per VBL), 33 fps on average, 17-21 with the full formation; sound on the YM2149 (the WSG's voices as square waves, the explosion as noise) |
-| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | exact logic and picture; playable, but slow: about 45% of the arcade's speed and 12 pictures a second in play in Hatari; music and effects on the YM2149 (the OPL and FM channels as square waves) |
-| <a href="games/1942/README.md"><img src="games/1942/docs/screenshot.png" width="160" alt="1942"></a> | [1942](games/1942/README.md) | Z80 (a cooperative kernel; the sound driver's output recorded) | attract mode and play with the hardware scrolled background, exact logic and picture; the arcade's speed (60 ticks a second) and 34-43 frames a second in Hatari; music and effects on the YM2149 (three of the six channels) |
-| <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) | attract mode and play with the hardware scrolled background, lock-step logic and pictures exact; 86% of the arcade's speed and 8 frames a second in Hatari; music and effects on the YM2149 |
-| <a href="games/blktiger/README.md"><img src="games/blktiger/docs/screenshot.png" width="160" alt="Black Tiger"></a> | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | STE runtime, banked translation, virtual-screen scrolling and firmware protection; 92% of the arcade's speed and 26 frames a second in Hatari; music and effects on the YM2149 |
-| <a href="games/commando/README.md"><img src="games/commando/docs/screenshot.png" width="160" alt="Commando"></a> | [Commando](games/commando/README.md) | Z80 (encrypted opcodes; the sound driver's output recorded) | playable STE runtime, scrolling Blitter renderer, exact reference/translation checks; 16 colours; the sound effects and the FM music as square waves on the YM |
-| <a href="games/gunsmoke/README.md"><img src="games/gunsmoke/docs/screenshot.png" width="160" alt="Gun.Smoke"></a> | [Gun.Smoke](games/gunsmoke/README.md) | Z80 (four ROM banks with code; sound CPU omitted) | attract mode and play, exact logic and picture against the reference (checked in rounds 1-3, 6, 7, 9 and the ending); 49 ticks (83% of the arcade) and 23 frames a second in Hatari, 16 colours; music and effects on the YM2149 |
+| screenshot (Hatari) | game | CPUs |
+|---|---|---|
+| <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 |
+| <a href="games/galaga/README.md"><img src="games/galaga/docs/screenshot.png" width="160" alt="Galaga"></a> | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) |
+| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) |
+| <a href="games/1942/README.md"><img src="games/1942/docs/screenshot.png" width="160" alt="1942"></a> | [1942](games/1942/README.md) | Z80 (a cooperative kernel; the sound driver's output recorded) |
+| <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) |
+| <a href="games/blktiger/README.md"><img src="games/blktiger/docs/screenshot.png" width="160" alt="Black Tiger"></a> | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) |
+| <a href="games/commando/README.md"><img src="games/commando/docs/screenshot.png" width="160" alt="Commando"></a> | [Commando](games/commando/README.md) | Z80 (encrypted opcodes; the sound driver's output recorded) |
+| <a href="games/gunsmoke/README.md"><img src="games/gunsmoke/docs/screenshot.png" width="160" alt="Gun.Smoke"></a> | [Gun.Smoke](games/gunsmoke/README.md) | Z80 (four ROM banks with code; sound CPU omitted) |
+|  | [Splatterhouse](games/splatter/) | Namco System 1: 3 x MC6809 + HD63701 MCU (main and sub translated, the MCU native) |
+|  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
+|  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
+|  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
+|  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 |
+|  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 |
+|  | [Gyruss](games/gyruss/) | Z80 + KONAMI-1 (encrypted 6809) + Z80 + i8039 |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
@@ -34,11 +41,13 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
 
 ## Layout
 
-    engine/            shared: Z80 / 6801 emulators and disassemblers, translators (z80x, translate, m6801x), STE simulator on
+    engine/            shared: Z80 / 6801 / 6809 (KONAMI-1 too) / HD63701 emulators and disassemblers, translators (z80x,
+                       translate, m6801x, m6809x), the Namco System 1 board (namcos1.py) with its MAME check
+                       (namcos1_mame.py), MAME comparison helpers (mamegfx.py, mame_cmp.py, *.lua), STE simulator on
                        Musashi (sim.py), Blitter sprite code generator, ROM preparation (roms.py), paths and toolchain;
                        sound: capsnd.py (Capcom sound drivers recorded per command), opn.py / opl.py (YM2203 / YM3526
                        envelopes), lz.py (packed data); rt/: the shared 68000 runtime (rtlib.s, borders.s, jagpad.s,
-                       ikbd.s, capsnd.s / capsnd_core.s: the sound players, lz.s); *_test.py: the engine's tests
+                       ikbd.s, capsnd.s / capsnd_core.s: the sound players, lz.s, m6809rt.s); *_test.py: the engine's tests
     games/<game>/      one folder per port, all alike:
       README.md        state, controls, method, measurements (a screenshot at the top)
       src/             <game>.s (start, VBL schedule, input, hooks) and the parts it includes, named by topic without a

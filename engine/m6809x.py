@@ -141,7 +141,7 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None, inline_banks=False):
+                 hook_next=None, static_read=None, inline_banks=False, io_fold=None):
         self.name, self.prefix = name, prefix
         self.page_bytes = page_bytes
         self.slot_of = dict(slot_of)
@@ -158,6 +158,7 @@ class Program:
         self.hook_next = dict(hook_next or {})    # hook -> where the code goes on after it (its flags are those read there)
         self.static_read = static_read            # (page, offset) -> 68000 lines leaving the byte in d7, or None
         self.inline_banks = inline_banks          # static MMU writes inline (the runtime has page_base_table)
+        self.io_fold = io_fold                    # v -> (base symbol, mask): an I/O site's stores fold into a register file
         self.slot_pages = collections.defaultdict(set)
         for p, s in self.slot_of.items():
             self.slot_pages[s].add(p)
@@ -362,6 +363,7 @@ class Emitter:
         self.joins = joins
         self.live_out = live_out
         self.lines = []
+        self.tail = []                          # (data after the code: the jump tables)
         self.refs = set()
         self.uid = 0
         self.unsupported = []
@@ -696,6 +698,23 @@ class Emitter:
         if a is not None and (a + off) & 0xFFFF >= 0xE000:
             self.mmu_static((a + off) & 0xFFFF, src)
             return
+        fold = self.p.io_fold(v) if self.p.io_fold else None
+        if fold and self.io_site(v, ins):
+            # a register file mirrored over the page (the CUS123 control): the address folded inline
+            self.stats["io write folded"] += 1
+            base, mask = fold
+            a = self.static_addr(ins)
+            if a is not None:
+                self.e("move.b %s,%s+$%X" % (src, base, (a + off) & mask))
+            else:
+                self.ea_to_d7(v, ins)
+                if off:
+                    self.e("addq.w #%d,d7" % off)
+                self.e("and.w #$%X,d7" % mask)
+                self.e("lea %s,a0" % base)
+                self.e("move.b %s,(a0,d7.w)" % src)
+            self.e("tst.b %s" % src)
+            return
         if self.io_site(v, ins):
             self.stats["io write"] += 1
             a = self.static_addr(ins)
@@ -762,6 +781,21 @@ class Emitter:
         a = self.static_addr(ins)
         if a is not None and a >= 0xE000 and not a & 1 and ((a >> 9) & 0xF) < 8:
             self.mmu_static(a, src, word=True)
+            return
+        fold = self.p.io_fold(v) if self.p.io_fold else None
+        if fold and self.io_site(v, ins):
+            self.stats["io write folded"] += 2
+            base, mask = fold
+            self.ea_to_d7(v, ins) if self.static_addr(ins) is None else self.e("move.w #$%04X,d7" % self.static_addr(ins))
+            self.e("move.w d7,d6")
+            self.e("and.w #$%X,d7" % mask)
+            self.e("lea %s,a0" % base)
+            self.e("move.w %s,-(sp)" % src)
+            self.e("move.b (sp)+,(a0,d7.w)")
+            self.e("addq.w #1,d6")
+            self.e("and.w #$%X,d6" % mask)
+            self.e("move.b %s,(a0,d6.w)" % src)
+            self.e("tst.w %s" % src)
             return
         if self.io_site(v, ins):
             self.stats["io write"] += 2
@@ -918,6 +952,7 @@ class Emitter:
                 self.jump_to(v, ins.target, branch_targets(self.p, v, ins))
             else:
                 self.e("move.w sr,d5")
+                self.jump_table(v, ins, None)
                 self.ea_to_d7(v, ins)
                 self.dispatch(v, saved=True)
             return
@@ -926,6 +961,7 @@ class Emitter:
             live = self.live_out.get(v, NZVC) & NZVC
             self.e("move.w sr,d5")
             if fl == "icall":
+                self.jump_table(v, ins, ret)
                 self.ea_to_d7(v, ins)
             self.e("move.b #$%02X,-(a5)" % (ret & 0xFF))
             self.e("move.b #$%02X,-(a5)" % (ret >> 8))
@@ -980,6 +1016,87 @@ class Emitter:
         if saved:
             self.e("move.w d5,ccr")
         self.e("jmp %s_dispatch" % self.p.name)
+
+    def jump_table(self, v, ins, ret):
+        """JMP / JSR [A,X] or [B,X] right after LDX #table (only A / B loads and shifts between): when the entries are
+        code in slot 7 or in this instruction's page, a 68000 table of labels serves the even indexes up to its
+        length (the ROM table's page checked when its slot has others); anything else goes on to the generic code
+        after this.  d5 = the SR to restore."""
+        x = ins.arg
+        if ins.mode != "idx" or not x.indirect or x.reg != "x" or x.kind not in ("acc_a", "acc_b"):
+            return
+        prev = []
+        w = v
+        for _ in range(4):
+            cands = [u for u in self.code if u < w and self.next_v(u, self.code[u]) == w]
+            if len(cands) != 1 or w in self.joins and w != v:
+                return
+            w = cands[0]
+            pi = self.code[w]
+            if pi.mn == "ldx" and pi.mode == "imm16":
+                table = pi.arg
+                break
+            if pi.mn not in ("lda", "ldb", "asla", "aslb", "lsla", "lslb", "pshs", "tsta", "tstb"):
+                return
+            if pi.mn == "pshs" and pi.arg & 0x10:
+                return
+        else:
+            return
+        tslot = table >> 13
+        own = self.p.slot_of[v >> 13]
+        if tslot == own:
+            tpage = v >> 13
+        elif self.fixed_slot(tslot) and len(self.p.slot_pages.get(tslot, ())) == 1:
+            tpage = next(iter(self.p.slot_pages[tslot]))
+        else:
+            pages = {pg for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r" and sl == tslot}
+            if len(pages) != 1:
+                return
+            tpage = next(iter(pages))
+        data = self.p.page(tpage)
+        entries = []
+        for k in range(64):
+            o = (table & 0x1FFF) + 2 * k
+            if o + 1 >= 0x2000:
+                break
+            t = (data[o] << 8) | data[o + 1]
+            ts = t >> 13
+            if ts == own:
+                tv = (v & ~0x1FFF) | (t & 0x1FFF)
+            elif self.fixed_slot(ts) and len(self.p.slot_pages.get(ts, ())) == 1:
+                tv = (next(iter(self.p.slot_pages[ts])) << 13) | (t & 0x1FFF)
+            else:
+                break
+            if tv not in self.code:
+                break
+            entries.append(tv)
+        if len(entries) < 2:
+            return
+        self.stats["jump table"] += 1
+        generic = self.new_label()
+        tab = "%s_jt%d" % (self.p.label(v), self.uid)
+        if tpage != v >> 13 and not (self.fixed_slot(tslot) and len(self.p.slot_pages.get(tslot, ())) == 1):
+            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(tpage), 4 * tslot))
+            self.e("bne %s" % generic)
+        self.e("moveq #0,d7")
+        self.e("move.b %s,d7" % ("d0" if x.kind == "acc_a" else "d1"))
+        self.e("cmp.w #%d,d7" % (2 * len(entries)))
+        self.e("bcc %s" % generic)
+        self.e("btst #0,d7")
+        self.e("bne %s" % generic)
+        self.e("add.w d7,d7")
+        self.e("lea %s,a0" % tab)
+        self.e("move.l (a0,d7.w),a0")
+        if ret is not None:
+            self.e("move.b #$%02X,-(a5)" % (ret & 0xFF))
+            self.e("move.b #$%02X,-(a5)" % (ret >> 8))
+        self.e("move.w d5,ccr")
+        self.e("jmp (a0)")
+        self.tail.append("\teven")
+        self.tail.append("%s:" % tab)
+        for tv in entries:
+            self.tail.append("\tdc.l %s" % self.lab(tv))
+        self.lines.append(generic + ":")
 
     def dispatch(self, v, saved=False):
         """jump to the 6809 address in d7 (computed jump); the CCR is right (or in d5 when saved)"""
@@ -1740,7 +1857,7 @@ def translate(prog):
     em.ret_points = {k: set(sorted(v)[:4]) for k, v in rets.items()}
     em.emit_all()
     missing = sorted(v for v in em.refs if v not in code)
-    lines = list(em.lines)
+    lines = list(em.lines) + em.tail
     lines.append("; --- referenced but not code")
     for v in missing:
         lines.append("%s:\tmove.w #$%04X,d7\n\tjmp %s_badpc" % (prog.label(v), prog.cpu_pc(v) if v >> 13 in prog.slot_of else v & 0xFFFF, prog.name))
