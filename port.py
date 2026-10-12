@@ -76,6 +76,7 @@ TESTS = {
     "blktiger": [("tools/build.py", ["--sim"], None), ("tools/reference_test.py", ["700"], None),
                  ("tools/logic_test.py", ["{n}"], 1600),
                  ("tools/logic_test.py", ["4000", "--walk"], None),
+                 ("tools/logic_test.py", ["2600", "--idle", "2400"], None),   # no button after the start: the intro story
                  ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None),
                  ("tools/sprite_test.py", [], None),                # edge clipping, black band words, a random walk
                  ("tools/sound_test.py", ["6000"], None)],          # the STE's sound player against the model

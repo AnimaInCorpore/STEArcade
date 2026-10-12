@@ -277,3 +277,17 @@ the walk). `render_test.py` checks words 0, 1, 19, 20 black in all its frames (t
 --step 50 --frames 28 --walk` (28), `--consecutive --first 700 --step 50 --frames 12` (12), `--frames 3 --step 375
 --scroll-sweep --flip-layout-sweep --sprite-edges` (253), `logic_test.py 1600`, `logic_test.py 4000 --walk`,
 `reference_test.py 700`, `sound_test.py 6000`.
+
+## The intro story (2026-10-12)
+
+Since 0.2.1 the story after the start ("Long long ago, three dragons ...") showed rows of one character on black:
+the window guards are only at the coverage's access sites (`docs/window-sites.json`), and every coverage and test
+schedule pressed a button right after the start, which skips the story.  Its routines in bank 6 read the story text
+and palettes from the window unguarded (the image of another bank), and their stores were not in `gen.TEXT_WRITERS` /
+`PAL_WRITERS`.  `logic_test.py --idle N` keeps the player's inputs released until frame N; `--idle 2400` (in
+`port.py test`) runs the whole story.  Added: 9 window sites (`2BA0F`, `2BA8A`, `2BA95`, `2BAE6`, `2BAF1`, `2BAF4`,
+`2BAF6`, `2BAFE`, `2BAFF`), the text writers `BA18`/`BA1B`, `BAFF`/`BB02`, `BB1D`/`BB21` and the palette copies
+`BA8A`, `BA95`, `BAE6`, `BAF1` of bank 6, and the twelve palette copies at `7BB5`-`7C2B` (every block copy to the
+palette is now noted).  `--audit` names the instruction that made the access (the PC is past it when the access
+happens: the next instruction's label was named before) and adds to its file instead of replacing it.
+`BT_GUARD_ALL=1` (every indirect access guarded) showed the story right, which pointed at the sites.

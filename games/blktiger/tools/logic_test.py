@@ -30,6 +30,8 @@ def main():
     ap.add_argument('frames', nargs='?', type=int, default=1600)
     ap.add_argument('--seed',type=int)
     ap.add_argument('--walk',action='store_true',help='hold right and attack through the first stage')
+    ap.add_argument('--idle',type=int,default=0,help='no player input before this frame (the intro story after the start runs; '
+                    'a button skips it)')
     ap.add_argument('--stage',type=int,help='start the game at this stage (0-7): the stage number $f3a1 set on both machines '
                     'while the game sets up, the lives $f3a0 kept at 3 (the cheats of ref/cover.py seeds 4-11)')
     ap.add_argument('--audit',action='store_true',help='record the translated instructions that touch the image of the banked window and '
@@ -54,7 +56,7 @@ def main():
 
         def watch(mode, width, addr, value):
             if g0 <= addr < g0 + 0x5000:
-                i = bisect.bisect_right(lv, cpu.r_pc()) - 1
+                i = bisect.bisect_right(lv, cpu.r_pc() - 1) - 1   # (the PC is past the accessing instruction)
                 if i >= 0:
                     audit[labels[i][1]] = audit.get(labels[i][1], 0) + 1
             return on_access(mode, width, addr, value)
@@ -179,6 +181,15 @@ def main():
     if not compare(-1):
         return 1
     print('boot matched',flush=True)
+    def save_audit():
+        if args.audit:
+            out = build_dir('blktiger') / f"bt_wsites_audit_{'walk' if args.walk else args.seed or 0}{'_idle' if args.idle else ''}.pkl"
+            found = {int(k[1:], 16) for k in audit}
+            if out.exists():                    # (sites guarded since an earlier run are no longer seen: keep them)
+                found |= set(pickle.load(out.open('rb')))
+            pickle.dump(found, out.open('wb'))
+            print('audit: accesses to the unguarded image by', len(audit), 'instructions', sorted(audit.items())[:20], '->', out)
+
     rng = random.Random(args.seed)
     values = (255,255,255)
     for frame in range(args.frames):
@@ -187,6 +198,8 @@ def main():
         elif frame > 700 and frame % 30 == 0:
             system = 255 & ~(0x40 if frame % 180 == 0 else 0) & ~(1 if frame % 120 == 0 else 0)
             values = system, 255 ^ rng.choice([0,1,2,4,8,16,32,17,33,18,34]),255
+        if frame < args.idle:
+            values = values[0], 255, 255
         if args.walk and frame >= 1000:
             values = values[0], 255 ^ 1 ^ 16 ^ (32 if frame%90<15 else 0), 255
         if args.stage is not None:
@@ -205,6 +218,7 @@ def main():
             print(f'frame {frame}: stopped {stop}, target={mem.r16(sym["g_dispatch_pc"]):04x}, d7={cpu.r_reg(R.D7):08x}, bank={mem.r8(sym["g_bank"])}')
             return 1
         if not compare(frame) or not hooks(frame):
+            save_audit()
             return 1
         resume()
         stop = run_to_stop()
@@ -213,10 +227,7 @@ def main():
         if frame % 100 == 0:
             print('frame',frame,'matched',flush=True)
     print(args.frames,'frames matched; the text layer checked in',text_checked[0])
-    if args.audit:
-        out = build_dir('blktiger') / f"bt_wsites_audit_{'walk' if args.walk else args.seed or 0}.pkl"
-        pickle.dump({int(k[1:], 16) for k in audit}, out.open('wb'))
-        print('audit: accesses to the unguarded image by', len(audit), 'instructions', sorted(audit.items())[:20], '->', out)
+    save_audit()
     return 0
 
 
