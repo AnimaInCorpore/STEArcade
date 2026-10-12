@@ -423,10 +423,9 @@ draw_part:
 	neg	d0
 	add	#240,d0
 	sub	6(a6),d0		; u0 = 208 - raw sy: left display column
-	cmp	#-16,d0
-	ble	.no_part
-	cmp	#224,d0
-	bge	.no_part
+	cmp	#224-16,d0		; across the picture's left or right edge (or outside): .edge_x
+	bhi	.edge_x
+.x_set:
 	cmp	#-16,d3
 	ble	.no_part
 	cmp	#GAME_LINES,d3
@@ -635,6 +634,11 @@ draw_part:
 	endc
 
 .slow_blits:
+	btst	#30,d0			; across an edge: its inner words only
+	beq.s	.slow_go
+	bsr	edge_blits
+	bra	.blits_done
+.slow_go:
 	lsl	#4,d6
 	sub	d5,d6
 	sprite_first_line
@@ -665,6 +669,95 @@ draw_part:
 .no_part:
 	moveq	#-1,d0
 	move.l	d0,S_RECT(a4)
+	rts
+
+; A part across the picture's left edge (u0 -15..-1) or right edge (209..223): both edges lie on 16-pixel
+; groups (GAME_X = 3 chunks, 224 = 14 chunks), so it draws only its inner destination word (edge_blits); one
+; wholly outside is culled.  Bit 30 of d0 marks it, bit 31 sends it down the generic path (as a 64 KB crossing).
+.edge_x:
+	cmp	#-16,d0
+	ble	.no_part
+	cmp	#224,d0
+	bge	.no_part
+	or.l	#$c0000000,d0
+	bra	.x_set
+
+; edge_blits: the lines of an edge part, one word each (xcount 1).  Right edge (chunk 13): the first word, skew s,
+; END1 = the line's first mask.  Left edge (chunk -1): the second word at +8, FXSR with source Y increment 0 (the
+; pre-read is the line's word, the read after it is not used: its bits lie outside the second mask), END1 = the
+; line's second mask.  The record keeps the inner chunk only (rectangle, words, cells): restores and marks never
+; touch the side bands.  Called with a0 = the generic masks (e1, e3 per line from the first line drawn), d3 = the
+; top (flip x: bottom) line's address, d4 > 0 down / < 0 up, d0 = flags | skew.
+edge_blits:
+	move	#1,BLT_COUNT.w
+	move	#2,BLT_DST_YINC.w
+	moveq	#$f,d2
+	and.b	d0,d2			; skew (no NFSR: xcount 1)
+	move.l	#STRIDE,d6
+	tst	d4
+	bpl.s	.down
+	neg.l	d6
+.down:
+	move	S_LINES(a4),d5
+	subq	#1,d5
+	lea	BLT_DST_ADDR.w,a6
+	tst.b	S_RECT+3(a4)		; (the rectangle's chunk: GAME_X - 8 on the left, GAME_X + 13 * 8 on the right)
+	bmi.s	.right
+	; left edge
+	addq.l	#8,d3
+	clr	BLT_SRC_YINC.w
+	or.b	#$80,d2		; FXSR
+	move.b	d2,BLT_SKEW.w
+	addq.l	#2,a0			; the second masks
+.lline:
+	move	(a0),d2
+	addq.l	#4,a0
+	beq.s	.lskip		; (nothing of this line in the inner word: the source moves on)
+	move	d2,(a1)
+	move.l	d3,(a6)
+	move	d1,(a5)
+	move.b	#$c0,(a2)		; BUSY | HOG
+	add.l	d6,d3
+	dbf	d5,.lline
+	bra.s	.ldone
+.lskip:
+	addq.l	#8,BLT_SRC_ADDR.w
+	add.l	d6,d3
+	dbf	d5,.lline
+.ldone:
+	move	#2,BLT_SRC_YINC.w
+	bset	#3,S_RECT+3(a4)		; the rectangle from chunk 0 (GAME_X - 8 + 8: bit 3 of 16 -> 24, idempotent)
+	move.l	#$0c000000,d2		; cell columns 4-5
+	bra.s	.record
+.right:
+	move.b	d2,BLT_SKEW.w
+.rline:
+	move	(a0),d2
+	addq.l	#4,a0
+	beq.s	.rskip		; (nothing of this line in the inner word: the source moves on)
+	move	d2,(a1)
+	move.l	d3,(a6)
+	move	d1,(a5)
+	move.b	#$c0,(a2)		; BUSY | HOG
+	add.l	d6,d3
+	dbf	d5,.rline
+	bra.s	.rdone
+.rskip:
+	addq.l	#8,BLT_SRC_ADDR.w
+	add.l	d6,d3
+	dbf	d5,.rline
+.rdone:
+	move.l	#$00030000,d2		; cell columns 30-31 (window long 1)
+.record:
+	move	#4,S_WORDS(a4)
+	move.l	d2,S_MASK1(a4)
+	tst.l	S_MASK2(a4)
+	beq.s	.done
+	move.l	d2,S_MASK2(a4)
+	tst.l	S_MASK3(a4)
+	beq.s	.done
+	move.l	d2,S_MASK3(a4)
+.done:
 	rts
 
 ; per (size y, size x): bit 3 - part of the parts that exist (part 0 top left, 1 right of

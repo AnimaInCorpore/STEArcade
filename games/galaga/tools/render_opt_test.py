@@ -1,4 +1,5 @@
-"""Compare renderer builds, including cached repaints and star ownership.
+"""Compare renderer builds, including cached repaints and star ownership: the game area's bytes (every line, bytes
+24-135; sprites clip at its left and right edges since 2026-10-12), and AFTER's side bands must stay clean.
 Usage: python games/galaga/tools/render_opt_test.py BEFORE_DIR AFTER_DIR
 Each directory contains GALAGA.PRG and galaga.map.
 """
@@ -76,12 +77,17 @@ def main():
             h = TestHarness(directory / "GALAGA.PRG", directory / "galaga.map")
             images, cycles = sequence(h, repaint)
             h.m.cleanup()
+            area = [b"".join(img[line * 256 + 24:line * 256 + 136] for line in range(384)) for img in images]
+            band = sum(any(img[line * 256 + x] for line in range(384) for x in (*range(24), *range(136, 256)))
+                       for img in images)
             if expected is not None:
-                for frame, (a, b) in enumerate(zip(expected, images)):
+                for frame, (a, b) in enumerate(zip(expected, area)):
                     assert a == b, ("frame", frame, "different bytes", sum(x != y for x, y in zip(a, b)))
-            expected = images
-            print(directory.name, "repaint" if repaint else "full frame", len(images), "frames", cycles, "CPU+bus cycles", flush=True)
-    print("PASS: identical screen bytes")
+            expected = area
+            print(directory.name, "repaint" if repaint else "full frame", len(images), "frames", cycles, "CPU+bus cycles;",
+                  band, "frames with bytes in the side bands", flush=True)
+        assert not band, "AFTER drew into the side bands"
+    print("PASS: identical bytes in the game area (all lines), AFTER's side bands clean")
 
 if __name__ == "__main__":
     main()

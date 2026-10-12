@@ -9,7 +9,8 @@ relative to `games/galaga/`; the shared pieces are described in `docs/architectu
 
 * `src/` the runtime and renderer (`galaga.s`, `render.s`, `sprites.s`, `stars.s`)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `sound.py` (the WSG on the
-  YM2149), `build.py`; tests `schedule_test.py`, `sound_test.py`, `render_test.py`, `render_opt_test.py`
+  YM2149), `build.py`; tests `schedule_test.py`, `sound_test.py`, `render_test.py`, `render_opt_test.py`, `sprite_test.py`;
+  `perf_test.py` (renderer cycles), `bench.sh` / `bench.ps1` (Hatari frame rate)
 * `ref/` coverage (`cover.py`) and the MAME comparison, one-off probes in `ref/probes/`; the coverage pickles go to `build/galaga/`
 
 Build and run from the repository root: `python port.py build galaga`, `python port.py run galaga shot@30`.
@@ -335,3 +336,39 @@ found from those dumps.  Coverage seeds 4-6 of `ref/cover.py` poke the score (si
 and play the name entry (one player, two players, the timeout); `port.py cover galaga 4` runs one seed with its group's
 frame count.  Checked in Hatari with the score forced to 30000: game over, name entry, Best 5 and seven minutes of the
 attract mode.  Released in 0.2.1.
+
+
+## Sprites clipped at the picture's left and right edges (2026-10-12)
+
+The picture's left and right edges lie on 16-pixel groups (`GAME_X` = 3 chunks, 224 pixels = 14 chunks), so, as the
+renderer rules now allow there, a sprite part across one draws only its inner destination word and the side bands of
+the 512-pixel lines get no sprite pixels; top and bottom stay whole in the guard rows.  `draw_part`: the two range
+compares of the left column became one unsigned compare (`cmp #224-16,d0 / bhi .edge_x`); `.edge_x` culls a part wholly
+outside and marks the others (d0 bits 30 + 31), which then take the generic path (the 64 KB one) to `edge_blits`: one
+word a line (xcount 1, the 4 planes as the Y count), right edge the first word with END1 = the line's first mask, left
+edge the second word at +8 with FXSR and source Y increment 0 (END1 = the line's second mask), lines without bits in
+the inner word skipped (source address + 8).  The record keeps the inner chunk only (`S_RECT`, `S_WORDS` 4, the two
+cells), so restores and marks never touch the bands either.  The generated sprite code and the common path are
+unchanged; nothing is erased after drawing.  The stars and characters are drawn in the picture only, as before.
+
+Cost, CPU + Blitter cycles on Musashi:
+* `tools/perf_test.py` (new): 1201 consecutive arcade RAM states of the attract mode (VBL 2400-3600, recorded once from
+  the build before, `capture`), drawn by each build's `render_frame` (`replay`), so both draw exactly the same frames:
+  render_frame 179,912 -> 179,601 a render (-0.17%), draw_sprites 94,872 -> 94,561 (-0.33%); 49 edge parts.  `compare`:
+  the game area identical in all 1201 renders, bytes in the side bands in 21 renders before, 0 after.
+* `render_opt_test.py` (random sprites, so many more at the edges): full frames 38,330,702 -> 38,336,116 (+0.01%),
+  forced repaints 17,206,312 -> 17,289,998 (+0.5%, the edge parts' per-line loop against the generated code).  The
+  test now compares the game area (all lines) and requires AFTER's side bands to be clean.
+* Hatari (pinned F030Arcade build, `tools/bench.sh 9000`, the Unix version of `bench.ps1`, attract mode): 33.0 -> 33.1
+  frames drawn a second on average, the formation windows 17.2-20.7 -> 17.4-20.7; no CRASH.TXT, no late border events.
+  The game logic runs at every VBL in both (one game frame per VBL); the picture rate is the number above.
+
+Tests: `tools/sprite_test.py [DIR]` (new; default run/galaga_sim with build/galaga's map, so rebuild `--sim` after
+other builds): 4 sprites with holes, flags 0 / flip x / flip y / 32 wide / 32 wide flipped / double both, all 16
+shifts, plain and across a 64 KB boundary: 2664 positions (2208 across an edge, 408 culled) equal the same columns of
+the sprite drawn whole in the middle, the side bands untouched, and after a move to the middle the restore leaves the
+bands alone; the build before fails it (109 band pixels at the first left-edge case).  Passes with `-D CACHESPRITES=1`
+and `-D NOSPRITECODE=1` too.  `port.py test galaga`: sound_test 2987 frames / 3000 random states 0 differ,
+render_test 0 pixels at 2200, 3600, 5200 (and 1500, 3000, 4400, 6400, 8000), schedule_test as before (differs from frame
+900, the stars); `engine/sprite_blit_test.py` passes (Galaga: 8192 shape/skew/direction checks, 48 renderer
+comparisons of the NOSPRITECODE and the generated-code build, both clipping).
