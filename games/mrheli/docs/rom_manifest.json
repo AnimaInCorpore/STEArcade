@@ -1,0 +1,116 @@
+[
+ {
+  "name": "b-b0-.rom",
+  "size": 65536,
+  "crc32": "b5b95776",
+  "sha1": "4685b56071b916ce712c45f24da8068dd7e40ed1"
+ },
+ {
+  "name": "b-b1-.rom",
+  "size": 65536,
+  "crc32": "74ca16ee",
+  "sha1": "7984bc9a0b46e1b4a8ecac7528d57606305aad73"
+ },
+ {
+  "name": "b-b2-.rom",
+  "size": 65536,
+  "crc32": "b82cca04",
+  "sha1": "c12b95be311205181b01d15021bcf9f01ed3e0a3"
+ },
+ {
+  "name": "b-b3-.rom",
+  "size": 65536,
+  "crc32": "a7afc920",
+  "sha1": "92c75463ada39184e731b82ef2883ae6f1f67482"
+ },
+ {
+  "name": "c-v0-b.rom",
+  "size": 65536,
+  "crc32": "d0c27e58",
+  "sha1": "fec76217cc0c04c723989c3ec127a2bd33d64c60"
+ },
+ {
+  "name": "mh-b-a0.bin",
+  "size": 65536,
+  "crc32": "6a0db256",
+  "sha1": "fa3a2dc03da5bbe06a9c9b3d4ed4fddb47c469ac"
+ },
+ {
+  "name": "mh-b-a1.bin",
+  "size": 65536,
+  "crc32": "14ec9795",
+  "sha1": "4842e076115efe9daf00dab8f61516d28c19baae"
+ },
+ {
+  "name": "mh-b-a2.bin",
+  "size": 65536,
+  "crc32": "dfcb510e",
+  "sha1": "2387cde4ec0bae176486e1f7541103fd557fe255"
+ },
+ {
+  "name": "mh-b-a3.bin",
+  "size": 65536,
+  "crc32": "957e329b",
+  "sha1": "9d48a0b84915e1cef0b0311a3581991dc83ee199"
+ },
+ {
+  "name": "mh-c-00.bin",
+  "size": 131072,
+  "crc32": "dec4e121",
+  "sha1": "92169b523f1600e994e016dc1959a52958e1d89d"
+ },
+ {
+  "name": "mh-c-10.bin",
+  "size": 131072,
+  "crc32": "7aaa151e",
+  "sha1": "efd980bb2eed7084354b7a4aa2f733cd2f876741"
+ },
+ {
+  "name": "mh-c-20.bin",
+  "size": 131072,
+  "crc32": "eae0de74",
+  "sha1": "3a2469c0eeb18131f989807afb50228f57ccea30"
+ },
+ {
+  "name": "mh-c-30.bin",
+  "size": 131072,
+  "crc32": "01d5052f",
+  "sha1": "5d5e70913bb7af48193c70209595f27a64fa6cac"
+ },
+ {
+  "name": "mh-c-h0.bin",
+  "size": 65536,
+  "crc32": "e2ca5646",
+  "sha1": "9f4fe2f0a45233325bd9336cabb925a1f625453b"
+ },
+ {
+  "name": "mh-c-h1.bin",
+  "size": 65536,
+  "crc32": "8974e84d",
+  "sha1": "39e05c80e805dde45f2fc5fc429b75f9b599089c"
+ },
+ {
+  "name": "mh-c-h3.bin",
+  "size": 65536,
+  "crc32": "143f596e",
+  "sha1": "f9d444eebcd53dac925d14b7a2858803b7fd9ce2"
+ },
+ {
+  "name": "mh-c-l0.bin",
+  "size": 65536,
+  "crc32": "643e23cd",
+  "sha1": "66998a6dfc7ef538540986b61d2414a5ef250d0d"
+ },
+ {
+  "name": "mh-c-l1.bin",
+  "size": 65536,
+  "crc32": "5f8bda69",
+  "sha1": "48629d617bd48c9de9c6a567fb203258a56fdbbd"
+ },
+ {
+  "name": "mh-c-l3.bin",
+  "size": 65536,
+  "crc32": "c0982536",
+  "sha1": "45399f8d0577c6e2a277a69303954ce5d2de7c07"
+ }
+]

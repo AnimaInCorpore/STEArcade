@@ -111,6 +111,19 @@ prints 0 differing pixels for all four frames now.  Notes:
   First, Megazone, Jail Break, Finalizer, Roc'n Rope): `M6809(rd, wr, rd_op=konami1_opcode(rd, boundary))` and
   `m6809dis.decode(..., rd_op=...)`; only the opcode bytes (the first byte and the byte after $10/$11) go through
   `rd_op`, operands do not.  A translator reading code bytes must do the same (`engine/konami1_test.py`).
+* **Irem M72** (R-Type, Mr. HELI; `engine/m72.py`, `engine/m72_mame.py`, 2026-10-12): 0 differing pixels and pens in
+  every captured frame of both games.  The scroll, raster-line and sprite-DMA registers are V30 *I/O ports*: TAPS take
+  `tag:space:start:end` (`maincpu:io:0x80:0x87`; a 16-bit bus's write is logged byte by byte, the tap range must
+  cover whole bus words), `f<frame>_tapstate.txt` holds the registers' values before the logged writes, and DUMPS of
+  20-bit ranges go to `f<frame>_<tag>_<space>_<start>.bin` (`load_dump` grows the image).  The sprite chip draws a
+  buffer the program fills by a write to port $04 (MAME's buffered sprite RAM, in no address space): SNAPS
+  `maincpu:io:0x04=maincpu:0xc0000:0xc03ff` copies the sprite RAM at that write.  MAME draws the lines up to the raster
+  interrupt's line (port $06 - 128) when it fires and the rest at the frame's end, so render per band from the
+  previous frame's dump plus the logged writes (video RAM writes do occur mid-frame); the palette is not banded (pens
+  are looked up at the end).  R-Type: DMA and scroll in the VBLANK handler, the status bar is a raster split at line
+  239 (FG scroll y $90, x 0: map rows 0-1).  Mr. HELI: a top panel split at line 31 and, in the cave, a second split
+  where the handler re-programs the raster line.  Pens never written keep MAME's default pattern (pen bits 0/1/2 ->
+  full red/green/blue), not black: 448 pens "differ" during R-Type's boot; compare after the game wrote the palette.
 
 #### Frames from an old MAME without Lua snapshots (F030Arcade `wolfmame-0162`, Windows)
 

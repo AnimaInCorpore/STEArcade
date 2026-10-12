@@ -21,15 +21,16 @@ from paths import ENGINE, ROMS
 LUA = ENGINE / "mame_frames.lua"
 
 
-def run_mame(game, frames, dumps, taps=(), timeout=600, keep=None):
+def run_mame(game, frames, dumps, taps=(), timeout=600, keep=None, rompath=None, snaps=(), pens_every=False):
     exe = os.environ.get("MAME") or shutil.which("mame")
     if not exe:
         raise RuntimeError("MAME not found; set MAME")
     out = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="mame_%s_" % game))
     out.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, OUT=str(out), FRAMES=" ".join(map(str, frames)), DUMPS=" ".join(dumps), TAPS=" ".join(taps))
+    env = dict(os.environ, OUT=str(out), FRAMES=" ".join(map(str, frames)), DUMPS=" ".join(dumps), TAPS=" ".join(taps),
+               SNAPS=" ".join(snaps), PENS_EVERY="1" if pens_every else "0")
     with (out / "mame.log").open("w") as log:
-        r = subprocess.run([exe, game, "-rompath", str(ROMS), "-window", "-sound", "none", "-nothrottle",
+        r = subprocess.run([exe, game, "-rompath", str(rompath or ROMS), "-window", "-sound", "none", "-nothrottle",
                             "-frameskip", "0", "-seconds_to_run", "250", "-skip_gameinfo", "-autoboot_script", str(LUA),
                             "-snapshot_directory", str(out)], cwd=out, env=env, stdout=log, stderr=log, timeout=timeout)
     last = max(frames)
@@ -38,9 +39,16 @@ def run_mame(game, frames, dumps, taps=(), timeout=600, keep=None):
     return out
 
 
-def load_dump(d, frame, tag, start, into=None):
-    data = (Path(d) / ("f%d_%s.bin" % (frame, tag))).read_bytes()
-    mem = into if into is not None else bytearray(0x10000)
+def load_dump(d, frame, tag, start, into=None, space="program"):
+    """The dump of DUMPS entry tag[:space]:start:end put at start of a memory image (a new one of 64 KB, or as large as
+    the range needs: 20-bit addresses)."""
+    p = Path(d) / ("f%d_%s_%s_%05x.bin" % (frame, tag, space, start))
+    if not p.exists():
+        p = Path(d) / ("f%d_%s.bin" % (frame, tag))
+    data = p.read_bytes()
+    mem = into if into is not None else bytearray(max(0x10000, start + len(data)))
+    if len(mem) < start + len(data):
+        mem.extend(bytes(start + len(data) - len(mem)))
     mem[start:start + len(data)] = data
     return mem
 
@@ -49,9 +57,25 @@ def load_shot(d, frame):
     return np.array(Image.open(Path(d) / ("f%d.png" % frame)).convert("RGB"))
 
 
-def load_pens(d):
+def load_pens(d, frame=None):
+    """The pens at the first dumped frame (pens.txt), or at `frame` (run_mame(..., pens_every=True))."""
+    name = "pens.txt" if frame is None else "f%d_pens.txt" % frame
     return np.array([[int(l.split()[1][i:i + 2], 16) for i in (0, 2, 4)]
-                     for l in (Path(d) / "pens.txt").read_text().splitlines()], np.uint8)
+                     for l in (Path(d) / name).read_text().splitlines()], np.uint8)
+
+
+def load_tap_state(d, frame):
+    """{(tag, offset): byte}: the last value written to each tapped address before the frame's logged writes."""
+    out = {}
+    for l in (Path(d) / ("f%d_tapstate.txt" % frame)).read_text().splitlines():
+        t, o, x = l.split()
+        out[(t, int(o, 16))] = int(x, 16)
+    return out
+
+
+def load_snap(d, frame, n=1, prev=False):
+    """SNAPS entry n's copy at the frame's end (prev: at the previous frame's end)."""
+    return (Path(d) / ("f%d_snap%d%s.bin" % (frame, n, "_prev" if prev else ""))).read_bytes()
 
 
 def load_taps(d, frame):

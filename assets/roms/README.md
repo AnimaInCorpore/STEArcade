@@ -16,6 +16,8 @@ the repository** (`.gitignore`): supply the archives below yourself; `port.py pr
 | `commando.zip` | Commando (World, MAME `commando`) | `extracted/commando/` (22 verified files; `port.py prepare commando`) | `games/commando` |
 | `gunsmoke.zip` | Gun.Smoke (MAME `gunsmoke`) | `extracted/gunsmoke/` (32 verified files; `port.py prepare gunsmoke`) | `games/gunsmoke` |
 | `galaga88.zip` | other set | not extracted yet | — |
+| `rtype.zip` | R-Type (World, MAME `rtype`; without the M72 boards' PROMs and PALs, which the driver never reads) | `extracted/rtype/` (20 verified files); `build/rtype/mame_roms/` for MAME 0.289 (its names, zero-filled stand-ins) | `games/rtype` |
+| `mrheli.zip` + `mh_c-pr-.ic1` | Mr. HELI no Daibouken (Japan, MAME `mrheli`; an older set: the i8751 program `mh_c-pr-.ic1`, crc32 897dc4ee, is a separate file) | `extracted/mrheli/` (19 verified files + the MCU program); `build/mrheli/mame_roms/` as for R-Type | `games/mrheli` |
 
 `extracted/` is not in git: `python port.py prepare <game>` (each game's `tools/prepare.py`) verifies the archive
 against `games/<game>/docs/rom_manifest.json` and unpacks it; `port.py build`, `cover`, `test` and `mame` do that first

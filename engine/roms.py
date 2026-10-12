@@ -42,3 +42,19 @@ def write_manifest(game, names):
     """(once, when a set is added) the manifest of already verified files in extracted/<game>/"""
     entries = [dict(name=n, **fingerprint((EXTRACTED / game / n).read_bytes())) for n in names]
     (game_dir(game) / "docs" / "rom_manifest.json").write_text(json.dumps(entries, indent=1) + "\n")
+
+
+def mame_folder(game, names=None, stand_ins=None, extra=()):
+    """build/<game>/mame_roms/<game>/ for a MAME 0.289 run (-rompath build/<game>/mame_roms) when the archive is from an
+    older romset: a ROM folder is matched by name, not CRC, so the files get MAME's names (names: ours -> MAME's);
+    stand_ins: {name: size} zero-filled files MAME requires but the driver never reads (PROMs, PALs; a checksum warning
+    only); extra: files outside the archive (assets/roms/<name>) copied as they are.  Returns the -rompath."""
+    out = ROMS.parent.parent / "build" / game / "mame_roms"
+    (out / game).mkdir(parents=True, exist_ok=True)
+    for f in (EXTRACTED / game).iterdir():
+        (out / game / (names or {}).get(f.name, f.name)).write_bytes(f.read_bytes())
+    for name, size in (stand_ins or {}).items():
+        (out / game / name).write_bytes(bytes(size))
+    for name in extra:
+        (out / game / name).write_bytes((ROMS / name).read_bytes())
+    return out

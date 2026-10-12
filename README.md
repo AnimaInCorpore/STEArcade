@@ -22,6 +22,8 @@ arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, 
 |  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 |
 |  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 |
 |  | [Gyruss](games/gyruss/) | Z80 + KONAMI-1 (encrypted 6809) + Z80 + i8039 |
+|  | [R-Type](games/rtype/) | Irem M72: NEC V30 + Z80 |
+|  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
