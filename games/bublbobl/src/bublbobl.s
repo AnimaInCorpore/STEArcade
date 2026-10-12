@@ -348,6 +348,9 @@ quit:
 	ifd DEBUG
 	bsr bd_report
 	bsr	dbg_counters
+	ifd RNDTRACE
+	bsr	dbg_rndwrite
+	endc
 	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -512,6 +515,9 @@ vbl:
 	tst.b	booted1			; (the chips' interrupts start once the main CPU idles; nothing is
 	beq	vbl_done		; drawn before that: the boot's RAM test only fills the video RAM)
 	addq.l	#1,logic_rounds
+	ifd RNDTRACE
+	bsr	dbg_rndtrace		; (the random state and inputs at each round: RNDTRACE.BIN)
+	endc
 	ifd SIM
 	addq.l	#1,sim_game_frames	; (profile.py: game frames run)
 	endc
@@ -871,7 +877,7 @@ mcu_irq:
 	lea	mcu_mem,a6
 	lea	mcu_mem+$100,a5
 	moveq	#0,d2
-	bsr	MF046
+	bsr	mcu_native		; (src/mcu_native.s; -D MCU_XLATE: the translation, MF046)
 	bra.s	mcu_exit
 .no:	rts
 
@@ -1267,7 +1273,11 @@ compose_inputs:
 ; The benchmark's inputs (tools/bench.sh), as tools/profile.py's script by VBL: coin at 400, start at 440, then
 ; left / right every 50 VBLs, jump every 30, bubble every 90.
 autoplay:
+	ifd	ROUNDPLAY
+	move.l	logic_rounds,d0		; (-D ROUNDPLAY: by game round, the same game in faster builds)
+	else
 	move.l	frame_counter,d0
+	endc
 	moveq	#$03,d1
 	cmp.l	#400,d0
 	blo.s	.c
@@ -1357,6 +1367,48 @@ dbg_counters:
 dbg_cname:
 	dc.b	"COUNTERS.BIN",0
 	even
+	endc
+
+	ifd RNDTRACE
+dbg_rndtrace:
+	movem.l	d0/a0,-(sp)
+	move.l	logic_rounds,d0
+	cmp.l	#4096,d0
+	bhs.s	.no
+	lsl.l	#3,d0
+	lea	dbg_rnd,a0
+	add.l	d0,a0
+	move.w	rnd_state,(a0)+
+	move.b	in0_val,(a0)+
+	move.b	in1_val,(a0)+
+	move.w	frame_counter+2,(a0)+
+	move.b	G_MCRAM+$1E,(a0)+	; (the credits)
+	move.b	main_irq,(a0)
+.no:	movem.l	(sp)+,d0/a0
+	rts
+dbg_rndwrite:
+	clr	-(sp)
+	pea	.name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	dbg_rnd
+	move.l	#8*4096,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+.name:	dc.b	"RNDTRACE.BIN",0
+	even
+	section bss,bss
+dbg_rnd:	ds.b	8*4096
+	section text,code
 	endc
 
 ; scancode, IN0 bits (coins), player 1 bits (left 0, right 1, bubble 4, jump 5, start 6),
@@ -1535,6 +1587,7 @@ z80_unsupported:
 	include "bb_code.s"
 	include "bb_mcu.s"
 	include "natives.s"
+	include "mcu_native.s"
 
 	section text,code
 	include "rtlib.s"

@@ -151,7 +151,11 @@ tests its routines against the translation they replace (random states: memory, 
 lock-step test.  Bubble Bobble (`games/bublbobl/src/natives.s`, 2026-10-12): the sub CPU's count of objects near IX
 (`$0849`, ~210 -> ~50 cycles an object) and both CPUs' object state dispatch (`$5C37`, `$03CF`: a chain of `bit` /
 `jp nz` with Z merged into F at each test, two tests native for an object with none set): the translated code 171k ->
-116k + 16k native cycles a game frame in play, the game 18-40% more rounds a VBL there.
+116k + 16k native cycles a game frame in play, the game 18-40% more rounds a VBL there.  The same port replaces its MCU's
+VBL interrupt (`src/mcu_native.s`, 6801 firmware, not through `natives`: the runtime calls it instead of the
+translation): the bus cycles the firmware clocks through its ports become moves on the shared RAM, 27k -> 3.9k cycles
+a game frame; with the natives, in play in Hatari (the same game: inputs by game round) 0.85 -> 0.97 game rounds a VBL
+and 13.4 -> 21.9 pictures a second.
 
 ### Tests and measurements of the translator
 

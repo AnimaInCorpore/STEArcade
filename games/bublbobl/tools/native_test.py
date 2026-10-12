@@ -8,11 +8,17 @@ y_near (the sub CPU's $0849): its translation still follows its label (Y084D, af
 counts 0-12 (0: 256 objects, the translation), IX one of the objects, fields near each other (equal +29, |+2| and +1
 around 13, +30 bit 0, IX+33 bits 4/5, (IY+0) & $1D zero or not).
 
+mcu_native (src/mcu_native.s, the MCU's VBL interrupt $F046) against the translated firmware MF046 with the runtime's
+bus routines: random MCU RAM, shared RAM, DIP switches and inputs, the request bytes biased to each path (coins and
+credits, lockout, the counters and their checks, the two position scans with objects near, the sequences, the
+countdown, the tables, the reset request): the MCU's memory $00-$EF (its ports, $4A, its variables), the shared RAM,
+p1_out / p2_out / p3_in, the main CPU's interrupt request, a reset.
+
 z_state / y_state (the objects' state dispatch, $5C37 / $03CF): the translation from the label after the `push af`
 (the push done here as z80x stores it); every combination of the tested bits of (IX+0) and (IX+33) (the others
 random), random F: the handler reached, A, F, the CCR, the Z80 stack.
 """
-import os, random, sys
+import collections, os, random, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 from sim import Sim
 from machine68k import Register as R
@@ -88,11 +94,106 @@ def test_states(s, sym, rnd):
               "the Z80 stack), all %d handlers reached" % (label, cases, len(tested), len(handlers)))
 
 
+def test_mcu(s, sym, rnd, n_cases):
+    cpu, mem = s.cpu, s.mem
+    mm, mc = sym["mcu_mem"], sym["G_MCRAM"]
+    mem.w_block(mm + 0xF000, (build_dir("bublbobl") / "rom_mcu.rom").read_bytes())
+    frame = 0x2E8000                              # (mcu_restart: movem.l (sp)+,d0-d7/a0-a6; rts)
+    glue = ["p1_out", "p2_out", "p3_in", "main_irq", "mcu_booted"]
+    paths = collections.Counter()
+
+    def pick(*vals):
+        return rnd.choice(list(vals) + [rnd.getrandbits(8)])
+
+    for case in range(n_cases):
+        ram = bytearray(rnd.getrandbits(8) for _ in range(0x100))
+        ram[0], ram[1], ram[5] = 0xF0, 0xFF, 0xFF
+        ram[4] = rnd.choice([0, 0xFF])
+        for a in (0x41, 0x43, 0x45):
+            ram[a] = pick(0, 1, 2, 3)
+        for a in (0x40, 0x42, 0x44):
+            ram[a] = pick(0, 0x80)
+        ram[0x48], ram[0x49] = rnd.randrange(4), rnd.randrange(4)
+        for a in range(0x5D, 0x61):
+            ram[a] = rnd.randrange(12)
+        sh = bytearray(rnd.getrandbits(8) for _ in range(0x400))
+        put = lambda a, v: sh.__setitem__(a - 0xC00, v)
+        put(0xF98, pick(0x47, 0x47))
+        put(0xF94, pick(1, 0xFF, 0))
+        put(0xC1E, pick(0, 3, 8, 9))
+        for cmd, val, cp in ((0xC6F, 0xC24, 0x52), (0xC70, 0xC25, 0x53)):
+            put(cmd, pick(0, 1, 2, 4, 8))
+            put(val, pick(0x0A, ram[cp]))
+        put(0xF95, pick(0x42))
+        put(0xC7E, pick(0, 1, 2, 4, 8, 0x10, 0x20, 0x40))
+        x, y = rnd.getrandbits(8), rnd.getrandbits(8)
+        for req, xa, ya in ((0xC5F, 0xC60, 0xC61), (0xC67, 0xC68, 0xC69)):
+            put(req, pick(1, 3, 0))
+            put(xa, x)
+            put(ya, y)
+        for k in range(7):
+            put(0xC01 + 4 * k, pick(1, 0))
+            put(0xC02 + 4 * k, (x + rnd.randrange(-12, 13)) & 0xFF)
+            put(0xC03 + 4 * k, (y + rnd.randrange(-12, 13)) & 0xFF)
+        for a in (0xC72, 0xC74, 0xC76, 0xC80):
+            put(a, rnd.randrange(40))
+        put(0xC7A, pick(0, 1))
+        put(0xC79, pick(0, 1))
+        put(0xC78, pick(0, 1))
+        put(0xC71, pick(0x0D))
+        ram[0x54] = pick(0x0C)
+        put(0xC7C, rnd.randrange(7))
+        for f, i in ((0xF88, 0xF8A), (0xF8C, 0xF8E), (0xF90, 0xF92)):
+            put(f, pick(1, 1))
+            put(i, rnd.randrange(5))
+        put(0xF97, rnd.choice([0x4A] + [rnd.getrandbits(8)] * 30))
+        inputs = bytes(rnd.getrandbits(8) for _ in range(4))
+        in0 = rnd.choice([rnd.getrandbits(4) | 3, rnd.getrandbits(8)])
+        g0 = [rnd.getrandbits(8), rnd.getrandbits(8), rnd.getrandbits(8), 0, 1]
+        out = []
+        for entry in ("MF046", "mcu_native"):
+            mem.w_block(mm, bytes(ram))
+            mem.w_block(mc, bytes(sh))
+            mem.w_block(sym["dsw0"], inputs)
+            mem.w8(sym["in0_val"], in0)
+            for name, v in zip(glue, g0):
+                mem.w8(sym[name], v)
+            mem.w32(sym["mcu_sp0"], frame)
+            mem.w32(frame + 60, STOP)
+            for r in (R.D0, R.D1, R.D2, R.D3, R.D6, R.D7):
+                cpu.w_reg(r, 0)
+            cpu.w_reg(R.A6, mm)
+            cpu.w_reg(R.A5, mm + 0x100)
+            cpu.w_reg(R.A7, 0x2EF000)
+            mem.w32(0x2EF000, STOP)
+            cpu.w_sr(0x2700)
+            cpu.w_pc(sym[entry])
+            n = 0
+            while cpu.r_pc() != STOP:
+                cpu.execute(1)
+                n += 1
+                assert n < 200000, (entry, "does not return", hex(cpu.r_pc()))
+            out.append((bytes(mem.r_block(mm, 0xF0)), bytes(mem.r_block(mc, 0x400)),
+                        [mem.r8(sym[name]) for name in glue]))
+        a, b = out
+        assert a == b, (case, [("mcu %02X" % i, a[0][i], b[0][i]) for i in range(0xF0) if a[0][i] != b[0][i]][:8],
+                        [("sh %03X" % (0xC00 + i), a[1][i], b[1][i]) for i in range(0x400) if a[1][i] != b[1][i]][:8],
+                        a[2], b[2])
+        paths["reset"] += a[2][4] == 0
+        paths["main irq"] += a[2][3] != 0
+        paths["scan hit"] += a[1][0x62] != sh[0x62] or a[1][0x6A] != sh[0x6A]
+        paths["credits"] += a[1][0x1E] != sh[0x1E]
+        paths["countdown end"] += a[1][0x7B] != sh[0x7B]
+    print("mcu_native: %d cases: native = translation (MCU memory $00-$EF, shared RAM, ports, interrupt, reset); "
+          "with %s" % (n_cases, ", ".join("%s %d" % kv for kv in sorted(paths.items()))))
+
+
 def main():
     n_cases = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
     s = Sim(str(RUN / "BUBBLE.PRG"), run_dir=RUN)
     sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
     cpu, mem = s.cpu, s.mem
+    test_mcu(s, sym, random.Random(3), n_cases)
     test_states(s, sym, random.Random(2))
     a6 = sym["g_block"]
     mem.w32(TABLE + 4 * RET_PC, STOP)            # (the ret: the dispatch table's entry of the return point)

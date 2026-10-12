@@ -47,6 +47,7 @@ def main():
     if a.frames: defs.append("FRAMES=%d" % a.frames)
     if a.debug: defs.append("DEBUG=1")
     if a.sim: defs.append("SIM=1")
+    if os.environ.get("BB_NO_NATIVES"): defs.append("MCU_XLATE=1")      # (gen.py: the translation alone)
     assemble_link("bublbobl", "bublbobl.s", tag, a.out, defs)
     print("built", a.out, os.path.getsize(a.out), "bytes")
 

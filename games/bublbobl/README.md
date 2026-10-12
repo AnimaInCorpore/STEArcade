@@ -25,10 +25,12 @@ Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad 
   guards every indirect access: the main CPU's translated code 67.7k instead of 62.4k cycles a frame, `engine/xprof.py`;
   the audit of seed 7, 3000 frames: no site missed).
 * **Sub CPU** (1.4k instructions): the same shared RAM (`g_ram`), "long" memory model.
-* **MCU** (`engine/m6801x.py`, 940 instructions): the firmware translated 6801 -> 68000, the self-test that
-  can never pass on the board skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write)
-  native in the runtime.  It reads the inputs and DIP switches, moves bytes to and from `$FC00-$FFFF` and
-  raises the main CPU's interrupt (IM 2, the vector byte is in `$FC00`, the page in the I register).
+* **MCU**: its VBL interrupt is native 68000 code (`src/mcu_native.s`, since 2026-10-12, see "Native routines"); the
+  firmware translated 6801 -> 68000 (`engine/m6801x.py`, 940 instructions) runs the boot and stands in when the
+  ports are not as the init leaves them (`-D MCU_XLATE`: always), the self-test that can never pass on the board
+  skipped (reset = `$F003`), the two bus routines (`$F1BF` read, `$F1DB` write) native in the runtime.  It reads
+  the inputs and DIP switches, moves bytes to and from `$FC00-$FFFF` and raises the main CPU's interrupt (IM 2, the
+  vector byte is in `$FC00`, the page in the I register).
 * **Sound CPU**: not translated; its driver's output is recorded per command and played on the YM2149 (see
   "Sound"); the main CPU's writes of the latch (`$FA00`) reach the player through a write hook.
 * **Boot self-tests** are patched out of the ROMs (`machine.skip_tests`, also in the reference): the RAM
@@ -510,3 +512,40 @@ second, before -> after): VBLs 1200-1499 0.95 / 27.5 -> 0.95 / 34.0, 1500-1799 1
 0.98 / 21.0 -> 1.00 / 34.2, 2100-2399 0.87 / 14.8 -> 1.00 / 29.7; later the faster build is in a heavier scene (2400-2999:
 0.98 / 23.0 and 0.97 / 27.3 before, 0.89 / 14.0 and 0.82 / 11.2 after).  Next candidate: the object table copy `$04B6`
 (`ldir`, 5k).
+
+### The MCU (2026-10-12)
+
+`src/mcu_native.s`: the MCU's VBL interrupt (`$F046`) as 68000 code, in place of the translated firmware
+(`mcu_irq` calls `mcu_native`).  The firmware does its work in 20 routines that reach the Z80 side only through its
+two bus routines; translated, each bus cycle is a dozen port writes the runtime emulates (`mcu_bus_read` /
+`mcu_bus_write`, ~340 cycles a call, ~56 calls a game frame: 19k cycles, the firmware's own code 7.7k).  Native, a
+bus read is a move from the shared RAM or the DIP switches / inputs and a write a move into it; what the ports keep
+afterwards is set once at the end (the handler always ends with the read of `$0F96`).  The routines: the inputs and
+DIP switches to `$0C1F-$0C23`, the coins and credits (the coinage table at `$F187`), the coin lockout, three counters
+the Z80 asks to change (and the firmware's checks of their copies), two position scans against 7 objects (`$F48F`,
+`$F585`), four sequences (the tables at `$F717`), a 16-bit countdown, three table lookups (`$F9B1`), the main CPU's
+interrupt (P1 bit 6 low-high-low) and the reset request.  Not reproduced (nor by the translation): the stack push of
+a counter check that fails (on the board the rts after it returns into nothing) and the delay loop of `$F089`.  The
+ports' directions must be the init's (P1 `$F0`, P2 and P4 `$FF`); otherwise the translation runs.
+
+Tests: `tools/native_test.py` runs it against the translated firmware with the runtime's bus routines (3,000 random
+states in `port.py test`, 20,000 checked once, the request bytes biased to every path: the MCU's memory `$00-$EF`,
+the shared RAM, `p1_out` / `p2_out` / `p3_in`, the main CPU's interrupt, a reset); `logic_test.py` (the game against
+the Z80 / 6801 reference) 4,000 frames without a difference; `mcu_test.py` still checks the translation.
+
+`engine/xprof.py bublbobl --frames 300 --skip 900` (the same game frames, inputs by game frame): the MCU 27k -> 3.9k
+cycles a game frame; with the other three natives the 300 game frames take **398 VBLs instead of 601**.
+
+Hatari (`ROUNDS=1 tools/bench.sh 3600`: the input script by game round, `-D ROUNDPLAY`, so both builds play the same
+game: `-D RNDTRACE` records the random state, inputs and credits at each round, identical over the 1,954 rounds
+compared), totals at the same round, before (`BB_NO_NATIVES=1`) -> after (all four natives):
+
+| Rounds | VBLs | Pictures shown | Game rounds per VBL | Pictures a second |
+|---|---|---|---|---|
+| 0–1200 (boot, attract, coin, start) | 1549 -> 1560 | 621 -> 595 | 0.77 -> 0.77 | 20.0 -> 19.1 |
+| 1200–2700 (play) | 1767 -> 1554 | 475 -> 680 | 0.85 -> **0.97** | 13.4 -> **21.9** |
+| 0–2700 | 3316 -> 3114 | 1096 -> 1275 | 0.81 -> 0.87 | 16.5 -> 20.5 |
+
+Shorter spans differ by which pictures are drawn and when the renderer's map rebuilds (~3.6M cycles each) fall, so
+compare totals.
+
