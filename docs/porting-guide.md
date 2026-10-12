@@ -272,14 +272,19 @@ the rules its runtime must keep:
 Use a wider virtual screen with enough hidden space on both sides for a whole
 object, including the extra destination word of a shifted sprite. Objects crossing
 an edge are drawn whole and disappear behind the visible display window. Do not
-implement sprite clipping routines or calculate edge masks at runtime. Reserve
+clip sprites, implement sprite clipping routines, calculate edge masks at runtime,
+or erase a sprite's overhang after drawing. This rule applies to every port,
+including legacy fallback paths. Culling an entirely invisible object is allowed;
+a partially visible object must always be drawn whole. Reserve
 vertical guard rows too when whole objects can cross the top or bottom.
 
-Sprite drawing follows `C:/Arbeit/stefastbobs2/main.s`: reorder source rows to group
+Sprite drawing follows `/Users/saschaspringer/Work/stefastbobs2/main.s`: reorder source rows to group
 equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
 Blitter state and its automatically advancing source address. Use short HOG blits
-with the border timer guard. This is the required approach for every port; older
-renderers must be migrated when their sprite drawing is changed.
+with the shared early border handlers. Try this approach in every port and measure CPU plus bus
+cycles before keeping it. Commando, 1942, 1943, Gun.Smoke, Black Tiger and Bubble Bobble use reordered
+source data. DK/Galaga’s original-order shared assets retain their generated mask-reuse paths: the
+reproducible `engine/sprite_reorder_audit.py` experiment found no win after the extra address moves.
 
 ## Change detection by translated writers (2026-10-09)
 
@@ -317,8 +322,8 @@ Also seen in Black Tiger (2026-10-09):
   (`GSEmitter.storing`).  Fixed the same way in Black Tiger's and Bubble Bobble's gens (Bubble Bobble missed
   `ld a,(iy-1)` at two window read sites); 1943's gen still has the gap.
 * **The STE shows 48 pixels on each side of a 224-pixel window**: whole tiles and sprites drawn into the side margins are
-  visible there.  Clear the side chunks a tile or a sprite reached (the damage list then restores black from the twin);
-  `render_test.py` checks the side bars.
+  visible there. Never clear newly drawn overhang to imitate arcade clipping. Restore the previous picture’s
+  damage before drawing; compare the arcade picture independently of these intentionally visible side bands.
 * **HOG blits also delay Timer A's palette switches** (the picture's first lines black when the palette came on late):
   `wait_borders` waits while the palette-on event is pending and just before palette-off; text restores in 2-line bursts.
   **And the VBL itself**: a HOG blit across it delays the VBL handler that arms Timer A, the top border stays closed and
@@ -429,3 +434,22 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   text before it idles at `$038D`; 1942's cooperative kernel) and the ports that skip pictures to keep the game's speed
   (1943, Bubble Bobble).  Not measured: whether their drawing waits for logic it could overlap.
 
+## Palette stamps and measuring (Bubble Bobble, 2026-10-12)
+
+* **Stamps instead of cache walks.**  When a pen's colour slot changes, do not walk the baked caches: start a new
+  palette epoch, record it for the pen (and the latest per bank), and store the epoch with each baked entry (tile,
+  sprite image, cell composite).  A lookup whose stamp is older checks only the pens its tiles use (the per-tile pen
+  mask the assets already have) and refreshes the stamp when none changed.  The keys stay exact; the epoch's wrap
+  flushes everything.  Bubble Bobble: ~225k -> ~50k cycles a slot change, sprites no longer redrawn for pens they do
+  not use.
+* **Composite caches pay where the game repeats itself.**  A level's static cells come from a few dozen tile pairs
+  (60 recipes for 896 cells); an exact cache of composed cells (keys + stamp + pixels + opacity) makes a rebuild and the
+  usual redraws mostly copies.  A cache keyed by an interned colour mapping would also serve colour cycling.
+* **Profilers attribute by the nearest label**: a `name = *` label (no colon) is a symbol too; a profiler that buckets
+  by source file must include it (Bubble Bobble's block copy loop had been charged to the runtime), and absolute
+  symbols (equates such as pad bit masks) must not be used as code labels.
+* **Test the margins too**: when sprites are drawn whole into guard rows and visible side bands, the reference test
+  should check that every set pixel outside the arcade picture belongs to a sprite drawn now (Bubble Bobble's
+  `render_test.py`); a negative run (the guard restore disabled) shows that the check bites.
+* **Before/after in Hatari**: a DEBUG + AUTOPLAY build that replays the simulator profile's input script by VBL and
+  writes counters every 300 VBLs (Bubble Bobble's `tools/bench.sh`) gives windows comparable with `profile.py`'s.

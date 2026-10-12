@@ -2,6 +2,8 @@
 
 Code is shared by every colour quad. Keep source rows in their original order so
 the existing plane data and the generic 64 KB boundary fallback remain usable.
+See sprite_reorder_audit.py for the mask-group ordering experiment: source seeks
+and destination jumps outweigh mask savings with this shared asset layout.
 Register contract: a1 END1, a6 END3, a2 control, a3 destination low word,
 a5 Y count, a0 compressed masks; d1=4, d2=$c0, d4=+248/-264.
 The code consumes a0 and initializes a6; other registers are preserved.

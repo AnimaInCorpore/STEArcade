@@ -69,8 +69,12 @@ class Blitter:
         if self.stats is not None and hasattr(self.sim, "cpu"):
             # a HOG pass holds the CPU (and its interrupts) for its bus cycles: a write, a destination read unless the
             # op ignores it, a source read
-            per = 4 + (0 if op in (0, 3, 12, 15) else 4) + (4 if usesrc else 0)
-            c = xcount * ycount * per + (4 * ycount if usesrc and fxsr else 0)
+            masks = ([em1] if xcount == 1 else
+                     [em1] + [em2] * (xcount - 2) + [em3])
+            dest_reads = sum(mask != 0xffff or op not in (0, 3, 12, 15)
+                             for mask in masks)
+            src_reads = (xcount + int(fxsr) - int(nfsr)) if usesrc else 0
+            c = 4 * ycount * (xcount + dest_reads + src_reads)
             # (a pass without HOG shares the bus: it runs on during the interrupts, under the border code's timing)
             pc = self.sim.cpu.r_pc()
             if os.environ.get("BLIT_CALLER"):        # (inside blit_go: its caller, above the saved d0-d2)
@@ -115,6 +119,8 @@ class Blitter:
                     w = s
                 else:
                     w = s & h
+                if mask != 0xffff or op not in (0, 3, 12, 15):
+                    self.cycles += 4          # destination read needed by mask or operation
                 d = r16(dst & 0xFFFFFF)
                 if op == 0: r = 0
                 elif op == 1: r = w & d
