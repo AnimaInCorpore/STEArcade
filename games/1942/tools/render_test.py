@@ -114,7 +114,7 @@ def main():
         want = oracle.frame(ref)
         diff = np.argwhere(mine != want)
         raw = np.frombuffer(bytes(mem.r_block(ring + top * 256, 256 * 256)), np.uint8).reshape(256, 256)
-        if raw[:, 16:24].any() or raw[:, 136:144].any():  # the margin chunks beside the game area: black (sprites clipped)
+        if raw[:, 16:24].any() or raw[:, 136:144].any():  # the margin chunks beside the game area: black (edge parts draw their inner word)
             margin_bad += 1
             print("frame %d: pixels in the margins beside the game area" % f)
         drawn += 1

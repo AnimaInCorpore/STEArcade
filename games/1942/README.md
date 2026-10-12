@@ -89,11 +89,9 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
   structure (772 for the 500 shapes, shifted or not, 93 KB) whose instructions are only register writes (`add d4,(a4)`, `move (a0)+,(a2)`,
   `move d6,(a5)`, `move.b d7,(a6)`, the Blitter's registers held in `a2-a6`, `d4-d7`); the masks and the control word (skew, NFSR) of
   the 16 shifts are a stream per (code, shift) (`spr_code_tab`, 202 KB), baked, nothing is computed at runtime.  Parts are drawn whole
-  into the virtual ring without clipping.  The routines add to the low word of the destination address, so a part that reaches a 64 KB
+  vertically (guard rows); across the game area's left or right edge only the inner word is drawn (`draw_edge`, see below).  The routines add to the low word of the destination address, so a part that reaches a 64 KB
   boundary of the ring (1 in 16) goes through `generic_part` (a Blitter call per row with the full address, same streams, rows from
-  the shift independent `spr_plan`).  A part across a side edge of the game area spills into the 16 pixel chunk beside it:
-  that chunk is cleared for its 16 lines (`spr_clip`; the arcade's monitor shows 224 of the 256 pixels).  `render_test.py`
-  checks that the margin chunks stay black (without the clipping 212 of 1500 frames showed sprite pixels there).  `spritegen.py` runs every (code, shift) routine against a model of the Blitter (stale source
+  the shift independent `spr_plan`).  `render_test.py` checks that the margin chunks beside the game area stay black.  `spritegen.py` runs every (code, shift) routine against a model of the Blitter (stale source
   buffer bits, skew, NFSR, endmasks) over noise and refuses to write anything that fails.
 
 ## Sound (2026-10-11)
@@ -119,13 +117,38 @@ game ticks differ, 230 of them by a volume step of 1-2 (an effect that resumes i
 whole ticks), the random command runs 15 and 0; `sound_test.py 3000` (in `port.py test`): the 68000 player against the
 model, 0 of 9000 ticks differ.  `build.py --sound` records the programs again.
 
+## Edge clipping of sprites (2026-10-12)
+
+The game area's left and right edges (byte 24 and 136 of a line, black margins beside them, no horizontal scroll) are chunk
+boundaries, so they follow the updated rule: a part across one draws only its inner destination word, a part wholly in a margin is
+culled, nothing is erased afterwards; top and bottom stay whole in the guard rows.  `sprite_entry` tests the screen x with one
+unsigned compare (`cmp.w #208` / `bhi .edge`, which replaces the two compares of the old cull, so inner parts got cheaper); the
+edge branch culls x < -15 or >= 224 and calls `draw_edge` (`spr.s`): one Blitter call per row with X count 1 and the full address
+(no 64 KB limit), masks from the existing streams of `spritegen.py` (unchanged, so 1943 is not affected), rows from `spr_plan`.
+Right edge (x 209-223): the first word, skew s, END1.  Left edge (x -15..-1): the second word at chunk 0, FXSR with source Y
+increment 0 (two reads a line advance one word), END1 := the stream's END3; source Y increment 2 again afterwards.  Only the
+inner chunk is recorded for the restore and the character overlay.  (Before this the uncommitted tree drew parts whole into the
+visible margins; HEAD cleared the margin chunk after drawing, `spr_clip`.)
+
+Musashi, same frames and inputs, before (whole parts) -> after:
+- `perf_test.py 3000` (2100 ticks from 900, CPU + Blitter a tick): 139461 -> 139455 (CPU 126281 -> 126408, Blitter 13180 -> 13046)
+- `perf_test.py 3000 600` (level skips): 116884 -> 116897 (+0.01%)
+- `profile.py 300 1250` (render_frame alone): 65915 -> 65798 cycles a frame (-0.18%; `draw_edge` 547 CPU cycles, Blitter 9556 -> 9294)
+- Hatari (`bench.sh`, logic speed / picture rate): 58.1 ticks/s (98%) and 35.7 frames/s both before and after; no late border events.
+
+Tests: `sprite_test.py` (new edge cases: every code at both edges with all 15 shifts, plain and across a 64 KB boundary, holes and
+margins checked against the seed): 56993 draws and restores pass (33912 at an edge, 15000 of them across 64 KB; SEED=3: 57159); the
+old whole-drawing build fails it at once.  `render_test.py` checks the margins again: `seq 600 1 1200` 0 differ / 0 with margin
+pixels (old build: 56 of 600 frames with margin pixels), `seq 200` and `ATTRACT=1 seq 300` 0 / 0; `port.py test 1942` passes
+(logic_test 6000 + more, 0 differences).
+
 ## Tests
 
     python port.py test 1942                       # build --sim, logic_test (6000 frames), render_test seq 200
     python games/1942/tools/logic_test.py 40000    # whole program on Musashi against the Z80 reference, RAM compared every frame
     python games/1942/tools/logic_test.py 12000 --two   # the same with a two-player game
     python games/1942/tools/sound_test.py 3000     # the YM player against tools/sound.py's model
-    python games/1942/tools/sprite_test.py         # every sprite code, shift, many positions (edges, 64 KB boundaries, re-baking), restore
+    python games/1942/tools/sprite_test.py         # every sprite code, shift, many positions (edge clipping, 64 KB boundaries, re-baking), restore
     python games/1942/tools/spritegen.py           # sizes and the Blitter model check of all 8000 generated routine / stream pairs
     python games/1942/tools/render_test.py seq 600 1 1200   # picture of every frame against the reference renderer through the palette map
     python games/1942/tools/profile.py 60 1250     # cycles of render_frame by routine
@@ -150,7 +173,10 @@ VBLs).  Never kill other Hatari instances.
 `games/1942/tools/bench.sh [finish_period]` builds the DEBUG + AUTOPLAY version (scripted coin, start, fire and joystick; MAME's cheats
 for 1942b: lives E101, invincibility E0A5 and, every `finish_period` frames, "Finish Current Level Now!" EBD0 / E099 / E102 - the cheat that
 selects a starting level did nothing in this set), runs 6000 VBLs in Hatari and reads `COUNTERS.BIN`: ticks a second (the arcade: 59.6),
-frames drawn a second, VBLs between two ticks, CPU idle.  The first 300 VBLs are the boot, so 57.2 of 59.6 ticks is full speed.
+frames drawn a second, VBLs between two ticks, CPU idle.  The first 300 VBLs are the boot, so 57.2 of 59.6 ticks is full speed.  Since 2026-10-12 it builds into
+`run/1942_bench` (with the ROM bank files; `run/1942` keeps the normal build) and starts its own Hatari, stopped by its
+PID: `tools/hatari.sh` stops every running Hatari, other benchmarks and interactive sessions too.  Items (`shot@60`,
+`tap:5@20`, `dump:...`) work as in `tools/hatari.sh`; results land in `run/1942_bench`.
 
 | | game ticks / s | frames drawn / s |
 |---|---|---|

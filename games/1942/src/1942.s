@@ -36,6 +36,7 @@ MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
 BUSY = %10000000
 HOG = %01000000
 NFSR = %01000000
+FXSR = %10000000
 
 KEY_ESC = $01
 

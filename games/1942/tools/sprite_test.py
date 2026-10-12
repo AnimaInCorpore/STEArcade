@@ -1,6 +1,9 @@
-"""Check the sprite drawing (generated Blitter routines and the generic path) on Musashi with the Blitter model: for sprite codes,
-every shift and many positions (including the ones where the part reaches a 64 KB boundary of the ring, and the edges) the part
-must change exactly its opaque pixels and nothing around it, and the rectangle restore must put the seed back.
+"""Check the sprite drawing (generated Blitter routines, the generic path and the edge path) on Musashi with the Blitter model: for
+sprite codes, every shift and many positions (including the ones where the part reaches a 64 KB boundary of the ring, and the edges)
+the part must change exactly its opaque pixels inside the game area (transparent holes kept) and nothing around it - the margin
+chunks beside the game area included: a part across the left (x -15..-1) or right edge (x 209..223) draws only its inner word
+(draw_edge) - and the rectangle restore must put the seed back.  Every sprite code is also drawn at both edges with all 15 shifts
+there, plainly and across a 64 KB boundary of the ring.  (An old build without draw_edge is tested through draw_part: it fails.)
 Build with --sim first, then python games/1942/tools/sprite_test.py [all]    (`all`: every code and y, takes a few minutes)
 """
 import os
@@ -43,6 +46,8 @@ def main():
     clean = mem.r32(sym["clean_base"])
     rng = random.Random(int(os.environ.get("SEED", "7")))
     checks = crossing = 0
+    crossing_edge = [0]
+    edges = 0
     codes = [c for c in range(512) if opaque[c].any()]
     for code in codes:
         col = rng.randrange(16) if code != 296 else 15
@@ -58,8 +63,25 @@ def main():
             positions = [(x, y) for x in (-15, -1, 0, 5, 15, 16, 100, 207, 208, 223) for y in range(-15, 256)]
         elif code % 25 == 0:
             positions += [(x, y) for x in (-15, 0, 9, 223) for y in range(-15, 256, 7)]
-        for x, y in positions:
+        positions = [(x, y, None) for x, y in positions]
+        for x in list(range(-15, 0)) + list(range(209, 224)):     # the edges: every shift, plain and across a 64 KB boundary
+            positions.append((x, rng.randrange(-15, 256), False))
+            positions.append((x, None, True))
+        for x, y, cross in positions:
             idx, T = rng.randrange(3), rng.choice((0, 1, 124, 255, 256, 300, 511))
+            if cross is not None:
+                rb = mem.r32(sym["ring_base"] + 4 * idx)
+                ok = []
+                for yy in range(-15, 256):
+                    inner = rb + (T + yy) * 256 + 24 + (0 if x < 0 else 13 * 8)
+                    over = (inner & 0xffff) + 15 * 256 > 0xffff           # the part's lines cross a 64 KB boundary
+                    if over == cross:
+                        ok.append(yy)
+                if not ok:
+                    continue
+                y = rng.choice(ok)
+                if cross:
+                    crossing_edge[0] += 1
             mem.w16(sym["cur_T"], T)
             mem.w16(sym["draw_idx"], idx)
             ring = mem.r32(sym["ring_base"] + 4 * idx) + T * 256
@@ -72,6 +94,8 @@ def main():
                 for plane in range(4):
                     word = int.from_bytes(natural[row * 8 + plane * 2:row * 8 + plane * 2 + 2], "big")
                     for chunk in range(1 if shift == 0 else 2):
+                        if not 0 <= column + chunk < 14:      # (a margin chunk: untouched)
+                            continue
                         amount = -shift if chunk == 0 else 16 - shift
                         m = (mask >> -amount if amount < 0 else mask << amount) & 65535
                         v = (word >> -amount if amount < 0 else word << amount) & 65535
@@ -89,8 +113,8 @@ def main():
             call("spr_begin")
             origin = ring + y * 256 + 24 + column * 8
             low = (origin + 0) & 0xffff
-            crossing += low > 0xEFE0
-            call("draw_part")
+            crossing += low > 0xEFE0 and 0 <= x <= 208
+            call("draw_edge" if (x < 0 or x > 208) and "draw_edge" in sym else "draw_part")
             call("spr_end")
             got = bytes(mem.r_block(line0, len(seed)))
             if got != bytes(expected):
@@ -103,7 +127,9 @@ def main():
                 print("FAIL restore code %d x %d y %d" % (code, x, y))
                 return 1
             checks += 1
-    print("%d whole-part draws and restores passed (%d sprite codes, every shift, edges, %d at a 64 KB boundary)" % (checks, len(codes), crossing))
+            edges += x < 0 or x > 208
+    print("%d part draws and restores passed (%d sprite codes, every shift; %d across the left or right edge, margins untouched, %d of them "
+          "across a 64 KB boundary; %d inner parts at a 64 KB boundary)" % (checks, len(codes), edges, crossing_edge[0], crossing))
     return 0
 
 

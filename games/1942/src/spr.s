@@ -5,8 +5,10 @@
 ; code bit 7 (bit 5) + x bit 8 (bit 4) + height (bits 6-7: 1, 2 or 4 parts), raw y, raw x.  A part is 16 x 16 pixels of 16 colours (pen 15 =
 ; transparent).  The arcade draws entry 0 on top, so entry 31 is drawn first.  The screen is the arcade raster rotated
 ; 270 degrees: part n of an entry has its left edge at screen x = y + 16 * n - 16 and its top line at screen y = 240 - x
-; (x = the sprite's raw x, a signed 9 bit number). Whole parts draw into the
-; wider virtual screen and guard rows; the display window hides offscreen pixels.
+; (x = the sprite's raw x, a signed 9 bit number).  Parts draw whole vertically into the guard rows of the ring (the display window
+; hides them); the game area's left and right edges are chunk boundaries inside the visible picture (black margins of 16 pixels and
+; more each side, no horizontal scroll), so a part across one draws only its inner destination word (draw_edge), and a part wholly in
+; a margin is culled.
 ; Drawing follows stefastbobs2/FAST_BLITTER_SPRITES.md: the baked source has the rows of a part in blit order (equal opaque masks
 ; adjacent, transparent rows left out), one Blitter call per row draws its four planes (Y count 4, the opaque mask as end masks, NFSR
 ; for the second destination word), and a generated routine per row structure (tools/spritegen.py) does the whole part with the
@@ -232,7 +234,23 @@ sprite_entry:
 	lsl.w	#4,d3
 	add.w	d3,d2
 	sub.w	#16,d2				; screen x of the part
-	cmp.w	#-15,d2
+	cmp.w	#224-16,d2
+	bhi.s	.edge				; (unsigned: left of the game area too)
+	move.w	spr_code,d0
+	add.w	d1,d0
+	and.w	#$1FF,d0
+	lea	spr_blank,a0
+	tst.b	(a0,d0.w)
+	bne.s	.next
+	move.w	d2,spr_xs
+	move.w	d0,spr_pcode
+	bsr.s	draw_part
+.next:	subq.w	#1,spr_n
+	bpl.s	.part
+	rts
+; a part left of x 0 or right of 208: wholly in a margin, culled; across the game area's left or right edge (both on chunk
+; boundaries, so the part is shifted), only its inner word (draw_edge)
+.edge:	cmp.w	#-15,d2
 	blt.s	.next
 	cmp.w	#224,d2
 	bge.s	.next
@@ -244,46 +262,13 @@ sprite_entry:
 	bne.s	.next
 	move.w	d2,spr_xs
 	move.w	d0,spr_pcode
-	bsr.s	draw_part
-	move.w	spr_xs,d3			; a part across an edge of the game area: its chunk in the margin is
-	bmi.s	.left				; cleared (the arcade's monitor shows 224 of the 256 pixels)
-	cmp.w	#208,d3
-	ble.s	.next
-	moveq	#14*8,d0
-	bsr	spr_clip
+	bsr	draw_edge
 	bra.s	.next
-.left:	moveq	#-8,d0
-	bsr	spr_clip
-.next:	subq.w	#1,spr_n
-	bpl.s	.part
-	rts
-
-; The margin chunk at byte d0.w of the game area (-8: left, 112: right) cleared for the 16 lines of the part just drawn
-; (the Blitter is done: HOG mode).  Clobbers d0-d2, a0.
-
-spr_clip:
-	move.w	spr_ytop,d2
-	cmp.w	#-15,d2
-	blt.s	.out
-	cmp.w	#256,d2
-	bge.s	.out
-	ext.l	d2
-	lsl.l	#8,d2
-	add.l	spr_toff,d2
-	ext.l	d0
-	add.l	d0,d2
-	add.l	w_base,d2
-	move.l	d2,a0
-	moveq	#15,d1
-.c:	clr.l	(a0)
-	clr.l	4(a0)
-	lea	STRIDE(a0),a0
-	dbf	d1,.c
-.out:	rts
 
 ; ------------------------------------------------------------------------------
-; One whole part: spr_pcode, spr_col, spr_xs (screen x), spr_ytop (screen y of the top line).  Records the rectangle, then draws the
-; whole part into the virtual ring without clipping (the display window hides what is off).
+; One whole part (screen x 0-208, inside the game area): spr_pcode, spr_col, spr_xs (screen x), spr_ytop (screen y of the top line).
+; Records the rectangle, then draws the whole part into the virtual ring (whole vertically: the guard rows and the display window
+; take what is above or below the picture).
 
 draw_part:
 	move.w	spr_ytop,d2
@@ -406,3 +391,122 @@ generic_part:
 	dbf	d1,.row
 	bra.s	.group
 .done:	bra	spr_regs
+
+; ------------------------------------------------------------------------------
+; A part across the game area's left edge (spr_xs -15..-1) or right edge (209..223), always shifted: only its inner destination word
+; is drawn and recorded, one word a line, so the margins stay black (nothing is drawn there and nothing erased afterwards).
+; Right edge: the first word, (previous source word : this one) >> skew under the stream's END1 (the previous word's bits fall
+; outside the mask).  Left edge: the second word, FXSR (this source word : the next) >> skew under the stream's END3; the source Y
+; increment 0 makes the two reads of a line advance one word.  Masks from the stream, lines from spr_plan, full destination
+; addresses (no 64 KB limit).  The pass's registers are reloaded at the end (spr_regs).
+
+draw_edge:
+	move.w	spr_ytop,d2
+	cmp.w	#-15,d2
+	blt	.out
+	cmp.w	#256,d2
+	bge	.out
+	move.w	spr_pcode,d0
+	lsl.w	#4,d0
+	or.w	spr_col,d0
+	lsl.w	#2,d0
+	lea	spr_ptr,a0
+	move.l	(a0,d0.w),d0
+	bne.s	.baked
+	move.w	spr_pcode,d0
+	move.w	spr_col,d1
+	bsr	sprite_get
+	move.l	a0,d0
+.baked:	move.l	d0,BLT_SRC_ADDR.w
+	; the ring offset of the inner chunk
+	move.w	spr_ytop,d2
+	ext.l	d2
+	lsl.l	#8,d2
+	add.l	spr_toff,d2
+	move.w	spr_xs,d3
+	moveq	#15,d1
+	and.w	d3,d1				; the shift (1-15)
+	moveq	#13,d0				; (right edge: the first word, chunk 13)
+	tst.w	d3
+	bpl.s	.right
+	moveq	#0,d0				; (left edge: the second word, chunk 0)
+	or.b	#FXSR,d1
+	clr.w	BLT_SRC_YINC.w
+.right:	move.b	d1,BLT_SKEW.w
+	move.w	d0,d4
+	lsl.w	#3,d4
+	ext.l	d4
+	add.l	d4,d2
+	; the record: offset, lines, one chunk, its column, first and last screen line
+	move.l	rect_fill,a0
+	move.l	d2,(a0)+
+	move.w	#16,(a0)+
+	move.w	#1,(a0)+
+	move.w	d0,(a0)+
+	move.w	spr_ytop,d0
+	move.w	d0,(a0)+
+	add.w	#15,d0
+	move.w	d0,(a0)+
+	addq.l	#2,a0
+	move.l	a0,rect_fill
+	add.l	w_base,d2
+	move.l	d2,a1				; the destination address of the inner word of row 0
+	moveq	#0,d0
+	move.w	spr_pcode,d0
+	lsl.w	#4,d0
+	and.w	#15,d3
+	or.w	d3,d0
+	lsl.l	#3,d0
+	lea	spr_code_tab,a2
+	move.l	4(a2,d0.l),a2			; the stream: per group END1, END3; the control word after the first group's masks
+	move.w	#1,BLT_COUNT.w
+	move.w	#2,BLT_DST_YINC.w
+	moveq	#0,d0
+	move.w	spr_pcode,d0
+	lsl.w	#2,d0
+	lea	spr_plan_offsets,a0
+	move.l	(a0,d0.w),d0
+	lea	spr_plan,a0
+	add.l	d0,a0				; per group: rows, then the row steps; 0 ends
+	lea	BLT_END1.w,a3
+	lea	BLT_DST_ADDR.w,a4
+	lea	BLT_COUNT+2.w,a5
+	lea	BLT_CTRL.w,a6
+	moveq	#4,d6
+	move.w	#$c0,d7
+	move.w	(a0)+,d1			; (the first group: the control word follows its masks)
+	tst.w	spr_xs
+	bmi.s	.left
+	move.w	(a2),(a3)			; END1
+	addq.l	#6,a2
+	bra.s	.rrows
+.rgroup:
+	move.w	(a0)+,d1
+	beq.s	.done
+	move.w	(a2),(a3)			; END1 (END3 skipped)
+	addq.l	#4,a2
+.rrows:	subq.w	#1,d1
+.rrow:	adda.w	(a0)+,a1
+	move.l	a1,(a4)
+	move.w	d6,(a5)
+	move.b	d7,(a6)
+	dbf	d1,.rrow
+	bra.s	.rgroup
+.left:	move.w	2(a2),(a3)			; END3: the second word's mask
+	addq.l	#6,a2
+	bra.s	.lrows
+.lgroup:
+	move.w	(a0)+,d1
+	beq.s	.done
+	move.w	2(a2),(a3)
+	addq.l	#4,a2
+.lrows:	subq.w	#1,d1
+.lrow:	adda.w	(a0)+,a1
+	move.l	a1,(a4)
+	move.w	d6,(a5)
+	move.b	d7,(a6)
+	dbf	d1,.lrow
+	bra.s	.lgroup
+.done:	move.w	#2,BLT_SRC_YINC.w
+	bra	spr_regs
+.out:	rts
