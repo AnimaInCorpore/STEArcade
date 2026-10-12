@@ -143,17 +143,19 @@ bb_command:
 ; a VBL of every track -> bb_val (per track: its period and volume, or its registers' address), the channels' values
 ; (cs_vals: the A track's, else the B track's), the SSG's registers (bb_ssg).  Uses d0-d7 / a0-a4.
 bb_step:
+	lea	bb_on,a0		; (only the tracks that play set theirs)
+	moveq	#TRACKS/4-1,d0
+.clr:	clr.l	(a0)+
+	dbf	d0,.clr
 	lea	bb_tracks,a4
 	moveq	#0,d7			; the track
 .tr:	tst.b	TR_ON(a4)
-	beq.s	.off
+	beq.s	.next
 	move.w	TR_LEN(a4),d0
 	beq.s	.go
 	cmp.w	TR_N(a4),d0
 	bhi.s	.go
 	clr.b	TR_ON(a4)		; it ended
-.off:	lea	bb_on,a0
-	clr.b	(a0,d7.w)
 	bra.s	.next
 .go:	addq.w	#1,TR_N(a4)
 	lea	bb_on,a0
@@ -181,52 +183,42 @@ bb_step:
 	blo.s	.tr
 	lea	bb_chan_tracks,a1	; the channels: per channel its A and B track
 	lea	cs_vals,a2
-	moveq	#CS_MCH-1,d6
-.ch:	moveq	#0,d0
-	move.b	(a1)+,d0		; A
-	bsr.s	bb_pick
-	bne.s	.got
+	lea	bb_on,a3
+	lea	bb_val,a0
 	moveq	#0,d0
+	moveq	#CS_MCH-1,d6
+.ch:	move.b	(a1)+,d0		; A
+	tst.b	(a3,d0.w)
+	bne.s	.got
 	move.b	(a1),d0			; B
-	bsr.s	bb_pick
+	tst.b	(a3,d0.w)
 	bne.s	.got
 	clr.l	(a2)+			; neither: silent
 	addq.l	#1,a1
 	dbf	d6,.ch
 	bra.s	.ssg_out
-.got:	move.l	(a0),(a2)+
+.got:	lsl.w	#2,d0
+	move.l	(a0,d0.w),(a2)+
+	moveq	#0,d0
 	addq.l	#1,a1
 	dbf	d6,.ch
 .ssg_out:
 	moveq	#0,d0			; the SSG: $84, else $86
-	bsr.s	bb_pick
+	tst.b	(a3)
 	bne.s	.s_got
-	moveq	#1,d0
-	bsr.s	bb_pick
+	moveq	#4,d0
+	tst.b	1(a3)
 	bne.s	.s_got
 	lea	bb_ssg+8,a0		; neither plays: the registers stay, silent
 	clr.b	(a0)+
 	clr.b	(a0)+
 	clr.b	(a0)
 	rts
-.s_got:	move.l	(a0),a0
+.s_got:	move.l	(a0,d0.w),a0
 	lea	bb_ssg,a1
 	moveq	#11-1,d0
 .c:	move.b	(a0)+,(a1)+
 	dbf	d0,.c
-	rts
-
-; track d0: Z clear when it plays, a0 its bb_val entry
-bb_pick:
-	lea	bb_on,a0
-	tst.b	(a0,d0.w)
-	beq.s	.no
-	lea	bb_val,a0
-	lsl.w	#2,d0
-	add.w	d0,a0
-	moveq	#1,d0
-	rts
-.no:	moveq	#0,d0
 	rts
 
 ; per channel (OPL 0-8, FM 0-2): its A track, its B track
@@ -259,7 +251,7 @@ bb_snd_init:
 bb_bss:
 bb_tracks:	ds.b	TRACKS*TR_SIZE
 bb_val:		ds.l	TRACKS		; per track: its period and volume (words), or its registers' address
-bb_on:		ds.b	TRACKS		; per track: it played this VBL
+bb_on:		ds.b	TRACKS		; per track: it played this VBL (cleared by longs: TRACKS % 4 = 0)
 bb_ssg:		ds.b	12		; the SSG's registers 0-10 (the mixer's effect)
 bb_ym:		ds.b	12		; the YM2149's registers 0-10 as written
 bb_queue:	ds.b	16		; the commands from the main CPU

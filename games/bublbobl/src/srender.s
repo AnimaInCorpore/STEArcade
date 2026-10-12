@@ -23,9 +23,9 @@
 ;     where they are opaque, from sr_img through sr_msk, then the second layer's).
 ; Exact: the reference's bitmap through the colour table (tools/render_test.py, tools/render_bench.py).
 ;
-; A sprite is drawn from its own baked image: the four tiles shifted to its x (16 shifts) as two plane word groups
-; per line, the mask inverted and doubled (sr_cache: direct mapped, keyed by the four tiles and the shift).
-; Sprites are clipped to the game area by whole groups (the area is 16 groups wide) and by lines.
+; A sprite is baked unshifted and its rows grouped by opaque mask (stefastbobs2).
+; sr_cache is keyed by four tile keys/generations; the Blitter supplies x & 15.
+; Sprites draw whole into the virtual screen. Only their damage footprint is bounded to the game area.
 ;
 ; Anything else (the columns not on the 8 x 8 grid, as while a level scrolls in, or the layers in another order)
 ; is drawn by the general renderer (render.s); switching between the two draws everything once.
@@ -37,7 +37,7 @@ SREC = 64				; a record per object (sr_recs), as the last frame drawn by this re
 R_ORAM = 0				;   the object entry (y, shape, x, flags)
 R_T01 = 4				;   a sprite's tile entries: the top row (left, right)
 R_T23 = 8				;   ... the bottom row
-R_GEN = 12				;   ... the colour generations of their banks
+					;   (12: free)
 R_X = 16				;   x (signed)
 R_Y = 18				;   the top line (game coordinates)
 R_R0 = 20				;   the first and the last block row
@@ -45,9 +45,9 @@ R_R1 = 22
 R_CM = 24				;   the block columns
 R_KIND = 26				;   0 nothing, 1 a sprite, 2 a column
 R_VIS = 27				;   a sprite with something on the screen
-R_LA = 28				;   the first line on the screen (0-15) and how many
+R_LA = 28				;   the bounded damage footprint: first line (0-15), count
 R_LN = 29
-R_GS = 30				;   the groups drawn: 1 the left one, 2 the right one, 3 both
+R_GS = 30				;   damage groups: 1 left, 2 right, 3 both (drawing is whole)
 R_G0 = 31				;   the left group (-1..15)
 R_TOFF = 32				;   a sprite: its top left tile entry; a column: its x
 R_SHIFT = 34				;   a sprite: x & 15; a column: its layer (0 behind the sprites, 2 in front)
@@ -57,8 +57,13 @@ R_IN = 56				;   drawn this frame (sr_closure)
 R_IDX = 57				;   the object's number
 R_NB = 58				;   a sprite's tiles are not all blank
 SC_N = 512				; sprite cache entries
-SC_ENTRY = 408				;   the four tile keys, the shift.w, -.w, 16 lines of 24 bytes
+SC_ENTRY = 212				;   four tile keys, reserved.l, 16 mask/offset pairs + plane rows
 SC_DATA = 20
+CC_N = 1024				; composite cache entries (sr_cell)
+CC_ENTRY = 64				;   the four tile keys (-1: none), the stamp.w, reserved.w, 8 rows of 4 plane bytes,
+CC_DATA = 20				;   8 front opacity bytes
+sr_ccache = comp_B			; (the general renderer's composites: unused while this renderer draws; it builds
+					; them all again when it takes over, sr_frame: masks_valid)
 SR_CMAX = 64				; columns at most
 
 ; ---- block bitmaps (56 words)
@@ -99,8 +104,15 @@ sr_frame:
 	tst.b	sr_inited
 	bne.s	.inited
 	st	sr_inited
+	sf	pal_wrapped
 	bsr	sr_flush		; (no baked image yet)
 .inited:
+	tst.b	pal_wrapped		; (the palette epochs started again: no stamp can be trusted)
+	beq.s	.epochs
+	sf	pal_wrapped
+	bsr	sr_flush
+	bsr	sr_ccflush
+.epochs:
 	sb_fill	sr_chg,0
 	bsr	sr_pal_gens		; colours that changed: the generations of their banks
 	bsr	sr_scan			; the objects: the sprites that changed (sr_chg), the visible ones (sr_vlist)
@@ -126,6 +138,8 @@ sr_frame:
 	st	sr_full			; (the general renderer drew the frames before: everything)
 	st	sr_rebuild
 	st	sr_active
+	bsr	sr_ccflush		; (its memory held the general renderer's composites)
+	sf	masks_valid		; (... and their masks: built again when it draws)
 .active:
 	ifd SIM
 	addq.l	#1,sim_sr_frames
@@ -134,6 +148,9 @@ sr_frame:
 	tst.b	sr_rebuild
 	beq.s	.changes
 	sf	sr_rebuild
+	ifd SIM
+	addq.l	#1,sim_sr_rebuild
+	endc
 	lea	sr_sdirty,a0
 	moveq	#28-1,d0
 .ac:	move.l	#-1,(a0)+
@@ -152,11 +169,13 @@ sr_frame:
 	beq.s	.closure
 	sb_fill	sr_chg,-1
 .closure:
+	bsr sr_guard_marks
 	bsr	sr_closure		; sr_chg -> sr_draw (the set), R_IN (the sprites drawn)
 	tst.b	sr_full
 	bne.s	.no_copy
 	bsr	sr_copy			; the last frame's set, outside this one's: from the screen shown
 .no_copy:
+	bsr sr_guard_restore
 	bsr	sr_restore
 	bsr	sr_sprites
 	lea	sr_stale,a1		; the other screens lack this frame's set, this one nothing
@@ -194,6 +213,95 @@ sr_frame:
 	rts
 
 ; ------------------------------------------------------------------------------
+ ; Whole sprites may draw into guard rows and margin groups. Before drawing
+ ; the next picture into a page, restore that page's old guard background.
+ ; Boundary sprites join the damage set even if unchanged, so they draw whole
+ ; again after that restore. There is no edge-specific sprite drawing path.
+sr_guard_marks:
+	sf sr_has_guard			; (bits: 0 left, 1 right, 2 top, 3 bottom guard)
+	lea sr_vlist,a3
+.loop:
+	cmp.l sr_vend,a3
+	bhs.s .done
+	move.l (a3)+,a2
+	moveq #0,d1			; (left and right: sr_draw1 clips at the picture's edges)
+	cmp.w #16,R_Y(a2)
+	bhs.s .y0
+	addq.b #4,d1
+.y0:	cmp.w #224,R_Y(a2)
+	bls.s .y1
+	addq.b #8,d1
+.y1:	tst.b d1
+	beq.s .loop
+	or.b d1,sr_has_guard
+	mark_rec sr_chg
+	bra.s .loop
+.done:
+	rts
+
+; the guards this page was drawn into last time (sr_guard_pages): their background again
+sr_guard_restore:
+	move.w rf_buf,d0
+	lea sr_guard_pages,a0
+	move.b (a0,d0.w),d1
+	move.b sr_has_guard,(a0,d0.w)
+	tst.b d1
+	beq .done
+	move.w #2,$ffff8a2e.w
+	move.w #$ffff,$ffff8a28.w
+	move.w #$ffff,$ffff8a2a.w
+	move.w #$ffff,$ffff8a2c.w
+	move.w #0,$ffff8a3a.w     ; zero fill: no source bus reads
+	clr.b $ffff8a3d.w
+	move.l rf_screen,a0
+	btst #0,d1
+	beq.s .r
+	lea (YPAD+16)*STRIDE+GAME_BYTES-8(a0),a1
+	move.l a1,$ffff8a32.w
+	bsr sr_guard_column
+.r:	btst #1,d1
+	beq.s .t
+	lea (YPAD+16)*STRIDE+GAME_BYTES+128(a0),a1
+	move.l a1,$ffff8a32.w
+	bsr sr_guard_column
+.t:	btst #2,d1
+	beq.s .b
+	lea YPAD*STRIDE+GAME_BYTES-8(a0),a1
+	move.l a1,$ffff8a32.w
+	bsr sr_guard_band
+.b:	btst #3,d1
+	beq.s .done
+	move.l a0,a1
+	add.l #(YPAD+240)*STRIDE+GAME_BYTES-8,a1
+	move.l a1,$ffff8a32.w
+	bsr sr_guard_band
+.done:
+	rts
+sr_guard_column:
+	move.w #4,$ffff8a36.w
+	move.w #STRIDE-8+2,$ffff8a30.w
+	moveq #224/8-1,d0
+.loop:
+	move.w #8,$ffff8a38.w
+	move.b #$c0,$ffff8a3c.w
+	dbf d0,.loop
+	rts
+sr_guard_band:
+	; 18 groups would need wide strips; clear one row in three 24-word
+	; passes, then advance to the next row. No HOG pass exceeds 128 cycles.
+	move.w #24,$ffff8a36.w
+	move.w #2,$ffff8a30.w
+	moveq #16-1,d0
+.row:
+	rept 3
+	move.w #1,$ffff8a38.w
+	move.b #$c0,$ffff8a3c.w
+	endr
+	lea STRIDE(a1),a1
+	move.l a1,$ffff8a32.w
+	dbf d0,.row
+	rts
+
 ; sr_scan: the object list against the records.  A sprite whose entry, tile entries or colour generations changed
 ; puts its old and its new blocks into sr_chg; the visible sprites go to sr_vlist (record pointers, in list
 ; order; sr_vend), sr_c2 = the first object of the front columns (192: none), sr_schg = a column changed (or
@@ -212,30 +320,39 @@ sr_scan:
 	move.w	#SR_N,sr_s1first
 	; the objects after the last one in use (now or in the records) are skipped: find the last one now
 	lea	S_ORAM+SR_N*4,a0
+	move.w	sr_hi,d1
 	move.w	#SR_N-1,d0
-.hi:	tst.l	-(a0)
-	bne.s	.hi_found
-	cmp.w	sr_hi,d0
-	ble.s	.hi_found
-	dbf	d0,.hi
-	moveq	#0,d0
-.hi_found:
-	cmp.w	sr_hi,d0
+.hi:	cmp.w	d1,d0
+	ble.s	.hi_rec			; (not below the last one in the records)
+	tst.l	-(a0)
+	dbne	d0,.hi
+	bne.s	.hi_ok
+	moveq	#-1,d0			; (none)
+.hi_rec:
+	cmp.w	d1,d0
 	bge.s	.hi_ok
-	move.w	sr_hi,d0
+	move.w	d1,d0
 .hi_ok:
 	addq.w	#1,d0
 	move.w	d0,sr_end		; objects 0 .. sr_end - 1
+	move.w	d0,a5			; (the end, for the loop)
 	move.w	#-1,sr_hi
 	moveq	#0,d6			; the phase: 0 columns, 1 sprites, 2 columns, 3 sprites
 	moveq	#0,d7			; the chained x
 	moveq	#0,d5			; the object
 .obj:
 	move.l	(a4)+,d0
+	bne.s	.obj_nz
+	tst.l	R_ORAM(a2)
+	bne	.changed		; (it went)
+	lea	SREC(a2),a2		; nothing, as before (the usual case: a short loop)
+	addq.w	#1,d5
+	cmp.w	a5,d5
+	blo.s	.obj
+	bra	.end
+.obj_nz:
 	cmp.l	R_ORAM(a2),d0
 	bne	.changed
-	tst.l	d0
-	beq	.next			; (nothing, as before)
 	move.w	d5,sr_hi
 	move.b	R_KIND(a2),d1
 	cmp.b	#1,d1
@@ -266,9 +383,9 @@ sr_scan:
 .changed:
 	tst.b	R_VIS(a2)		; the old blocks
 	beq.s	.no_old
-	move.l	d0,a5			; (mark_rec takes d0-d2)
+	move.l	d0,-(sp)		; (mark_rec takes d0-d2)
 	mark_rec	sr_chg
-	move.l	a5,d0
+	move.l	(sp)+,d0
 .no_old:
 	cmp.b	#1,R_KIND(a2)		; a sprite that only moved (same shape and flags): its tiles' keys stand
 	bne	.not_moved
@@ -399,9 +516,16 @@ sr_scan:
 .next:
 	lea	SREC(a2),a2
 	addq.w	#1,d5
-	cmp.w	sr_end,d5
+	cmp.w	a5,d5
 	blo	.obj
+.end:
 	move.l	a3,sr_vend
+	ifd SIM
+	move.l	a3,d0
+	sub.l	#sr_vlist,d0
+	lsr.l	#2,d0
+	add.l	d0,sim_sr_vis
+	endc
 	moveq	#0,d0
 	rts
 .bad:
@@ -482,7 +606,7 @@ sr_sprite_place:
 .off:
 	rts
 
-; the record a2's tiles: R_T01, R_T23, R_GEN, R_KEYS; R_VIS set if it has a place on the screen and a tile that is
+; the record a2's tiles: R_T01, R_T23, R_KEYS; R_VIS set if it has a place on the screen and a tile that is
 ; not blank.  a6 = snap_vram.  Clobbers d0-d4, a0, a1.
 sr_sprite_tiles:
 	move.w	R_TOFF(a2),d4
@@ -494,8 +618,6 @@ sr_sprite_tiles:
 	swap	d0
 	move.w	$42(a6,d4.w),d0
 	move.l	d0,R_T23(a2)
-	bsr	sr_gens
-	move.l	d4,R_GEN(a2)
 	moveq	#0,d1
 	move.b	R_ORAM+3(a2),d1
 	and.w	#15,d1
@@ -550,8 +672,7 @@ sr_tiles_same:
 .gen:
 	tst.b	sr_genchg
 	beq.s	.same
-	bsr	sr_gens
-	cmp.l	R_GEN(a2),d4
+	bsr	sr_penhit		; (a pen of its tiles changed slot)
 	bne.s	.diff
 .same:
 	moveq	#0,d0
@@ -560,22 +681,83 @@ sr_tiles_same:
 	moveq	#1,d0
 	rts
 
-; d4 = the colour generations of the record a2's four tile banks (a byte each).  Clobbers d0-d2, a0.
-sr_gens:
-	lea	sr_gen,a0
-	moveq	#0,d4
+; Z clear if a pen used by one of the record a2's four tiles changed slot this frame (rf_palette: pen_chg).
+; Clobbers d0-d4, a0.
+sr_penhit:
+	moveq	#0,d3
+	move.b	R_ORAM+3(a2),d3
+	and.w	#15,d3
+	moveq	#10,d0
+	lsl.w	d0,d3			; the tile number's high bits
 	move.l	R_T01(a2),d0
 	bsr.s	.two
+	bne.s	.done
 	move.l	R_T23(a2),d0
 .two:
-	moveq	#2-1,d2
-.g:	swap	d0
-	move.w	d0,d1
-	lsr.w	#2,d1
-	and.w	#15,d1
-	lsl.l	#8,d4
-	move.b	(a0,d1.w),d4
-	dbf	d2,.g
+	moveq	#2-1,d4
+.t:	swap	d0
+	moveq	#0,d1
+	move.b	d0,d1			; the entry's second byte
+	move.w	d1,d2
+	lsr.w	#2,d2
+	and.w	#15,d2			; the bank
+	add.w	d2,d2
+	lea	pen_chg,a0
+	move.w	(a0,d2.w),d2
+	beq.s	.n
+	and.w	#3,d1
+	lsl.w	#8,d1
+	move.w	d0,-(sp)
+	move.b	(sp)+,d1		; (the entry's first byte: the tile number's low 8 bits)
+	or.w	d3,d1
+	add.w	d1,d1
+	lea	bb_penmask,a0
+	and.w	(a0,d1.w),d2
+	bne.s	.done
+.n:	dbf	d4,.t
+	moveq	#0,d2			; Z
+.done:	rts
+
+; a0 = a sprite or composite cache entry: Z set if no pen its four tiles use (keys -1: none) changed slot since it was
+; baked (its stamp is then brought up to date).  Clobbers d0-d4, a1.
+sr_valid:
+	move.w	16(a0),d0		; the stamp
+	cmp.w	pal_epoch,d0
+	beq.s	.ok
+	move.l	a0,a1
+	moveq	#4-1,d4
+.key:	move.l	(a1)+,d1
+	bmi.s	.kskip			; (a cell's slot without a tile)
+	move.l	d1,d2
+	moveq	#14,d3
+	lsr.l	d3,d2
+	and.w	#15,d2			; the bank
+	add.w	d2,d2
+	move.l	a1,-(sp)
+	lea	bank_epoch,a1
+	cmp.w	(a1,d2.w),d0
+	bhs.s	.kn
+	and.w	#$3FFF,d1
+	add.w	d1,d1
+	lea	bb_penmask,a1
+	move.w	(a1,d1.w),d1		; its pens
+	lsl.w	#4,d2
+	lea	pen_epoch,a1
+	add.w	d2,a1
+.pen:	lsr.w	#1,d1
+	bcc.s	.pn
+	cmp.w	(a1),d0
+	blo.s	.stale
+.pn:	addq.l	#2,a1
+	tst.w	d1
+	bne.s	.pen
+.kn:	move.l	(sp)+,a1
+.kskip:	dbf	d4,.key
+	move.w	pal_epoch,16(a0)
+.ok:	cmp.w	d0,d0			; Z
+	rts
+.stale:	move.l	(sp)+,a1
+	moveq	#1,d0			; not Z
 	rts
 
 ; d0 = two tile entries, d1 = the high bits of the tile number (<< 10): Z clear if one of them is not blank.
@@ -602,8 +784,8 @@ sr_blank2:
 	moveq	#1,d2			; not Z
 	rts
 
-; d0.w = a tile entry, d1.w = the high bits of the tile number: its key (as draw_tile's) | the generation of its
-; bank << 20 at (a1)+.  Keeps d0, d1.  Clobbers d2-d4, a0.
+; d0.w = a tile entry, d1.w = the high bits of the tile number: its key (as draw_tile's) at (a1)+.
+; Keeps d0, d1.  Clobbers d2-d4.
 sr_ckey:
 	moveq	#0,d2
 	move.b	d0,d2			; the entry's second byte: flips (7-6), bank (5-2), tile number bits 9-8
@@ -615,13 +797,7 @@ sr_ckey:
 	lsr.w	#8,d4
 	or.w	d4,d2
 	or.w	d1,d2			; the tile number
-	moveq	#15,d4
-	and.w	d3,d4			; the bank
-	lea	sr_gen,a0
-	move.b	(a0,d4.w),d4
-	lsl.w	#6,d4
-	or.w	d4,d3			; generation << 6 | flips << 4 | bank
-	swap	d3
+	swap	d3				; flips << 4 | bank
 	clr.w	d3
 	lsr.l	#2,d3			; << 14
 	or.l	d3,d2
@@ -650,18 +826,15 @@ sr_columns:
 	move.w	d6,sr_ccount
 	rts
 
-; the banks whose colours changed (rf_palette: bank_chg_b): a new generation (their sprites change); sr_genchg
+; sr_genchg: the colour mapping of a bank changed (rf_palette: bank_chg_b; its pens: pen_chg)
 sr_pal_gens:
 	sf	sr_genchg
 	lea	bank_chg_b,a0
-	lea	sr_gen,a1
 	moveq	#16-1,d1
 .gen:	tst.b	(a0)+
 	beq.s	.gn
-	addq.b	#1,(a1)
 	st	sr_genchg
-.gn:	addq.l	#1,a1
-	dbf	d1,.gen
+.gn:	dbf	d1,.gen
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -852,33 +1025,67 @@ sr_setcell:
 	rts
 
 ; the colours that changed (rf_palette: bank_chg_b, pen_chg): the cells of the static tiles with a pen whose slot
-; changed are drawn again
+; changed are drawn again.  Only the cells that had a tile of a changed bank when they were composed (sr_cbm) are
+; looked at (a cell whose tile entries changed since is drawn again anyway: sr_vram_cells).
 sr_pal_cells:
-	lea	bank_chg_b,a0
-	moveq	#0,d0
-	moveq	#16-1,d1
-.any:	or.b	(a0)+,d0
-	dbf	d1,.any
-	tst.b	d0
-	beq	.none
-	lea	sr_map1,a3
+	lea	bank_chg_b,a0		; the changed banks' bits
+	moveq	#0,d7
+	moveq	#0,d1
+.any:	tst.b	(a0)+
+	beq.s	.an
+	bset	d1,d7
+.an:	addq.w	#1,d1
+	cmp.w	#16,d1
+	blo.s	.any
+	tst.w	d7
+	beq.s	.none
+	lea	sr_cbm,a3
 	lea	sr_sdirty,a2
 	lea	snap_vram,a4
 	lea	bb_penmask,a5
 	lea	pen_chg,a6
-	move.w	#896*4-1,d7		; (both maps, two slots each)
-	moveq	#0,d6			; the slot
-.cell:
-	move.l	(a3)+,d0
-	bmi.s	.cn
+	move.w	#896-1,d6
+.c:	move.w	(a3)+,d0
+	and.w	d7,d0
+	bne.s	.cand
+.cn:	dbf	d6,.c
+.none:
+	rts
+.cand:
+	move.w	#896-1,d5
+	sub.w	d6,d5			; the cell
+	move.w	d5,d2
+	bsr.s	sr_cell_pens
+	beq.s	.cn
+	ifd SIM
+	addq.l	#1,sim_sr_palcells
+	endc
+	move.w	d5,d2
+	bsr	sr_setcell
+	bra.s	.cn
+
+; d2.w = a cell: Z clear if one of its tiles (both layers' slots) uses a pen whose slot changed.  a4 = snap_vram,
+; a5 = bb_penmask, a6 = pen_chg.  Clobbers d0-d4, a0.
+sr_cell_pens:
+	lsl.w	#3,d2			; (two slots per cell)
+	lea	sr_map1,a0
+	add.w	d2,a0
+	bsr.s	.two
+	bne.s	.done
+	lea	sr_map2,a0
+	add.w	d2,a0
+.two:
+	moveq	#2-1,d4
+.s:	move.l	(a0)+,d0
+	bmi.s	.n
 	moveq	#0,d1
 	move.b	1(a4,d0.w),d1		; the entry's second byte
-	move.w	d1,d2
-	lsr.w	#2,d2
-	and.w	#15,d2			; the bank
-	add.w	d2,d2
-	move.w	(a6,d2.w),d2		; its changed pens
-	beq.s	.cn
+	move.w	d1,d3
+	lsr.w	#2,d3
+	and.w	#15,d3			; the bank
+	add.w	d3,d3
+	move.w	(a6,d3.w),d3		; its changed pens
+	beq.s	.n
 	and.w	#3,d1
 	lsl.w	#8,d1
 	move.b	(a4,d0.w),d1		; the tile number's low 10 bits
@@ -887,18 +1094,11 @@ sr_pal_cells:
 	lsl.w	#2,d0
 	or.w	d0,d1			; + the high bits
 	add.w	d1,d1
-	and.w	(a5,d1.w),d2
-	beq.s	.cn
-	move.w	d6,d2		; the cell (of either map)
-	lsr.w	#1,d2
-	cmp.w	#896,d2
-	blo.s	.c1
-	sub.w	#896,d2
-.c1:	bsr	sr_setcell
-.cn:	addq.w	#1,d6
-	dbf	d7,.cell
-.none:
-	rts
+	and.w	(a5,d1.w),d3
+	bne.s	.done
+.n:	dbf	d4,.s
+	moveq	#0,d3			; Z
+.done:	rts
 
 ; ------------------------------------------------------------------------------
 ; sr_cells: the cells of sr_sdirty drawn again into sr_img (the back layer's tile, then the front layer's on it)
@@ -927,8 +1127,13 @@ sr_cells:
 	blo.s	.col
 	bra.s	.nr
 
-; d6 = the cell row, d5 = the column
+; d6 = the cell row, d5 = the column.  The cell's four tile slots are resolved to keys (sr_ckeys); a cell
+; composed before from the same keys, under the same colours of their pens, is copied from the composite
+; cache (sr_ccache); else it is composed (the first tile written, the others merged) and kept there.
 sr_cell:
+	ifd SIM
+	addq.l	#1,sim_sr_cells
+	endc
 	move.w	d6,d0
 	lsl.w	#3,d0
 	add.w	#YPAD+16,d0
@@ -936,7 +1141,7 @@ sr_cell:
 	move.w	d5,d1
 	lsr.w	#1,d1
 	lsl.w	#3,d1
-	add.w	#16,d1
+	add.w	#GAME_BYTES,d1
 	btst	#0,d5
 	beq.s	.even
 	addq.w	#1,d1
@@ -953,7 +1158,122 @@ sr_cell:
 	lsl.w	#5,d0
 	add.w	d5,d0
 	lsl.w	#3,d0			; the cell * 8 (two slots)
-	move.w	d0,-(sp)
+	lea	sr_map1,a3
+	add.w	d0,a3
+	lea	sr_ckeys,a1
+	moveq	#0,d7			; (the slots with a tile; bits 16-31: their banks)
+	bsr	.key
+	bsr	.key
+	lea	sr_map2-sr_map1-8(a3),a3
+	bsr	.key
+	bsr	.key
+	move.l	d7,d0			; the cell's banks (sr_cbm: for sr_pal_cells)
+	swap	d0
+	move.w	d6,d1
+	lsl.w	#5,d1
+	add.w	d5,d1
+	add.w	d1,d1
+	lea	sr_cbm,a0
+	move.w	d0,(a0,d1.w)
+	tst.w	d7
+	beq	.empty
+	; the composite cache: hash of the four keys
+	lea	sr_ckeys,a1
+	move.l	(a1)+,d0
+	move.l	(a1)+,d1
+	rol.l	#5,d1
+	eor.l	d1,d0
+	move.l	(a1)+,d1
+	swap	d1
+	eor.l	d1,d0
+	move.l	(a1)+,d1
+	rol.l	#7,d1
+	rol.l	#4,d1
+	eor.l	d1,d0
+	move.l	d0,d1
+	swap	d1
+	eor.w	d1,d0
+	move.w	d0,d1
+	lsr.w	#8,d1
+	lsr.w	#2,d1
+	eor.w	d1,d0
+	and.l	#CC_N-1,d0
+	lsl.l	#6,d0			; (CC_ENTRY)
+	lea	sr_ccache,a0
+	add.l	d0,a0
+	move.l	a0,a2
+	lea	sr_ckeys,a1
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.miss
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.miss
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.miss
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.miss
+	move.l	a2,a0
+	bsr	sr_valid		; (its pens' slots as when it was composed?)
+	bne.s	.miss
+	ifd SIM
+	addq.l	#1,sim_sr_chit
+	endc
+	lea	CC_DATA(a2),a0
+o	set	0
+	rept 8
+	move.l	(a0)+,d0
+	movep.l	d0,o(a4)
+o	set	o+STRIDE
+	endr
+o	set	0
+	rept 8
+	move.b	(a0)+,o*32/STRIDE(a5)
+o	set	o+STRIDE
+	endr
+	bra	.any
+.miss:
+	move.l	a2,-(sp)
+	lea	sr_ckeys,a1		; (the entry is this cell's from now on: the keys, the stamp)
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	move.w	pal_epoch,(a2)
+	moveq	#0,d7			; (no tile written yet)
+	lea	sr_ckeys,a3
+	move.l	(a3)+,d4
+	moveq	#0,d0			; (the back layer)
+	bsr	.tile
+	move.l	(a3)+,d4
+	moveq	#0,d0
+	bsr	.tile
+	move.l	(a3)+,d4
+	moveq	#1,d0			; the front layer's: into sr_msk too
+	bsr	.tile
+	move.l	(a3)+,d4
+	moveq	#1,d0
+	bsr	.tile
+	tst.w	d7
+	bne.s	.written
+	bsr	.clear			; (all blank)
+.written:
+	move.l	(sp)+,a0		; the composite into the cache
+	lea	CC_DATA(a0),a0
+o	set	0
+	rept 8
+	movep.l	o(a4),d0
+	move.l	d0,(a0)+
+o	set	o+STRIDE
+	endr
+o	set	0
+	rept 8
+	move.b	o*32/STRIDE(a5),(a0)+
+o	set	o+STRIDE
+	endr
+	bra	.any
+.empty:
+	bsr.s	.clear
+	bra	.any
+.clear:
 	moveq	#0,d0
 o	set	0
 	rept 8
@@ -961,34 +1281,62 @@ o	set	0
 	clr.b	o*32/STRIDE(a5)
 o	set	o+STRIDE
 	endr
-	moveq	#0,d7			; the back layer's tiles, in order
-	lea	sr_map1,a0
-	move.w	(sp),d0
-	move.l	(a0,d0.w),d0
-	bsr.s	.tile
-	lea	sr_map1,a0
-	move.w	(sp),d0
-	move.l	4(a0,d0.w),d0
-	bsr.s	.tile
-	moveq	#1,d7			; the front layer's, into sr_msk too
-	lea	sr_map2,a0
-	move.w	(sp),d0
-	move.l	(a0,d0.w),d0
-	bsr.s	.tile
-	lea	sr_map2,a0
-	move.w	(sp)+,d0
-	move.l	4(a0,d0.w),d0
-	bsr.s	.tile
-	bra	.any
-; d0 = a map entry: its tile on the cell (a4); d7 = 1: its opacity into sr_msk (a5) as well
-.tile:
+	rts
+
+; a3 = a map slot: its key at (a1)+ (-1: none or blank), d7 + 1 if a tile, and bit 16 + its bank set.  a3 + 4.
+.key:
+	move.l	(a3)+,d0
 	bsr	sr_key
+	move.l	d4,(a1)+
+	bmi.s	.k_none
+	addq.w	#1,d7
+	move.l	d4,d0
+	lsl.l	#2,d0
+	swap	d0			; (the key's bits 14-17: the bank)
+	and.w	#15,d0
+	add.w	#16,d0
+	bset	d0,d7
+.k_none:
+	rts
+
+; d4 = a key (-1: none): its tile on the cell (a4); d0 = 1: its opacity into sr_msk (a5) as well.  The first
+; tile (d7 = 0) is written as it is (its transparent pixels are 0), the others merged.  Keeps a3.
+.tile:
+	tst.l	d4
 	bmi	.t_none
-	movem.l	d5-d7/a4-a5,-(sp)
+	move.w	d0,-(sp)
+	movem.l	d5-d7/a3-a5,-(sp)
 	bsr	get_tile
-	movem.l	(sp)+,d5-d7/a4-a5
+	movem.l	(sp)+,d5-d7/a3-a5
+	move.w	(sp)+,d0
 	lea	8(a0),a1
 	tst.w	d7
+	bne	.merge
+	moveq	#1,d7
+	tst.w	d0
+	bne	.f_msk
+o	set	0
+	rept 8
+	move.l	(a1)+,d0
+	addq.l	#4,a1
+	movep.l	d0,o(a4)
+	clr.b	o*32/STRIDE(a5)
+o	set	o+STRIDE
+	endr
+	rts
+.f_msk:
+o	set	0
+	rept 8
+	move.l	(a1)+,d0
+	move.l	(a1)+,d1
+	movep.l	d0,o(a4)
+	not.b	d1
+	move.b	d1,o*32/STRIDE(a5)
+o	set	o+STRIDE
+	endr
+	rts
+.merge:
+	tst.w	d0
 	bne	.t_msk
 o	set	0
 	rept 8
@@ -1054,43 +1402,29 @@ o	set	o+STRIDE
 	rts
 
 ; d0.l = a map entry (high bits << 16 | the tile entry's offset, or -1): d4 = the tile's key (as draw_tile makes it)
-; and N clear, or N set if none or blank.  Clobbers d0-d3.
+; and N clear, or N set if none or blank.  Clobbers d0-d3, a0.
 sr_key:
 	tst.l	d0
 	bmi.s	.none
 	lea	snap_vram,a0
-	moveq	#0,d4
 	moveq	#0,d3
-	move.b	(a0,d0.w),d4
-	move.b	1(a0,d0.w),d3
-	move.w	d3,d1
-	and.w	#3,d1
-	lsl.w	#8,d1
-	or.w	d1,d4
+	move.b	1(a0,d0.w),d3		; flips (7-6), bank (5-2), tile number bits 9-8
+	moveq	#3,d4
+	and.w	d3,d4
+	lsl.w	#8,d4
+	move.b	(a0,d0.w),d4		; the tile number's low 10 bits
 	swap	d0
-	moveq	#10,d1
-	lsl.w	d1,d0
+	ror.w	#6,d0			; (the high bits << 10)
 	or.w	d0,d4			; the tile number
-	lea	bb_blank,a0
 	move.w	d4,d1
 	lsr.w	#3,d1
-	move.w	d4,d2
-	and.w	#7,d2
-	btst	d2,(a0,d1.w)
+	lea	bb_blank,a0
+	btst	d4,(a0,d1.w)		; (the bit number mod 8)
 	bne.s	.none
-	moveq	#0,d1
-	move.b	d3,d1
-	lsr.b	#2,d1
-	and.w	#15,d1			; the bank
-	moveq	#14,d2
-	lsl.l	d2,d1
-	or.l	d1,d4
-	moveq	#0,d1
-	move.b	d3,d1
-	lsr.b	#6,d1			; the flips
-	moveq	#18,d2
-	lsl.l	d2,d1
-	or.l	d1,d4			; (N clear)
+	lsr.b	#2,d3			; flips << 4 | bank
+	swap	d3
+	lsr.l	#2,d3			; << 14
+	or.l	d3,d4			; (N clear)
 	rts
 .none:
 	moveq	#-1,d4
@@ -1188,6 +1522,9 @@ sr_sprites:
 
 ; the record a2 -> a0 = the data of its baked image (sr_cache, baked on a miss).  Keeps a2.
 sr_lookup:
+	ifd SIM
+	addq.l	#1,sim_c_look
+	endc
 	move.l	R_ENT(a2),d0		; where it was last time
 	beq.s	.hash
 	move.l	d0,a0
@@ -1200,10 +1537,10 @@ sr_lookup:
 	bne.s	.hash
 	cmpm.l	(a1)+,(a0)+
 	bne.s	.hash
-	move.w	R_SHIFT(a2),d0
-	cmp.w	(a0),d0
-	bne.s	.hash
-	addq.l	#4,a0			; the data
+	lea	-16(a0),a0
+	bsr	sr_valid
+	bne	sr_bake
+	lea	SC_DATA(a0),a0		; the data
 	rts
 .hash:
 	lea	R_KEYS(a2),a1
@@ -1225,10 +1562,6 @@ sr_lookup:
 	move.w	d0,d2
 	lsr.w	#7,d2
 	eor.w	d2,d0
-	move.w	R_SHIFT(a2),d6
-	move.w	d6,d2
-	mulu	#97,d2
-	add.w	d2,d0
 	and.w	#SC_N-1,d0
 	mulu	#SC_ENTRY,d0
 	lea	sr_cache,a0
@@ -1244,9 +1577,9 @@ sr_lookup:
 	bne.s	.miss
 	cmpm.l	(a1)+,(a0)+
 	bne.s	.miss
-	cmp.w	(a0),d6
-	bne.s	.miss
 	move.l	(sp)+,a0
+	bsr	sr_valid
+	bne	sr_bake
 	lea	SC_DATA(a0),a0
 	rts
 .miss:
@@ -1254,11 +1587,10 @@ sr_lookup:
 	bra	sr_bake
 
 ; ------------------------------------------------------------------------------
-; Baking a sprite image: a0 = the entry, a2 = the record (R_KEYS: the four tile keys), d6 = the shift.  The four
-; tiles (tcache) are copied first (the cache could drop one while the next is baked), then per line: the left and
-; the right tile's row as four plane words and the opaque mask word (movep: the tiles' plane bytes side by side),
-; each shifted right by s across two words (the high one is the left group's).  A line: ~m0:~m0, p0:p1, p2:p3 (the
-; left group), ~m1:~m1, p0:p1, p2:p3 (the right group).  Keeps a2; a0 = the data.
+ ; Bake an unshifted image from the four cached tiles, copying colliding entries
+ ; first. Each row holds opacity.w, destination offset.w and four plane words.
+ ; Group equal masks once on a miss; all 16 skews share the resulting image.
+ ; Keeps a2; a0 returns the reordered data.
 ; ------------------------------------------------------------------------------
 
 sr_bake:
@@ -1272,15 +1604,15 @@ sr_bake:
 	move.l	(a1)+,(a0)+
 	move.l	(a1)+,(a0)+
 	move.l	(a1)+,(a0)+
-	move.w	d6,(a0)+
-	move.w	d6,-(sp)
+	move.w	pal_epoch,(a0)+		; (the stamp: the colour mapping it is baked under)
+	clr.w -(sp)
 	moveq	#0,d5			; the tile
 .tile:
 	move.l	6(sp),a2		; (the record)
 	move.w	d5,d0
 	lsl.w	#2,d0
 	move.l	R_KEYS(a2,d0.w),d4
-	and.l	#$000FFFFF,d4		; (the tile cache's key: no generation)
+	and.l	#$000FFFFF,d4		; (the tile cache's key)
 	move.w	d5,-(sp)
 	bsr	get_tile
 	move.w	(sp)+,d5
@@ -1315,7 +1647,7 @@ sr_bake:
 	move.w	(sp)+,d5
 	lea	sr_tbuf,a1
 	move.w	d5,d0
-	lsl.w	#6,d0
+	mulu	#TC_ENTRY,d0
 	add.w	d0,a1
 	move.w	d5,d0
 	lsl.w	#2,d0
@@ -1356,57 +1688,87 @@ sr_bake:
 	not.w	d0			; the opaque pixels
 	swap	d0
 	clr.w	d0
-	lsr.l	d6,d0
-	not.l	d0			; ~m0 : ~m1
-	move.l	d0,d1
-	swap	d1
-	move.w	d1,d2
-	swap	d2
-	move.w	d1,d2			; ~m0 : ~m0
-	move.l	d2,(a0)
-	move.l	d0,d2
-	swap	d2
-	move.w	d0,d2			; ~m1 : ~m1
-	move.l	d2,12(a0)
-	moveq	#0,d0			; the planes
-	move.w	(a3),d0
-	swap	d0
-	lsr.l	d6,d0
-	moveq	#0,d1
-	move.w	2(a3),d1
-	swap	d1
-	lsr.l	d6,d1
-	moveq	#0,d2
-	move.w	4(a3),d2
-	swap	d2
-	lsr.l	d6,d2
-	moveq	#0,d3
-	move.w	6(a3),d3
-	swap	d3
-	lsr.l	d6,d3
-	move.l	d0,d4			; p0:p1 of the left group
-	move.l	d1,d5
-	swap	d5
-	move.w	d5,d4
-	move.l	d4,4(a0)
-	move.l	d2,d4			; p2:p3
-	move.l	d3,d5
-	swap	d5
-	move.w	d5,d4
-	move.l	d4,8(a0)
-	swap	d0			; the right group: the low words
-	move.w	d1,d0
-	move.l	d0,16(a0)
-	swap	d2
-	move.w	d3,d2
-	move.l	d2,20(a0)
-	lea	24(a0),a0
+
+	; Unshifted opaque mask and four plane words. The Blitter does x & 15.
+	swap d0
+	move.w d0,(a0)+
+	moveq #15,d0
+	sub.w d7,d0
+	mulu #STRIDE,d0
+	move.w d0,(a0)+
+	move.l (a3),(a0)+
+	move.l 4(a3),(a0)+
 	addq.l	#8,a2
 	addq.l	#8,a1
 	dbf	d7,.line
+	move.l (sp),a0
+	lea SC_DATA(a0),a0
+	bsr sr_reorder
 	move.l	(sp)+,a0
 	lea	SC_DATA(a0),a0
 	move.l	(sp)+,a2
+	rts
+
+ ; Group identical opaque masks once per miss, followed by contiguous plane rows.
+ ; Pairs: mask.w (the group's first row; 0: the same as the row before), offset.w;
+ ; the number of opaque rows - 1 in the word before the data (the entry's 18).
+ ; The Blitter source advances itself; mask/offset pairs retain original positions.
+ ; sr_tbuf is free after the four tiles have been consumed. No sprite is clipped.
+sr_reorder:
+	move.l a0,a4
+	lea sr_tbuf,a1
+	moveq #16*12/4-1,d0
+.copy:
+	move.l (a0)+,(a1)+
+	dbf d0,.copy
+	move.l a4,a0
+	lea 16*4(a0),a5
+	moveq #0,d5                ; rows already emitted
+	moveq #-1,d3               ; opaque rows - 1
+	moveq #0,d7
+.outer:
+	btst d7,d5
+	bne.s .next
+	move.w d7,d0
+	mulu #12,d0
+	lea sr_tbuf,a1
+	move.w (a1,d0.w),d6
+	beq.s .next              ; transparent rows need no source words
+	moveq #0,d4
+	lea sr_tbuf,a1
+	move.w d6,d2               ; the group's first row carries its mask, the others 0
+.same:
+	btst d4,d5
+	bne.s .skip
+	cmp.w (a1),d6
+	bne.s .skip
+	bset d4,d5
+	addq.w #1,d3
+	move.w d2,(a0)+          ; the mask (or 0: the same) and the original row offset
+	moveq #0,d2
+	move.w 2(a1),(a0)+
+	move.l 4(a1),(a5)+
+	move.l 8(a1),(a5)+
+.skip:
+	lea 12(a1),a1
+	addq.w #1,d4
+	cmp.w #16,d4
+	blo.s .same
+.next:
+	addq.w #1,d7
+	cmp.w #16,d7
+	blo.s .outer
+	move.w d3,-2(a4)        ; the rows sr_draw1 draws, - 1 (-1: none)
+	rts
+
+; every composite is dropped (a key that cannot be)
+sr_ccflush:
+	lea	sr_ccache,a0
+	move.w	#CC_N-1,d0
+	move.l	#$40000000,d1
+.f:	move.l	d1,(a0)
+	lea	CC_ENTRY(a0),a0
+	dbf	d0,.f
 	rts
 
 ; every baked sprite image is dropped
@@ -1419,69 +1781,164 @@ sr_flush:
 	rts
 
 ; ------------------------------------------------------------------------------
-; Block copies: the blocks of the bitmap a0 from the buffer a5 to the buffer a4 (both in the screen's layout)
+; Block copies: the blocks of the bitmap a0 from the buffer a5 to the buffer a4 (both in the screen's layout).
+; Per row the runs of set groups are found with two tables (sr_tz: the clear bits below the lowest set bit of a
+; byte, sr_to: the set bits from bit 0 up); a run of one to three groups is copied by the CPU, a longer one (up to
+; 8 groups: 32 words a line) by the Blitter in HOG passes of one line.  Clobbers d0-d7, a0-a3, a6.
 ; ------------------------------------------------------------------------------
 
 sr_blocks:
-	lea	(YPAD+16)*STRIDE+16(a5),a5
-	lea	(YPAD+16)*STRIDE+16(a4),a4
+	ifnd CPUCOPIES
+	move.w #2,$ffff8a20.w
+	move.w #2,$ffff8a2e.w
+	move.w #$ffff,$ffff8a28.w
+	move.w #$ffff,$ffff8a2a.w
+	move.w #$ffff,$ffff8a2c.w
+	move.w #$0203,$ffff8a3a.w
+	clr.b $ffff8a3d.w
+	endc
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a5),a5
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a4),a4
+	lea	sr_tz,a3
+	lea	sr_to,a6
 	moveq	#SR_ROWS-1,d7
 .row:
 	move.w	(a0)+,d6
 	beq	.nr
 	move.l	a5,a1
 	move.l	a4,a2
-.g:	tst.w	d6
+.g:					; d6: bit 0 = the group at a1 / a2
+	moveq	#0,d0
+	move.b	d6,d0
+	bne.s	.lo
+	lsr.w	#8,d6			; (none in the low byte: 8 groups on)
 	beq	.nr
-	lsr.w	#1,d6
-	bcs.s	.found
-	addq.l	#8,a1
-	addq.l	#8,a2
-	bra.s	.g
-.found:					; runs of up to three groups at once (movem)
-	lsr.w	#1,d6
-	bcc	.k1
-	lsr.w	#1,d6
-	bcc.s	.k2
+	lea	64(a1),a1
+	lea	64(a2),a2
+	move.b	d6,d0
+.lo:	move.b	(a3,d0.w),d0		; the groups before the run
+	lsr.w	d0,d6
+	lsl.w	#3,d0
+	add.w	d0,a1
+	add.w	d0,a2
+	moveq	#0,d0
+	move.b	d6,d0
+	move.b	(a6,d0.w),d0		; the run: 1-8 groups
+	lsr.w	d0,d6
+	ifd SIM
+	move.l	a0,-(sp)
+	move.l	sim_blk_dst,a0
+	add.l	d0,(a0)
+	move.l	(sp)+,a0
+	endc
+	subq.w	#2,d0
+	bmi	.k1
+	beq	.k2
+	subq.w	#1,d0
+	beq.s	.k3
+	ifnd CPUCOPIES
+	addq.w	#3,d0			; (the run)
+	move.w	d0,d1
+	lsl.w	#2,d1			; four words per group
+	move.w	d1,$ffff8a36.w
+	add.w	d1,d1
+	move.w	#STRIDE+2,d2
+	sub.w	d1,d2
+	move.w	d2,$ffff8a22.w
+	move.w	d2,$ffff8a30.w
+	move.l	a1,$ffff8a24.w
+	move.l	a2,$ffff8a32.w
+	rept 4				; (a line a pass: at most 32 words)
+	move.w	#1,$ffff8a38.w
+	move.b	#$c0,$ffff8a3c.w
+	endr
+	add.w	d1,a1
+	add.w	d1,a2
+	tst.w	d6
+	bne	.g
+	bra	.nr
+	else
+	moveq	#-1,d1			; (the run: three now, the others again)
+	lsl.w	d0,d1
+	not.w	d1
+	lsl.w	d0,d6
+	or.w	d1,d6
+	endc
+.k3:
 	movem.l	0(a1),d0-d5
 	movem.l	d0-d5,0(a2)
-	movem.l	160(a1),d0-d5
-	movem.l	d0-d5,160(a2)
-	movem.l	320(a1),d0-d5
-	movem.l	d0-d5,320(a2)
-	movem.l	480(a1),d0-d5
-	movem.l	d0-d5,480(a2)
+	movem.l	STRIDE(a1),d0-d5
+	movem.l	d0-d5,STRIDE(a2)
+	movem.l	2*STRIDE(a1),d0-d5
+	movem.l	d0-d5,2*STRIDE(a2)
+	movem.l	3*STRIDE(a1),d0-d5
+	movem.l	d0-d5,3*STRIDE(a2)
 	lea	24(a1),a1
 	lea	24(a2),a2
-	bra.s	.g
-.k2:					; (two, and the group after them is clear)
+	tst.w	d6
+	bne	.g
+	bra.s	.nr
+.k2:
 	movem.l	0(a1),d0-d3
 	movem.l	d0-d3,0(a2)
-	movem.l	160(a1),d0-d3
-	movem.l	d0-d3,160(a2)
-	movem.l	320(a1),d0-d3
-	movem.l	d0-d3,320(a2)
-	movem.l	480(a1),d0-d3
-	movem.l	d0-d3,480(a2)
-	lea	24(a1),a1
-	lea	24(a2),a2
-	bra	.g
-.k1:					; (one, and the group after it is clear)
-	move.l	0(a1),0(a2)
-	move.l	4(a1),4(a2)
-	move.l	160(a1),160(a2)
-	move.l	164(a1),164(a2)
-	move.l	320(a1),320(a2)
-	move.l	324(a1),324(a2)
-	move.l	480(a1),480(a2)
-	move.l	484(a1),484(a2)
+	movem.l	STRIDE(a1),d0-d3
+	movem.l	d0-d3,STRIDE(a2)
+	movem.l	2*STRIDE(a1),d0-d3
+	movem.l	d0-d3,2*STRIDE(a2)
+	movem.l	3*STRIDE(a1),d0-d3
+	movem.l	d0-d3,3*STRIDE(a2)
 	lea	16(a1),a1
 	lea	16(a2),a2
-	bra	.g
+	tst.w	d6
+	bne	.g
+	bra.s	.nr
+.k1:
+	move.l	0(a1),0(a2)
+	move.l	4(a1),4(a2)
+	move.l	STRIDE(a1),STRIDE(a2)
+	move.l	STRIDE+4(a1),STRIDE+4(a2)
+	move.l	2*STRIDE(a1),2*STRIDE(a2)
+	move.l	2*STRIDE+4(a1),2*STRIDE+4(a2)
+	move.l	3*STRIDE(a1),3*STRIDE(a2)
+	move.l	3*STRIDE+4(a1),3*STRIDE+4(a2)
+	addq.l	#8,a1
+	addq.l	#8,a2
+	tst.w	d6
+	bne	.g
 .nr:	lea	4*STRIDE(a5),a5
 	lea	4*STRIDE(a4),a4
 	dbf	d7,.row
 	rts
+
+; the tables of sr_blocks, per byte value: the clear bits below its lowest set bit (sr_tz), the set bits from
+; bit 0 up (sr_to)
+sr_tz:
+v	set	0
+	rept 256
+b	set	0
+	if v
+	rept 8
+	if ((v>>b)&1)=0
+b	set	b+1
+	endif
+	endr
+	endif
+	dc.b	b
+v	set	v+1
+	endr
+sr_to:
+v	set	0
+	rept 256
+b	set	0
+	rept 8
+	if ((v>>b)&1)=1
+b	set	b+1
+	endif
+	endr
+	dc.b	b
+v	set	v+1
+	endr
+	even
 
 ; the blocks this screen lacks, outside this frame's set: from the screen drawn last (it is complete)
 sr_copy:
@@ -1498,12 +1955,18 @@ sr_copy:
 	move.w	d1,(a2)+
 	dbf	d0,.c
 	lea	sr_tmp,a0
+	ifd SIM
+	move.l	#sim_sr_copyblk,sim_blk_dst
+	endc
 	move.l	last_screen_address,a5
 	move.l	rf_screen,a4
 	bra	sr_blocks
 
 ; the set: the static picture
 sr_restore:
+	ifd SIM
+	move.l	#sim_sr_restblk,sim_blk_dst
+	endc
 	lea	sr_draw,a0
 	lea	sr_img,a5
 	move.l	rf_screen,a4
@@ -1514,8 +1977,8 @@ sr_overlay:
 	lea	sr_s1,a0
 	lea	sr_any,a1
 	move.l	rf_screen,a4
-	lea	(YPAD+16)*STRIDE+16(a4),a4
-	lea	sr_img+(YPAD+16)*STRIDE+16,a5
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a4),a4
+	lea	sr_img+(YPAD+16)*STRIDE+GAME_BYTES,a5
 	lea	sr_msk,a6
 	moveq	#SR_ROWS-1,d7
 .row:
@@ -1554,18 +2017,18 @@ sr_overlay:
 	move.w	d1,d0
 	move.l	d0,d1
 	not.l	d1
-	move.l	160(a2),d2
+	move.l	STRIDE(a2),d2
 	and.l	d1,d2
-	move.l	160(a3),d3
+	move.l	STRIDE(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,160(a2)
-	move.l	164(a2),d2
+	move.l	d2,STRIDE(a2)
+	move.l	STRIDE+4(a2),d2
 	and.l	d1,d2
-	move.l	164(a3),d3
+	move.l	STRIDE+4(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,164(a2)
+	move.l	d2,STRIDE+4(a2)
 .z1:
 	move.w	64(a6,d5.w),d0		; the opaque pixels of the front columns
 	beq.s	.z2
@@ -1574,18 +2037,18 @@ sr_overlay:
 	move.w	d1,d0
 	move.l	d0,d1
 	not.l	d1
-	move.l	320(a2),d2
+	move.l	2*STRIDE(a2),d2
 	and.l	d1,d2
-	move.l	320(a3),d3
+	move.l	2*STRIDE(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,320(a2)
-	move.l	324(a2),d2
+	move.l	d2,2*STRIDE(a2)
+	move.l	2*STRIDE+4(a2),d2
 	and.l	d1,d2
-	move.l	324(a3),d3
+	move.l	2*STRIDE+4(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,324(a2)
+	move.l	d2,2*STRIDE+4(a2)
 .z2:
 	move.w	96(a6,d5.w),d0		; the opaque pixels of the front columns
 	beq.s	.z3
@@ -1594,18 +2057,18 @@ sr_overlay:
 	move.w	d1,d0
 	move.l	d0,d1
 	not.l	d1
-	move.l	480(a2),d2
+	move.l	3*STRIDE(a2),d2
 	and.l	d1,d2
-	move.l	480(a3),d3
+	move.l	3*STRIDE(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,480(a2)
-	move.l	484(a2),d2
+	move.l	d2,3*STRIDE(a2)
+	move.l	3*STRIDE+4(a2),d2
 	and.l	d1,d2
-	move.l	484(a3),d3
+	move.l	3*STRIDE+4(a3),d3
 	and.l	d0,d3
 	or.l	d3,d2
-	move.l	d2,484(a2)
+	move.l	d2,3*STRIDE+4(a2)
 .z3:
 .ng:	addq.l	#8,a2
 	addq.l	#8,a3
@@ -1619,65 +2082,87 @@ sr_overlay:
 	rts
 
 ; ------------------------------------------------------------------------------
-; One sprite (the record a2) into rf_screen, clipped to its lines and groups
-; ------------------------------------------------------------------------------
-
+ ; One whole sprite, into the virtual screen's guard rows and margin groups.
+ ; The damage/closure footprint remains bounded to the game area. It does
+ ; not trim drawing: every opaque sprite row and both groups are emitted.
 sr_draw1:
 	ifd SIM
-	addq.l	#1,sim_c_draw
+	addq.l #1,sim_c_draw
 	endc
-	bsr	sr_lookup		; a0 = the baked image
-	moveq	#0,d0
-	move.b	R_LA(a2),d0
-	move.w	d0,d1
-	mulu	#24,d1
-	add.l	d1,a0			; its first line on the screen
-	add.w	R_Y(a2),d0
-	add.w	#YPAD,d0
-	mulu	#STRIDE,d0
-	move.l	rf_screen,a1
-	add.l	d0,a1
-	move.b	R_G0(a2),d0
-	ext.w	d0
-	lsl.w	#3,d0
-	add.w	#16,d0
-	add.w	d0,a1			; the left group's first word
-	moveq	#0,d7
-	move.b	R_LN(a2),d7
-	subq.w	#1,d7
-	move.b	R_GS(a2),d0
-	cmp.b	#3,d0
-	bne.s	.one
-.both:
-	movem.l	(a0)+,d0-d5
-	and.l	d0,(a1)
-	or.l	d1,(a1)+
-	and.l	d0,(a1)
-	or.l	d2,(a1)+
-	and.l	d3,(a1)
-	or.l	d4,(a1)+
-	and.l	d3,(a1)
-	or.l	d5,(a1)
-	lea	STRIDE-12(a1),a1
-	dbf	d7,.both
+	bsr sr_lookup
+	move.w R_Y(a2),d0
+	add.w #YPAD,d0
+	mulu #STRIDE,d0
+	move.l rf_screen,a1
+	add.l d0,a1
+	move.w R_X(a2),d0
+	asr.w #4,d0
+	lsl.w #3,d0
+	add.w #GAME_BYTES,d0
+	add.w d0,a1
+	move.w R_SHIFT(a2),d6
+	move.w -2(a0),d7           ; the opaque rows - 1
+	bmi.s .done
+	move.w #2,$ffff8a20.w
+	move.w #2,$ffff8a22.w
+	move.w #8,$ffff8a2e.w
+	move.w #-6,$ffff8a30.w
+	move.w #$0203,$ffff8a3a.w
+	move.w #2,$ffff8a36.w
+	move.w #$c040,d3           ; BUSY+HOG, NFSR; the second group reuses the source word
+	or.w d6,d3
+	lea 16*4(a0),a3
+	move.l a3,$ffff8a24.w      ; contiguous source words advance between passes
+	lea $ffff8a32.w,a4         ; (the destination; -10 endmask 1, -6 endmask 3, 6 y count, 10 control)
+	moveq #4,d5
+	move.w R_X(a2),d0          ; across the left or right picture edge: the outer word's end mask is 0
+	bmi.s .left
+	cmp.w #240,d0
+	bgt.s .right
+.line:
+	move.w (a0)+,d0            ; a new mask group (0: the same mask)
+	beq.s .same
+	swap d0
+	clr.w d0
+	lsr.l d6,d0
+	move.w d0,-6(a4)
+	swap d0
+	move.w d0,-10(a4)
+.same:
+	move.l a1,a3
+	add.w (a0)+,a3            ; original row, in the virtual screen
+	move.l a3,(a4)
+	move.w d5,6(a4)
+	move.w d3,10(a4)
+	dbf d7,.line
+.done:
 	rts
-.one:
-	cmp.b	#1,d0
-	beq.s	.left
-	lea	12(a0),a0		; the right group only
-	addq.l	#8,a1
 .left:
-	movem.l	(a0)+,d0-d2
-	lea	12(a0),a0
-	and.l	d0,(a1)
-	or.l	d1,(a1)+
-	and.l	d0,(a1)
-	or.l	d2,(a1)
-	lea	STRIDE-4(a1),a1
-	dbf	d7,.left
+	moveq #0,d4
+	not.w d4
+	bra.s .cline
+.right:
+	moveq #-1,d4
+	clr.w d4
+.cline:
+	move.w (a0)+,d0
+	beq.s .csame
+	swap d0
+	clr.w d0
+	lsr.l d6,d0
+	and.l d4,d0                ; (left: d4 = $0000ffff, right: $ffff0000)
+	move.w d0,-6(a4)
+	swap d0
+	move.w d0,-10(a4)
+.csame:
+	move.l a1,a3
+	add.w (a0)+,a3
+	move.l a3,(a4)
+	move.w d5,6(a4)
+	move.w d3,10(a4)
+	dbf d7,.cline
 	rts
 
-; ------------------------------------------------------------------------------
 	section bss,bss
 	ifd SIM
 sim_sr_frames:	ds.l	1		; (tools/profile.py: frames the sprite renderer drew)
@@ -1685,7 +2170,19 @@ sim_sr_maps:	ds.l	1		; (... the column maps built, refused)
 sim_sr_cannot:	ds.l	1
 sim_c_bake:	ds.l	1
 sim_c_draw:	ds.l	1
+sim_c_look:	ds.l	1		; (sprite cache lookups; sim_c_bake the misses)
+sim_sr_chit:	ds.l	1		; cells copied from the composite cache
+sim_sr_cells:	ds.l	1		; static cells composed
+sim_sr_rebuild:	ds.l	1		; whole static rebuilds
+sim_sr_palcells:	ds.l	1		; cell slots marked by a pen slot change
+sim_sr_vis:	ds.l	1		; visible sprites listed (sim_c_draw: drawn after closure)
+sim_sr_copyblk:	ds.l	1		; blocks copied from the last screen
+sim_sr_restblk:	ds.l	1		; blocks restored from sr_img
+sim_blk_dst:	ds.l	1
 	endc
+sr_has_guard:	ds.b 1			; the guards drawn into (bits: left, right, top, bottom)
+sr_guard_pages:	ds.b 3
+	even
 sr_recs:	ds.b	SR_N*SREC
 sr_vlist:	ds.l	SR_N		; the visible sprites' records, in list order
 sr_vend:	ds.l	1
@@ -1700,13 +2197,14 @@ sr_map1:	ds.l	896*2
 sr_map2:	ds.l	896*2		; (follows sr_map1)
 sr_vinv:	ds.w	3712
 sr_sdirty:	ds.l	28
+sr_ckeys:	ds.l	4		; (sr_cell) the cell's four tile keys
+sr_cbm:		ds.w	896		; per cell: the banks of its tiles (as last composed)
 sr_chg:		ds.w	SR_ROWS
 sr_draw:	ds.w	SR_ROWS
 sr_stale:	ds.w	3*SR_ROWS	; per screen: the blocks it lacks (the sets drawn since it was drawn)
 sr_s1:		ds.w	SR_ROWS
 sr_tmp:		ds.w	SR_ROWS
 sr_any:		ds.w	SR_ROWS
-sr_gen:		ds.b	16
 sr_tmp8:	ds.b	8
 sr_tbuf:	ds.b	4*72
 sr_tptr:	ds.l	4		; (sr_bake) the four tiles' entries

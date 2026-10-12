@@ -30,7 +30,9 @@ BUSY = %10000000
 HOG = %01000000
 NFSR = %01000000
 
-STRIDE = 160				; bytes per line
+STRIDE = 256				; bytes per line
+GAME_BYTES = 64			; game x=128 in the 512 pixel virtual screen
+VIEW_BYTES = GAME_BYTES-16	; 320 visible pixels, game centred 32 pixels in
 KEY_ESC = $01
 
 	ifnd TA_DATA
@@ -73,15 +75,8 @@ g_ram = g_block+$8000			; $8000-$FFFF
 G_MCRAM = g_ram+$7C00			; $FC00-$FFFF: the RAM shared with the MCU
 TOKEN = $FE7F				; $7FFE on the Z80 stack, byte swapped
 
-arm_border_timers	macro
-	clr.b	$fffffa1b.w
-	move.b	#199+29,$fffffa21.w
-	move.b	#8,$fffffa1b.w
-	move.b	#TA_DATA,$fffffa1f.w
-	move.b	#4,$fffffa19.w
-	st	border_a
-	st	border_b
-	endm
+; Early, synchronized border events tolerate the renderer's short HOG passes.
+	include "borders.s"
 
 	section text,code
 
@@ -350,6 +345,10 @@ restore_hardware:
 
 quit:
 	bsr	restore_hardware
+	ifd DEBUG
+	bsr bd_report
+	bsr	dbg_counters
+	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
 	trap	#1
@@ -376,7 +375,7 @@ init_video:
 	dbf	d1,.buf
 
 	clr.b	$ffff8260.w		; low resolution
-	clr.b	$ffff820f.w
+	move.b #48,$ffff820f.w
 
 	move.l	scr_address+4,draw_screen_address
 	move.l	scr_address,display_screen_address
@@ -428,7 +427,7 @@ hbl:
 
 vbl:
 	ifnd NOBORDER
-	arm_border_timers		; (first thing: the timers count from here)
+	borders_vbl		; (first thing: the timers count from here)
 	endc
 	ifnd NOSOUND
 	tst.b	snd_busy		; the sound: every VBL, also the ones that only arm the timers (src/sound.s)
@@ -455,6 +454,9 @@ vbl:
 	move	sr,-(sp)
 	move	#$2600,sr		; (the keyboard composes them too)
 	bsr	compose_inputs
+	ifd AUTOPLAY
+	bsr	autoplay
+	endc
 	move	(sp)+,sr
 	endc
 
@@ -463,8 +465,14 @@ vbl:
 	move.l	ready_screen,d0
 	beq.s	.no_swap
 	clr.l	ready_screen
+	ifd SIM
+	addq.l	#1,sim_shown		; (profile.py: pictures shown)
+	endc
+	ifd DEBUG
+	addq.w	#1,dbg_shown
+	endc
 	move.l	d0,display_screen_address
-	add.l	#CROP_TOP*STRIDE,d0	; the shown part
+	add.l	#CROP_TOP*STRIDE+VIEW_BYTES,d0	; the shown part
 	move.l	d0,-(sp)
 	move.b	1(sp),$ffff8201.w
 	move.b	2(sp),$ffff8203.w
@@ -478,6 +486,9 @@ vbl:
 .no_swap:
 
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	bsr	dbg_snapshot
+	endc
 
 	tst.b	quit_flag
 	bne	quit
@@ -586,7 +597,7 @@ vbl_render:
 	; Draw the frame, with the VBL enabled: when it takes longer than a frame, the
 	; next VBL runs the game's interrupts (above) and skips the drawing.
 	tst.b	in_render
-	bne.s	vbl_done
+	bne	vbl_done
 	tst.b	in_turn
 	bne.s	vbl_done
 	movem.l	(sp),d0-d7/a0-a6	; the main CPU's registers for its IRQ handler
@@ -602,6 +613,12 @@ vbl_render:
 	bsr	render_frame
 	move	#$2700,sr		; the picture is ready, with its colours
 	move.l	draw_screen_address,ready_screen
+	ifd SIM
+	addq.l	#1,sim_done		; (profile.py: renders completed)
+	endc
+	ifd DEBUG
+	addq.w	#1,dbg_done
+	endc
 	movem.l	ste_pal,d0-d7
 	movem.l	d0-d7,ready_pal
 	st	pal_pending
@@ -646,48 +663,8 @@ g2_ret:
 ; The top and bottom borders are removed (Timer A in the middle of the last line before the
 ; border, Timer B at the bottom border), as in the Galaga port: 277 lines.
 
-timer_a:
-	move.l	2(sp),dbg_t_pc
-	move	#$2100,sr
-	stop	#$2100
-	move	#$2700,sr
-	clr.b	$fffffa19.w
-	rept TA_NOPS
-	nop
-	endr
-	clr.b	$ffff820a.w
-	rept 9
-	nop
-	endr
-	move.b	#2,$ffff820a.w
-	clr.b	border_a
-	rte
-
-timer_b:
-	movem.l	d0/a0,-(sp)
-	lea	$fffffa21.w,a0
-	move.b	(a0),d0
-.wait1:
-	cmp.b	(a0),d0
-	beq.s	.wait1
-	clr.b	$ffff820a.w
-	moveq	#2,d0
-.wait2:
-	nop
-	dbf	d0,.wait2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
-	move.b	(a0),d0
-.wait3:
-	cmp.b	(a0),d0
-	beq.s	.wait3
-	movem.l	(sp)+,d0/a0
-	clr.b	border_b
-	rte
+	borders_handlers
+	borders_report
 
 ; ------------------------------------------------------------------------------
 ; The boot schedule.  z80_hook is reached from the translated code at the spin loops
@@ -913,8 +890,7 @@ mcu_bus_read:				; (a6 = mcu_mem while the MCU's code runs)
 	clr.b	4(a6)
 	move.w	d2,$4A(a6)
 	move.b	d2,7(a6)
-	move.w	d2,d0
-	lsr.w	#8,d0
+	move.b	$4A(a6),d0		; (X's high byte)
 	and.b	#$0F,d0
 	or.b	#$10,d0			; (P2 = X high nibble, then | $10: only the second write is seen)
 	move.b	d0,3(a6)
@@ -957,8 +933,7 @@ mcu_bus_write:
 	move.b	d1,6(a6)
 	move.w	d2,$4A(a6)
 	move.b	d2,7(a6)
-	move.w	d2,d0
-	lsr.w	#8,d0
+	move.b	$4A(a6),d0		; (X's high byte)
 	and.b	#$0F,d0
 	or.b	#$10,d0
 	move.b	d0,3(a6)
@@ -1288,6 +1263,102 @@ compose_inputs:
 	move.b	d0,in2_val
 	rts
 
+	ifd AUTOPLAY
+; The benchmark's inputs (tools/bench.sh), as tools/profile.py's script by VBL: coin at 400, start at 440, then
+; left / right every 50 VBLs, jump every 30, bubble every 90.
+autoplay:
+	move.l	frame_counter,d0
+	moveq	#$03,d1
+	cmp.l	#400,d0
+	blo.s	.c
+	cmp.l	#406,d0
+	bhs.s	.c
+	or.b	#$04,d1			; coin 1
+.c:	move.b	d1,in0_val
+	moveq	#-1,d1
+	cmp.l	#440,d0
+	blo.s	.s
+	cmp.l	#446,d0
+	bhs.s	.s
+	and.b	#$BF,d1			; start 1
+.s:	cmp.l	#560,d0
+	bls.s	.done
+	move.l	d0,d2
+	divu	#50,d2
+	btst	#0,d2
+	beq.s	.left
+	and.b	#$FD,d1			; right
+	bra.s	.j
+.left:	and.b	#$FE,d1
+.j:	move.l	d0,d2
+	divu	#30,d2
+	swap	d2
+	cmp.w	#3,d2
+	bhs.s	.b
+	and.b	#$DF,d1			; jump
+.b:	move.l	d0,d2
+	divu	#90,d2
+	swap	d2
+	cmp.w	#3,d2
+	bhs.s	.done
+	and.b	#$EF,d1			; bubble
+.done:	move.b	d1,in1_val
+	st	in2_val
+	rts
+	endc
+
+	ifd DEBUG
+; every 300 VBLs: VBLs, game rounds, pictures completed, pictures shown (words; COUNTERS.BIN at the exit,
+; tools/bench.sh)
+dbg_snapshot:
+	move.l	d0,-(sp)
+	move.l	frame_counter,d0
+	divu	#300,d0
+	swap	d0
+	tst.w	d0
+	bne.s	.no
+	move.l	a0,-(sp)
+	move.w	dbg_nsnap,d0
+	cmp.w	#64,d0
+	bhs.s	.full
+	addq.w	#1,dbg_nsnap
+	lsl.w	#3,d0
+	lea	dbg_snaps,a0
+	add.w	d0,a0
+	move.w	frame_counter+2,(a0)+
+	move.w	logic_rounds+2,(a0)+
+	move.w	dbg_done,(a0)+
+	move.w	dbg_shown,(a0)
+.full:	move.l	(sp)+,a0
+.no:	move.l	(sp)+,d0
+	rts
+
+dbg_counters:
+	clr	-(sp)
+	pea	dbg_cname
+	move	#$3c,-(sp)		; Fcreate
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	dbg_snaps
+	moveq	#0,d0
+	move.w	dbg_nsnap,d0
+	lsl.l	#3,d0
+	move.l	d0,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)		; Fwrite
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)		; Fclose
+	trap	#1
+	addq	#4,sp
+	rts
+dbg_cname:
+	dc.b	"COUNTERS.BIN",0
+	even
+	endc
+
 ; scancode, IN0 bits (coins), player 1 bits (left 0, right 1, bubble 4, jump 5, start 6),
 ; player 2 bits
 
@@ -1435,7 +1506,9 @@ crash_name:
 sim_frame_done:				; the test harness stops here (once per frame, after the game's interrupts)
 	bra.s	sim_frame_done
 sim_renders:	dc.l	0			; renders started so far (tools/profile.py)
-sim_game_frames:	dc.l	0			; the game's interrupt rounds run so far (tools/profile.py)
+sim_game_frames:	dc.l	0
+sim_done:	dc.l	0			; renders completed (tools/profile.py)
+sim_shown:	dc.l	0			; pictures shown by the VBL (tools/profile.py)			; the game's interrupt rounds run so far (tools/profile.py)
 	endc
 
 ; ------------------------------------------------------------------------------
@@ -1519,8 +1592,7 @@ old_fa21:	ds.b	1
 
 quit_flag:	ds.b	1
 	jagpad_vars
-border_a:	ds.b	1
-border_b:	ds.b	1
+	borders_vars
 in_logic:	ds.b	1		; the game's interrupts of a VBL are running
 render_age:	ds.b	1		; VBLs since the frame being drawn began
 skip_phase:	ds.b	1
@@ -1562,6 +1634,12 @@ rnd_state:	ds.w	1
 cnt_acia:	ds.w	1
 cnt_late:	ds.w	1
 cnt_vbl:	ds.w	1
+	ifd DEBUG
+dbg_done:	ds.w	1		; pictures completed (tools/bench.sh)
+dbg_shown:	ds.w	1		; ... shown
+dbg_nsnap:	ds.w	1
+dbg_snaps:	ds.w	4*64
+	endc
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 dbg_vbl_pc:	ds.l	1

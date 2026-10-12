@@ -56,23 +56,45 @@ the general renderer below (switching draws everything once).  On the 8 x 8 grid
   line), `sr_any` (per block: the front layer has an opaque pixel).  Two tiles per cell and layer are allowed (the
   title has 32 columns and no sprites: both sets are behind); a cell is drawn again when one of its tile entries changed
   (`rf_vdiff`'s `tile_dirty` through `sr_vinv`, the cell of every entry) or a pen of its tiles changed slot
-  (`pen_chg`, `bb_penmask`: the pens each tile uses).  The maps (`sr_maps`) are built again when a column, its x or
+  (`pen_chg`, `bb_penmask`: the pens each tile uses; only the cells whose banks, as last composed, include a changed
+  one are looked at: `sr_cbm`, a bank mask per cell).  A cell's four tile keys look up the **composite cache**
+  (`sr_ccache`, 1024 entries of 64 bytes: the keys, a palette stamp, the cell's four plane bytes and front opacity per
+  line; it lives in the general renderer's composite buffers, which that renderer builds again when it takes over);
+  a miss composes the cell (the first tile written as it is, the others merged) and keeps it.  The maps (`sr_maps`) are built again when a column, its x or
   its layer changed (sprites coming or going between the two sets move the front set to the back).
 * The screen is handled in blocks of 16 pixels (one plane word group) x 4 lines.  Per object a record (`sr_recs`, 64
   bytes) of what the last frame drawn here saw; `sr_scan` compares: a sprite whose entry, tile entries (the page flags of
-  `rf_vdiff`) or colour generation (`sr_gen`, per bank, new on a mapping change) changed puts its old and new blocks into
-  the set; one that only moved keeps its tiles' keys.  The visible sprites are listed (`sr_vlist`).
+  `rf_vdiff`) or colours changed (a pen its tiles use changed slot this frame: `sr_penhit`) puts its old and new blocks
+  into the set; one that only moved keeps its tiles' keys.  The visible sprites are listed (`sr_vlist`); empty objects
+  take a short loop.
 * Closure: a sprite with a block in the set is drawn whole and its blocks join the set, until nothing changes.  The
   screen to draw gets: the blocks it lacks outside the set copied from the screen drawn last, the set restored from
   `sr_img`, the set's sprites in list order, the front columns again through `sr_msk` where a back sprite was drawn
   (blocks of `sr_s1` and `sr_any`), the sprites after the front columns.
-* A sprite is drawn from its baked image (`sr_cache`, 512 entries of 408 bytes, direct mapped, keyed by the four tiles'
-  keys with their generations and the shift x & 15): two plane word groups per line, the mask inverted and doubled,
-  `and.l` / `or.l` per plane pair, clipped by whole groups (the game area is 16 groups wide) and by lines.  A miss bakes
-  it from the tile cache (`tcache`).
+* A sprite is drawn whole with the Blitter from an unshifted image (`sr_cache`, 512 entries of 212 bytes,
+  keyed by four tile keys, validated by a palette stamp). Its 16 rows are grouped by identical opacity masks,
+  following `stefastbobs2`; offset pairs retain original destinations (a group's first row carries the mask, the
+  others 0; the opaque rows' count is in the entry); contiguous plane rows let the Blitter advance its source
+  automatically. The Blitter supplies the skew, so moving across any of the 16 shifts reuses the same cache entry.
+  Block copies find their runs of groups with two byte tables (`sr_tz`, `sr_to`): one to three groups by the CPU,
+  longer runs (up to 8 groups) in HOG passes of one line, at most 256 bus cycles.
+* **Palette stamps** (2026-10-12): a change of a pen's slot starts a new palette epoch (`pal_epoch`) and records it for
+  that pen and its bank (`pen_epoch`, `bank_epoch`).  A baked tile (`tcache`), a sprite image and a cell composite
+  carry the epoch they were made under; a lookup with an older stamp checks only the pens its tiles use against
+  `pen_epoch` (`get_tile`'s `.stamp`, `sr_valid`) and refreshes the stamp if none changed.  Nothing is walked at a
+  palette change; the keys stay exact (tile, bank, flips); the epoch wrapping flushes everything (`pal_wrapped`).
+* The virtual screen is 512 pixels wide (256 bytes per row). The 320-pixel hardware window starts at x=96,
+  centring the 256-pixel game picture at x=128. The sprite renderer's Blitter path (`sr_draw1`) clips a sprite
+  across the left or right picture edge (2026-10-12): the edges lie on 16-pixel groups, so the word outside gets an
+  end mask of 0 (the Blitter leaves it untouched; a second loop, used only for such sprites, ANDs the row masks
+  with $0000ffff or $ffff0000), and the 32-pixel visible side bands stay clean.  Top and bottom: whole sprites into
+  the guard rows, restored before drawing.  The general renderer still draws whole sprites into all four guards.
+  Each screen remembers which guards it was drawn into (`sr_guard_pages`: bits left, right, top, bottom); only
+  those are cleared (the sprite renderer now sets only top and bottom).
 
 Exact: `render_test.py seq 100 1500` (attract, coin, start, two rounds, a level transition) 1500 of 1500 frames,
-`render_bench.py` 0 wrong pixels.  `render_bench.py ... --step 2` renders every second frame (the pace of 25 pictures a
+`render_bench.py` 0 wrong pixels.  `render_test.py` also checks the margins and guard rows around the picture: every set
+pixel there must lie in a sprite drawn now (no stale damage; it reports the stray pixels).  `render_bench.py ... --step 2` renders every second frame (the pace of 25 pictures a
 second); it leaves the first frame (a full redraw) out of its means and profile and prints how many sprites were drawn
 and baked.
 
@@ -153,6 +175,9 @@ Paths relative to `games/bublbobl/`; from the repository root `python port.py te
     venv/bin/python tools/align_test.py 900          # odd word accesses (a 68000 faults on them, Musashi does not)
     venv/bin/python tools/render_bench.py 110 60 400 60 620 120   # renderer cost and picture quality, windows of frames
     venv/bin/python tools/profile.py 1200            # where the 68000's cycles go, in the real VBL schedule
+    venv/bin/python tools/sprite_test.py             # whole sprites: all shifts, holes, guard edges, cache collisions
+    venv/bin/python tools/sound_test.py              # the sound player against tools/sound.py's model
+    tools/bench.sh 1500                              # Hatari: game rounds and pictures per 300 VBLs, border events
     python port.py run bublbobl shot@20              # Hatari (F030Arcade), screenshots
     python port.py run bublbobl key:5@20 key:1@26 shot@60   # ... with keys (5 = coin, 1 = start)
     python port.py run bublbobl dump:0xADDR:0xSIZE@50       # ... and memory dumps (savebin)
@@ -246,15 +271,11 @@ timers (see the Blitter notes in `docs/porting-guide.md`), so they would have to
 numbers are simulated bus cycles, not Hatari frame times.  A Blitter renderer for this game would pay for a background layer
 composited by rectangle copies and for sprite-like objects, i.e. a different renderer, not a different inner loop.
 
-**The whole-object rule** (`docs/architecture.md` / `docs/porting-guide.md`, "Whole-object drawing (all ports)": a wider virtual
-screen with hidden margins, objects drawn whole, no clipping routines or runtime edge masks): the renderer already draws whole
-tiles and has the 16-byte margins left and right and the guard rows above and below (`YPAD`); what it does is cull a tile that is
-entirely outside (`draw_tile`, allowed by the rule) and erase the overhang of the partly outside tiles each frame (`rf_cleanup`,
-25k cycles = 1.1% of a play frame), because the margins are **visible** black bands of the 320 pixel screen: the 256 pixel
-game area leaves 32 pixels each side, so the "hidden" space of the rule does not exist here and a tile spilling over the edge
-would show.  Keeping `rf_cleanup` is the exact choice (the arcade clips); dropping it would be the 1942 choice (spill into the
-margins, a visible deviation) and would save 1.1%.
-
+**Whole-object rule (updated 2026-10-11):** all ports draw partially visible sprites whole. The old
+`rf_cleanup` eraser described in the 2026-10-09 experiments below has been removed. Bubble Bobble now uses
+a 512-pixel virtual screen and restores previous guard damage before drawing the next picture. The visible
+side bands are part of the hardware window, so whole sprites may appear there.  (2026-10-12: the sprite
+renderer's Blitter path now clips at the left and right picture edges, see above.)
 Next, in order: the steady cost of the play, i.e. the per-cell work (the aligned tile: ~300 cycles of set-up before
 its first row, `get_tile`'s hash, the clearing of a cell an opaque tile overwrites anyway, `rf_redraw`'s object loop),
 fewer dirty cells (an object marks all its tiles, old and new), table driven `obj_slots`; the scene change (draw the
@@ -289,7 +310,7 @@ cycles (1.30x; 2026-10-09, the engine's window wrapper without the a0 save).  Wh
 0.63 / 3.3 before: the translated code is a fifth of the CPU in the play, the renderer more than two thirds
 (~109k cycles a VBL), so the frame rate moved little.
 
-## Edge bands (2026-10-09)
+## Edge bands (2026-10-09 experiment, superseded 2026-10-11)
 
 Tiles that hang over the game area are drawn whole into the 16-pixel bands around it (the screen is the plain 320-pixel
 one); `draw_tile` notes which band it drew into (`hang_top`, `hang_bottom`, `hang_rows` for the 8-line rows with a tile
@@ -365,3 +386,88 @@ differ: commands that change another's tracks (effect $1A changes a parameter of
 lasts) are not modelled.  `sound_test.py` (in `port.py test`): the 68000 player against the model, 0 of 6,000 VBLs
 differ.  Hatari: music and effects in the attract mode and play.  `build.py --sound` records again (~10 min).
 
+
+## Whole sprites and measurements (2026-10-11)
+
+The renderer now uses the reordered sprite method, caches one unshifted image instead of sixteen positional
+variants, and saves about 98 KiB of sprite-cache memory. The two straight-line sprite tile writers mark their
+possible video RAM pages once per burst (`BYTEVMARKS=1` retains individual marks for comparison); generator
+assertions reject branches or entries inside a burst. Colliding tile entries are copied with their full 72-byte spacing.
+
+`profile.py 1500 --chunk 256 --window 600:900 900:1200 1200:1500`, same scripted inputs and sound player:
+
+| VBL window | Before, pictures/s | After, pictures/s | Game rounds/VBL, after |
+|---|---:|---:|---:|
+| 600–899 | 3.2 | 4.7 | 0.63 |
+| 900–1199 | 11.2 | 13.7 | 0.74 |
+| 1200–1499 | 14.0 | 14.8 | 0.57 |
+
+These are Musashi schedule estimates, including Blitter source reads, masked destination reads and writes;
+they are not Hatari fps measurements. Steady 25+ fps is still unmet: translated logic and scene rebuilds need
+further work. Older measurements above predate the corrected bus accounting.
+
+Validation: 3,000 logic frames match; 1,500 consecutive render frames (100–1599) have zero wrong game pixels;
+128 independent whole-sprite cases cover all skews, four borders, transparent holes, colliding tile-cache entries
+and a 64 KB destination crossing. Alignment test: zero odd-access sites in 900 frames. The renderer makes
+250,730 HOG passes in the sequential test, none longer than 256 bus cycles and none sharing the bus. A 4 MB
+pinned Hatari debug build completed 2,500 game rounds, including coin/start gameplay, with no crash file;
+`BORDERS.BIN` reports two startup fallbacks and zero late top/bottom events. Normal builds do not stop at that limit.
+
+## Performance plan, implemented (2026-10-12)
+
+`docs/performance-plan.md` (the investigation of 2026-10-11) in its order, each change measured and kept only with
+the tests below passing.  Numbers: `profile.py 1500 --chunk 256 --window 600:900 900:1200 1200:1500` (Musashi, the real
+VBL schedule; game rounds per VBL / pictures a second) and `tools/bench.sh 1500` (the pinned Hatari, a DEBUG + AUTOPLAY
+build with the same input script by VBL).  The game's state in a window differs between the two (boot timing), and
+between before and after (a faster renderer changes which pictures are drawn): compare within a column.
+
+| VBL window | Musashi before | Musashi after | Hatari before | Hatari after |
+|---|---|---|---|---|
+| 600–899 (coin, start, round 1 intro) | 0.63 / 4.7 | 0.66 / 5.5 | 0.60 / 3.2 | 0.62 / 4.0 |
+| 900–1199 (play) | 0.74 / 13.7 | 0.75 / **15.8** | 0.76 / 11.7 | 0.79 / **14.7** |
+| 1200–1499 (play) | 0.57 / 14.8 | 0.56 / **17.3** | 0.86 / 17.5 | 0.94 / **25.0** |
+
+A play picture (900–1199) costs ~285k renderer cycles, from ~330k (with the block copies counted as renderer: the
+profile used to charge `sr_blocks_group` to the runtime).  The fixed-state bench (`render_bench.py 900 40 1200 40
+--step 2 --prof`, means): 735,903 / 391,036 -> 681,616 / 362,382 cycles; its means are dominated by the map rebuilds
+(~3.6 M cycles each).  25 pictures a second at the full game pace is **not** reached: the play's game work is ~93k
+cycles a round (Musashi), so a picture would have to cost ~125k.
+
+What was done, by the plan's steps:
+
+1. **Palette stamps** instead of whole-bank generations and walks (see "Sprite renderer"): a pen slot change costs
+   roughly 50k instead of ~225k cycles (profile estimate) (the 4,096-slot tile cache walk and the 3,584-slot map walk are gone), sprites are drawn
+   again only when a pen their tiles use changed slot.
+2. **Cell composite cache** (1,024 entries, exact keys, stamped, front opacity cached) and the first tile written
+   without the clear and merge; `sr_key` decodes a key in half the instructions.  Not done: per-cell recipes (a cell
+   drawn again because its tile entry changed must decode it anyway; the memory is not there) and the coherent
+   scene-change generations (they move the cost of a transition, they do not remove it).  Found: the start and round
+   screens cycle colours (bank 11's pens 0, 4, 7 through slots 1, 4, 8), so every step recomposes the same ~175 cells;
+   a cache keyed by the bank's mapping (interned, exact) would hit there, at the cost of the per-pen precision.
+3. **Object scan**: the object RAM writer marks were not added: the game copies its 90 sprite entries (`$04B6`, 360
+   bytes from `$E1CD` to `$DD00`) every round, so a mark would flag every sprite every round, and a fused copy-and-compare
+   costs more per byte than the misaligned byte copy.  Instead: a short loop for empty objects, the last object found
+   with `dbne`.  Block copies: runs found by table (`sr_tz` / `sr_to`), 8% cheaper; the sprite draw loop 15% cheaper
+   (mask only at a group's first row, the Blitter registers through an address register).  The guards: per screen and
+   edge.  The video RAM diff: `dbne`, `tile_dirty` cleared only in the pages flagged before, the marks tested four at a
+   time.
+4. **Logic**: the MCU firmware reaches the bus routines from ~130 straight-line sites (no loops to replace natively);
+   the translated `jsr $F1BF` / `$F1DB` now calls `mcu_bus_read` / `mcu_bus_write` directly (`m6801x.py`) and they take
+   X's high byte from `$4A` instead of shifting.  The main CPU's time is a flat tail of small helpers (`$0D50`-`$0DBD`,
+   `$147D`, `$26A4`-`$2772`, `$03FD`); the sub CPU's object loop (`$03CF`, up to 11k cycles a VBL in later rounds) keeps
+   exact flags after every `bit` because a `push af` at its head makes them live (a liveness proof across the
+   `pop af` would remove five instructions a test).  Sound: `bb_step` clears the tracks' flags at once and picks the
+   channels inline: 13,863 -> 11,909 cycles a VBL (`sound_test.py`, 6,000 VBLs identical).
+
+Measuring: `profile.py` prints, per window, renders started / completed / shown and per completed render the cells
+composed, composite cache hits, palette-marked cells, pens invalidated, sprite lookups / bakes, visible / drawn
+sprites, blocks copied / restored, map builds and palette changes (the `--sim` build's `sim_*` counters), and the
+logic and logic + runtime cycles per game round; `--bucket NAME` lists one area's routines.  `render_bench.py`
+attributes samples to code labels only.
+
+Validation (all on the final build): `sprite_test.py` 128 cases exact; `render_test.py seq 100 1500` 1500 of 1500
+frames exact, no stray pixels around the picture (the check finds 14 at frame 514 with the guard restore disabled);
+`logic_test.py 700` 0 differences; `align_test.py 900` 0 sites; `mcu_test.py 2600` 0 mismatches; `sound_test.py` 0 of
+6,000; `BLIT_STATS=256` over 300 frames: 28,117 HOG passes, the longest 256 bus cycles, none sharing the bus;
+`tools/bench.sh 1500` in Hatari: no late border event, no pass in pieces, no crash file.  Memory: 3,931,904 bytes
+(+4 KB: the epochs and the cells' bank masks).

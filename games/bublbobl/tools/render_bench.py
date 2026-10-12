@@ -56,7 +56,7 @@ def main():
     if not windows:
         windows = [(100, 60), (400, 60), (620, 120)]
     s = Sim(str(lt.RUN / "BUBBLE.PRG"), run_dir=lt.RUN)
-    s.mem.set_trace_mode(False)
+    s.mem.set_trace_mode(True)                 # Blitter register writes drive Sim.on_access
     sym = {k: v + s.base for k, v in s.symbols(lt.MAP).items()}
     s.bad = sym["z80_badpc"]
     cpu, mem = s.cpu, s.mem
@@ -76,7 +76,9 @@ def main():
     f = 0
     results = []
     import bisect, collections
-    addrs = sorted((v, k) for k, v in sym.items())
+    import re
+    reloc = {m.group(1) for m in re.finditer(r"0x[0-9a-fA-F]+ (\w+): .*?reloc,", open(lt.MAP).read())}
+    addrs = sorted((v, k) for k, v in sym.items() if k in reloc)     # (absolute symbols are not code)
     keys = [v for v, _ in addrs]
     hot = collections.Counter()
     detail = collections.Counter()
@@ -110,7 +112,8 @@ def main():
             cpu.w_pc(sym["render_frame"])
             cyc = 0
             while cpu.r_pc() != stop:
-                c = cpu.execute(1 if count else (64 if prof else 20000)).cycles
+                c = cpu.execute(1 if count else (64 if prof else 20000)).cycles + s.blitter.cycles
+                s.blitter.cycles = 0
                 cyc += c
                 if count:
                     pc = cpu.r_pc()

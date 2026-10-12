@@ -62,6 +62,18 @@ VRAM_WRITERS = {
     0x1A181: ('hl', 0), 0x1A183: ('hl', 0), 0x1FE30: ('de', 0), 0x1FE34: ('de', 0),
 }
 
+# These two straight-line sprite writers store four adjacent tile pairs at
+# IY+12..15 and IY+76..79. Mark their two possible 128-byte pages once at
+# the first store, instead of saving CCR and computing a page eight times.
+# Logic runs to completion before the renderer resumes, so it cannot consume
+# the marks between the first and last store. BYTEVMARKS retains the old path
+# for A/B measurements. Do not extend these ranges across calls or branches.
+SPRITE_WRITER_BURSTS = {
+    0x1480: (0x1480, 0x1483, 0x1487, 0x148A, 0x148E, 0x1491, 0x1495, 0x1498),
+    0x14A1: (0x14A1, 0x14A4, 0x14A8, 0x14AB, 0x14AF, 0x14B2, 0x14B6, 0x14B9),
+}
+SPRITE_BURST_SITES = {pc for sites in SPRITE_WRITER_BURSTS.values() for pc in sites}
+
 
 def virt(pc, bank):
     return VBASE + bank * 0x4000 + (pc - WIN_LO)
@@ -204,6 +216,24 @@ class BBEmitter(Emitter):
         super().emit_ins(pc, live_out_override, with_label)
         self.window_wrap(n0)                  # (z80x: a0 = the window, saved only where it holds BC')
         form = VRAM_WRITERS.get(pc)
+        if pc in SPRITE_BURST_SITES:
+            self.e('ifd BYTEVMARKS')
+            self.emit_vmark(form)
+            self.e('else')
+            if pc in SPRITE_WRITER_BURSTS:
+                self.e('move sr,-(sp)')
+                self.e('lea vmarks,a0')
+                for off in (12, 79):
+                    self.e('move.w a2,d7')
+                    self.e('add.w #%d,d7' % off)
+                    self.e('lsr.w #7,d7')
+                    self.e('st (a0,d7.w)')
+                self.e('move (sp)+,ccr')
+            self.e('endc')
+            return
+        self.emit_vmark(form)
+
+    def emit_vmark(self, form):
         if form == 'all':
             self.e('st vmark_all')
         elif form and form[0] == 'abs':
@@ -264,6 +294,25 @@ def translate(rom, roots, dyn, cfg, emitter_cls=Emitter, decode=None, hooks=(), 
     joins = set(roots) | set(hooks)
     for nxt, targets in tables.values():
         joins |= set(targets)
+    if cfg.prefix == "Z":
+        # A consolidated mark is valid only for complete straight-line bursts.
+        # Fail the build if coverage/ROM changes introduce an interior entry.
+        targets = set(roots) | set(hooks)
+        targets |= {i.target for i in code.values() if i.target is not None}
+        for _, entries in tables.values():
+            targets.update(entries)
+        for first, sites in SPRITE_WRITER_BURSTS.items():
+            end = sites[-1] + code[sites[-1]].length
+            assert not any(first < target < end for target in targets), "sprite writer has an interior entry"
+            pc = first
+            while pc < end:
+                ins = code[pc]
+                assert ins.flow == "seq", "sprite writer is not straight-line"
+                assert ins.ops[0] != ("r16", "iy"), "sprite writer changes IY"
+                if pc in sites:
+                    assert ins.mn == "ld" and ins.ops[0] == ("ind", "iy", VRAM_WRITERS[pc][1])
+                pc += ins.length
+            assert pc == end
     em = compile_code(code, joins, cfg, hooks, emitter=emitter_cls, **kw)
     return code, tables, em
 

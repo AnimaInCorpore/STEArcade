@@ -37,7 +37,7 @@ WCAP = 8
 VOLMIN = 4				; a palette entry that changed this often is volatile (flashing)
 VIDLE = 48				; (STATICPAL) palette changes without one of its own: a flashing entry gives its colour back
 TC_SIZE = 4096				; tile cache slots
-TC_ENTRY = 72				; key.l, opaque.l, 8 rows of (data.l, inverted mask.l)
+TC_ENTRY = 72				; key.l, stamp.w, opaque.w, 8 rows of (data.l, inverted mask.l)
 
 ; rf_map2 = stale if the object a3 is outside the moving range (its tiles are in the composites)
 stale_if_static	macro
@@ -230,11 +230,7 @@ init_render:
 	lea	16(a0),a0
 	dbf	d0,.shape
 	st	vmark_all			; (the first frame compares the whole video RAM)
-	lea	tcache,a0
-	move.l	#TC_SIZE-1,d0
-.t:	move.l	#-1,(a0)
-	lea	TC_ENTRY(a0),a0
-	dbf	d0,.t
+	bsr	tc_flush
 	st	bank_stale
 	lea	ttab,a0			; (no mapping yet: the first palette builds everything)
 	moveq	#64-1,d0
@@ -354,6 +350,17 @@ render_frame:
 	bm_fill	dirty,-1		; (the palette changed: every cell of both screens)
 .not_all:
 	bsr	rf_objects		; (stale: the cells of changed objects outside the moving range)
+	; General objects can leave whole tiles in the guards too. Restore old
+	; guard background before any drawing and redraw the adjacent game cells.
+	move.b #$0F,sr_has_guard	; (all four guards)
+	bsr sr_guard_restore
+	lea dirty,a0
+	moveq #28-1,d0
+.guard_damage:
+	or.l #$80000001,(a0)+
+	dbf d0,.guard_damage
+	move.l #-1,dirty
+	move.l #-1,dirty+27*4
 	bsr	classify		; (comp_bad / comp_bad_k: the cells of objects that changed layer)
 	bm_copy	stale,stale_k		; (shapes changed there: the masks above too; colours alone leave them)
 	tst.b	rf_all
@@ -468,7 +475,6 @@ render_frame:
 	sf	rf_noclear
 	bsr	comp_overlay		; the objects after it, through their mask
 .done:
-	bsr	rf_cleanup
 .sr_drawn:
 	rts
 
@@ -602,13 +608,13 @@ build_composites:
 	subq.w	#1,d0
 	move.w	d0,rf_hi
 	bsr	rf_redraw
-	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	lea	canvas+(YPAD+16)*STRIDE+GAME_BYTES,a1
 	each_cell	need,comp_B,cap_b
 	st	rf_noclear		; above, on it
 	bsr	set_above
 	bsr	rf_redraw
 	sf	rf_noclear
-	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	lea	canvas+(YPAD+16)*STRIDE+GAME_BYTES,a1
 	each_cell	need,comp_S,cap_s
 	move.l	(sp)+,rf_screen
 	bm_andnot	need,comp_bad
@@ -632,7 +638,7 @@ build_composites:
 	st	rf_maskmode		; above as its opacity, on black: the mask in all four planes
 	bsr	rf_redraw
 	sf	rf_maskmode
-	lea	canvas+(YPAD+16)*STRIDE+16,a1
+	lea	canvas+(YPAD+16)*STRIDE+GAME_BYTES,a1
 	each_cell	need_k,comp_K,cap_kmask
 	move.l	(sp)+,rf_screen
 	bm_andnot	need_k,comp_bad_k
@@ -649,7 +655,7 @@ set_above:
 ; the dirty cells of the screen: comp_B where the moving range has tiles (mov), else comp_S
 comp_fill:
 	move.l	rf_screen,a1
-	lea	(YPAD+16)*STRIDE+16(a1),a1
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a1),a1
 	lea	mov,a3
 	each_cell	dirty,comp_S,fill_row
 	rts
@@ -664,7 +670,7 @@ comp_overlay:
 	move.l	d1,(a3)+
 	dbf	d0,.and
 	move.l	rf_screen,a1
-	lea	(YPAD+16)*STRIDE+16(a1),a1
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a1),a1
 	each_cell	dmov,comp_S,over_cell
 	rts
 
@@ -750,9 +756,9 @@ rf_mark_banks:
 
 rf_copy:
 	move.l	rf_screen,a1
-	lea	(YPAD+16)*STRIDE+16(a1),a1	; the first game cell row, column 0 of the screen to draw
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a1),a1	; the first game cell row, column 0 of the screen to draw
 	move.l	last_screen_address,a2
-	lea	(YPAD+16)*STRIDE+16(a2),a2	; ... of the screen drawn last
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a2),a2	; ... of the screen drawn last
 	move.w	rf_buf,d0
 	mulu	#28*4,d0
 	lea	old_stale,a0
@@ -805,16 +811,29 @@ rf_vdiff:
 	sf	vdiff_busy
 	rts
 .diff:
-	lea	page_dirty,a3
-	moveq	#64/4-1,d0
-.pz:	clr.l	(a3)+
-	dbf	d0,.pz
-	lea	tile_dirty,a3
-	move.w	#(3712/32)-1,d0
-.tz:	clr.l	(a3)+
-	dbf	d0,.tz
-	lea	tile_dirty,a3
-	lea	page_dirty,a2
+	lea	page_dirty,a2			; (tile_dirty has bits only in the pages page_dirty flags: only those
+	lea	tile_dirty,a3			; are cleared, four pages at a time)
+	moveq	#0,d6
+.c4:	tst.l	(a2,d6.w)
+	beq.s	.c4n
+	clr.l	(a2,d6.w)
+	move.w	d6,d0
+	lsl.w	#3,d0
+	lea	(a3,d0.w),a0
+	moveq	#0,d0
+	rept 4
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	endr
+	cmp.w	#56,d6
+	beq.s	.c4n				; (pages 56, 57: the last 16 bytes of tile_dirty)
+	rept 4
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	endr
+.c4n:	addq.w	#4,d6
+	cmp.w	#58,d6
+	blo.s	.c4
 	lea	bank_seen_b,a4
 	lea	vmarks+$180,a5			; (the pages of C000-DCFF: the translated writers mark them, gen.VRAM_WRITERS)
 	tst.b	vmark_all
@@ -827,10 +846,24 @@ rf_vdiff:
 .roll:
 	move.w	d0,vroll
 	st	(a5,d0.w)
-	moveq	#0,d6
-.page:
-	tst.b	(a5,d6.w)
-	beq.s	.skip
+	moveq	#0,d6				; the marks four at a time
+.p4:	tst.l	(a5,d6.w)
+	bne.s	.some
+	addq.w	#4,d6
+	cmp.w	#56,d6
+	blo.s	.p4
+	bra.s	.last
+.some:	rept 4
+	bsr.s	.one
+	addq.w	#1,d6
+	endr
+	cmp.w	#56,d6
+	blo.s	.p4
+.last:	bsr.s	.one				; (pages 56, 57)
+	addq.w	#1,d6
+; page d6: compared if it is marked
+.one:	tst.b	(a5,d6.w)
+	beq.s	.o_none
 	sf	(a5,d6.w)
 	move.w	d6,d3
 	lsl.w	#5,d3				; the long index
@@ -841,11 +874,8 @@ rf_vdiff:
 	add.w	d0,a0
 	add.w	d0,a1
 	moveq	#32-1,d0
-	bsr.s	vcompare
-.skip:
-	addq.w	#1,d6
-	cmp.w	#58,d6
-	blo.s	.page
+	bra	vcompare
+.o_none:
 	rts
 .all:
 	sf	vmark_all
@@ -860,12 +890,10 @@ rf_vdiff:
 ; d0+1 longs from a0 (the video RAM) against a1 (the copy), d3 = the first long index: the copy brought up to
 ; date, the tile entries and pages that changed flagged.
 vcompare:
-.l:
-	cmpm.l	(a0)+,(a1)+
+	move.l	a0,d7			; (the first long: the index of a difference is found from a0)
+.l:	cmpm.l	(a0)+,(a1)+
+	dbne	d0,.l
 	bne.s	.diff
-.next:
-	addq.w	#1,d3
-	dbf	d0,.l
 	rts
 .diff:
 	st	bank_stale		; (a tile entry changed: the banks in use are counted again)
@@ -885,7 +913,12 @@ vcompare:
 	and.w	#15,d5
 	st	(a4,d5.w)
 .e2:
-	move.w	d3,d1
+	move.l	a0,d4			; the long's index: d3 + (a0 - 4 - the first) / 4
+	sub.l	d7,d4
+	lsr.w	#2,d4
+	add.w	d3,d4
+	subq.w	#1,d4
+	move.w	d4,d1
 	add.w	d1,d1			; the first tile entry (word) of the long
 	move.w	d1,d2
 	lsr.w	#3,d2
@@ -894,10 +927,10 @@ vcompare:
 	move.w	d1,d2
 	lsr.w	#3,d2
 	bset	d1,(a3,d2.w)
-	move.w	d3,d1
-	lsr.w	#5,d1			; the long index / 32 = the page (128 bytes)
-	st	(a2,d1.w)
-	bra.s	.next
+	lsr.w	#5,d4			; the long index / 32 = the page (128 bytes)
+	st	(a2,d4.w)
+	dbf	d0,.l			; (dbne left the count as it was)
+	rts
 
 ; ------------------------------------------------------------------------------
 ; The objects.  Per object (OBJ_SIZE bytes): xin.w (the chained x entering), the 4 bytes of the
@@ -1510,7 +1543,7 @@ rf_redraw:
 	tst.b	rf_noclear
 	bne	.draw
 	move.l	rf_screen,a1
-	lea	(YPAD+16)*STRIDE+16(a1),a1	; the first game cell row, column 0
+	lea	(YPAD+16)*STRIDE+GAME_BYTES(a1),a1	; the first game cell row, column 0
 	move.l	rf_map,a0
 	move.l	rf_fill,d1
 	moveq	#28-1,d0
@@ -1591,64 +1624,6 @@ rf_redraw:
 .nothing:
 	rts
 
-; the tiles that hang over the game area are drawn into the black bands around it: erase them, where draw_tile
-; drew this frame (hang_top, hang_bottom, hang_rows: the 8-line rows with a tile at x < 0 or x > 248)
-
-rf_cleanup:
-	move.l	rf_screen,a1
-	moveq	#0,d1
-	move.l	d1,d2
-	move.l	d1,d3
-	move.l	d1,d4
-	tst.b	hang_top
-	beq.s	.no_top
-	clr.b	hang_top
-	lea	(YPAD+9)*STRIDE(a1),a0		; rows 9-15
-	moveq	#7-1,d0
-.t:
-	rept 10
-	movem.l	d1-d4,(a0)
-	lea	16(a0),a0
-	endr
-	dbf	d0,.t
-.no_top:
-	tst.b	hang_bottom
-	beq.s	.no_bottom
-	clr.b	hang_bottom
-	lea	(YPAD+240)*STRIDE(a1),a0	; rows 240-246
-	moveq	#7-1,d0
-.b:
-	rept 10
-	movem.l	d1-d4,(a0)
-	lea	16(a0),a0
-	endr
-	dbf	d0,.b
-.no_bottom:
-	; the margins: the tiles at x < 0 and x > 248 hang into the groups next to the game area
-	lea	hang_rows,a3
-	clr.w	(a3)				; (rows 0-1 and 30-31: in the top and bottom bands)
-	clr.w	30(a3)
-	lea	(YPAD+16)*STRIDE+8(a1),a0
-	moveq	#2,d5
-.row:
-	tst.b	(a3,d5.w)
-	beq	.next
-	clr.b	(a3,d5.w)
-o	set	0
-	rept 8
-	move.l	d1,o(a0)
-	move.l	d1,o+4(a0)
-	move.l	d1,o+136(a0)
-	move.l	d1,o+140(a0)
-o	set	o+STRIDE
-	endr
-.next:
-	lea	8*STRIDE(a0),a0
-	addq.w	#1,d5
-	cmp.w	#30,d5
-	blo	.row
-	rts
-
 ; ------------------------------------------------------------------------------
 ; One tile.  d0.w = x (signed), d1.w = y (0-255), d2.w = the vram offset, d3.w = the tile number's
 ; high bits (attr & 15) << 10.  Draws into rf_screen.  Keeps nothing but a5-a6 / sp.
@@ -1663,22 +1638,6 @@ draw_tile:
 	blt	.out
 	cmp.w	#239,d1
 	bgt	.out
-	cmp.w	#248,d0			; (hanging over the game area: rf_cleanup erases that band)
-	bls.s	.in_x
-	move.w	d1,d7
-	lsr.w	#3,d7
-	lea	hang_rows,a0
-	st	(a0,d7.w)
-	st	1(a0,d7.w)
-.in_x:
-	cmp.w	#16,d1
-	bhs.s	.in_top
-	st	hang_top
-.in_top:
-	cmp.w	#232,d1
-	bls.s	.in_y
-	st	hang_bottom
-.in_y:
 	lea	G_VRAM,a0
 	moveq	#0,d4
 	moveq	#0,d5
@@ -1743,7 +1702,7 @@ draw_tile:
 	move.w	d5,d4
 	asr.w	#1,d4
 	lsl.w	#3,d4
-	add.w	#16,d4
+	add.w	#GAME_BYTES,d4
 	btst	#0,d5
 	beq.s	.left_even
 	addq.w	#1,d4
@@ -1805,7 +1764,7 @@ draw_tile:
 	move.w	d0,d5
 	lsr.w	#4,d5
 	lsl.w	#3,d5
-	add.w	#16,d5
+	add.w	#GAME_BYTES,d5
 	btst	#3,d0
 	beq.s	.a_even
 	addq.w	#1,d5
@@ -1813,7 +1772,7 @@ draw_tile:
 	lea	(a3,d5.w),a3
 	lea	8(a0),a1
 	moveq	#8-1,d1
-	tst.l	4(a0)
+	tst.w	6(a0)			; (the opaque flag; the high word is the palette stamp)
 	bne.s	.opaque
 .arow:
 	ifd SIM
@@ -1860,11 +1819,43 @@ get_tile:
 	lea	tcache,a0
 	add.l	d5,a0
 	cmp.l	(a0),d4
-	beq.s	.hit
+	bne.s	.bake
+	move.w	4(a0),d5		; baked under the current colour mapping?
+	cmp.w	pal_epoch,d5
+	bne.s	.stamp
+.hit:
+	rts
+.stamp:					; a pen of the tile's bank changed slot since: is it one the tile uses?
+	move.l	d4,d6
+	moveq	#14,d7
+	lsr.l	d7,d6
+	and.w	#15,d6			; the bank
+	add.w	d6,d6
+	lea	bank_epoch,a1
+	cmp.w	(a1,d6.w),d5
+	bhs.s	.valid			; (no pen of the bank changed since)
+	move.w	d4,d7
+	and.w	#$3FFF,d7
+	add.w	d7,d7
+	lea	bb_penmask,a1
+	move.w	(a1,d7.w),d7		; the pens the tile uses
+	lsl.w	#4,d6			; the bank * 32: its 16 pens' epochs
+	lea	pen_epoch,a1
+	add.w	d6,a1
+.pens:	lsr.w	#1,d7
+	bcc.s	.pn
+	cmp.w	(a1),d5
+	blo.s	.bake			; (a pen it uses changed slot after it was baked)
+.pn:	addq.l	#2,a1
+	tst.w	d7
+	bne.s	.pens
+.valid:
+	move.w	pal_epoch,4(a0)
+	rts
+.bake:
 	move.l	a0,-(sp)		; (the bake walks a0 through the entry)
 	bsr	tc_bake
 	move.l	(sp)+,a0
-.hit:
 	rts
 
 ; one pixel pair byte of a row: \1 = the source byte, \2 = the shift; accumulates the data in d1 and
@@ -1959,7 +1950,8 @@ FLIPX = 1
 	bne.s	.setflag
 	moveq	#1,d1			; no transparent pixel: the fast path
 .setflag:
-	move.l	d1,(a5)
+	move.w	pal_epoch,(a5)+		; (the colour mapping it was baked under)
+	move.w	d1,(a5)
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -1993,6 +1985,10 @@ rf_palette:
 	beq.s	.s_cn
 	addq.w	#1,d3
 .s_cn:	dbf	d0,.s_cnt
+	ifd SIM
+	addq.l	#1,sim_pal_chg
+	add.l	d3,sim_pal_ent
+	endc
 	lea	ttab,a0			; the mapping as it is
 	lea	ttab_new,a1
 	moveq	#64-1,d0
@@ -2768,29 +2764,57 @@ rf_palette:
 	cmp.w	#16,d6
 	blo	.tbank
 
-	; the baked tiles of the changed banks are stale
+	; the baked tiles of the changed banks' changed pens are stale: a new palette epoch, the pens' and their
+	; banks' epochs set to it.  get_tile checks a baked tile's stamp against them (lazily: no walk of tcache).
+	cmp.w	#$FFFF,pal_epoch
+	bne.s	.ep_ok
+	bsr	tc_flush		; (the epoch wraps: everything is baked again)
+.ep_ok:
+	addq.w	#1,pal_epoch
+	move.w	pal_epoch,d4
+	lea	pen_chg,a1
+	lea	pen_epoch,a2
+	lea	bank_epoch,a3
+	moveq	#0,d6			; bank
+.ep_bank:
+	tst.b	(a4,d6.w)
+	beq.s	.ep_next
+	move.w	(a1),d1
+	beq.s	.ep_next
+	move.w	d4,(a3)
+	move.l	a2,a0
+.ep_pen:
+	lsr.w	#1,d1
+	bcc.s	.ep_pn
+	move.w	d4,(a0)
+	ifd SIM
+	addq.l	#1,sim_tc_inval
+	endc
+.ep_pn:	addq.l	#2,a0
+	tst.w	d1
+	bne.s	.ep_pen
+.ep_next:
+	addq.l	#2,a1
+	lea	32(a2),a2
+	addq.l	#2,a3
+	addq.w	#1,d6
+	cmp.w	#16,d6
+	blo.s	.ep_bank
+	rts
+
+; every baked tile dropped, the palette epochs from 0
+tc_flush:
 	lea	tcache,a0
 	move.l	#TC_SIZE-1,d0
-.flush:
-	move.l	(a0),d1
-	bmi.s	.fl_n			; (empty already)
-	move.l	d1,d3
-	and.l	#$3FFF,d3		; the tile number
-	moveq	#14,d2
-	lsr.l	d2,d1
-	and.w	#15,d1			; the entry's bank
-	tst.b	(a4,d1.w)
-	beq.s	.fl_n
-	add.w	d1,d1
-	lea	pen_chg,a1
-	move.w	(a1,d1.w),d1
-	add.w	d3,d3
-	lea	bb_penmask,a1
-	and.w	(a1,d3.w),d1
-	beq.s	.fl_n			; (none of its pens changed)
-	move.l	#-1,(a0)
-.fl_n:	lea	TC_ENTRY(a0),a0
-	dbf	d0,.flush
+.t:	move.l	#-1,(a0)
+	lea	TC_ENTRY(a0),a0
+	dbf	d0,.t
+	clr.w	pal_epoch
+	st	pal_wrapped		; (srender.s: its caches' stamps)
+	lea	pen_epoch,a0
+	move.w	#(256+16)/2-1,d0	; (bank_epoch follows)
+.e:	clr.l	(a0)+
+	dbf	d0,.e
 	rts
 
 ; d6 = bank, d4 = pen -> d1 = the colour (r << 8 | g << 4 | b); clobbers d0, d2, a0
@@ -2866,7 +2890,6 @@ objslots:	ds.b	192*SLOT_BYTES
 dirty:		ds.l	28
 old_stale:	ds.l	3*28		; per screen: the cells it lacks (the changes since it was drawn)
 rf_buf:		ds.w	1		; the number of the screen being drawn
-hang_rows:	ds.b	32
 stale:		ds.l	28		; cells whose composites are rebuilt this frame
 stale_k:	ds.l	28		; (and their masks: a shape changed)
 comp_bad:	ds.l	28		; cells whose composites are not valid (built when they are drawn)
@@ -2877,6 +2900,9 @@ rf_whole:	ds.b	1
 	even
 	ifd SIM
 sim_rf_cells:	ds.l	1
+sim_tc_inval:	ds.l	1		; pens whose slot changed (their baked tiles are stale)
+sim_pal_chg:	ds.l	1		; palette RAM changes seen
+sim_pal_ent:	ds.l	1		; ... entries changed
 sim_rf_whole:	ds.l	1
 sim_rf_all:	ds.l	1
 	endc
@@ -2903,16 +2929,16 @@ comp_B:		ds.b	896*32
 comp_S:		ds.b	896*32
 comp_K:		ds.b	896*32
 canvas:		ds.b	SCREEN_SIZE
-vmarks:	ds.b	512			; the video RAM pages written (gen.VRAM_WRITERS)
+	even
+vmarks:	ds.b	512			; the video RAM pages written (gen.VRAM_WRITERS; tested by longs from $180)
 vmark_all:	ds.b	1
 vdiff_busy:	ds.b	1
 	even
 vroll:	ds.w	1
-hang_top:	ds.b	1
-hang_bottom:	ds.b	1
 	even
 dirty_raw:	ds.l	28
-page_dirty:	ds.b	64
+	even
+page_dirty:	ds.b	64			; (tested by longs)
 tile_dirty:	ds.b	464
 ctab:		ds.b	2048
 kept_own:	ds.w	16
@@ -2926,6 +2952,11 @@ slot_claimed:	ds.b	16
 slot_placed:	ds.b	16
 bank_chg_b:	ds.b	16
 pen_chg:	ds.w	16		; per bank: the pens whose slot changed (rf_palette)
+pal_wrapped:	ds.b	1
+	even
+pal_epoch:	ds.w	1		; the colour mapping's epoch (+1 per change of a pen's slot; tcache stamps)
+pen_epoch:	ds.w	256		; per bank and pen: the epoch its slot last changed
+bank_epoch:	ds.w	16		; (follows pen_epoch) per bank: the latest of its pens'
 	ifd STATICPAL
 vslot_of:	ds.b	256		; the lent colour of an entry (0: none)
 vcount:		ds.b	256		; (follows vslot_of) its changes without one

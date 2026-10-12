@@ -18,10 +18,18 @@ sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path
 from sim import Sim, FRAME_CYCLES, TRAP1
 from paths import ROOT, build_dir
 import bisect
+from pathlib import Path
 
 RUN = ROOT / "run" / "bublbobl_sim"
 MAP = build_dir("bublbobl") / "bublbobl_sim.map"
 SRC = ROOT / "games" / "bublbobl" / "src"
+
+
+COUNTERS = {"sim_done": "", "sim_shown": "", "sim_sr_cells": "cells", "sim_sr_chit": "cell cache hits", "sim_sr_rebuild": "static rebuilds",
+            "sim_sr_palcells": "pal-marked cell slots", "sim_tc_inval": "tiles invalidated", "sim_c_look": "sprite lookups",
+            "sim_c_bake": "sprite bakes", "sim_sr_vis": "visible sprites", "sim_c_draw": "sprites drawn",
+            "sim_sr_copyblk": "blocks copied", "sim_sr_restblk": "blocks restored", "sim_sr_maps": "map builds",
+            "sim_pal_chg": "palette changes", "sim_pal_ent": "palette entries changed"}
 
 
 def inputs(f):
@@ -47,15 +55,18 @@ def main():
     ap.add_argument("--window", nargs="*", default=["100:400", "600:900"], help="frame windows A:B to report")
     ap.add_argument("--hist", default="", help="comma list of routines: distribution of their cycles per VBL in each window")
     ap.add_argument("--prg", default=str(RUN / "BUBBLE.PRG"))
+    ap.add_argument("--map", default=str(MAP))
+    ap.add_argument("--bucket", default="", help="list the hottest routines of this area only (e.g. runtime)")
     ap.add_argument("--zpages", action="store_true", help="the translated code by 256-byte page of its Z80 / 6801 address")
     a = ap.parse_args()
 
     s = Sim(a.prg, run_dir=RUN)
-    s.mem.set_trace_mode(False)
-    sym = {k: v + s.base for k, v in s.symbols(MAP).items()}
-    addrs = sorted((v, k) for k, v in sym.items())
+    s.mem.set_trace_mode(True)                 # execute and charge HOG passes as well as CPU instructions
+    sym = {k: v + s.base for k, v in s.symbols(a.map).items()}
+    reloc = {m.group(1) for m in re.finditer(r"0x[0-9a-fA-F]+ (\w+): .*?reloc,", Path(a.map).read_text())}
+    addrs = sorted((v, k) for k, v in sym.items() if k in reloc)
     keys = [v for v, _ in addrs]
-    render_names = set(re.findall(r"^([A-Za-z_]\w*):", open(SRC / "render.s", encoding="utf-8").read() + open(SRC / "srender.s", encoding="utf-8").read(), re.M))
+    render_names = set(re.findall(r"^([A-Za-z_]\w*)(?::|\s*=\s*\*)", open(SRC / "render.s", encoding="utf-8").read() + open(SRC / "srender.s", encoding="utf-8").read(), re.M))
 
     def src(pc):
         i = bisect.bisect_right(keys, pc) - 1
@@ -87,6 +98,8 @@ def main():
     cpu, mem = s.cpu, s.mem
     per_frame = []                                  # (bucket counter, routine counter, game frames) per VBL
     rf_stats = []                                   # (dirty cells, whole redraws, palette changes) so far, per VBL
+    cnt_names = [n for n in COUNTERS if n in sym]
+    cnt_stats = []                                  # the SIM counters so far, per VBL
     hb_last = 0
     gframes = 0
     rn_last = 0
@@ -99,7 +112,8 @@ def main():
     while f < a.frames and not s.terminated:
         mem.w8(in0_a, inputs(f)[0]); mem.w8(in1_a, inputs(f)[1]); mem.w8(in2_a, inputs(f)[2])
         r = cpu.execute(a.chunk)
-        c = r.cycles
+        c = r.cycles + s.blitter.cycles
+        s.blitter.cycles = 0
         total += c
         pc = cpu.r_pc()
         if pc == frame_done:                        # step over the harness stop
@@ -115,7 +129,8 @@ def main():
             m = re.fullmatch(r"(Z|Lx|BK|BKT|Y|Ly|M)([0-9A-Fa-f]+)", n)
             if m:
                 n = "%s %s00" % ({"Lx": "Z", "BK": "Z", "BKT": "Z", "Ly": "Y"}.get(m.group(1), m.group(1)), m.group(2)[:-2].upper().rjust(2, "0"))
-        cur_r[n] += c
+        if not a.bucket or bucket(pc).startswith(a.bucket):
+            cur_r[n] += c
         gf_now = mem.r32(gf_addr)
         gframes += gf_now - hb_last
         hb_last = gf_now
@@ -126,6 +141,7 @@ def main():
             if s.irq(4, 28):
                 next_vbl += FRAME_CYCLES
                 per_frame.append((cur_b, cur_r, gframes, renders))
+                cnt_stats.append([mem.r32(sym[n]) for n in cnt_names])
                 if "sim_rf_cells" in sym:
                     rf_stats.append((mem.r32(sym["sim_rf_cells"]), mem.r32(sym["sim_rf_whole"]), mem.r32(sym["sim_rf_all"])))
                 gframes = 0
@@ -159,6 +175,18 @@ def main():
         print("   game frames run per VBL: %.2f  (1.00 = the port's full speed, i.e. 50 of the arcade's 59.19 frames/s); pictures drawn: %.1f per second (%d renders in %d VBLs)" % (gf / n, 50.0 * rnd / n, rnd, n))
         for k, v in B.most_common():
             print("   %-18s %8d cycles/VBL  %5.1f%%" % (k, v // n, 100.0 * v / (n * FRAME_CYCLES)))
+        logic = sum(v for k, v in B.items() if k.startswith("game"))
+        if gf:
+            print("   per game round: logic %d cycles, logic + runtime %d" % (logic // gf, (logic + B["runtime"]) // gf))
+        if cnt_stats and hi <= len(cnt_stats):
+            c0 = cnt_stats[lo - 1] if lo else [0] * len(cnt_names)
+            d = dict(zip(cnt_names, (b - a for a, b in zip(c0, cnt_stats[hi - 1]))))
+            done = max(1, d.get("sim_done", rnd))
+            print("   renders started %d, completed %d, shown %d (%.1f/s); per completed render: %s"
+                  % (rnd, d.get("sim_done", 0), d.get("sim_shown", 0), 50.0 * d.get("sim_shown", 0) / n,
+                     ", ".join("%s %.1f" % (COUNTERS[k], v / done) for k, v in d.items() if k not in ("sim_done", "sim_shown"))))
+            if B["renderer"] and d.get("sim_done"):
+                print("   renderer cycles per completed render: %d" % (B["renderer"] // d["sim_done"]))
         if a.hist:
             names = a.hist.split(",")
             vals = sorted(sum(r[nm] for nm in names) for _, r, _, _ in sel)

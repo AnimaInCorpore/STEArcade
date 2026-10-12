@@ -23,6 +23,7 @@ def main():
     last = {}
 
     def watch(mode, width, addr, value):
+        s.on_access(mode, width, addr, value)
         if width and (addr & 1) and addr < 0xFF8000:
             hits[(mode, ("b", "w", "l")[width], nm(cpu.r_pc()))] += 1
     while True:

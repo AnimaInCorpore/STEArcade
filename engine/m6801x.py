@@ -270,7 +270,10 @@ class MCUEmitter:
                 self.e("jmp %s" % self.label(ins.arg))
             return
         if mn == "jsr" and ins.mode == "ext":
-            self.e("bsr %s" % self.label(ins.arg))
+            if ins.arg in getattr(self, "native", {}):
+                self.e("jsr %s" % self.native[ins.arg])     # (straight to the native routine)
+            else:
+                self.e("bsr %s" % self.label(ins.arg))
             return
         if mn == "bsr":
             self.e("bsr %s" % self.label(ins.target))

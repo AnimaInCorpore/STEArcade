@@ -20,16 +20,46 @@ RUN = lt.RUN
 
 def decode_screen(mem, base, lines0, nlines):
     """[nlines][256] STE colour indices of the game area: game row y at buffer line y + YPAD."""
-    raw = np.frombuffer(bytes(mem.r_block(base, 160 * 280)), np.uint8).reshape(280, 160)
+    raw = np.frombuffer(bytes(mem.r_block(base, 256 * 280)), np.uint8).reshape(280, 256)
     out = np.zeros((nlines, 256), np.uint8)
     for yy in range(nlines):
         line = raw[lines0 + yy]
         for g in range(16):
             for p in range(4):
-                w = (int(line[16 + g * 8 + p * 2]) << 8) | int(line[16 + g * 8 + p * 2 + 1])
+                w = (int(line[64 + g * 8 + p * 2]) << 8) | int(line[64 + g * 8 + p * 2 + 1])
                 for b in range(16):
                     out[yy, g * 16 + b] |= ((w >> (15 - b)) & 1) << p
     return out
+
+
+def check_guards(mem, sym, base):
+    """The sprite renderer draws whole sprites into the margins and guard rows around the arcade picture (game rows
+    0-15 and 240-255, one 16 pixel group left and right of it; the side bands are visible).  Outside the picture
+    every set pixel must belong to a sprite drawn now: no stale damage.  -> the number of stray pixels."""
+    if not mem.r8(sym["sr_active"]):
+        return 0                                   # (the general renderer draws whole tiles there)
+    raw = np.frombuffer(bytes(mem.r_block(base, 256 * 280)), np.uint8).reshape(280, 256)
+    allowed = np.zeros((256, 18 * 16), bool)       # game rows 0-255, virtual x 112-399
+    for p in range(sym["sr_vlist"], mem.r32(sym["sr_vend"]), 4):
+        rec = mem.r32(p)
+        x = (mem.r16(rec + 16) ^ 0x8000) - 0x8000 + 16      # R_X, relative to x 112
+        y = mem.r16(rec + 18)                               # R_Y
+        allowed[max(0, y):y + 16, max(0, x):max(0, x + 16)] = True
+    stray = 0
+    for yy in range(256):
+        line = raw[10 + yy]                        # (YPAD)
+        inside = 16 <= yy < 240
+        for g in range(18):
+            if inside and 1 <= g <= 16:
+                continue
+            o = 56 + g * 8
+            w = 0
+            for pl in range(4):
+                w |= (int(line[o + pl * 2]) << 8) | int(line[o + pl * 2 + 1])
+            for b in range(16):
+                if (w >> (15 - b)) & 1 and not allowed[yy, g * 16 + b]:
+                    stray += 1
+    return stray
 
 
 def inputs_upto(ref, f):
@@ -44,7 +74,7 @@ def main():
     else:
         frames = [int(a) for a in args] or [100, 300, 420, 600, 700]
     s = Sim(str(RUN / "BUBBLE.PRG"), run_dir=RUN)
-    s.mem.set_trace_mode(False)
+    s.mem.set_trace_mode(True)                 # the renderer uses the simulated Blitter
     sym = {k: v + s.base for k, v in s.symbols(lt.MAP).items()}
     s.bad = sym["z80_badpc"]
     cpu, mem = s.cpu, s.mem
@@ -97,7 +127,9 @@ def main():
             pc = lambda name: sum(bin(mem.r32(sym[name] + 4 * i)).count("1") for i in range(28))
             print("   moving range %d-%d, cells: dirty %d (before the closure %d), mov %d, stale %d, need %d, need_k %d, composites invalid %d" % (
                 mem.r16(sym["lay_lo"]), (mem.r16(sym["lay_hi"]) ^ 0x8000) - 0x8000, pc("dirty"), pc("dirty_raw"), pc("mov"), pc("stale"), pc("need"), pc("need_k"), pc("comp_bad")))
-        print("frame %d: %d of %d pixels differ (cycles %d)" % (target, nd, diff.size, n))
+        stray = check_guards(mem, sym, scr)
+        nd += stray
+        print("frame %d: %d of %d pixels differ (cycles %d)%s" % (target, nd, diff.size, n, " (%d stray pixels around the picture)" % stray if stray else ""))
         if len(frames) <= 8:
             check_cache(mem, sym)
             check_slots(s, ref, sym)
