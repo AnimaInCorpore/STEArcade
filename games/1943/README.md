@@ -15,6 +15,8 @@ python port.py build 1943                   # assets + translation -> run/1943/1
 python port.py test 1943                    # ROMs, graphics, reference, lock-step logic and pictures
 python port.py run 1943                     # Hatari (tools/hatari.sh)
 python port.py mame 1943                    # pixel checks at frames 100, 700 and 1500
+games/1943/tools/sprite_test.py             # sprites at the window edges: clipped, all shifts, 64 KB
+games/1943/tools/front_test.py              # front tiles at the window edges: clipped, all shifts, 64 KB
 games/1943/tools/bench.sh                   # Hatari speed: ticks and frames a second (DEBUG + AUTOPLAY, 6000 VBLs)
 ```
 
@@ -48,7 +50,7 @@ not cycle accurate; the sound CPU is not part of it (its driver is recorded alon
 firmware tables (including retained replies for unknown commands), then runs
 unpatched frames and saves `build/1943/reference.png`. Graphics tests check
 4,000 decoded pixels against independent scalar ROM bit reads and exercise
-layer enables, flips, maximum scroll, sprite ownership, priority and clipping.
+layer enables, flips, maximum scroll, sprite ownership, priority and whole sprites at borders.
 
 ## MAME validation
 
@@ -186,3 +188,44 @@ frames a second; without the sound (`-D NOSOUND=1`) 55.7 and 11.3 (the frames ge
 
 The flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
 busiest scenes (the game's own logic is 86k cycles a tick there).
+
+## Whole objects at borders (2026-10-11)
+
+Partially visible sprites and front tiles now draw whole into the virtual ring. Removed the post-draw
+`clear_outside` eraser and the one-word front-tile edge path. Their complete damage rectangles are restored
+before the next picture. The 48-pixel side bands inside the hardware window may therefore contain overhang.
+The existing sprite source rows already use the reordered mask-group method. Validation: 1,600 translated
+logic/render frames match, with 160 game pictures and the twin background compared against the reference.
+The comparisons cover the arcade picture; the side bands intentionally show whole objects.
+The rebuilt 4 MB STE Hatari debug run completed 2,500 VBLs without a crash file and with zero late
+border or palette events (two startup fallbacks).
+
+## Sprites clipped at the window's left and right edges (2026-10-12)
+
+The window's edges lie on 16-pixel chunks (3 chunks of side band each side), so a sprite across one has exactly one
+word inside: `sprite_part` sends sprites left of window x 0 or right of 208 (one unsigned compare) to `sprite_edge`,
+which culls those wholly in the right band and draws the others with `clip_part`: one word a line, the right edge's
+first word with the skewed source under END1, the left edge's second word with FXSR and source Y increment 0 under
+the stream's END3 mask; only that word is listed as damage.  The 48-pixel side bands no longer show sprites (front
+tiles may still spill there).  Cost (Musashi, CPU + Blitter a frame): play 237,010 -> 237,061, stage 3 346,033 ->
+346,166 (+0.02-0.04%, the compare); Hatari (bench.sh, 6000 VBLs) 51.2 ticks/s, 7.9 frames/s, no late border event.
+`tools/sprite_test.py`: 4 sprites with holes, all 16 shifts, both edges and the culled band, plain and across 64 KB
+(376 cases, 232 clipped) against the same sprite drawn whole by its generated routine, the bands untouched (the old
+whole drawing fails it).  `logic_test.py --render` prints the clipped sprites: default 1600 frames (12), `--cheat 3`
+2000 (62), `--seed 1` 1600 (15), `--cheat 9 --twins --every 2` 3000 (975): all pictures equal.
+## Front tiles clipped at the window's left and right edges (2026-10-12)
+
+The front layer's 32-pixel tiles spilled into the 16 pixels beside the window in nearly every picture (its rows start
+at window x -16 when the front scroll D802 is 0): `logic_test.py --render` now counts the pictures whose side bands
+are not black, and before this change found 941 of 1600 (default), 1341 of 2000 (stage 3) and 1170 of 1500 (stage 9),
+~3,500 pixels each.  `front_tile` now draws only the words inside the window: an unshifted tile at chunk -1 or 13
+draws one word (the general path's one-word mode: the right word at chunk 0, the left at chunk 13), a shifted one at
+chunks -2/-1/12/13 its three words with the band words' end masks 0 (`ft_m12`, `ft_m3`, ANDed into the run's
+shifted masks) and lists damage only for the chunks inside.  The common path pays one unsigned compare, as before
+two.  Musashi (`perf_test.py`, CPU + Blitter a frame): play 237,061 -> 236,816 (-0.10%), `--cheat 3` 346,166 ->
+341,561 (-1.33%), `--cheat 9` (ticks 2600-2900) 354,525 -> 353,716 (-0.23%); the logic unchanged.
+`tools/front_test.py`: 4 tiles with holes, all 16 shifts, both edges and wholly outside, plain and across 64 KB
+(768 cases, 496 across an edge) against the same tile drawn whole in the middle, bands untouched, every change inside
+the listed damage, the damage inside the window (the old code fails it).  The side bands are now black in every
+compared picture; `logic_test.py --render` also prints the front tiles clipped (`ft_uclips`, `ft_sclips`).
+

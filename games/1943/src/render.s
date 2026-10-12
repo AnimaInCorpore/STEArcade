@@ -20,7 +20,8 @@
 ; being in the same columns; mixed cells: the runs of lines with transparent pixels, the masks inverted).  The sprites
 ; of colours 10 and 11 are drawn after the sea pass and the front cells they overlap again over them.  This mode needs
 ; both layers on and no horizontal front scroll.
-; What a front tile or a sprite draws beside the 224 pixels of the window (the 48 pixel margins show) is cleared.
+; Nothing is drawn into the visible side bands: sprites across the window's left or right edge draw only their inner
+; word (clip_part), front tiles only their words inside (front_tile .uedge / .sedge); wholly outside, they are culled.
 STRIDE = 256
 GAME_X = 24				; the window's first chunk in a line (the display shows 3 chunks of margin each side)
 RING_H = 320
@@ -806,58 +807,6 @@ add_damage:
  move.l (sp)+,a0
  rts
 
-; d2 = the address of a rectangle's first line and chunk, d0 = its first chunk (-3 .. 16), d4 = its chunks, d1 =
-; lines: the chunks of it outside the window (0 .. 13) cleared.  Keeps all registers.
-clear_outside:
- movem.l d0-d6/a0,-(sp)
- move.w d0,d6			; the first chunk
- move.w d0,d5
- add.w d4,d5			; the chunk after the last
- move.w d5,d3			; left: chunks d6 .. min(d5, 0) - 1
- ble.s .l1
- moveq #0,d3
-.l1:
- sub.w d6,d3
- ble.s .right
- move.l d2,a0
- bsr.s .clear
-.right:
- moveq #14,d0			; right: chunks max(d6, 14) .. d5 - 1
- cmp.w d6,d0
- bge.s .r1
- move.w d6,d0
-.r1:
- move.w d5,d3
- sub.w d0,d3
- ble.s .out
- sub.w d6,d0
- lsl.w #3,d0
- move.l d2,a0
- add.w d0,a0
- bsr.s .clear
-.out:
- movem.l (sp)+,d0-d6/a0
- rts
-; a0 = the first chunk, d3 = chunks, d1 = lines
-.clear:
- lsl.w #2,d3			; words a line
- move.w #$ffff,BLT_END1.w
- move.w #$ffff,BLT_END2.w
- move.w #$ffff,BLT_END3.w
- move.w #2,BLT_DST_XINC.w
- move.w d3,d0
- add.w d0,d0
- neg.w d0
- add.w #STRIDE+2,d0
- move.w d0,BLT_DST_YINC.w
- clr.w BLT_HOP_OP.w		; (all zero)
- clr.b BLT_SKEW.w
- move.l a0,BLT_DST_ADDR.w
- move.w d3,BLT_COUNT.w
- move.w d1,BLT_COUNT+2.w
- bsr blit_go
- rts
-
 ; ---- the front layer ------------------------------------------------------------------------------------------------
 ; Map column c covers raw x 32c - fx .. +31 (fx = D800-D801): its tiles' first window line is 224 - (32c - fx); row r
 ; covers raw y (32r - fy) & 255 .. +31 (fy = D802), window x = that - 16, and wraps at raw y 256 (drawn again 256
@@ -939,8 +888,8 @@ draw_front:
 ; a0 = a baked front tile (32 lines of 4 planes x 2 words, then its runs: those drawn a plane at a time, those drawn a
 ; line at a time, see tools/assets.py), front_x / front_y = its window position (whole: up to 31 lines beyond the
 ; window).  A plane at a time: one Blitter call per plane, Y count = the run's lines; a line at a time: one call per
-; line, Y count = the 4 planes, the source advancing by itself.  An unshifted tile at the window's edge draws only its
-; chunk inside; a shifted one that reaches beside the window is drawn whole and what it drew there cleared.
+; line, Y count = the 4 planes, the source advancing by itself.  Across the window's left or right edge only the words
+; inside are drawn (.uedge, .sedge); above and below the window tiles are drawn whole.
 ; a3-a6 = the Blitter's source, destination, Y count and control registers (draw_front).
 FT_LINE = 4				; (as in tools/assets.py: runs of fewer lines go line by line)
 front_tile:
@@ -950,28 +899,18 @@ front_tile:
  moveq #15,d5
  and.w front_x,d5		; shift
  beq.s .unshifted
- cmp.w #14,d0			; shifted: 3 chunks
- bge .out
- cmp.w #-3,d0
- ble .out
+ cmp.w #11,d0			; shifted: 3 chunks
+ bhi .sedge			; (unsigned: across the window's left or right edge, or outside)
+ move.l #-1,ft_m12
+ move.w #-1,ft_m3
  moveq #3,d4
  moveq #0,d6			; (source offset: both words)
  bra.s .placed
 .unshifted:
  moveq #2,d4
  moveq #0,d6
- cmp.w #-1,d0
- blt .out
- bgt.s .l
- moveq #1,d4			; chunk -1: its right word only
- moveq #2,d6
- moveq #0,d0
- bra.s .placed
-.l:
- cmp.w #13,d0
- blt.s .placed
- bgt .out
- moveq #1,d4			; chunk 13: its left word only
+ cmp.w #12,d0
+ bhi .uedge			; (unsigned: across an edge, or outside)
 .placed:
  move.w d0,obj_chunk
  lsl.w #3,d0
@@ -1116,6 +1055,8 @@ front_tile:
  sub.w d5,d7
  lsl.w d7,d3			; word 2: the low word << (16 - shift)
  move.w (sp)+,d7
+ and.w ft_m3,d3			; (across an edge: the band words' masks 0)
+ and.l ft_m12,d6
  move.w d3,BLT_END3.w
  move.w d6,BLT_END2.w
  swap d6
@@ -1165,23 +1106,83 @@ front_tile:
  dbf d1,.gline
  bra .grun
 .runs_done:
- tst.w d5
- beq.s .out			; (unshifted: nothing beside the window)
- move.w obj_chunk,d0		; the chunks beside the window
- bmi .outside
- cmp.w #11,d0
- ble.s .out
-.outside:
- move.l obj_addr,d2
- move.w obj_chunk,d0
- moveq #3,d4
- moveq #32,d1
- bsr clear_outside
- move.w #$0203,BLT_HOP_OP.w	; (the front pass's constants again)
- move.w #8,BLT_DST_XINC.w
 .out:
  movem.l (sp)+,d6-d7/a0
  rts
+
+; Across the window's left or right edge (the edges lie on chunks): only the words inside the window.  Unshifted
+; (chunk -1 or 13): one word, the right one (source 2 bytes on) at chunk 0 or the left one at chunk 13, through the
+; general path's one-word mode.  Shifted (chunks -2 .. 0, -1 .. 1, 12 .. 14, 13 .. 15): the 3 words with the band
+; words' end masks 0 (ft_m12: END1 and END2, ft_m3: END3), the damage only the chunks inside.
+.uedge:
+ addq.l #1,ft_uclips
+ moveq #1,d4
+ cmp.w #-1,d0
+ bne.s .u13
+ moveq #2,d6			; (the right word)
+ moveq #0,d0
+ bra .placed
+.u13:
+ cmp.w #13,d0
+ bne .out
+ bra .placed			; (the left word: d6 = 0)
+.sedge:
+ addq.l #1,ft_sclips
+ cmp.w #-2,d0
+ beq.s .s_2
+ cmp.w #-1,d0
+ beq.s .s_1
+ cmp.w #12,d0
+ beq.s .s12
+ cmp.w #13,d0
+ bne .out
+ move.l #$ffff0000,ft_m12	; (chunks 13 .. 15: the first word)
+ clr.w ft_m3
+ moveq #4,d1			; (damage: chunk 13)
+ moveq #0,d3
+ bra.s .sclip
+.s12:
+ move.l #-1,ft_m12		; (chunks 12 .. 14: the first two)
+ clr.w ft_m3
+ moveq #8,d1
+ moveq #0,d3
+ bra.s .sclip
+.s_1:
+ move.l #$0000ffff,ft_m12	; (chunks -1 .. 1: the last two)
+ move.w #-1,ft_m3
+ moveq #8,d1
+ moveq #8,d3
+ bra.s .sclip
+.s_2:
+ clr.l ft_m12			; (chunks -2 .. 0: the last one)
+ move.w #-1,ft_m3
+ moveq #4,d1
+ moveq #16,d3
+.sclip:
+ moveq #3,d4
+ moveq #0,d6
+ move.w d0,obj_chunk
+ lsl.w #3,d0
+ move.w front_y,d2
+ add.w cur_top,d2
+ ext.l d2
+ lsl.l #8,d2
+ add.l ring_addr,d2
+ ext.l d0
+ add.l d0,d2
+ add.l #GAME_X,d2
+ move.l d2,obj_addr
+ tst.b front_nodmg
+ bne .no_dmg
+ add.l d3,d2			; (the damage: the chunks inside)
+ move.w d1,d3
+ move.w front_y,d0
+ moveq #16,d1
+ bsr add_damage
+ add.l #16*STRIDE,d2
+ add.w #16,d0
+ bsr add_damage
+ bra .no_dmg
 
 ; ---- front-follow: the sea pass -----------------------------------------------------------------------------------------
 ; Every front cell of the window that is not fully opaque gets the back layer where it is transparent.  The back layer
@@ -1719,14 +1720,16 @@ cache_clear:
  rts
 
 ; a1 = the baked sprite, spr_code, dest_x / dest_y: the whole part (generated routine, or the generic path at a 64 KB
-; boundary of the low word), its damage, and what it drew beside the window cleared.
+; boundary of the low word), with its whole damage recorded for the next visit.
 sprite_part:
+ move.w dest_x,d0
+ cmp.w #224-16,d0
+ bhi sprite_edge		; (unsigned: left of the window too)
  move.w dest_y,d2
  add.w cur_top,d2
  ext.l d2
  lsl.l #8,d2
  add.l ring_addr,d2
- move.w dest_x,d0
  asr.w #4,d0
  move.w d0,obj_chunk
  lsl.w #3,d0
@@ -1785,29 +1788,114 @@ sprite_part:
  move.w #$c0,d7
  jsr (a1)
  movem.l (sp)+,d4-d7/a2-a6
- bra.s .margins
+ bra.s .out
 .generic:
  bsr generic_part
-.margins:
- move.w obj_chunk,d0
- bmi .outside
- cmp.w #13,d0
- blt.s .out
- bgt.s .outside
- moveq #15,d1
- and.w dest_x,d1
- beq.s .out			; (one chunk, the window's last)
-.outside:
- move.l obj_addr,d2
- moveq #1,d4
- moveq #15,d1
- and.w dest_x,d1
- beq.s .c
- moveq #2,d4
-.c:
- moveq #16,d1
- bsr clear_outside
 .out:
+ rts
+
+; sprite_part's sprites left of window x 0 or right of 208 (d0 = dest_x): wholly in the right band, culled; across
+; the left or right edge (always shifted), only the inner word (clip_part), and only its damage.
+sprite_edge:
+ cmp.w #224,d0
+ bge .out
+ move.w dest_y,d2
+ add.w cur_top,d2
+ ext.l d2
+ lsl.l #8,d2
+ add.l ring_addr,d2
+ asr.w #4,d0
+ move.w d0,obj_chunk
+ lsl.w #3,d0
+ ext.l d0
+ add.l d0,d2
+ add.l #GAME_X,d2
+ move.l d2,obj_addr
+ moveq #2,d5			; (right edge: the first word)
+ tst.w dest_x
+ bpl.s .right
+ moveq #1,d5			; (left edge: the second word)
+ addq.l #8,d2
+.right:
+ moveq #4,d3
+ move.w dest_y,d0
+ moveq #16,d1
+ bsr add_damage
+ move.w #2,BLT_SRC_XINC.w
+ move.w #2,BLT_SRC_YINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ move.l a1,BLT_SRC_ADDR.w
+ moveq #0,d0
+ move.w spr_code,d0
+ lsl.l #4,d0
+ move.w dest_x,d3
+ move.w d3,d1
+ and.w #15,d1
+ or.w d1,d0
+ lsl.l #2,d0
+ lea spr_code_tab,a0
+ move.l (a0,d0.l),d0		; (routine << 20 |) stream offset
+ beq.s .out
+ and.l #$fffff,d0
+ lea spr_streams,a0
+ add.l d0,a0
+ bsr clip_part
+.out:
+ rts
+
+; A shifted sprite across the window's left (d5 = 1) or right (d5 = 2) edge: only its inner word (at d2), one word a
+; line.  Right: the first word, (previous source word : this one) >> skew under END1 (the previous word's bits fall
+; outside the mask).  Left: the second word, FXSR (this source word : the next) >> skew under the stream's END3 mask;
+; the source Y increment 0 makes the two reads a line advance one word.  Masks from the stream (a0), lines from spr_plan.
+clip_part:
+ addq.l #1,clip_count
+ movem.l d2-d5/a1-a2,-(sp)
+ move.l d2,a1
+ move.w #1,BLT_COUNT.w
+ move.w #2,BLT_DST_YINC.w
+ move.w d3,d0
+ and.w #15,d0
+ cmp.w #1,d5
+ bne.s .r
+ or.b #$80,d0			; FXSR
+ clr.w BLT_SRC_YINC.w
+.r:
+ move.b d0,BLT_SKEW.w
+ move.l a0,a2
+ moveq #0,d0
+ move.w spr_code,d0
+ lsl.l #2,d0
+ lea spr_plan_offsets,a0
+ move.l (a0,d0.l),d0
+ lea spr_plan,a0
+ add.l d0,a0
+ moveq #1,d4
+.group:
+ move.w (a0)+,d1
+ beq.s .done
+ move.w (a2)+,d0		; END1
+ move.w (a2)+,d3		; END3
+ cmp.w #1,d5
+ bne.s .m
+ move.w d3,d0
+.m:
+ move.w d0,BLT_END1.w
+ tst.w d4
+ beq.s .rows
+ moveq #0,d4
+ addq.l #2,a2			; (the control word of the first row)
+.rows:
+ subq.w #1,d1
+.row:
+ adda.w (a0)+,a1
+ move.l a1,BLT_DST_ADDR.w
+ move.w #4,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ dbf d1,.row
+ bra.s .group
+.done:
+ move.w #2,BLT_SRC_YINC.w
+ movem.l (sp)+,d2-d5/a1-a2
  rts
 
 ; Crossing a 64 KB boundary: full addresses; the masks still come from the stream (a0), the lines from spr_plan.
@@ -2247,6 +2335,11 @@ chr_cache: ds.l 2*4096
 pool_ptr: ds.l 1
 pool: ds.b POOL_SIZE
 cache_misses: ds.l 1
+ft_m12: ds.l 1				; (front_tile, shifted: the end mask clips of words 0, 1 and 2)
+ft_m3: ds.w 1
+ft_uclips: ds.l 1			; (front tiles across an edge or outside: unshifted, shifted)
+ft_sclips: ds.l 1
+clip_count: ds.l 1			; (sprites drawn clipped at the window's edges)
 pool_epoch: ds.w 1
 chr_epoch: ds.w 1
 chr_roll: ds.w 1

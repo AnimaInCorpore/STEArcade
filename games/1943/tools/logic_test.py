@@ -130,6 +130,7 @@ def main():
 
     palmap = np.frombuffer((build_dir('1943') / 'palmap.bin').read_bytes(), np.uint8)
     pictures = [0]
+    band_bad = [0, 0]                              # (pictures with non-black side bands, their pixels)
     text_sum = [None]
     last_text = [None]
 
@@ -179,7 +180,7 @@ def main():
                 back[:, 48:272] = np.rot90(np.where(opaque, palmap[cols], 0)[16:240])
             elif ref.layers & 32:
                 back[:, 48:272] = palmap[np.rot90(ref.video.render_raw(ref.mem, ref.sprites, ref.control & ~128, 32)[16:240])]
-            if (tw != back).any():
+            if (tw[:, 48:272] != back[:, 48:272]).any():
                 ys, xs = np.nonzero(tw != back)
                 print(f'frame {frame}: the twin lines differ from the back layer in {len(ys)} pixels, first at window x {xs[0]-48} y {ys[0]}'
                       f' (ring mode {mem.r8(sym["ring_mode"] + mem.r16(sym["draw_idx"]))}, top {top})')
@@ -190,14 +191,23 @@ def main():
                     cols = np.array([[lv((w >> sh) & 15) * 17 for sh in (8, 4, 0)] for w in rgb], np.uint8)
                     Image.fromarray(np.hstack([cols[tw], cols[back], cols[got]])).save(args.save)
                 return False
+        band = int((got[:, :48] != 0).sum() + (got[:, 272:] != 0).sum())
+        if band:
+            if not band_bad[0]:
+                ys, xs = np.nonzero(np.hstack([got[:, :48], got[:, 272:]]))
+                print(f'frame {frame}: {band} pixels in the side bands are not black, first at band x {xs[0]} y {ys[0]}')
+            band_bad[0] += 1
+            band_bad[1] += band
         bad = got != want
+        bad[:, :48] = False
+        bad[:, 272:] = False
         if bad.any():
             # The port draws the sprites of colours 10 and 11 before the front layer, the others after it: where a
             # sprite of the first kind comes earlier in the list than an overlapping one of the second, the arcade
             # shows the first (or the front), the port the second.  Such pictures are counted, not failed.
             alt = np.zeros((256, 320), np.int64)
             alt[:, 48:272] = palmap[np.rot90(port_order(raw)[16:240])]
-            if (got == alt).all():
+            if (got[:, 48:272] == alt[:, 48:272]).all():
                 approx[0] += 1
                 return True
             ys, xs = np.nonzero(bad)
@@ -438,6 +448,10 @@ def main():
             raise RuntimeError(f'Unexpected stop {stop}')
         if frame % 100 == 0:
             print('frame', frame, 'matched', flush=True)
+    if args.render:
+        print(f'side bands: {band_bad[0]} pictures with non-black pixels ({band_bad[1]} pixels)')
+        print(f'sprites drawn clipped at the window edges: {mem.r32(sym["clip_count"])}')
+        print(f'front tiles across an edge or outside the window: unshifted {mem.r32(sym["ft_uclips"])}, shifted {mem.r32(sym["ft_sclips"])}')
     print(args.frames, 'frames matched' + (f'; {pictures[0]} pictures compared, all equal' if args.render else '') +
           (f' ({approx[0]} only in the drawing order of overlapping sprites behind / before the front layer)' if approx[0] else ''))
     if args.audit:
