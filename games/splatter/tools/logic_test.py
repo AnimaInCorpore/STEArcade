@@ -42,9 +42,11 @@ def main():
     mem, cpu = s.mem, s.cpu
 
     import bisect
-    # the translated instructions' addresses, from the dispatcher's page tables (label -> 6809 pc)
+    # the translated instructions' addresses, from the dispatcher's page tables (label -> 6809 pc); about 2 GB, so only
+    # for --trace, --steplock and tools/profile.py
     labels = []
-    for cpu_name, pre in (("main", "M"), ("sub", "S")):
+    need_labels = args.trace >= 0 or args.steplock >= 0 or PROFILE
+    for cpu_name, pre in (("main", "M"), ("sub", "S")) if need_labels else ():
         tables = sym["%s_page_tables" % cpu_name]
         for p in range(0x400):
             pt = mem.r32(tables + 4 * p)
