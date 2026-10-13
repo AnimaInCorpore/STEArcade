@@ -70,6 +70,91 @@ BLT_SKEW	= $ffff8a3d
 BLT_NFSR	= $40
 BLT_FXSR	= $80
 
+; ren_draw_image's priority loops (.pr): \1 = the label, \2 = the sprite's priority P, \3 = clipped, \4 = over an
+; object drawn before (the hidden pixels put back from the twin column)
+REN_PRA	macro				; d4 = the pixels of the group word at (a2,d2.w) (q0 q1 q2) whose priority is above \1
+	if	\1=0
+	move.w	0(a2,d2.w),d4
+	or.w	2(a2,d2.w),d4
+	or.w	4(a2,d2.w),d4
+	endc
+	if	\1=1
+	move.w	2(a2,d2.w),d4
+	or.w	4(a2,d2.w),d4
+	endc
+	if	\1=2
+	move.w	2(a2,d2.w),d4
+	and.w	0(a2,d2.w),d4
+	or.w	4(a2,d2.w),d4
+	endc
+	if	\1=3
+	move.w	4(a2,d2.w),d4
+	endc
+	if	\1=4
+	move.w	2(a2,d2.w),d4
+	or.w	0(a2,d2.w),d4
+	and.w	4(a2,d2.w),d4
+	endc
+	if	\1=5
+	move.w	4(a2,d2.w),d4
+	and.w	2(a2,d2.w),d4
+	endc
+	if	\1=6
+	move.w	4(a2,d2.w),d4
+	and.w	2(a2,d2.w),d4
+	and.w	0(a2,d2.w),d4
+	endc
+	endm
+REN_PRW	macro				; word \2 (0-2) in \3: its hidden pixels left out (\1: the label, P \4, \5: put back)
+	move.w	ren_po+2*\2,d2
+	REN_PRA	\4
+	if	\5
+	move.w	d4,d2
+	and.w	\3,d2
+	beq.s	\1k\2
+	bsr	ren_pr_twin\2
+\1k\2:
+	endc
+	not.w	d4
+	and.w	d4,\3
+	endm
+REN_PRL	macro
+\1:	move.l	(a0)+,d0
+	move.l	d0,d1
+	lsr.l	d5,d1			; w0:w1
+	lsl.w	d6,d0			; w2
+	if	\3
+	and.w	ren_c2,d0
+	and.w	ren_c1,d1
+	swap	d1
+	and.w	ren_c0,d1
+	swap	d1
+	endc
+	cmp.w	#224,d3
+	bhs.s	\1w
+	move.w	d3,d2			; (a cell row of ren_rmask?)
+	add.w	ren_ey,d2
+	lsr.w	#3,d2
+	sub.w	ren_rrow,d2
+	btst	d2,ren_rmask+3
+	beq.s	\1w
+	swap	d1
+	REN_PRW	\1,0,d1,\2,\4
+	swap	d1
+	REN_PRW	\1,1,d1,\2,\4
+	REN_PRW	\1,2,d0,\2,\4
+\1w:	move.l	d1,(a6)			; (END1, END2)
+	move.w	d0,4(a6)
+	move.l	a1,(a3)
+	move.w	#4,(a4)
+	move.b	#$c0,(a5)
+	add.l	ren_ps4,a1
+	adda.w	ren_pps,a2
+	add.w	ren_pdy,d3
+	dbf	d7,\1
+	bra	.drawn
+	endm
+
 ; one step of the sprite row conversion (ren_cvf): d0 = the byte * 16
 	macro	CVSTEP
 	if	(J>>2)=0
@@ -295,6 +380,17 @@ render_frame:
 	lea	ren_buf,a0
 	move.l	(a0,d0.w),ren_dbuf
 	ifd	REN_PHASES
+	ifd	BENCH
+	cmp.l	#BENCH_FROM,cnt_logic	; (counted from the BENCH game's first measured frame on)
+	bhs.s	.phc
+	movem.l	d0-d1/a0,-(sp)
+	lea	ren_ph_vbl,a0
+	moveq	#10-1,d0
+.phz:	clr.l	(a0)+
+	dbf	d0,.phz
+	movem.l	(sp)+,d0-d1/a0
+.phc:
+	endc
 	REN_PH_IN
 	endc
 	bsr	ren_config
@@ -2808,7 +2904,21 @@ ren_fixed:
 	add.w	d5,a0
 	lea	ren_tcopy,a1
 	add.w	d5,a1
-	move.w	#504-1,d1
+	moveq	#504/8-1,d1		; (8 longs a round while nothing changed: the program writes these layers often)
+.cr8:	rept	8
+	cmpm.l	(a0)+,(a1)+
+	bne.s	.cd
+	endr
+	dbf	d1,.cr8
+	rts
+.cd:	subq.l	#4,a0			; (from the changed long on: a long at a time)
+	subq.l	#4,a1
+	move.l	a0,d1
+	sub.l	#vio+V_TILE,d1
+	sub.w	d5,d1
+	lsr.w	#2,d1
+	neg.w	d1
+	add.w	#504-1,d1		; (longs left - 1)
 .cl:	cmpm.l	(a0)+,(a1)+
 	dbne	d1,.cl
 	beq	.ce
@@ -4032,7 +4142,21 @@ ren_draw_image:
 	bra	.nf3
 .nf2:	add.w	d5,d0
 .nf3:	move.w	d0,ren_y0
-.nob:	; the Blitter (SXI, SYI 2, DXI 8, HOP / OP: ren_objects set them)
+.nob:	; a group layer above the sprite in some cell rows under it: drawn line by line, those pixels left out
+	bsr	ren_prio_rows
+	tst.b	ren_prio
+	beq	.npr
+	tst.b	ren_slow
+	bne	.pcar
+	cmp.w	#3,ren_nw
+	beq	.npr			; (two source words a row: the priority loop)
+.pcar:	tst.b	ren_pover		; (line by line: masked; over another object: drawn whole, then repaired)
+	beq	.psl
+	sf	ren_prio
+	st	ren_prep
+	bra	.npr
+.psl:	st	ren_slow
+.npr:	; the Blitter (SXI, SYI 2, DXI 8, HOP / OP: ren_objects set them)
 	move.w	ren_nw,BLT_XC.w
 	moveq	#-14,d0
 	cmp.w	#3,ren_nw
@@ -4084,6 +4208,8 @@ ren_draw_image:
 	subq.w	#1,d7
 	tst.b	ren_slow
 	bne	.slow
+	tst.b	ren_prio
+	bne	.pr
 	cmp.w	#3,ren_nw
 	beq	.f3
 	moveq	#4,d2			; (Y count: the four planes)
@@ -4273,8 +4399,73 @@ ren_draw_image:
 	move.w	#1,BLT_XC.w
 	move.w	#2,BLT_DYI.w
 	bra	.cg
+.pr:	; two source words a row, a group layer above the sprite in some of its cell rows: a pass a line, the end masks
+	; without the pixels whose group priority (ren_pri) is above the sprite's in the rows of ren_rmask; over an object
+	; drawn before (ren_pover) those pixels of the sprite get the background from the twin column
+	move.l	d4,ren_ps4		; (the line step)
+	asr.w	#1,d4
+	move.w	d4,ren_pps		; (the priority line step: 256 bytes)
+	asr.w	#8,d4
+	move.w	d4,ren_pdy		; (+-1)
+	move.w	ren_y0,d3
+	moveq	#0,d0
+	move.w	d3,d0
+	ext.l	d0
+	lsl.l	#8,d0
+	lea	ren_pri,a2
+	add.l	d0,a2			; (the first line's priority line: used only for lines 0-223)
+	move.l	ren_cur,a4
+	moveq	#0,d0
+	move.b	SL_PRI(a4),d0
+	add.w	d0,d0
+	tst.b	ren_clip
+	beq	.prn
+	add.w	#16,d0
+.prn:	tst.b	ren_pover
+	beq	.pro
+	add.w	#32,d0
+.pro:	lea	BLT_YC.w,a4
+	move.w	.prt(pc,d0.w),d0
+	jmp	.prt(pc,d0.w)
+.prt:	dc.w	.pu0-.prt,.pu1-.prt,.pu2-.prt,.pu3-.prt,.pu4-.prt,.pu5-.prt,.pu6-.prt,.pu6-.prt
+	dc.w	.pc0-.prt,.pc1-.prt,.pc2-.prt,.pc3-.prt,.pc4-.prt,.pc5-.prt,.pc6-.prt,.pc6-.prt
+	dc.w	.qu0-.prt,.qu1-.prt,.qu2-.prt,.qu3-.prt,.qu4-.prt,.qu5-.prt,.qu6-.prt,.qu6-.prt
+	dc.w	.qc0-.prt,.qc1-.prt,.qc2-.prt,.qc3-.prt,.qc4-.prt,.qc5-.prt,.qc6-.prt,.qc6-.prt
+	REN_PRL	.pu0,0,0,0
+	REN_PRL	.pu1,1,0,0
+	REN_PRL	.pu2,2,0,0
+	REN_PRL	.pu3,3,0,0
+	REN_PRL	.pu4,4,0,0
+	REN_PRL	.pu5,5,0,0
+	REN_PRL	.pu6,6,0,0
+	REN_PRL	.pc0,0,1,0
+	REN_PRL	.pc1,1,1,0
+	REN_PRL	.pc2,2,1,0
+	REN_PRL	.pc3,3,1,0
+	REN_PRL	.pc4,4,1,0
+	REN_PRL	.pc5,5,1,0
+	REN_PRL	.pc6,6,1,0
+	REN_PRL	.qu0,0,0,1
+	REN_PRL	.qu1,1,0,1
+	REN_PRL	.qu2,2,0,1
+	REN_PRL	.qu3,3,0,1
+	REN_PRL	.qu4,4,0,1
+	REN_PRL	.qu5,5,0,1
+	REN_PRL	.qu6,6,0,1
+	REN_PRL	.qc0,0,1,1
+	REN_PRL	.qc1,1,1,1
+	REN_PRL	.qc2,2,1,1
+	REN_PRL	.qc3,3,1,1
+	REN_PRL	.qc4,4,1,1
+	REN_PRL	.qc5,5,1,1
+	REN_PRL	.qc6,6,1,1
 	; the slow path: the clip masks, bar lines left out (the source then set for each line)
 .slow:	addq.l	#1,ren_slowdraws
+	move.l	a1,ren_sdst		; (the line's destination: + step a line)
+	move.w	ren_nw,d0
+	subq.w	#1,d0
+	lsl.w	#3,d0
+	move.w	d0,ren_srb		; (a row's source bytes)
 	move.w	ren_y0,d3		; the line
 	move.l	ren_srcp,a2
 	move.l	ren_cur,a0
@@ -4299,36 +4490,29 @@ ren_draw_image:
 	move.l	d0,d1
 	lsr.l	d5,d1
 	and.w	ren_c1,d1
-	move.w	d1,2(a6)		; (END2, or END3 of a two-word line: set again below)
+	move.w	d1,ren_mw+2
 	swap	d1
 	and.w	ren_c0,d1
-	move.w	d1,(a6)
-	cmp.w	#3,ren_nw
-	bne	.s2
+	move.w	d1,ren_mw
 	lsl.w	d6,d0
 	and.w	ren_c2,d0
-	move.w	d0,4(a6)
+	move.w	d0,ren_mw+4
+	tst.b	ren_prio
+	beq	.sp
+	bsr	ren_pri_line		; (a layer above the sprite: its pixels left out)
+.sp:	move.w	ren_mw,(a6)
+	cmp.w	#3,ren_nw
+	bne	.s2
+	move.l	ren_mw+2,2(a6)		; (END2, END3)
 	bra	.sg
-.s2:	move.w	2(a6),4(a6)
-.sg:	move.w	d3,d0
-	add.w	#REN_GUARD,d0
-	ext.l	d0
-	moveq	#9,d1
-	lsl.l	d1,d0
-	move.w	ren_g0,d1
-	ext.l	d1
-	lsl.l	#3,d1
-	add.l	d1,d0
-	add.l	ren_dbuf,d0
-	move.l	d0,(a3)
+.s2:	move.w	ren_mw+2,4(a6)		; (END3 of a two-word line)
+.sg:	move.l	ren_sdst,(a3)
 	move.l	a2,BLT_SRC.w
 	move.w	#4,(a4)
 	move.b	#$c0,(a5)
 .sk:	addq.l	#4,a0
-	move.w	ren_nw,d0
-	subq.w	#1,d0
-	lsl.w	#3,d0
-	add.w	d0,a2			; (the row's planes: 8 bytes a word)
+	add.w	ren_srb,a2		; (the row's planes: 8 bytes a word)
+	add.l	d4,ren_sdst
 	tst.w	d4
 	bmi	.su
 	addq.w	#1,d3
@@ -4344,18 +4528,106 @@ ren_draw_image:
 	move.w	ren_ya,d2
 	move.w	ren_yb,d3
 	bsr	ren_damage
-	; the priority repair
-	cmp.b	#2,ren_linesel
-	beq	.out
-	move.l	ren_cur,a2
-	moveq	#0,d0
-	move.b	SL_PRI(a2),d0
-	cmp.b	ren_grp_max,d0
-	bhs	.out
-	tst.b	ren_grp_n
+	tst.b	ren_prep
 	beq	.out
 	bsr	ren_repair
 .out:	rts
+
+; d2.w = the pixels of destination word k (0-2) of the line at a1 to put back from the twin column (ren_tw: the
+; twin's offset from a1 for the word's group, + 8k).  Keeps all.
+ren_pr_twin0:
+	movem.l	d0-d1/d4-d5,-(sp)
+	move.w	ren_tw+0,d4
+	move.w	d2,d1
+	not.w	d1
+	move.w	0(a1),d0
+	and.w	d1,d0
+	move.w	0(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,0(a1)
+	move.w	2(a1),d0
+	and.w	d1,d0
+	move.w	2(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,2(a1)
+	move.w	4(a1),d0
+	and.w	d1,d0
+	move.w	4(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,4(a1)
+	move.w	6(a1),d0
+	and.w	d1,d0
+	move.w	6(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,6(a1)
+	movem.l	(sp)+,d0-d1/d4-d5
+	rts
+ren_pr_twin1:
+	movem.l	d0-d1/d4-d5,-(sp)
+	move.w	ren_tw+2,d4
+	move.w	d2,d1
+	not.w	d1
+	move.w	8(a1),d0
+	and.w	d1,d0
+	move.w	0(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,8(a1)
+	move.w	10(a1),d0
+	and.w	d1,d0
+	move.w	2(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,10(a1)
+	move.w	12(a1),d0
+	and.w	d1,d0
+	move.w	4(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,12(a1)
+	move.w	14(a1),d0
+	and.w	d1,d0
+	move.w	6(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,14(a1)
+	movem.l	(sp)+,d0-d1/d4-d5
+	rts
+ren_pr_twin2:
+	movem.l	d0-d1/d4-d5,-(sp)
+	move.w	ren_tw+4,d4
+	move.w	d2,d1
+	not.w	d1
+	move.w	16(a1),d0
+	and.w	d1,d0
+	move.w	0(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,16(a1)
+	move.w	18(a1),d0
+	and.w	d1,d0
+	move.w	2(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,18(a1)
+	move.w	20(a1),d0
+	and.w	d1,d0
+	move.w	4(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,20(a1)
+	move.w	22(a1),d0
+	and.w	d1,d0
+	move.w	6(a1,d4.w),d5
+	and.w	d2,d5
+	or.w	d5,d0
+	move.w	d0,22(a1)
+	movem.l	(sp)+,d0-d1/d4-d5
+	rts
 
 ; d2 .. d3 - 1 (lines): the part in the palette ren_linesel's lines (1: the playfield's: < 0, htop .. hbot - 1,
 ; >= 224; 2: the HUD's: 0 .. htop - 1, hbot .. 223).  N: none; Z: one interval, into d2 d3; else two (d2 d3 kept).
@@ -4651,14 +4923,23 @@ ren_damage:
 	lea	ren_bar_line,a1
 	rts
 
-; The repair of the sprite just drawn (ren_cur, ren_cur_img; ren_g0, ren_s, ren_y0, ren_step): where the group's
-; priority at a pixel (ren_pri: three bit planes) is above the sprite's, the pixels the sprite set get the background
-; from the twin column again.  Only where a cell under the sprite has a higher priority (ren_cellpri).
-ren_repair:
-	movem.l	d0-d7/a0-a6,-(sp)
+; The priority of the sprite about to be drawn (ren_cur; ren_ya .. ren_yb, ren_dg0 .. ren_dg1): the cell rows under
+; it where a group cell's priority is above the sprite's (ren_cellpri) into ren_rmask (bit r: the cell row ren_rrow +
+; r), ren_prio set when there are any (then the lines there leave out the pixels whose group priority, the ren_pri
+; planes, is above the sprite's: ren_pri_line).  Not in the HUD's lines of an object (ren_linesel 2).  Keeps all.
+ren_prio_rows:
+	sf	ren_prio
+	sf	ren_prep
+	cmp.b	#2,ren_linesel
+	beq	.r
+	tst.b	ren_grp_n
+	beq	.r
+	movem.l	d0-d7/a0-a2,-(sp)
 	move.l	ren_cur,a2
 	moveq	#0,d7
 	move.b	SL_PRI(a2),d7		; P
+	cmp.b	ren_grp_max,d7
+	bhs	.out
 	move.w	ren_ya,d0
 	bsr	ren_bar_clamp
 	move.w	d0,d2
@@ -4669,7 +4950,6 @@ ren_repair:
 	bge	.out
 	move.w	d2,ren_ra
 	move.w	d3,ren_rb
-	; the cell rows under the sprite with a cell above P (bit r - the first row in d6)
 	add.w	ren_ey,d2
 	lsr.w	#3,d2			; the first cell row (unwrapped)
 	move.w	d2,ren_rrow
@@ -4718,11 +4998,44 @@ ren_repair:
 .nx:	addq.w	#1,d1
 	cmp.w	d3,d1
 	bls	.cr
-	move.l	ren_cur,a2
-	tst.l	d6
-	beq	.out
 	move.l	d6,ren_rmask
+	beq	.out
 	addq.l	#1,ren_repairs
+	st	ren_pover		; (an object drawn before it may be under it: its pixels behind the layer put back too)
+	st	ren_prio
+	add.w	d7,d7			; (the routine for P)
+	lea	ren_pfn_tab,a0
+	move.w	(a0,d7.w),ren_pfn
+	move.w	ren_g0,d0		; (the words' groups in the priority line: wrapped at 32; their twins)
+	lea	ren_po,a0
+	lea	ren_tw,a1
+	moveq	#0,d3
+	moveq	#3-1,d1
+.po:	moveq	#31,d2
+	and.w	d0,d2
+	lsl.w	#3,d2
+	move.w	d2,(a0)+
+	move.w	#256,d2
+	cmp.w	#32,d0
+	blt	.tw
+	move.w	#-256,d2
+.tw:	add.w	d3,d2
+	move.w	d2,(a1)+
+	addq.w	#8,d3
+	addq.w	#1,d0
+	dbf	d1,.po
+.out:	movem.l	(sp)+,d0-d7/a0-a2
+.r:	rts
+
+; The repair of the sprite just drawn whole (ren_prep: an object drawn before it in this picture may be under it, see
+; ren_prio_rows): in the cell rows of ren_rmask, where the group's priority (ren_pri planes) is above the sprite's,
+; the pixels the sprite set get the background from the twin column again (the arcade composes the sprites first: a
+; sprite pixel hidden by a layer hides the sprites behind it too).
+ren_repair:
+	movem.l	d0-d7/a0-a6,-(sp)
+	move.l	ren_cur,a2
+	moveq	#0,d7
+	move.b	SL_PRI(a2),d7		; P
 	; per line the sprite drew in ren_ra .. ren_rb - 1, in a marked cell row, per destination word
 	move.w	ren_nrow,d4
 	subq.w	#1,d4			; rows - 1
@@ -4873,6 +5186,263 @@ ren_pri_above:
 .p7:	moveq	#0,d6
 .o:	move.l	(sp)+,d0
 	rts
+
+; d3.w = a line of the sprite being drawn, ren_mw its destination words' end masks (ren_nw words): in a cell row of
+; ren_rmask, the pixels whose group priority (ren_pri planes q0 q1 q2) is above the sprite's (ren_prio_rows: the
+; routine for its priority, ren_pfn; the words' offsets in the priority line, ren_po) left out.  Uses d0 d1.
+ren_pri_line:
+	cmp.w	#224,d3
+	bhs	.r			; (the guard lines: no group priority)
+	move.w	d3,d1
+	add.w	ren_ey,d1
+	lsr.w	#3,d1
+	sub.w	ren_rrow,d1
+	btst	d1,ren_rmask+3
+	beq	.r
+	movem.l	d6/a1-a2,-(sp)
+	moveq	#0,d0
+	move.w	d3,d0
+	lsl.l	#8,d0
+	lea	ren_pri,a2
+	add.l	d0,a2			; the priority line
+	move.w	ren_pfn,d0
+	jmp	.tab(pc,d0.w)
+.tab:
+.a0:
+	tst.w	ren_mw+0
+	beq.s	.s00
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	(a1)+,d6
+	or.w	(a1)+,d6
+	or.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s00:
+	tst.w	ren_mw+2
+	beq.s	.s01
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	(a1)+,d6
+	or.w	(a1)+,d6
+	or.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s01:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s02
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	(a1)+,d6
+	or.w	(a1)+,d6
+	or.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s02:
+	bra	.done
+.a1:
+	tst.w	ren_mw+0
+	beq.s	.s10
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s10:
+	tst.w	ren_mw+2
+	beq.s	.s11
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s11:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s12
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s12:
+	bra	.done
+.a2:
+	tst.w	ren_mw+0
+	beq.s	.s20
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	and.w	(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s20:
+	tst.w	ren_mw+2
+	beq.s	.s21
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	and.w	(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s21:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s22
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	and.w	(a1),d6
+	or.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s22:
+	bra	.done
+.a3:
+	tst.w	ren_mw+0
+	beq.s	.s30
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s30:
+	tst.w	ren_mw+2
+	beq.s	.s31
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s31:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s32
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s32:
+	bra	.done
+.a4:
+	tst.w	ren_mw+0
+	beq.s	.s40
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	(a1),d6
+	and.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s40:
+	tst.w	ren_mw+2
+	beq.s	.s41
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	(a1),d6
+	and.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s41:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s42
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	2(a1),d6
+	or.w	(a1),d6
+	and.w	4(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s42:
+	bra	.done
+.a5:
+	tst.w	ren_mw+0
+	beq.s	.s50
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s50:
+	tst.w	ren_mw+2
+	beq.s	.s51
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s51:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s52
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s52:
+	bra	.done
+.a6:
+	tst.w	ren_mw+0
+	beq.s	.s60
+	move.w	ren_po+0,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	and.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+0
+.s60:
+	tst.w	ren_mw+2
+	beq.s	.s61
+	move.w	ren_po+2,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	and.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+2
+.s61:
+	cmp.w	#3,ren_nw
+	bne	.done
+	tst.w	ren_mw+4
+	beq.s	.s62
+	move.w	ren_po+4,d0
+	lea	(a2,d0.w),a1
+	move.w	4(a1),d6
+	and.w	2(a1),d6
+	and.w	(a1),d6
+	not.w	d6
+	and.w	d6,ren_mw+4
+.s62:
+	bra	.done
+.a7:
+	bra	.done
+.done:	movem.l	(sp)+,d6/a1-a2
+.r:	rts
+ren_pfn_tab:
+	dc.w	ren_pri_line\.a0-ren_pri_line\.tab,ren_pri_line\.a1-ren_pri_line\.tab
+	dc.w	ren_pri_line\.a2-ren_pri_line\.tab,ren_pri_line\.a3-ren_pri_line\.tab
+	dc.w	ren_pri_line\.a4-ren_pri_line\.tab,ren_pri_line\.a5-ren_pri_line\.tab
+	dc.w	ren_pri_line\.a6-ren_pri_line\.tab,ren_pri_line\.a7-ren_pri_line\.tab
 
 ; the buffer's damage put back (twin columns), its list emptied.  The bar image's rectangles only when the window and
 ; the bar image are as they were then (else ren_bars copies all bar lines, and a change of the bar lines redraws the
@@ -5968,6 +6538,21 @@ ren_brr:	ds.w	1
 ren_slow:	ds.b	1
 ren_clip:	ds.b	1
 ren_barok:	ds.b	1
+ren_prio:	ds.b	1
+ren_prep:	ds.b	1
+ren_pover:	ds.b	1
+	even
+ren_tw:		ds.w	3
+	even
+	even
+ren_sdst:	ds.l	1
+ren_srb:	ds.w	1
+ren_ps4:	ds.l	1
+ren_pps:	ds.w	1
+ren_pdy:	ds.w	1
+	even
+ren_pfn:	ds.w	1
+ren_po:		ds.w	3
 ren_sv:		ds.b	4
 	even
 ren_draw:	ds.w	1

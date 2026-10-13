@@ -42,9 +42,13 @@ control, the latched sprite list.  `tools/assets.py` converts the graphics ROMs 
   ANDed into the new mask's words: END mask 0 for the words outside, `ren_cl`/`ren_cr`), culled when wholly outside;
   top and bottom whole into the guard lines.  An object drawn in one palette's lines (`ren_linesel`, across the HUD
   boundary) is drawn as the interval of those lines; only bar lines of a higher priority inside the range (not at
-  its ends) need the line-by-line path.  Sprites below a group
-  layer's priority (Rick behind the foreground) are drawn and then *repaired*: where the priority planes say a layer
-  above shows, the background is copied back from the twin column (only in the cell rows that need it).
+  its ends) need the line-by-line path.  Sprites below a group layer's priority (Rick and the enemies behind the
+  cage bars) leave those pixels out: in the cell rows with a group cell above the sprite (`ren_prio_rows`) each
+  line's end masks lose the pixels whose group priority (the `ren_pri` planes) is above, and those pixels get the
+  background from the twin column (`ren_pr_twin`: an object drawn before may be under them; the arcade composes the
+  sprites first, so a hidden sprite pixel hides the sprites behind it too).  Two source words a row: a pass a line
+  with code per priority (`.pr`); otherwise line by line (`ren_pri_line`), or drawn whole and *repaired* afterwards
+  (`ren_repair`) when it lies over another object.
 * **Overlays**: enabled layers 0-3 outside the group (layer 3: the flickering lightning and objects of stages 4 and 6)
   and the fixed layers' cells outside the HUD bars are drawn per picture as 8 x 8 images through the same sprite code,
   between the sprites by priority.  Cells hidden by bars, wholly covered by group layers of higher priority, or opaque
@@ -133,11 +137,16 @@ all flips, the top and bottom guards, lines across a 64 KB boundary of each buff
 and not): exact, and no sprite pixel outside the clip groups in the side bands (the check bites: `-D REN_NOCLIP=1`
 fails).  `--png`: STE | reference into `build/splatter/render_*.png`.  `--every 2 --phase 0|1`: every other play frame
 (the program's `PIC_EVERY`; stage 1 enables layer 3 in every other frame, so the two phases cost differently).
+`--bench 500-1100`: the states of splatter.s' BENCH game (its scripted inputs: coin at frame 60, start at 140, from
+400 right with an attack 4 frames in 40; `build/splatter/render_bench.pkl`, recorded once): stage 1 scrolling with
+more enemies, the picture Hatari's `dbench` measures.  The fixed layers' flag is set in every frame there (the
+program's HUD writers run every frame), so their diff runs in every picture as in the program.
 
 Results (2026-10-12): play 1100 / 1100 pictures exact, attract 475 / 475, edges 218 / 218; stages 2-7 from
 stage-select captures (every 25th frame, ~90 pictures each) exact; also `-D REN_NBUF=3`, `-D REN_DMG=6` (overflow
 path), `-D TILE_FLAG=1`, `-D REN_ONEPAL=1` exact.  2026-10-13 (the speed-up below): play, attract, edges, both
-`--every 2` phases, with and without `TILE_FLAG`, `REN_NBUF=3`, `REN_ONEPAL=1`, `REN_DMG=6`: all exact.
+`--every 2` phases, with and without `TILE_FLAG`, `REN_NBUF=3`, `REN_ONEPAL=1`, `REN_DMG=6`: all exact; and the
+BENCH states (601 pictures, both `--every 2` phases) in all these variants.
 
 ### Measurements
 
@@ -163,6 +172,23 @@ pictures/s.  The rate depends on which arcade frames get a picture (layer 3's ph
 cycles of nops at render_frame's start gives 13.69, a variant ~1k cycles a picture slower 13.75; read changes of a
 few % with care.
 
+BENCH states (`--bench 500-1100 --every 2`, `TILE_FLAG`; median / mean without new scenes): phase 0 650k / 656k ->
+593k / 611k, phase 1 672k / 694k -> 616k / 651k.  Hatari, `dbench` with `REN_PHASES` (frames 600-1100, VBLs per phase, k cycles a picture): 13.28 ->
+13.96 arcade frames/s, 6.63 -> 6.96 pictures/s; objects 748 -> 666 VBLs (479k -> 426k), restore 112 -> 101, bars 96
+-> 102, fixed 69 -> 64, palette 46 -> 35, bg 73 -> 71.  Hatari's CPU profiler (`--parse`, a breakpoint on
+bench_inputs at frame 600 starts it) agrees with Musashi per routine within ~5-10% (the bus's 4-cycle rounding); the
+interrupts (Timer B, the border chain, the HUD plan) take ~6% of the time.  The higher picture cost than the play
+states is the game: the BENCH game scrolls and has more enemies (~340 sprite lines and ~80 behind the cage a
+picture), and the fixed layers are compared in every picture (~33k; the HUD writers set the flag every frame).
+
+Tried and dropped (2026-10-13): the full stefastbobs2 method as a prototype (`-D REN_GEN=1`, removed again): code
+generated per (image, skew, flip y) on first use (a pass a row, end masks / X count / Y increment written as
+constants when they change, no per-line decisions; `REN_GSORT`: rows grouped by equal masks).  Exact, but the BENCH
+game makes ~6 new (image, skew, flip y) a picture (hits 57% with a 96 KB code pool; 75% with 2 MB): generating costs
+~22k each, ~134k a picture, against ~42k saved in the draws.  Musashi BENCH mean 612k -> 714k (row order), grouped
+order slower again; Hatari 13.96 -> 12.54 arcade frames/s, objects 426k -> 552k a picture.  It would need ~0.5 MB
+of code to reach its best hit rate and still pay ~80k a picture for the generation.
+
 Tried and dropped: the stefastbobs2 reordered source (rows of equal masks grouped across the image, the destination
 from a table of row offsets).  Measured over 400 play pictures: 94213 sprite rows drawn, 58178 mask changes in row
 order, 49777 groups of equal masks: grouping saves ~21 mask changes a picture (~2.5k cycles), less than grouping
@@ -178,8 +204,11 @@ snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).
 ### Open problems
 
 * Speed: ~2 VBLs a picture in play besides the logic; a new scene takes ~1/2 s of black pictures.  Next: the draw
-  setup (~2k a sprite or overlay cell: many memory variables), the restores (Blitter), the palette's per-picture
-  checksum and representatives (~20k), the damage lists and repairs.
+  setup (~1-2k a sprite or overlay cell: many memory variables), the restores (Blitter), the priority rows' scan, the
+  palette's per-picture checksum and representatives (~20k), the damage lists.  Outside render.s: per-row flags from
+  the fixed layers' writers (gen.py) would cut the fixed layers' diff (~33k a picture); showing the HUD bars from a
+  fixed image by switching the video address at the bar lines (borders.s' Timer B events already switch the
+  palette there) would remove the bar copies while scrolling (~65k a picture in Hatari).
 * The HUD palette needs the Timer B extension; `REN_ONEPAL` meanwhile.
 * Colours: a representative pen that does not fade like its colour's other pens (the HUD skulls stay white in a
   fade); colours appearing after the choice (stage 4's purple lightning, sprites of a new colour) map to the nearest

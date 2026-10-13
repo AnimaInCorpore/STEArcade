@@ -165,6 +165,9 @@ class Harness:
             if st["vram"] != getattr(self, "_vram", None):
                 self.mem.w8(self.sym["tile_written"], 0xFF)
                 self.mem.w8(self.sym["tile_written_fix"], 0xFF)
+            if st.get("fix_written"):
+                # (the program's HUD writers run in every frame of play: the flag is set even without a change)
+                self.mem.w8(self.sym["tile_written_fix"], 0xFF)
             self._vram = st["vram"]
         v = bytearray(VIO_SIZE)
         v[0:0x8000] = st["pal"]
@@ -247,6 +250,16 @@ def record(kind, frames, every=1, start=0):
     hold = 0
     out = {}
     for f in range(frames):
+        if kind == "bench":
+            # (splatter.s bench_inputs, by the frame: coin at 60, start at 140, from 400 right, with attack for 4
+            # frames of every 40)
+            m.coin_in = 0xE8 if 60 <= f < 66 else 0xF8
+            c = 0xFF
+            if 140 <= f < 146:
+                c = 0x7F
+            elif f >= 400:
+                c = 0xEE if f % 40 < 4 else 0xFE
+            m.control_in[0] = c
         if kind == "play":
             if f == 30:
                 m.coin_in &= ~0x10
@@ -275,6 +288,24 @@ def load_states():
     print("recording the reference's states (a few minutes, once) ...", flush=True)
     st = {"play": record("play", 1400, 1, 300), "attract": record("attract", 2200, 4, 300)}
     STATES.write_bytes(pickle.dumps(st))
+    return st
+
+
+BENCH_STATES = BUILD / "render_bench.pkl"
+
+
+def load_bench():
+    """the states of splatter.s' BENCH game (its scripted inputs), frames 500-1100"""
+    if BENCH_STATES.exists():
+        st = pickle.loads(BENCH_STATES.read_bytes())
+        for v in st.values():
+            v["fix_written"] = True
+        return st
+    print("recording the BENCH game's states (a few minutes, once) ...", flush=True)
+    st = record("bench", 1101, 1, 500)
+    BENCH_STATES.write_bytes(pickle.dumps(st))
+    for v in st.values():
+        v["fix_written"] = True
     return st
 
 
@@ -331,6 +362,10 @@ def check(h, st, name, png=False):
     err = float(e.mean())
     sat = np.hypot(lab_want[..., 1], lab_want[..., 2]) > 0.08     # (the saturated pixels' error apart)
     check.sat = float(e[sat].mean()) if sat.any() else 0.0
+    if 0 < np.count_nonzero(diff) <= 16:
+        ys, xs = np.nonzero(diff)
+        print("  differing pixels (y, x: got, want, pen):", ", ".join(
+            "%d,%d: %d %d $%X" % (y, x, got[y, x], want[y, x], drawn_pens[y, x]) for y, x in zip(ys, xs)))
     if png or diff.any():
         from PIL import Image
         a = shown.astype(np.uint8)
@@ -485,6 +520,7 @@ def main():
     ap.add_argument("--play", default="300-1699")
     ap.add_argument("--attract", default="300-2200")
     ap.add_argument("--edges", action="store_true")
+    ap.add_argument("--bench", default="", help="frames A-B of splatter.s' BENCH game (500-1100), e.g. 500-1100")
     ap.add_argument("--png", default="")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--every", type=int, default=1, help="a picture every N recorded frames (the program: PIC_EVERY)")
@@ -497,13 +533,15 @@ def main():
     if args.edges:
         fails += edge_tests(h, states)
         h = Harness(args.defines)
-    for kind in ("play", "attract"):
+    if args.bench:
+        states = dict(states, bench=load_bench())
+    for kind in ("bench", "play", "attract"):
         spec = getattr(args, kind)
         if not spec:
             continue
         a, b = (int(x) for x in spec.split("-"))
         fr = [f for f in sorted(states[kind]) if a <= f <= b]
-        if kind == "play" and args.every > 1:       # (attract states are recorded every 4th frame already)
+        if kind in ("play", "bench") and args.every > 1:       # (attract states are recorded every 4th frame already)
             fr = [f for f in fr if f % args.every == args.phase]
         n, costs = run_sequence(h, states[kind], fr, kind, pngs)
         fails += n
