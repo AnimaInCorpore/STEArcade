@@ -28,7 +28,7 @@ VIO_FIRST, VIO_LAST = 0x170, 0x183                  # virtual pages of vio ($2E0
 IO_PAGES = {0x17C, 0x17E}
 IRQ = {0: 0xE0DF, 1: 0xE0A1}                        # the IRQ handlers (slot 7)
 # hand-written 68000 routines (src/natives.s) in place of translated code; NO_NATIVES=1 builds the translation only
-NATIVES = {0: {}, 1: {0x6EF714: "sub_sprites"}}
+NATIVES = {0: {}, 1: {0x6EF714: "sub_sprites", 0x6EF4CF: "sub_spritelist"}}
 NAMES = {0: ("main", "M"), 1: ("sub", "S")}
 
 

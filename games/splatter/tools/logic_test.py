@@ -13,6 +13,7 @@ seeds 11-17 start stage seed - 10 (the Stage Select DIP switch).
 """
 import argparse
 import random
+import os
 import sys
 from pathlib import Path
 
@@ -154,6 +155,9 @@ def main():
                                                                         for o in diff[:6]]))
         spr = vio_get(0x2FC800, 0x800)
         diff = [o for o in range(0x800) if spr[o] != m.spriteram[o] and o % 16 < 10]
+        if diff and os.environ.get("DUMPSPR"):
+            for e in range(0, 0x300, 16):
+                print("%03X %s | %s" % (e, spr[e + 4:e + 10].hex(), bytes(m.spriteram[e + 4:e + 10]).hex()))
         if diff:
             bad.append("sprites: %d bytes, first %s" % (len(diff), ["%03X %02X/%02X" % (o, spr[o], m.spriteram[o])
                                                                    for o in diff[:6]]))
@@ -233,7 +237,20 @@ def main():
     if stage:
         m.dipsw &= ~0x04
     tile_frames = flag_frames = 0
+    probe = {int(x, 16) for x in os.environ.get("PROBE_PCS", "").split(",") if x}
+    probe_frame = int(os.environ.get("PROBE_FRAME", "-1"))     # (debugging: the sub CPU at these pcs in that frame)
+    probe_on = [False]
+    if probe:
+        c1 = m.cpus[1]
+        step1 = c1.step
+
+        def step_probe():
+            if probe_on[0] and c1.pc in probe:
+                print("probe %04X A %02X B %02X X %04X Y %04X U %04X [51] %02X%02X" % (c1.pc, c1.a, c1.b, c1.x, c1.y, c1.u, m.ram[0x51], m.ram[0x52]))
+            return step1()
+        c1.step = step_probe
     for f in range(args.frames):
+        probe_on[0] = f == probe_frame
         if stage and 130 <= f < 430:
             k, phase = (f - 180) // 30, (f - 180) % 30
             if f == 130:
@@ -296,6 +313,8 @@ def main():
         m.run_cpu(1)
         if not compare(f):
             print("stopped after %d good frames" % f)
+            if trail and os.environ.get("TRAIL"):
+                print("labels:", " ".join(t for t in trail if t[:1] == os.environ["TRAIL"]))
             return 1
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1)), flush=True)

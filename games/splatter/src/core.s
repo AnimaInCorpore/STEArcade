@@ -402,6 +402,10 @@ tile_written_fix:	ds.b	1
 page_base_table:	ds.l	$400
 bad_table:	ds.l	$2000		; (filled with cpu_badpc)
 sprite_latch:	ds.b	2
+sl_end:		ds.l	1		; (natives.s: the sprite list's objects)
+sl_list:	ds.l	50
+sl_pb:		ds.l	1
+sl_s1:		ds.w	1
 badpc:		ds.w	1
 badslot:	ds.w	1
 badctx:		ds.l	1

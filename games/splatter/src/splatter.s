@@ -65,6 +65,9 @@ main_loop:
 	move.b	#MAX_BEHIND,ticks
 	addq.l	#1,cnt_dropped
 .go:	subq.b	#1,ticks
+	ifd	BENCH
+	bsr	bench_inputs
+	endc
 	bsr	vblank_work
 	bsr	port_frame
 	addq.l	#1,cnt_logic
@@ -230,6 +233,48 @@ port_crash:
 .name:	dc.b	"CRASH.TXT",0
 	even
 
+    ifd BENCH
+; BENCH: inputs by the arcade frame (coin at 60, start at 140, then right with an attack every 40 frames), the counters
+; kept at arcade frame BENCH_FROM and the program quit at BENCH_TO: the same play every run (no host key timing)
+BENCH_FROM = 600
+BENCH_TO = 1100
+bench_inputs:
+	move.l	cnt_logic,d0
+	move.b	#$FF,in_coin
+	move.b	#$FF,in_control0
+	cmp.l	#60,d0
+	blo.s	.r
+	cmp.l	#66,d0
+	bhs.s	.c
+	move.b	#$EF,in_coin		; (coin 1)
+	bra.s	.r
+.c:	cmp.l	#140,d0
+	blo.s	.r
+	cmp.l	#146,d0
+	bhs.s	.p
+	move.b	#$7F,in_control0	; (start)
+	bra.s	.r
+.p:	cmp.l	#400,d0
+	blo.s	.r
+	divu	#40,d0
+	swap	d0
+	move.b	#$FE,in_control0	; right
+	cmp.w	#4,d0
+	bhs.s	.r
+	move.b	#$EE,in_control0	; right + attack
+.r:	move.l	cnt_logic,d0
+	cmp.l	#BENCH_FROM,d0
+	blo.s	.n
+	tst.l	cnt_from
+	bne.s	.n
+	movem.l	cnt_vbls,d1-d5
+	movem.l	d1-d5,cnt_from
+.n:	cmp.l	#BENCH_TO,d0
+	blo.s	.q
+	st	quit_flag
+.q:	rts
+    endc
+
 ; COUNTERS.BIN (longs): VBLs, arcade frames run, pictures drawn, frames dropped, pictures skipped (no free buffer)
 write_counters:
 	moveq	#0,d0
@@ -244,7 +289,7 @@ write_counters:
 	bmi.s	.r
 	move.w	d0,-(sp)
 	pea	cnt_vbls
-	pea	20.w
+	pea	40.w				; (and cnt_from: BENCH)
 	move.w	d0,-(sp)
 	move.w	#$40,-(sp)		; Fwrite
 	trap	#1
@@ -482,6 +527,7 @@ cnt_logic:	ds.l	1
 cnt_pictures:	ds.l	1
 cnt_dropped:	ds.l	1
 cnt_skipped:	ds.l	1
+cnt_from:	ds.l	5		; (BENCH: the counters at VBL BENCH_FROM)
 old_mfp:	ds.b	14
 old_res:	ds.b	1
 old_hz:		ds.b	1
