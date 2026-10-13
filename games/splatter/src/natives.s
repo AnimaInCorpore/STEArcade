@@ -714,3 +714,129 @@ sl_rdx:
 	move.b	(a0),d7
 	addq.w	#1,d2
 	rts
+
+; ---- the main CPU's $CA57-$CA87: X[6..9] = the word at X times the word at X+2 (two passes of two MULs)
+;
+;   CA57  B = 2; PSHS U,Y,B; Y = X + 4, U = X + 8; X[6..9] = 0; per pass: D = X[1] * [-Y] + [U]; [U] = D;
+;         [U-1] += [U-1] + C; D = X[0] * [Y] + [-U]; [U] = D; [U-1] += [U-1] + C; DEC ,S; PULS B,Y,U,PC
+; The product fits in 32 bits, so the carries into X[6] are the product's and the last one is 0: X[6..9] = the
+; product, and the second pass's ADCA doubles X[5] (A = that, C = its old bit 7).  X lies in slot 0, as the
+; translation's sites (a3).  Flags are not live after the PULS.
+
+main_mul16:
+	lea	(a3,d2.l),a0			; a0 = X
+	move.b	d4,-1(a5)			; PSHS U,Y,B (B = 0 after the passes)
+	move.w	d4,-(sp)
+	move.b	(sp)+,-2(a5)
+	move.b	d3,-3(a5)
+	move.w	d3,-(sp)
+	move.b	(sp)+,-4(a5)
+	clr.b	-5(a5)
+	move.b	(a0),-(sp)			; the two words (X may be odd)
+	move.w	(sp)+,d7
+	move.b	1(a0),d7
+	move.b	2(a0),-(sp)
+	move.w	(sp)+,d6
+	move.b	3(a0),d6
+	mulu	d6,d7
+	move.b	d7,9(a0)
+	lsr.l	#8,d7
+	move.b	d7,8(a0)
+	lsr.l	#8,d7
+	move.b	d7,7(a0)
+	lsr.w	#8,d7
+	move.b	d7,6(a0)
+	move.b	5(a0),d0			; X[5] doubled: A
+	add.b	d0,d0
+	move.b	d0,5(a0)
+	subq.l	#5,a5				; (S at the PULS: B Y U PC)
+	jmp	M7FCA87
+
+; ---- the main CPU's $C5D5-$C5FF with $C630-$C649: the background's class under an object (7 calls a frame)
+;
+;   C5D5  PSHS D; D = sext B + [$13,U]; X = $C600 + (A << 2, signed); <$0F = $E600 = [X] (slot 3's bank); X = [X+2];
+;         PULS D; B = (B + [$14,U]) >> 1; A = (A + [$1A,U]) >> 4 (C = bit 3); B = (B >> 1 | C << 7) & $FE;
+;         D = [X + D] (slot 3); BSR $C630; RTS
+;   C630  PSHS X,D; PSHS D; X = $C64B; [2,S] = $0004; PULS D; the thresholds at X (words, rising): while D is not
+;         below the next one, [0,S] += 1 and [1,S] -= 1 (four at most); PULS D,X,PC: A = their count, B = 4 - it
+; Flags are not live after the RTS (its callers TSTA, PSHS A or return).  The stack bytes below S are written as the
+; routine leaves them.
+
+main_bgclass:
+	move.b	d0,d5				; (A B of the entry)
+	move.b	d1,d6
+	lea	(a3,d4.l),a1			; a1 = U (slot 0)
+	move.b	$13(a1),-(sp)			; SEX; ADDD $13,U
+	move.w	(sp)+,d7
+	move.b	$14(a1),d7
+	ext.w	d1
+	add.w	d1,d7
+	lsr.w	#8,d7				; ASLA; ASLA; LEAX A,X (X = $C600 + signed)
+	lsl.b	#2,d7
+	ext.w	d7
+	add.w	#$C600,d7
+	and.l	#$FFFF,d7
+	move.l	VB+6*4(a6),a0			; (slot 6, this code's page)
+	move.b	(a0,d7.l),d0			; LDD ,X; STD <$0F; STD $E600
+	move.b	1(a0,d7.l),d1
+	move.b	d0,$F(a3)
+	move.b	d1,$10(a3)
+	move.b	2(a0,d7.l),-(sp)		; LDX 2,X
+	move.w	(sp)+,d2
+	move.b	3(a0,d7.l),d2
+	move.b	d0,-(sp)
+	move.w	(sp)+,d7
+	move.b	d1,d7
+	and.w	#$3FF,d7
+	cmp.w	PID+3*2(a6),d7
+	beq.s	.bank
+	move.w	d7,PID+3*2(a6)
+	add.w	d7,d7
+	add.w	d7,d7
+	lea	page_base_table,a0
+	move.l	(a0,d7.w),a0
+	move.l	a0,PB+3*4(a6)
+	suba.l	#$6000,a0
+	move.l	a0,VB+3*4(a6)
+.bank:	add.b	$14(a1),d6			; PULS D; ADDB $14,U; LSRB
+	lsr.b	#1,d6
+	add.b	$1A(a1),d5			; ADDA $1A,U; LSRA x4 (C = bit 3 of the sum); RORB; ANDB #$FE
+	lsr.b	#1,d6
+	btst	#3,d5
+	beq.s	.c0
+	or.b	#$80,d6
+.c0:	and.b	#$FE,d6
+	lsr.b	#4,d5
+	move.b	d5,-(sp)			; LDD D,X (slot 3)
+	move.w	(sp)+,d7
+	move.b	d6,d7
+	add.w	d2,d7
+	and.l	#$FFFF,d7
+	move.l	VB+3*4(a6),a0
+	move.b	(a0,d7.l),-(sp)
+	move.w	(sp)+,d5
+	move.b	1(a0,d7.l),d5			; d5 = the map word
+	move.b	#$C5,-2(a5)			; BSR $C630 (its return address $C5FF)
+	move.b	#$FF,-1(a5)
+	move.b	d2,-3(a5)			; PSHS X,D; PSHS D
+	move.w	d2,-(sp)
+	move.b	(sp)+,-4(a5)
+	move.b	d5,-7(a5)
+	move.w	d5,-(sp)
+	move.b	(sp)+,-8(a5)
+	move.l	VB+6*4(a6),a0			; the thresholds at $C64B
+	adda.l	#$C64B,a0
+	moveq	#0,d0				; A = the count
+	moveq	#4-1,d6
+.cmp:	move.b	(a0)+,-(sp)
+	move.w	(sp)+,d7
+	move.b	(a0)+,d7
+	cmp.w	d7,d5
+	bcs.s	.done
+	addq.b	#1,d0
+	dbf	d6,.cmp
+.done:	moveq	#4,d1				; B = 4 - A
+	sub.b	d0,d1
+	move.b	d0,-6(a5)
+	move.b	d1,-5(a5)
+	jmp	M7FC5FF				; (the RTS: its return candidates, else the dispatcher)

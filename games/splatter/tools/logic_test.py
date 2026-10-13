@@ -204,6 +204,17 @@ def main():
             if pc == sym["sim_wait"]:
                 print("frame done without a difference")
                 return
+            if pc == sym["sim_badpc"]:
+                i = ctxs.get(cpu.r_reg(R.A6) & 0xFFFFFFFF)
+                c = m.cpus[i]
+                c.step()
+                print("badpc %04X; the reference went to %06X (slot pages %s) after:" % (
+                    mem.r16(sym["badpc"]), m.offsets[i][c.pc >> 13] | (c.pc & 0x1FFF),
+                    " ".join("%X" % (o >> 13) for o in m.offsets[i])))
+                for h in hist[-12:]:
+                    print("   cpu %d %s %s | ref %s %s" % (h[0], h[1], ["%X" % x for x in h[2]], h[3],
+                                                            ["%X" % x for x in h[4]]))
+                return
             for lab in sorted(addr_of.get(pc, ())):
                 i = ctxs.get(cpu.r_reg(R.A6) & 0xFFFFFFFF)
                 if i is not None:

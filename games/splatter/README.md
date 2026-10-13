@@ -4,6 +4,31 @@ Atari STE port (4 MB) of the MAME set `splatter` (Namco System 1): the main and 
 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`), the reference board `engine/namcos1.py` (its renderer
 pixel-exact against MAME), and the STE renderer below.  Work in progress.
 
+## Native routines (`src/natives.s`, `tools/gen.py` NATIVES)
+
+Hand-written 68000 code in place of translated 6809 routines (`NO_NATIVES=1` builds the translation only); each leaves
+the registers, memory and stack bytes below S as the 6809 code does and returns through the routine's own translated
+RTS / PULS.  `tools/logic_test.py` (lock-step against the reference) is their test.  Sub CPU: the sprite list ($F4CF,
+`sub_spritelist` / `sl_core`) and one object's sprite parts ($F714, `sub_sprites`).  Main CPU (2026-10-13), the two
+largest self-contained routines of `tools/profile.py --dump` grouped by call target:
+
+* `$CA57` `main_mul16`: the word at X times the word at X+2 into X+6..9 (two passes of two MULs; 3 calls a frame,
+  ~1800 cycles translated).  Its `LDA -1,U; ADCA -1,U` doubles the byte below the partial sum: X+5 ends doubled.
+* `$C5D5` + `$C630` `main_bgclass`: the background class under an object (slot 3's bank from the table at $C600, the
+  map word, its count of the four thresholds at $C64B; 7.4 calls a frame, ~1100 -> ~770 cycles).
+
+Measured: Musashi (`profile.py --start 1200 --frames 400`, seed 5 play) 132.4k -> 126.7k cycles a frame for the two
+CPUs (-4.3%); Hatari (BENCH=1, arcade frames 600-1100, the same sources built back to back) logic 1.232 -> 1.162 VBLs
+an arcade frame, 15.06 -> 15.33 arcade frames/s, 7.46 -> 7.53 pictures/s.  Lock-step: seeds 4, 5, 15 2500 frames
+identical; seeds 11, 13, 17 stopped at a main CPU badpc (frames 1009, 1769, 587) with and without the natives (a
+coverage gap: `gen.py` `table_targets`).  2026-10-14: seed 14 stopped at frame 644 at $883F `JSR [B,X]` (entry $2A,
+$887C: the coverage had seen one target there) and behind it at $887C's `JSR $D3F4` (slot 6, pages 3B4 and 3FE);
+`table_targets` now also takes executed sites with fewer than two targets seen, and direct jumps / calls of that code
+into the pages of a slot where the target is plausible with all it reaches in its page (`plausible_tree`).  Seeds 4, 5,
+11-17: 2500 frames identical.  What is left is spread out: the sprite list natives (~23% of the logic, ~200 cycles a part),
+the object loops ($CD9A, $AE09, $CCDF, $D5D7: 32 slots each, a handler per object through `JSR [A,X]`), calls and
+returns (RTS ~72 cycles, indirect JSR ~130).
+
 ## Renderer
 
 `src/render.s` draws the arcade picture (288 x 224, the player's view: MAME's screen turned by the cabinet's ROT180 with

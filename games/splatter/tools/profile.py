@@ -20,6 +20,7 @@ def main():
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument("--pcs", type=int, default=0)
+    ap.add_argument("--dump", help="write the cycles and executions per label to this file (pickle)")
     args = ap.parse_args()
     prof = collections.Counter()
     pch = collections.Counter()                 # (runtime cycles per 68000 pc: --pcs N prints the top N)
@@ -56,6 +57,9 @@ def main():
     sys.argv = [sys.argv[0]] + logic_test.main_args
     logic_test.main()
     total = sum(prof.values())
+    if args.dump:
+        import pickle
+        Path(args.dump).write_bytes(pickle.dumps(dict(prof=dict(prof), counts=dict(counts), frames=args.frames)))
     print("%d cycles in %d frames: %.0f a frame" % (total, args.frames, total / args.frames))
     groups = collections.Counter()
     for k, n in prof.items():

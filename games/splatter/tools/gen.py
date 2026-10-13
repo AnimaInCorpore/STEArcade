@@ -28,7 +28,7 @@ VIO_FIRST, VIO_LAST = 0x170, 0x183                  # virtual pages of vio ($2E0
 IO_PAGES = {0x17C, 0x17E}
 IRQ = {0: 0xE0DF, 1: 0xE0A1}                        # the IRQ handlers (slot 7)
 # hand-written 68000 routines (src/natives.s) in place of translated code; NO_NATIVES=1 builds the translation only
-NATIVES = {0: {}, 1: {0x6EF714: "sub_sprites", 0x6EF4CF: "sub_spritelist"}}
+NATIVES = {0: {0x7FCA57: "main_mul16", 0x7FC5D5: "main_bgclass"}, 1: {0x6EF714: "sub_sprites", 0x6EF4CF: "sub_spritelist"}}
 NAMES = {0: ("main", "M"), 1: ("sub", "S")}
 
 
@@ -147,6 +147,197 @@ def control_fold(ioacc):
     return fold
 
 
+def plausible(prog, v, starts, inside):
+    """a table entry could be code: a code page's straight line of instructions decodes to ordinary ones until a
+    transfer or code the coverage reached (within 256), and never starts inside an instruction of that code"""
+    for _ in range(256):
+        if v >> 13 not in prog.slot_of or v in inside:
+            return False
+        if v in starts:
+            return True
+        rd, slot = prog.reader(v)
+        ins = m6809x.decode(rd, prog.cpu_pc(v), prog.dp_at(v))
+        if ins.flow in ("halt", "wait", "swi", "rti") or ins.mn[0] == "x" or ins.mn == "nop" or \
+                ins.mode == "idx" and ins.arg.kind == "illegal":
+            return False
+        if ins.flow not in ("seq", "jcc", "call", "icall"):
+            return True
+        nv = m6809x.next_virtual(prog, v, ins)
+        if nv is None:
+            return False
+        v = nv
+    return False
+
+
+def plausible_tree(prog, v, starts, inside, known, ok):
+    """plausible, and so is everything v reaches in its own page (straight on, branches, jumps and calls) before code
+    the coverage or the discovery reached: no instruction plausible rejects, no start inside an executed instruction"""
+    page, work, seen = v >> 13, [v], set()
+    while work:
+        u = work.pop()
+        if u in seen or u in starts or u in known:
+            continue
+        seen.add(u)
+        if u >> 13 != page or u in inside:
+            return False
+        rd, slot = prog.reader(u)
+        ins = m6809x.decode(rd, prog.cpu_pc(u), prog.dp_at(u))
+        if ins.flow in ("halt", "wait", "swi", "rti") or ins.mn[0] == "x" or ins.mn == "nop" or \
+                ins.mode == "idx" and ins.arg.kind == "illegal":
+            return False
+        if ins.target is not None and ins.flow in ("jmp", "jcc", "call") and ins.target >> 13 == slot:
+            work.append((u & ~0x1FFF) | (ins.target & 0x1FFF))
+        if ins.flow in ("seq", "jcc", "call", "icall"):
+            nv = m6809x.next_virtual(prog, u, ins)
+            if nv is None:
+                return False
+            work.append(nv)
+    return ok(v)
+
+
+def table_targets(prog, exec_v, tg, acc):
+    """the entries of ROM tables that random play did not exhaust -> {site: set of virtual targets}.  A computed call /
+    jump through memory (JSR / JMP [..]): in the ROM pages the site read its pointer from, the runs of plausible
+    entries that hold at least two of the targets the coverage saw.  An entry is an address word (stride 2; its page
+    the one the site's targets have in that slot, or the slot's only one) or a page word and an address word (stride 4:
+    the object records of stages 3 and 5, `LDD ,X++; STD $E800; JSR [,X]`)."""
+    starts, inside = set(), set()
+    for v in exec_v:
+        rd, slot = prog.reader(v)
+        ins = m6809x.decode(rd, prog.cpu_pc(v), prog.dp_at(v))
+        starts.add(v)
+        inside.update(range(v + 1, v + ins.length))
+    inside -= starts
+    ok_cache = {}
+
+    def ok(t):
+        if t not in ok_cache:
+            ok_cache[t] = plausible(prog, t, starts, inside)
+        return ok_cache[t]
+    out = collections.defaultdict(set)
+    for v, seen in tg.items():
+        if v not in starts or v >> 13 not in prog.slot_of:
+            continue
+        rd, slot = prog.reader(v)
+        ins = m6809x.decode(rd, prog.cpu_pc(v), prog.dp_at(v))
+        if ins.flow not in ("icall", "ijmp") or ins.mode != "idx" or not ins.arg.indirect:
+            continue
+        seen = {t for t in seen if t >> 13 in prog.slot_of}
+        by_slot = collections.defaultdict(set)
+        for t in seen:
+            by_slot[prog.slot_of[t >> 13]].add(t >> 13)
+        for pg in sorted({pg for rw, sl, pg, odd in acc.get(v, ()) if rw == "r" and pg >= 0x200}):
+            data = prog.page(pg)
+
+            def word(o):
+                return (data[o] << 8) | data[o + 1]
+
+            def entry(o, stride):
+                if not 0 <= o < 0x1FFF:
+                    return None
+                w = word(o)
+                s = w >> 13
+                if stride == 4:
+                    if o < 2 or prog.slot_of.get(word(o - 2)) != s:
+                        return None
+                    tv = (word(o - 2) << 13) | (w & 0x1FFF)
+                else:
+                    pages = by_slot.get(s) or prog.slot_pages.get(s, ())
+                    if len(pages) != 1:
+                        return None
+                    tv = (next(iter(pages)) << 13) | (w & 0x1FFF)
+                return tv if ok(tv) else None
+            done = set()
+            for o in range(0x1FFF):
+                for stride in (2, 4):
+                    if (o, stride) in done or entry(o, stride) not in seen:
+                        continue
+                    run = set()
+                    for step in (stride, -stride):
+                        q = o
+                        for _ in range(256):
+                            tv = entry(q, stride)
+                            if tv is None:
+                                break
+                            done.add((q, stride))
+                            run.add(tv)
+                            q += step
+                    if len(run & seen) >= 2:
+                        out[v] |= run - seen
+    # the code these entries reach has tables of its own that nothing ran: `LDX #table` (A / B loads and shifts
+    # between) and JSR / JMP [A,X] or [B,X]: the plausible entries from the first one on; again until nothing is new.
+    # Also the sites that ran with fewer than two targets seen (no run above: seed 14 stopped at $883F's entry $2A)
+    simple = ("lda", "ldb", "asla", "aslb", "lsla", "lslb", "tsta", "tstb", "anda", "andb")
+    static = set()
+    while True:
+        prog.targets = {k: set(tg.get(k, ())) | out.get(k, set()) for k in set(tg) | set(out)}
+        code, joins = m6809x.discover(prog)
+        prev = collections.defaultdict(list)
+        for u, ins in code.items():
+            nv = m6809x.next_virtual(prog, u, ins)
+            if nv is not None and ins.flow in ("seq", "jcc"):
+                prev[nv].append(u)
+        new = False
+        for v, ins in code.items():
+            if v in static or ins.flow not in ("icall", "ijmp") or ins.mode != "idx":
+                continue
+            if v in starts and len({t for t in tg.get(v, ()) if t >> 13 in prog.slot_of}) >= 2:
+                continue
+            x = ins.arg
+            if not x.indirect or x.reg != "x" or x.kind not in ("acc_a", "acc_b"):
+                continue
+            static.add(v)
+            w, table = v, None
+            for _ in range(4):
+                if len(prev[w]) != 1:
+                    break
+                w = prev[w][0]
+                if code[w].mn == "ldx" and code[w].mode == "imm16":
+                    table = code[w].arg
+                    break
+                if code[w].mn not in simple:
+                    break
+            if table is None:
+                continue
+            own = prog.slot_of[v >> 13]
+
+            def page_in(s):
+                if s == own:
+                    return v >> 13
+                pages = prog.slot_pages.get(s, ())
+                return next(iter(pages)) if len(pages) == 1 else None
+            tp = page_in(table >> 13)
+            if tp is None:
+                continue
+            data = prog.page(tp)
+            for k in range(64):
+                o = (table & 0x1FFF) + 2 * k
+                if o + 1 >= 0x2000:
+                    break
+                w16 = (data[o] << 8) | data[o + 1]
+                pg = page_in(w16 >> 13)
+                if pg is None or not ok((pg << 13) | (w16 & 0x1FFF)):
+                    break
+                out[v].add((pg << 13) | (w16 & 0x1FFF))
+                new = True
+        # direct jumps / calls in code nothing ran into a slot of several pages (no target the coverage saw): each page
+        # where the target is plausible, its branches and calls in that slot too (seed 14: $887C's JSR $D3F4 into slot
+        # 6, pages 3B4 and 3FE; 3B4's $C51B is TSTA; BRA into data)
+        for v, ins in code.items():
+            if v in starts or ins.target is None or ins.flow not in ("jmp", "jcc", "call"):
+                continue
+            ts = ins.target >> 13
+            if ts == prog.slot_of[v >> 13] or m6809x.branch_targets(prog, v, ins):
+                continue
+            for pg in sorted(prog.slot_pages.get(ts, ())):
+                tv = (pg << 13) | (ins.target & 0x1FFF)
+                if tv not in out[v] and ok(tv) and plausible_tree(prog, tv, starts, inside, code, ok):
+                    out[v].add(tv)
+                    new = True
+        if not new:
+            return out
+
+
 def program(cpu, regions, cover):
     exec_, acc, tg, ioacc = cover
     name, prefix = NAMES[cpu]
@@ -177,6 +368,10 @@ def program(cpu, regions, cover):
     # the slots one code page runs from (in all the coverage): returns and jumps into them need no page check
     pages_in = collections.Counter(prog.slot_of.values())
     prog.fixed_slots = tuple(sorted(k for k, n in pages_in.items() if n == 1))
+    # table entries random play did not take (stage-select seeds 11, 13, 17 stopped at them in lock-step)
+    extra = {} if os.environ.get("NO_TABLES") else table_targets(prog, prog.exec_cover, tg[cpu], acc[cpu])
+    prog.targets = {v: set(tg[cpu].get(v, ())) | extra.get(v, set()) for v in set(tg[cpu]) | set(extra)}
+    prog.table_extra = sum(len(s) for s in extra.values())
     return prog, irq_v, idle_v
 
 
@@ -210,6 +405,7 @@ def generate():
         prog, irq_v, idle_v = program(cpu, regions, cover)
         lines, rep, em, code = m6809x.translate(prog)
         rep["idle_flags"] = em.live_out.get(idle_v, m6809x.NZVC)
+        rep["stats"]["table entries"] = prog.table_extra
         em.no_entry = set()
         name = prog.name
         head = ["; generated by games/splatter/tools/gen.py (engine/m6809x.py): the %s CPU" % name, "\tsection text,code"]
