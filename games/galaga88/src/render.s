@@ -2004,6 +2004,8 @@ ren_cell_one:
 ; empty), A's row at line 0, the lines from A, B (layer 3: the character from that line on; the fixed ones: 16384).
 ; Uses d0-d2 a0-a1.
 ren_cell_chars:
+	move.l	a2,-(sp)
+	lea	ren_ne16,a2		; (non-empty by the whole tile word)
 	lea	ren_cch,a1
 	move.w	ren_cr,d0		; layer 3: X = (8R - 332 - sx) & 511, lx = X >> 3, its row X & 7
 	lsl.w	#3,d0
@@ -2024,21 +2026,31 @@ ren_cell_chars:
 	lea	vio+VIO_TILE+$6000,a0
 	add.w	d2,a0
 	add.w	d0,d0
+	moveq	#0,d2
 	move.w	(a0,d0.w),d2		; A
-	bsr	.empty
-	move.w	d2,(a1)+
+	tst.b	(a2,d2.l)
+	beq	.ea
+	and.w	#$3FFF,d2
+	bra	.sa
+.ea:	move.w	#16384,d2
+.sa:	move.w	d2,(a1)+
 	move.w	d1,(a1)+		; its row
 	moveq	#8,d2
 	sub.w	d1,d2
 	move.w	d2,(a1)+		; the lines from A
-	moveq	#-1,d2			; B: the next column (on the 64)
+	move.w	#16384,d2		; B: the next column (on the 64)
 	tst.w	d1
 	beq	.nb
 	addq.w	#2,d0
 	and.w	#127,d0
+	moveq	#0,d2
 	move.w	(a0,d0.w),d2
-.nb:	bsr	.empty
-	move.w	d2,(a1)+
+	tst.b	(a2,d2.l)
+	beq	.eb
+	and.w	#$3FFF,d2
+	bra	.nb
+.eb:	move.w	#16384,d2
+.nb:	move.w	d2,(a1)+
 	move.w	ren_cc,d0		; the fixed layers: word (27 - C) * 36 + R
 	add.w	d0,d0
 	lea	ren_fixrow(pc),a0
@@ -2047,29 +2059,31 @@ ren_cell_chars:
 	add.w	d1,d1
 	add.w	d1,d0
 	lea	vio+VIO_TILE+$7010,a0
+	moveq	#0,d2
 	move.w	(a0,d0.w),d2
-	bsr	.empty
-	move.w	d2,(a1)+
+	tst.b	(a2,d2.l)
+	beq	.e4
+	and.w	#$3FFF,d2
+	bra	.s4
+.e4:	move.w	#16384,d2
+.s4:	move.w	d2,(a1)+
 	clr.w	(a1)+
 	move.w	#8,(a1)+
 	move.w	#16384,(a1)+
 	lea	vio+VIO_TILE+$7810,a0
+	moveq	#0,d2
 	move.w	(a0,d0.w),d2
-	bsr	.empty
-	move.w	d2,(a1)+
+	tst.b	(a2,d2.l)
+	beq	.e5
+	and.w	#$3FFF,d2
+	bra	.s5
+.e5:	move.w	#16384,d2
+.s5:	move.w	d2,(a1)+
 	clr.w	(a1)+
 	move.w	#8,(a1)+
 	move.w	#16384,(a1)+
+	move.l	(sp)+,a2
 	rts
-; d2.w = a tile word -> its character, or 16384 when empty (beyond the ROMs or no pixel)
-.empty:	and.w	#$3FFF,d2
-	move.l	a0,-(sp)
-	lea	ren_nonempty,a0
-	tst.b	(a0,d2.w)
-	move.l	(sp)+,a0
-	bne	.e
-	move.w	#16384,d2
-.e:	rts
 
 ; d1.w = a character (< 8192), d0.w = a bank (0-7) -> a0 = its 8 converted lines (longs: plane 0 in bits 31-24 ...
 ; plane 3 in 7-0, column 0 the high bit of each byte).  A 2-way cache of CIMG_SETS sets (set = (character + bank *
@@ -2140,26 +2154,26 @@ ren_cimg_make:
 	move.w	d6,(a1,d5.w)
 	bsr	ren_bmap_make
 .mok:	move.w	d0,d5
-	lsl.w	#8,d5
-	lea	ren_bmap,a2
-	add.w	d5,a2			; the bank's 256 indices
+	moveq	#10,d4
+	lsl.w	d4,d5
+	lea	ren_bspread,a2
+	add.w	d5,a2			; the bank's 256 spread indices (longs)
 	lea	ren_chr,a1
 	moveq	#0,d4
 	move.w	d1,d4
 	lsl.l	#6,d4
 	add.l	d4,a1
-	lea	ren_spread(pc),a3
 	moveq	#8-1,d7
+	moveq	#0,d4
 .ln:	moveq	#0,d6
-	moveq	#8-1,d5
-.px:	moveq	#0,d4
+	rept	8
+	moveq	#0,d4
 	move.b	(a1)+,d4
-	move.b	(a2,d4.w),d4		; the index
 	add.w	d4,d4
 	add.w	d4,d4
 	add.l	d6,d6
-	or.l	(a3,d4.w),d6
-	dbf	d5,.px
+	or.l	(a2,d4.w),d6
+	endr
 	move.l	d6,(a0)+
 	dbf	d7,.ln
 	movem.l	(sp)+,d0-d7/a0-a3
@@ -2175,21 +2189,30 @@ I	set	I+1
 
 ; d0.w = a bank: ren_bmap + bank * 256 = the indices of its pens $800 + bank * 256 + n
 ren_bmap_make:
-	movem.l	d0-d2/a0,-(sp)
+	movem.l	d0-d3/a0-a2,-(sp)
 	move.w	d0,d2
+	moveq	#10,d3
+	move.w	d0,d1
+	lsl.w	d3,d1
+	lea	ren_bspread,a1		; (and per pen its spread index: ren_cimg_make)
+	add.w	d1,a1
 	lsl.w	#8,d2
 	lea	ren_bmap,a0
 	add.w	d2,a0
 	add.w	#$800,d2
+	lea	ren_spread(pc),a2
 	move.w	#256-1,d1
 .p:	move.w	d1,-(sp)
 	move.w	d2,d0
 	bsr	ren_pen_index
 	move.b	d1,(a0)+
+	add.w	d1,d1
+	add.w	d1,d1
+	move.l	(a2,d1.w),(a1)+
 	move.w	(sp)+,d1
 	addq.w	#1,d2
 	dbf	d1,.p
-	movem.l	(sp)+,d0-d2/a0
+	movem.l	(sp)+,d0-d3/a0-a2
 	rts
 
 ; ---- this buffer: the cells composed since its last picture, the last picture's damage ----
@@ -4090,6 +4113,8 @@ ren_ne16:	ds.b	65536		; (ren_nonempty by the whole tile word, $FF / 0)
 ren_ltab:	ds.l	PIC_H+16
 ren_ctab:	ds.w	PIC_H
 ren_bmap:	ds.b	8*256
+	even
+ren_bspread:	ds.l	8*256		; (per bank and pen: its index's spread long, ren_spread)
 ren_lut:	ds.b	4096
 	even
 ren_hist:	ds.w	4096

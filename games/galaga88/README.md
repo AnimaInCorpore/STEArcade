@@ -91,7 +91,7 @@ picture, the reasons of the colour choices.  2026-10-13: play 1500 / 1500 and at
 version); the final one every 3rd state: play 500 / 500, attract 167 / 167 exact; colour error 0.028 (play) /
 0.032 (attract).
 
-Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 10.3 arcade frames/s, 3.2 -> 5.2 pictures/s
+Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 10.6 arcade frames/s, 3.2 -> 5.3 pictures/s
 (a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame (~130k cycles), the renderer the rest.  The
 BENCH game's states (`tools/states.py --bench`, `render_test.py --bench`): a picture 1.1M cycles on average (Musashi,
 CPU), stars ~30% (the warps' streaks: ~1400 pixels a picture), the background's compositions (colour choices, layer
