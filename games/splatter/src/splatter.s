@@ -22,6 +22,7 @@ BD_PALETTE = 1
 BD_HUD = 1
       endc
 MAX_BEHIND = 3
+TILE_FLAG = 1				; (render.s compares tile RAM only after the translated writers set tile_written)
       ifnd PIC_EVERY
 PIC_EVERY = 2				; (arcade frames a picture at most: the logic's share against the picture rate)
       endc
