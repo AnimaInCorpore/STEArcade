@@ -70,6 +70,23 @@ def main():
             hit = re.match(r"^([MS][0-9A-F]{6}):\t\t; (.*)$", line)
             if hit:
                 text[hit[1]] = hit[2]
+    # by kind: the mnemonic and the operand's form (immediate, direct, extended, indexed with its index form)
+    kinds = collections.Counter()
+    kcount = collections.Counter()
+    for k, n in prof.items():
+        t = text.get(k)
+        if not t:
+            continue
+        mn, _, arg = t[5:].partition(" ")
+        arg = arg.strip()
+        form = ("imm" if arg.startswith("#") else "dir" if arg.startswith("<") else "ind" if arg.startswith("[")
+                else "idx" if "," in arg else "ext" if arg.startswith("$") else "")
+        kinds["%s %s" % (mn, form)] += n
+        kcount["%s %s" % (mn, form)] += counts.get(k, 0)
+    print("by kind (share, executions, 68000 cycles per execution):")
+    for k, n in kinds.most_common(30):
+        c = kcount[k]
+        print("  %-12s %5.1f%% %8d %7.1f" % (k, 100 * n / total, c, n / c if c else 0))
     print("top instructions (share, executions, 68000 cycles per execution):")
     for k, n in prof.most_common(args.top):
         c = counts.get(k, 0)

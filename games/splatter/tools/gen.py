@@ -171,9 +171,12 @@ def program(cpu, regions, cover):
                           io_pages=IO_PAGES, hooks={idle_v: "%s_idle" % name}, page_addr=page_addr,
                           hook_next={idle_v: idle_v + 3}, static_read=key_read, inline_banks=True,
                           io_fold=control_fold(ioacc[cpu]), indirect_live=not os.environ.get("NO_INDIRECT_LIVE"),
-                          after=tile_marks(acc[cpu], ioacc[cpu]),
+                          after=tile_marks(acc[cpu], ioacc[cpu]), nf_dispatch=True,
                           natives={} if os.environ.get("NO_NATIVES") else NATIVES[cpu],
                           io_sites={v for v, s in ioacc[cpu].items() if io_site(s)} if any(ioacc[cpu].values()) else None)
+    # the slots one code page runs from (in all the coverage): returns and jumps into them need no page check
+    pages_in = collections.Counter(prog.slot_of.values())
+    prog.fixed_slots = tuple(sorted(k for k, n in pages_in.items() if n == 1))
     return prog, irq_v, idle_v
 
 

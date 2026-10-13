@@ -127,6 +127,21 @@ sub_dispatch:
 	move.w	d5,ccr
 	jmp	(a0)
 
+; the same when no flags are live at the target (the translation knows): the CCR is not kept
+main_dispatch_nf:
+sub_dispatch_nf:
+	move.w	d7,d6
+	rol.w	#3,d6
+	and.w	#7,d6
+	add.w	d6,d6
+	add.w	d6,d6
+	move.l	TBL(a6,d6.w),a0
+	and.w	#$1FFF,d7
+	add.w	d7,d7
+	add.w	d7,d7
+	move.l	(a0,d7.w),a0
+	jmp	(a0)
+
 ; TBL[slot] from PID[slot] (d6.w = slot * 4)
 set_tbl:
 	move.w	d6,d7

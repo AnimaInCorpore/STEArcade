@@ -141,8 +141,9 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None):
+                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False):
         self.name, self.prefix = name, prefix
+        self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
         self.indirect_live = indirect_live        # computed jumps / calls read what their seen targets read (see liveness)
         self.page_bytes = page_bytes
@@ -708,6 +709,9 @@ class Emitter:
             e("and.w #3,d7")
             e("lsl.w #8,d7")
             e("move.b %d(a6),d7" % (PID_OFF + 2 * k + 1))
+        skip = self.new_label()
+        e("cmp.w %d(a6),d7" % (PID_OFF + 2 * k))       # (the same page again: nothing changes; 2 of 3 writes)
+        e("beq.s %s" % skip)
         e("move.w d7,%d(a6)" % (PID_OFF + 2 * k))
         e("add.w d7,d7")
         e("add.w d7,d7")
@@ -728,6 +732,7 @@ class Emitter:
             e("move.l a0,a3")
         elif k == 1:
             e("move.l a0,a4")
+        self.lines.append(skip + ":")
         e("tst.%s %s" % ("w" if word else "b", src))
 
     def store8(self, v, ins, src, off=0):
@@ -1000,7 +1005,8 @@ class Emitter:
         if bm in ("bsr", "jsr"):
             ret = (self.p.cpu_pc(v) + ins.length) & 0xFFFF
             live = self.live_out.get(v, NZVC) & NZVC
-            self.e("move.w sr,d5")
+            if live or not self.p.nf_dispatch:
+                self.e("move.w sr,d5")
             if fl == "icall":
                 self.jump_table(v, ins, ret)
                 self.ea_to_d7(v, ins)
@@ -1009,7 +1015,8 @@ class Emitter:
             if fl == "icall":
                 self.dispatch(v, saved=True)
             else:
-                self.jump_to(v, ins.target, branch_targets(self.p, v, ins), saved=True)
+                self.jump_to(v, ins.target, branch_targets(self.p, v, ins), saved=bool(live or not self.p.nf_dispatch),
+                             live=live or not self.p.nf_dispatch)
             return
         if mn == "rts":
             self.emit_ret(v)
@@ -1032,9 +1039,10 @@ class Emitter:
         self.fallthrough(v, ins)
 
     # ---- control flow --------------------------------------------------------
-    def jump_to(self, v, target, tg, saved=False):
+    def jump_to(self, v, target, tg, saved=False, live=True):
         """a jump to the 6809 address target (tg: its virtual targets: one in this slot, or the pages the coverage saw).
-        saved: d5 holds the SR to restore before the transfer (the code before spoiled the CCR)."""
+        saved: d5 holds the SR to restore before the transfer (the code before spoiled the CCR).  live false: no
+        flags are read at the target (nothing to keep)."""
         slot = self.p.slot_of[v >> 13]
         if target >> 13 == slot and tg:
             if saved:
@@ -1042,21 +1050,28 @@ class Emitter:
             self.e("bra %s" % self.lab(tg[0]))
             return
         tslot = target >> 13
-        if not saved and tg:
+        if not saved and tg and live:
             self.e("move.w sr,d5")
             saved = True
+        if len(tg) == 1 and self.fixed_slot(tslot):
+            # (the only code page that runs from that slot)
+            if saved:
+                self.e("move.w d5,ccr")
+            self.e("bra %s" % self.lab(tg[0]))
+            return
         for t in tg:
             skip = self.new_label()
             self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), tslot * 4))
             self.e("bne.s %s" % skip)
-            self.e("move.w d5,ccr")
+            if saved:
+                self.e("move.w d5,ccr")
             self.e("bra %s" % self.lab(t))
             self.lines.append(skip + ":")
         self.stats["cross-slot dispatch"] += 1
         self.e("move.w #$%04X,d7" % target)
         if saved:
             self.e("move.w d5,ccr")
-        self.e("jmp %s_dispatch" % self.p.name)
+        self.dispatch_jump(live)
 
     def jump_table(self, v, ins, ret):
         """JMP / JSR [A,X] or [B,X] right after LDX #table (only A / B loads and shifts between): when the entries are
@@ -1139,8 +1154,35 @@ class Emitter:
             self.tail.append("\tdc.l %s" % self.lab(tv))
         self.lines.append(generic + ":")
 
+    def live_flags(self, v):
+        return self.live_out.get(v, NZVC) & NZVC
+
+    def dispatch_jump(self, live):
+        """jmp to the dispatcher (the one that keeps no CCR when no flags are live and the runtime has it)"""
+        if not live and self.p.nf_dispatch:
+            self.e("jmp %s_dispatch_nf" % self.p.name)
+        else:
+            self.e("jmp %s_dispatch" % self.p.name)
+
     def dispatch(self, v, saved=False):
         """jump to the 6809 address in d7 (computed jump); the CCR is right (or in d5 when saved)"""
+        live = self.live_flags(v)
+        if not live and self.p.nf_dispatch:
+            known = [t for t in sorted(self.p.targets.get(v, ())) if t >> 13 in self.p.slot_of and t in self.code]
+            if len(known) > 3:
+                known = []
+            for t in known:
+                pc = self.p.cpu_pc(t)
+                skip = self.new_label()
+                self.e("cmp.w #$%04X,d7" % pc)
+                self.e("bne.s %s" % skip)
+                if not self.fixed_slot(pc >> 13):
+                    self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
+                    self.e("bne.s %s" % skip)
+                self.e("bra %s" % self.lab(t))
+                self.lines.append(skip + ":")
+            self.dispatch_jump(0)
+            return
         if not saved:
             self.e("move.w sr,d5")
         known = [t for t in sorted(self.p.targets.get(v, ())) if t >> 13 in self.p.slot_of and t in self.code]
@@ -1188,10 +1230,11 @@ class Emitter:
             self.lines.append(skip + ":")
         if live:
             self.e("move.w d5,ccr")
-        self.e("jmp %s_dispatch" % self.p.name)
+        self.dispatch_jump(live)
 
     def fixed_slot(self, slot):
-        """a slot whose page the program never changes after the boot (Program.fixed_slots: slot 7, the vectors)"""
+        """a slot from which only one code page runs (Program.fixed_slots; default slot 7, the vectors): code that
+        returns or jumps there needs no page check"""
         return slot in getattr(self.p, "fixed_slots", (7,))
 
     def emit_rti(self, v):
@@ -1329,7 +1372,8 @@ class Emitter:
                 raise Unsupported("PULU PC")
             # a return: the callers' return points, else dispatch (the flags as pulled / as they were)
             cands = sorted(self.ret_cands(v))
-            if cands:
+            keep = bool(self.live_flags(v) or not self.p.nf_dispatch)
+            if cands and keep:
                 self.e("move.w sr,d5")
             for t in cands:
                 pc = self.p.cpu_pc(t)
@@ -1339,12 +1383,13 @@ class Emitter:
                 if not self.fixed_slot(pc >> 13):
                     self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
                     self.e("bne.s %s" % skip)
-                self.e("move.w d5,ccr")
+                if keep:
+                    self.e("move.w d5,ccr")
                 self.e("bra %s" % self.lab(t))
                 self.lines.append(skip + ":")
-            if cands:
+            if cands and keep:
                 self.e("move.w d5,ccr")
-            self.e("jmp %s_dispatch" % self.p.name)
+            self.dispatch_jump(keep)
 
     def u_to_a1(self):
         """a1 = the 68000 address of U (its slot from the value)"""
