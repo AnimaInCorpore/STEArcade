@@ -76,6 +76,28 @@ increment 8 (the next 16-pixel group of interleaved planes), destination Y incre
   Hatari (a deterministic benchmark: inputs scripted by game frame, see Splatterhouse's `BENCH`). Keep logic speed
   and picture rate apart. Keep the method only if it wins; write down what was measured either way, below.
 
+## Memory: prepared data from the hard disk (planned)
+
+The prepared form (16 shifts, generated code, per-colour data) is several times larger than the ROM's sprite data,
+and the 4 MB fill up (Splatterhouse uses ~3.6 MB before any of it). The plan is not to hold it all in RAM but to
+load it from the hard disk while the game runs, with the program's own low-level driver (TOS is out of the picture
+once the port owns the machine):
+
+* **Drivers.** ACSI through the ST's DMA chip (the STE's own port, and SCSI adapters on it), and IDE (the Falcon's
+  port and the IDE adapters for the ST / STE). One small routine per interface that reads sectors into a buffer,
+  started and polled from the main loop, never waiting inside the border or VBL handlers. ACSI DMA moves data
+  without the CPU; IDE's PIO costs CPU time per word, so its reads are kept small and spread over pictures.
+* **Data on disk.** The prepared sprites as a file in sector-aligned blocks, per sprite code (or per group of codes
+  that are used together), with an index the program loads once: where each block is, how large it is. Built at build
+  time into `build/<game>/` and copied next to the program (ROM-derived: never committed).
+* **The cache in RAM.** A fixed pool with eviction (least recently drawn), like Splatterhouse's conversion cache.
+  A sprite whose prepared data is not in RAM yet is drawn by the slower path that needs no preparation (the row or
+  converted-image path) until its block arrives; so a slow disk costs speed for a few pictures, never correctness.
+* **Prefetch.** Loads are requested ahead of use: when a stage or scene starts (the game's own stage number or tile
+  bank switch), the blocks of the sprites seen there before (a per-stage list made from the coverage runs) are queued.
+* **Measure** the disk's cost like everything else: the reads' CPU time in the deterministic Hatari benchmark (Hatari
+  emulates ACSI and IDE hard disks), and pictures drawn by the fallback path while blocks were missing.
+
 ## What the ports found
 
 | Port | Result |
