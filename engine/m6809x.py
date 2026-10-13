@@ -7,14 +7,20 @@ the 23 bit virtual space, and a page runs from one bank slot of the CPU (slot = 
 Registers (the 6809's in the 68000's):
     d0 = A, d1 = B (low bytes; D is composed where needed: ADDD is add.b/addx.b, exact N Z V C)
     d2 = X, d3 = Y, d4 = U (16 bit values, the upper words always 0: they index as longs)
-    a5 = S as a 68000 pointer into the stack's page (the stack lives in slot 0: S < $2000; the runtime moves a5 when
-         slot 0 is switched)
+    a5 = S as a 68000 pointer into the stack's page (the stack lives in one slot, `a3_slot`: Splatterhouse slot 0,
+         Galaga '88 slot 2; the runtime moves a5 when that slot is switched)
     a6 = the CPU's context block: +0 PB[8] the 68000 address of the page in each slot, +32 VB[8] = PB - slot * $2000
          (so VB[k] + a 6809 address in slot k is the byte), +112 the CC bits E F H I (6809 positions)
-    a3 = PB[0] (= VB[0]: the direct page, the stack), a4 = VB[1], a2 = PB[7] (the runtime keeps them when a slot
-         changes): the most used slots without a load
+    a3 = VB[a3_slot] (the direct page and the stack: S = a5 - a3), a4 = VB[a4_slot], a2 = PB[7] (the runtime keeps
+         them when a slot changes): the most used slots without a load (default slots 0 and 1)
     d5 d6 d7 a0 a1: scratch
-DP is 0 in every program translated so far (coverage); direct addressing is slot 0.
+DP is a constant of each instruction: the program's (`dp`: 0 in Splatterhouse, $40 in Galaga '88), or what the coverage
+saw there (`dp_sites`: Galaga '88's main IRQ runs a routine with DP 0); TFR / EXG into DP and PULS DP change nothing.
+Direct addressing is a static address in the slot of DP << 8 (the program's DP: a3_slot).
+
+`dynamic_stack` (Galaga '88: the main IRQ's routine moves S into slot 0 for a while): the stack's slot is the
+context's SSLOT (slot * 4) and SBASE its VB (S = a5 - SBASE); an assignment to S takes the slot of S - 1 (the stack
+grows down from S), a static bank write to that slot moves a5 (the runtime's bank_set too).
 
 Flags: the 6809's N Z V C are the low nibble of the 68000's CCR, so they live there.  Each instruction's 68000 code
 leaves some of them right (`ok`); the others that the code after it reads (backward liveness, `live_out`) are fixed by a
@@ -52,6 +58,7 @@ INV = {"bhi": "bls", "bls": "bhi", "bcc": "bcs", "bcs": "bcc", "bne": "beq", "be
 REG8 = {"a": "d0", "b": "d1"}
 REG16 = {"x": "d2", "y": "d3", "u": "d4"}
 VB_OFF, CCHI_OFF = 32, 112
+SSLOT_OFF, SBASE_OFF = 160, 164                   # (dynamic_stack: the stack's slot * 4 and its VB)
 TBL_OFF, PID_OFF, TABLES_OFF = 64, 96, 152        # (the runtime's context block: games/splatter/src/core.s)
 
 
@@ -141,8 +148,14 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False):
+                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False,
+                 dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False):
         self.name, self.prefix = name, prefix
+        self.dp = dp                              # the direct page register's usual value
+        self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
+        self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
+        self.a3_slot, self.a4_slot = a3_slot, a4_slot     # the slots whose VB a3 / a4 hold (a3: DP's and the stack's)
+        assert a3_slot <= 3 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot
         self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
         self.indirect_live = indirect_live        # computed jumps / calls read what their seen targets read (see liveness)
@@ -189,6 +202,9 @@ class Program:
             return 0
         return rd, slot
 
+    def dp_at(self, v):
+        return self.dp_sites.get(v, self.dp)
+
     def cpu_pc(self, v):
         return (self.slot_of[v >> 13] << 13) | (v & 0x1FFF)
 
@@ -213,7 +229,7 @@ def discover(prog):
                 break
             rd, slot = prog.reader(v)
             pc = (slot << 13) | (v & 0x1FFF)
-            ins = decode(rd, pc, 0)
+            ins = decode(rd, pc, prog.dp_at(v))
             code[v] = ins
             nxt = pc + ins.length
             if ins.target is not None and ins.flow in ("jmp", "jcc", "call"):
@@ -446,7 +462,7 @@ class Emitter:
     def static_addr(self, ins):
         """the address of a direct / extended / PC relative operand, else None"""
         if ins.mode == "dir":
-            return ins.arg                         # (DP = 0)
+            return (self.p.dp_at(self.cur_v) << 8) | ins.arg
         if ins.mode == "ext":
             return ins.arg
         if ins.mode == "idx" and not ins.arg.indirect and ins.arg.kind in ("pcr8", "pcr16"):
@@ -460,10 +476,8 @@ class Emitter:
         if a is not None:
             a = (a + off) & 0xFFFF
             k = a >> 13
-            if k == 0:
-                return "$%X(a3)" % a                   # (a3 = PB[0] = VB[0])
-            if k == 1:
-                return "$%X(a4)" % a                   # (a4 = VB[1])
+            if self.cached(k):
+                return "$%X(%s)" % (a, self.cached(k))     # (a3 / a4 = VB of their slots)
             if k == 7:
                 return "$%X(a2)" % (a & 0x1FFF)        # (a2 = PB[7])
             self.e("move.l %d(a6),a0" % (k * 4))
@@ -484,7 +498,7 @@ class Emitter:
                 raise Unsupported("auto inc/dec on S: " + ins.text)
             # accumulator offsets on S: the address as a value
             self.e("move.l a5,d7")
-            self.e("sub.l a3,d7")
+            self.e("sub.l %s,d7" % self.s_base())
             self.acc_add_d7(x.kind)
             self.slot_base_dyn()
             return "%d(a0,d7.l)" % off if off else "(a0,d7.l)"
@@ -519,8 +533,8 @@ class Emitter:
             b = "a0"
             if slots is not None and len(slots) == 1:
                 k = next(iter(slots))
-                if k in (0, 1):
-                    b = ("a3", "a4")[k]
+                if self.cached(k):
+                    b = self.cached(k)
                 else:
                     self.e("move.l %d(a6),a0" % (VB_OFF + 4 * k))
             else:
@@ -540,16 +554,17 @@ class Emitter:
             self.e("ext.w d6")
             self.e("add.w d6,d7")
 
+    def cached(self, k):
+        """the 68000 register holding VB of slot k, or None"""
+        return "a3" if k == self.p.a3_slot else "a4" if k == self.p.a4_slot else None
+
     def slot_base(self, v, slots, dr, offset):
-        """a0 = VB[slot] of the indexed access; the slot from the coverage, else from the register (slots 0 and 1:
-        a3 / a4 hold VB, a0 is set from them)"""
+        """a0 = VB[slot] of the indexed access; the slot from the coverage, else from the register (a3 / a4 hold VB of
+        their slots, a0 is set from them)"""
         if slots is not None and len(slots) == 1:
             k = next(iter(slots))
-            if k == 0:
-                self._base = "a3"
-                return
-            if k == 1:
-                self._base = "a4"
+            if self.cached(k):
+                self._base = self.cached(k)
                 return
             self.e("move.l %d(a6),a0" % (VB_OFF + 4 * k))
             return
@@ -588,7 +603,7 @@ class Emitter:
                 if x.kind in ("inc1", "inc2", "dec1", "dec2"):
                     raise Unsupported("auto inc/dec on S: " + ins.text)
                 self.e("move.l a5,d7")
-                self.e("sub.l a3,d7")
+                self.e("sub.l %s,d7" % self.s_base())
                 self.e("and.l #$FFFF,d7")
             else:
                 dr = REG16[r]
@@ -610,8 +625,8 @@ class Emitter:
                 reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
                 if len(reads) == 1:
                     ptr = next(iter(reads))
-            if ptr in (0, 1):
-                b = ("a3", "a4")[ptr]
+            if ptr is not None and self.cached(ptr):
+                b = self.cached(ptr)
             elif ptr is not None:
                 self.e("move.l %d(a6),a0" % (VB_OFF + 4 * ptr))
                 b = "a0"
@@ -695,7 +710,7 @@ class Emitter:
 
     def bank_inline(self, k, odd, src, word):
         """slot k's page from a static store, inline: PID, PB (page_base_table), VB, the dispatcher's table when code
-        runs from the slot, the cached registers (a3 and the stack: slot 0, a4: slot 1, a2: slot 7)"""
+        runs from the slot, the cached registers (a3 and the stack, a4, a2: slot 7)"""
         self.stats["bank write inline"] += 1
         e = self.e
         if word:
@@ -726,11 +741,23 @@ class Emitter:
         if k:
             e("suba.l #$%X,a0" % (k * 0x2000))
         e("move.l a0,%d(a6)" % (VB_OFF + 4 * k))
-        if k == 0:
+        if self.p.dynamic_stack:
+            stay = self.new_label()
+            e("cmp.w #%d,%d(a6)" % (4 * k, SSLOT_OFF))
+            e("bne.s %s" % stay)
+            e("suba.l %d(a6),a5" % SBASE_OFF)
+            e("adda.l a0,a5")
+            e("move.l a0,%d(a6)" % SBASE_OFF)
+            self.lines.append(stay + ":")
+            if k == self.p.a3_slot:
+                e("move.l a0,a3")
+            elif k == self.p.a4_slot:
+                e("move.l a0,a4")
+        elif k == self.p.a3_slot:
             e("suba.l a3,a5")
             e("adda.l a0,a5")
             e("move.l a0,a3")
-        elif k == 1:
+        elif k == self.p.a4_slot:
             e("move.l a0,a4")
         self.lines.append(skip + ":")
         e("tst.%s %s" % ("w" if word else "b", src))
@@ -971,6 +998,7 @@ class Emitter:
         self.refs.add(nv)
 
     def emit(self, v, ins):
+        self.cur_v = v
         mn = ins.mn
         if mn.startswith("x") and mn not in ("xdec",):
             raise Unsupported("undocumented " + mn)
@@ -1246,7 +1274,7 @@ class Emitter:
         self.e("bpl.s %s" % skip)                       # E (bit 7)
         self.e("move.b (a5)+,d0")
         self.e("move.b (a5)+,d1")
-        self.e("addq.l #1,a5")                          # DP (0)
+        self.e("addq.l #1,a5")                          # DP (the program's constant)
         for r in ("d2", "d3", "d4"):
             self.e("move.b (a5)+,d6")
             self.e("lsl.w #8,d6")
@@ -1297,7 +1325,8 @@ class Emitter:
                 self.e("move.w %s,-(sp)" % src)         # (the high byte through the stack: no shift)
                 self.e("move.b (sp)+,-(%s)" % sp)
             elif r == "dp":
-                self.e("clr.b -(%s)" % sp)
+                dp = self.p.dp_at(v)
+                self.e("move.b #$%02X,-(%s)" % (dp, sp) if dp else "clr.b -(%s)" % sp)
             elif r == "b":
                 self.e("move.b d1,-(%s)" % sp)
             elif r == "a":
@@ -1408,7 +1437,29 @@ class Emitter:
     def s_value_d6(self):
         """d6 = S as a 6809 value"""
         self.e("move.l a5,d6")
-        self.e("sub.l a3,d6")
+        self.e("sub.l %s,d6" % self.s_base())
+
+    def s_base(self):
+        """the operand holding VB of the stack's slot"""
+        return "%d(a6)" % SBASE_OFF if self.p.dynamic_stack else "a3"
+
+    def set_s_d7(self):
+        """S = d7.w (upper word may be anything): a5 from the stack's slot (dynamic_stack: the slot of S - 1)"""
+        self.e("and.l #$FFFF,d7")
+        if not self.p.dynamic_stack:
+            self.e("move.l a3,a5")
+            self.e("add.l d7,a5")
+            return
+        self.e("move.w d7,d6")
+        self.e("subq.w #1,d6")
+        self.e("rol.w #3,d6")
+        self.e("and.w #7,d6")
+        self.e("add.w d6,d6")
+        self.e("add.w d6,d6")
+        self.e("move.w d6,%d(a6)" % SSLOT_OFF)
+        self.e("move.l %d(a6,d6.w),a5" % VB_OFF)
+        self.e("move.l a5,%d(a6)" % SBASE_OFF)
+        self.e("add.l d7,a5")
 
     def cc_byte_d7(self):
         """d7 = the 6809 CC byte: N Z V C from the CCR, E F H I from the context"""
@@ -1441,9 +1492,7 @@ class Emitter:
             def b():
                 self.load16(v, ins, "d7")
                 self.e("move.w d7,-(sp)")
-                self.e("and.l #$FFFF,d7")
-                self.e("move.l a3,a5")
-                self.e("add.l d7,a5")
+                self.set_s_d7()
                 self.e("tst.w (sp)+")
             self.wrap(v, N | Z | V, b)
             return
@@ -1844,8 +1893,7 @@ class Emitter:
         # LEAS from another register
         def b():
             ea_value()
-            self.e("move.l a3,a5")
-            self.e("add.l d7,a5")
+            self.set_s_d7()
         self.preserve_all(v, b)
 
     REGNUM = {0: "d", 1: "x", 2: "y", 3: "u", 4: "s", 5: "pc", 8: "a", 9: "b", 10: "cc", 11: "dp"}
@@ -1885,7 +1933,7 @@ class Emitter:
             if src == "cc":
                 return
             if src == "dp":
-                self.e("moveq #0,d7")
+                self.e("moveq #$%02X,d7" % self.p.dp_at(v))
             else:
                 self.e("move.b %s,d7" % REG8[src])
             self.e("move.b d7,%d(a6)" % CCHI_OFF)
@@ -1904,10 +1952,12 @@ class Emitter:
             return
         if src == "dp":
             if dst != "dp":
-                self.preserve_all(v, lambda: self.e("clr.b %s" % REG8[dst]))
+                dp = self.p.dp_at(v)
+                self.preserve_all(v, lambda: self.e("move.b #$%02X,%s" % (dp, REG8[dst]) if dp
+                                                    else "clr.b %s" % REG8[dst]))
             return
         if dst == "dp":
-            # DP must stay 0 for the translation (the programs only write 0 there)
+            # DP must keep the program's value for the translation (the programs write only that after the boot)
             self.stats["tfr dp"] += 1
             return
 
@@ -1938,9 +1988,9 @@ class Emitter:
             self.e("lsr.w #8,d6")
             self.e("move.b d6,d0")
         elif r == "s":
-            self.e("move.l a3,a5")
-            self.e("and.l #$FFFF,%s" % src)
-            self.e("add.l %s,a5" % src)
+            if src != "d7":
+                self.e("move.l %s,d7" % src)
+            self.set_s_d7()
         else:
             self.e("move.w %s,%s" % (src, REG16[r]))
 

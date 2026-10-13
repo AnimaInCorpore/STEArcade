@@ -1,6 +1,6 @@
 """The 6809 translation (m6809x.py) instruction by instruction against the reference interpreter (m6809.py).
 
-    venv/bin/python engine/m6809x_test.py [--seed N] [--states K] [--only MNEMONIC]
+    venv/bin/python engine/m6809x_test.py [--seed N] [--states K] [--only MNEMONIC] [--dp 0x40] [--dynamic-stack]
 
 Every documented 6809 instruction in every addressing mode (the indexed modes with random postbytes) is put into a test
 page, translated, assembled with vasm and run on Musashi from K random states (registers, the flags, E F H I, memory);
@@ -23,6 +23,8 @@ from m6809dis import OPS, decode, IND, DIR, EXT, IMM, REL, LREL, INH, PSHS, PULS
 import m6809x
 from paths import VASM, RT_INCLUDE
 
+DP = 0                          # (--dp)
+DYN = False                     # (--dynamic-stack)
 ORG = 0x10000
 IMG = 0x100000                  # the 6809's 64 KB, flat (slot k at IMG + k * $2000)
 CODE = 0xC000                   # the test page: slot 6
@@ -197,13 +199,14 @@ def run_batch(args, rng, batch):
             {("r", a >> 13, 0x200 + (a >> 13), False) for a in seen}
     prog = m6809x.Program("main", "M", lambda p: page if p == PAGE else bytes(0x2000), {PAGE: SLOT},
                           roots=[(PAGE << 13) | (pc & 0x1FFF) for pc, bs in tests], acc_cover=acc, hooks=hooks,
-                          page_addr=lambda p: "$%X" % (IMG + (p - 0x200) * 0x2000), hook_flags=m6809x.ALL)
+                          page_addr=lambda p: "$%X" % (IMG + (p - 0x200) * 0x2000), hook_flags=m6809x.ALL,
+                          dp=DP, a3_slot=DP >> 5, a4_slot=1 if DP >> 5 != 1 else 0, dynamic_stack=DYN)
     lines, report, em, code = m6809x.translate(prog)
     tmp = Path(tempfile.mkdtemp(prefix="m6809x_"))
     src = ["\torg $%X" % ORG, "table:"]
     for pc, bs in tests:
         src.append("\tdc.l %s" % prog.label((PAGE << 13) | (pc & 0x1FFF)))
-    src += ["ctx:\tds.b 160", "stopreg:\tdc.l 0", "stopsr:\tdc.w 0", "stopper:\tnop", "\tbra stopper",
+    src += ["ctx:\tds.b 168", "stopreg:\tdc.l 0", "stopsr:\tdc.w 0", "stopper:\tnop", "\tbra stopper",
             "main_dispatch:\tmove.w sr,stopsr", "\tand.l #$FFFF,d7", "\tadd.l #$10000,d7", "\tmove.l d7,stopreg", "\tbra stopper",
             "main_io_r:\tmoveq #0,d7", "\trts", "main_io_w:\trts",
             "main_unsupported:\tmove.w sr,stopsr", "\tmove.l #-1,stopreg", "\tbra stopper",
@@ -240,7 +243,7 @@ def run_batch(args, rng, batch):
             prepare_pointers(mem, pc, st)
             before = bytes(mem)
             cpu = make_cpu(mem, st, pc, set())
-            ins = decode(lambda a: mem[a & 0xFFFF], pc, 0)
+            ins = decode(lambda a: mem[a & 0xFFFF], pc, DP)
             try:
                 cpu.step()
             except M6809Error:
@@ -251,6 +254,8 @@ def run_batch(args, rng, batch):
                 mem68.w32(ctx + 4 * k, IMG + k * 0x2000)
                 mem68.w32(ctx + 32 + 4 * k, IMG)
             mem68.w8(ctx + 112, st["cc"] & 0xF0)
+            mem68.w16(ctx + 160, 4 * ((st["s"] - 1) >> 13 & 7))
+            mem68.w32(ctx + 164, IMG)
             for reg, val in ((R.D0, st["a"] | 0xA5A5A500), (R.D1, st["b"] | 0x5A5A5A00), (R.D2, st["x"]), (R.D3, st["y"]),
                              (R.D4, st["u"]), (R.D5, 0x12345678), (R.D6, 0x87654321), (R.D7, 0xDEADBEEF),
                              (R.A5, IMG + st["s"]), (R.A6, ctx), (R.A4, IMG), (R.A3, IMG), (R.A2, IMG + 0xE000),
@@ -297,7 +302,7 @@ def run_batch(args, rng, batch):
 
 def prepare_pointers(mem, pc, st):
     """indirect modes: the pointer the instruction will read points into the data area"""
-    ins = decode(lambda a: mem[a & 0xFFFF], pc, 0)
+    ins = decode(lambda a: mem[a & 0xFFFF], pc, DP)
     if ins.mode != "idx" or not ins.arg.indirect:
         return
     x = ins.arg
@@ -330,7 +335,7 @@ def make_cpu(mem, st, pc, seen):
         mem[a] = v & 0xFF
     c = M6809(rd, wr)
     c.a, c.b, c.x, c.y, c.u, c.s, c.cc, c.pc = st["a"], st["b"], st["x"], st["y"], st["u"], st["s"], st["cc"], pc
-    c.dp = 0
+    c.dp = DP
     return c
 
 
@@ -342,4 +347,10 @@ if __name__ == "__main__":
     ap.add_argument("--only")
     ap.add_argument("--show", type=int, default=2)
     ap.add_argument("--list-unsupported", action="store_true")
-    sys.exit(1 if run(ap.parse_args()) else 0)
+    ap.add_argument("--dp", type=lambda x: int(x, 0), default=0, help="the program's DP (e.g. 0x40: Galaga '88; a3 then "
+                    "caches DP's slot, the stack's)")
+    ap.add_argument("--dynamic-stack", action="store_true", help="the stack's slot from the context (Galaga '88)")
+    args = ap.parse_args()
+    DP = args.dp
+    DYN = args.dynamic_stack
+    sys.exit(1 if run(args) else 0)
