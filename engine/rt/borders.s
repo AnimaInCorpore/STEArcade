@@ -30,8 +30,18 @@
 ; bd_late_off (events that started too late: a border may have stayed closed, a palette switch came late) and
 ; bd_pieced; -D BD_PCLOG=1 keeps the last 64 interrupted PCs of late Timer B events (bd_pc_base: what held them back).
 
+; BD_HUD (with BD_PALETTE): a second palette for HUD bars at the picture's top and bottom.  The port defines hud_pal
+; (16 words), hud_top and hud_bot (words: picture lines 0 .. hud_top - 1 and hud_bot .. PIC_LINES - 1 show hud_pal;
+; hud_top = 0 and hud_bot = PIC_LINES: none) and calls bd_hud_plan in its VBL after borders_vbl, once those are this
+; frame's: it lays out the frame's Timer B events (bd_evs) in line order: the palette on, the playfield palette at
+; the top bar's end, hud_pal at the bottom bar, the bottom border (its line stays exact), black.  Events stay
+; BD_K + 1 lines apart (a bar line that would come closer moves by up to two lines, or the bar's switch is left out).
+
 	ifnd BD_PALETTE
 BD_PALETTE = 0
+	endc
+	ifnd BD_HUD
+BD_HUD = 0
 	endc
 
 BD_K = 2				; Timer B events fire this many lines early
@@ -41,7 +51,11 @@ BD_LOW = 229				; the line end after which the bottom border is opened
 BD_ON = PIC_TOP				; the line end after which the palette comes on
 BD_OFF = PIC_TOP+PIC_LINES		; and goes off
 BD_FIRST = BD_ON
-BD_SAVED = 44				; (Timer B's saved registers)
+	if BD_HUD
+BD_SAVED = 48				; (Timer B's saved registers)
+	else
+BD_SAVED = 44
+	endc
 	else
 BD_FIRST = BD_LOW
 BD_SAVED = 16
@@ -60,7 +74,9 @@ borders_vbl	macro
 	clr.b	$fffffa1b.w		; Timer B: counts this frame's lines from the first
 	move.b	#BD_FIRST-BD_K,$fffffa21.w
 	move.b	#8,$fffffa1b.w
-	if BD_PALETTE
+	if BD_HUD
+	move.l	#bd_evs,bd_ev_ptr
+	elseif BD_PALETTE
 	clr.b	bd_tb_state
 	else
 	move.b	#1,bd_tb_state
@@ -150,6 +166,136 @@ bd_ta_chain:
 	movem.l	(sp)+,d0-d1
 .pre:	rte
 
+	if BD_HUD
+; Timer B with the HUD palette: the events bd_hud_plan laid out (bd_evs: the counter's value at the event's line end,
+; the next event's count (0: none), the kind: 0 shown_pal, 4 hud_pal, 8 black_pal, 12 the bottom border).
+timer_b:
+	movem.l	d0-d7/a0-a3,-(sp)
+	lea	$fffffa21.w,a0
+	moveq	#BD_POLL,d1
+	move.l	bd_ev_ptr,a3
+	addq.l	#4,bd_ev_ptr
+	moveq	#0,d0
+	move.b	(a3),d0			; the counter at the line end
+	move.w	2(a3),d2
+	cmp.w	#12,d2
+	beq.s	.low
+	move.l	.pals(pc,d2.w),a1
+	movem.l	(a1),d2-d7/a1-a2
+	bd_poll
+	movem.l	d2-d7/a1-a2,$ffff8240.w
+	bsr.s	.next
+	bd_check_late bd_late_on
+	movem.l	(sp)+,d0-d7/a0-a3
+	rte
+.pals:	dc.l	shown_pal,hud_pal,black_pal
+.low:	bd_poll
+	clr.b	$ffff820a.w		; Remove the bottom border
+	moveq	#2,d2
+.w2:	nop
+	dbf	d2,.w2
+	nop
+	nop
+	nop
+	nop
+	nop
+	move.b	#2,$ffff820a.w
+	clr.b	$fffffa19.w		; Timer A to the next frame's top border
+	move.b	#BD_TA_P1,$fffffa1f.w
+	move.b	#4,$fffffa19.w
+	move.b	#BD_TA_P2,$fffffa1f.w	; (the reload)
+	move.b	#2,bd_ta_state
+	bsr.s	.next
+	bd_check_late bd_late_low
+	movem.l	(sp)+,d0-d7/a0-a3
+	rte
+.next:	clr.b	$fffffa1b.w		; the next event (none: the VBL starts the next frame's)
+	move.b	1(a3),d2
+	beq.s	.none
+	move.b	d2,$fffffa21.w
+	move.b	#8,$fffffa1b.w
+.none:	rts
+
+; the frame's events from hud_top / hud_bot (see the top)
+bd_hud_plan:
+	movem.l	d0-d4/a0-a1,-(sp)
+	lea	bd_lines_k,a0		; (line, kind) words, in line order
+	move.w	hud_top,d0
+	move.w	hud_bot,d1
+	move.w	d1,d2
+	sub.w	d0,d2
+	cmp.w	#BD_K+1,d2
+	bge.s	.split
+	move.w	#BD_ON,(a0)+		; (no playfield lines between the bars: all hud_pal)
+	move.w	#4,(a0)+
+	bra.s	.low
+.split:	move.w	#BD_ON,(a0)+
+	tst.w	d0
+	beq.s	.notop
+	move.w	#4,(a0)+
+	cmp.w	#BD_K+1,d0
+	bge.s	.t
+	moveq	#BD_K+1,d0
+.t:	add.w	#BD_ON,d0
+	move.w	d0,(a0)+
+	clr.w	(a0)+
+	bra.s	.bot
+.notop:	clr.w	(a0)+
+	move.w	#BD_ON,d0
+.bot:	cmp.w	#PIC_LINES,d1		; d0 = the last event's line
+	bge.s	.low
+	add.w	#BD_ON,d1
+	move.w	d0,d2
+	add.w	#BD_K+1,d2
+	cmp.w	d2,d1
+	bge.s	.b1
+	move.w	d2,d1			; (too close to the top bar's end)
+.b1:	cmp.w	#BD_LOW-BD_K-1,d1
+	bgt.s	.after
+	move.w	d1,(a0)+		; before the bottom border
+	move.w	#4,(a0)+
+	bra.s	.low
+.after:	move.w	#BD_LOW,(a0)+		; after it
+	move.w	#12,(a0)+
+	cmp.w	#BD_LOW+BD_K+1,d1
+	bge.s	.a1
+	move.w	#BD_LOW+BD_K+1,d1
+.a1:	cmp.w	#BD_OFF-BD_K-1,d1
+	bgt.s	.off			; (too close to the end: left out)
+	move.w	d1,(a0)+
+	move.w	#4,(a0)+
+	bra.s	.off
+.low:	move.w	#BD_LOW,(a0)+
+	move.w	#12,(a0)+
+.off:	move.w	#BD_OFF,(a0)+
+	move.w	#8,(a0)+
+	; the counts: an event's Timer B count is its distance to the one before less BD_K (the first: from line 0,
+	; borders_vbl's BD_FIRST - BD_K); the counter reads that less BD_K at the event's line end
+	move.l	a0,d4
+	lea	bd_lines_k,a0
+	lea	bd_evs,a1
+	moveq	#0,d3			; the line before
+.c:	move.w	(a0),d2
+	sub.w	d3,d2
+	subq.w	#BD_K,d2		; this event's count
+	move.w	(a0),d3
+	subq.w	#BD_K,d2
+	move.b	d2,(a1)			; the counter at the line end
+	move.w	2(a0),2(a1)
+	addq.l	#4,a0
+	cmp.l	a0,d4
+	beq.s	.last
+	move.w	(a0),d2
+	sub.w	d3,d2
+	subq.w	#BD_K,d2
+	move.b	d2,1(a1)		; the next event's count
+	addq.l	#4,a1
+	bra.s	.c
+.last:	clr.b	1(a1)
+	movem.l	(sp)+,d0-d4/a0-a1
+	rts
+	else
+
 ; Bottom border and palette (Timer B).  bd_tb_state: 0 the palette on, 1 the bottom border, 2 the palette off.
 timer_b:
 	if BD_PALETTE
@@ -215,6 +361,7 @@ timer_b:
 	movem.l	(sp)+,d0-d2/a0
 	endc
 	rte
+	endc
 	endm
 
 ; blit_go: starts the HOG pass set up in the Blitter's registers (the lines in its Y count): whole when it is at most a
@@ -418,6 +565,11 @@ borders_vars	macro
 bd_ta_state:	ds.b	1
 bd_tb_state:	ds.b	1
 	even
+	if BD_HUD
+bd_ev_ptr:	ds.l	1		; (the next Timer B event)
+bd_evs:		ds.l	6		; counter at the line end.b, next count.b, kind.w
+bd_lines_k:	ds.l	6		; (bd_hud_plan: line.w, kind.w)
+	endc
 bd_c_syi:	ds.w	1		; (blit_go's column strips: the pass's Y increments and end masks)
 bd_c_dyi:	ds.w	1
 bd_c_em1:	ds.w	1

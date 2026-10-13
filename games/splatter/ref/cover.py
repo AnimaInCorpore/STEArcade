@@ -3,7 +3,8 @@
     venv/bin/python games/splatter/ref/cover.py SEED FRAMES      -> build/splatter/cover_SEED.pkl
 
 Random play (coins, start, joystick and buttons changing every few frames from the seed; seed 1-3 only the attract
-mode with a coin late; seeds 11-17 start stage seed - 10 through the Stage Select DIP switch, SW:3).  Records per CPU
+mode with a coin late; seed 6 starts and then stands still; seed 7 walks right, attacking now and then; seeds 11-17
+start stage seed - 10 through the Stage Select DIP switch, SW:3).  Records per CPU
 (0 main, 1 sub, 2 sound):
   exec[cpu]   Counter of (virtual pc, bank slot) executed
   acc[cpu]    {(virtual pc, slot): set of (r|w, address bank slot, virtual page, odd word start?)} for every data
@@ -168,7 +169,16 @@ def run(seed, frames, out=None):
             m.control_in[0] &= ~0x80
         if play and f == coin_at + 106:
             m.control_in[0] |= 0x80
-        if play and f > coin_at + (400 if stage else 150):
+        if seed in (6, 7) and f > coin_at + 150:
+            # standing still / walking right, attacking now and then; coin and start again after a game over
+            m.control_in[0] = 0xFF if seed == 6 else 0xFE & (0xEF if f % 40 < 4 else 0xFF)
+            if f % 1500 == 0:
+                m.coin_in &= ~0x10
+            elif f % 1500 == 6:
+                m.coin_in |= 0x10
+            elif f % 1500 == 100:
+                m.control_in[0] &= ~0x80
+        elif play and f > coin_at + (400 if stage else 150):
             if hold <= 0:
                 bits = rng.choice([0, 1, 2, 4, 8, 0x10, 0x20, 0x11, 0x12, 0x21, 0x22, 0x31, 0x32, 0x01, 0x01, 0x01])
                 m.control_in[0] = (0xFF & ~bits) | 0x80

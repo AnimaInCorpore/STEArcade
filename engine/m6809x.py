@@ -141,8 +141,10 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None, inline_banks=False, io_fold=None):
+                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None):
         self.name, self.prefix = name, prefix
+        self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
+        self.indirect_live = indirect_live        # computed jumps / calls read what their seen targets read (see liveness)
         self.page_bytes = page_bytes
         self.slot_of = dict(slot_of)
         self.roots = list(roots)
@@ -310,9 +312,15 @@ def liveness(prog, code, ret_points=None):
     live_in = {v: 0 for v in code}
     live_out = {}
     order = sorted(code, reverse=True)
+    # the targets of computed jumps and calls the coverage saw (entry_live: the flags any of them reads)
+    ijmp_tg = {v: [t for t in prog.targets.get(v, ()) if t in code] for v, ins in code.items() if ins.flow == "ijmp"}
+    entries = {t for v, ins in code.items() if ins.flow in ("ijmp", "icall") for t in prog.targets.get(v, ()) if t in code}
     changed = True
     while changed:
         changed = False
+        entry_live = 0
+        for t in entries:
+            entry_live |= live_in[t]
         for v in order:
             ins = code[v]
             fl = ins.flow
@@ -329,6 +337,10 @@ def liveness(prog, code, ret_points=None):
                         out |= live_in.get(t, NZVC)
                 else:
                     out = NZVC
+            elif fl == "ijmp" and prog.indirect_live and ijmp_tg.get(v):
+                out = entry_live
+                for t in ijmp_tg[v]:
+                    out |= live_in[t]
             elif fl in ("rti", "ijmp", "swi", "wait", "halt"):
                 out = NZVC
             elif fl in ("call", "icall"):
@@ -340,7 +352,9 @@ def liveness(prog, code, ret_points=None):
                     for t in tg:
                         out |= live_in.get(t, NZVC)
                     if fl == "icall":
-                        out |= NZVC          # (a target the coverage did not see)
+                        # a target the coverage did not see: anything (or, with indirect_live, what any target of a
+                        # computed jump or call reads: they are entry points, which seldom read flags)
+                        out |= entry_live if prog.indirect_live else NZVC
             else:
                 out = 0
                 for t in succ[v]:
@@ -363,6 +377,7 @@ class Emitter:
         self.joins = joins
         self.live_out = live_out
         self.lines = []
+        self._a0 = None
         self.tail = []                          # (data after the code: the jump tables)
         self.refs = set()
         self.uid = 0
@@ -378,7 +393,30 @@ class Emitter:
 
     # ---- small helpers -----------------------------------------------------
     def e(self, s):
+        # (peephole: a0 loaded again from the same context field with nothing in between that can change either)
+        if s.startswith("move.l ") and s.endswith(",a0") and "(a6)" in s and self._a0 is not None:
+            src, at = self._a0
+            if src == s and all(self._a0_safe(x) for x in self.lines[at + 1:]):
+                return
         self.lines.append("\t" + s)
+        if s.startswith("move.l ") and s.endswith(",a0") and "(a6)" in s and "a0" not in s[:-3]:
+            self._a0 = (s, len(self.lines) - 1)
+
+    @staticmethod
+    def _a0_safe(line):
+        """the line keeps a0 and the context's fields (an instruction, not a label, branch or call)"""
+        if not line.startswith("\t"):
+            return False
+        op, _, args = line[1:].partition(" ")
+        if op[:1] in ("b", "j", "d") and not op.startswith(("btst", "bset", "bclr", "bchg")):
+            return False                      # (branches, jumps, calls, dbf)
+        dst = args.rsplit(",", 1)[-1] if "," in args else args
+        if "a0" in dst or "(a6" in dst or "a0)+" in args or "-(a0)" in args:
+            return False
+        return op.split(".")[0] in ("move", "moveq", "add", "addq", "sub", "subq", "and", "or", "eor", "lsl", "lsr",
+                                    "asl", "asr", "rol", "ror", "roxl", "roxr", "ext", "tst", "cmp", "clr", "neg",
+                                    "not", "addx", "subx", "scs", "scc", "seq", "sne", "smi", "spl", "svs", "svc",
+                                    "mulu", "muls", "swap", "lea") and not (op.startswith("lea") and dst == "a0")
 
     def new_label(self):
         self.uid += 1
@@ -909,6 +947,9 @@ class Emitter:
 
     def fallthrough(self, v, ins):
         """after a sequential instruction: the next one must follow in the output (else a branch to it)"""
+        if self.p.after is not None:
+            for line in self.p.after(v, ins) or ():
+                self.e(line)
         nv = self.next_v(v, ins)
         if nv is None:
             # the code runs into the next slot: dispatch through its page
@@ -1727,6 +1768,20 @@ class Emitter:
                     self.e("subq.w #%d,%s" % (-off, r))
                 else:
                     self.e("add.w #%d,%s" % (off, r))
+            self.wrap(v, Z, b)
+            return
+        if dst in ("x", "y") and x.reg == dst and not x.indirect and x.kind in ("acc_a", "acc_b", "acc_d"):
+            r = REG16[dst]
+
+            def b():
+                if x.kind == "acc_d":
+                    self.e("move.b d0,-(sp)")
+                    self.e("move.w (sp)+,d6")
+                    self.e("move.b d1,d6")
+                else:
+                    self.e("move.b %s,d6" % ("d0" if x.kind == "acc_a" else "d1"))
+                    self.e("ext.w d6")
+                self.e("add.w d6,%s" % r)
             self.wrap(v, Z, b)
             return
         if dst in ("x", "y"):

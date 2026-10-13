@@ -1,4 +1,4 @@
-"""Build SPLATTER.PRG (--sim: the Musashi build the tests run; the only build so far).
+"""Build SPLATTER.PRG (--sim: the Musashi build the tests run).
 
     venv/bin/python games/splatter/tools/build.py --sim
 """
@@ -27,7 +27,9 @@ def main():
     mcu.write_tables(build_dir("splatter") / "mcu_samples.s", r["voice"], r["mcu"])
     if not args.sim:
         import snapshot
+        import assets
         snapshot.write()
+        assets.build()
     for name, r in report.items():
         print("%s: %d instructions, %d unsupported, %d missing targets, %s" % (
             name, r["instructions"], len(r["unsupported"]), len(r["missing"]), r["stats"]))

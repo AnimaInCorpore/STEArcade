@@ -68,6 +68,35 @@ def load_cover():
     return exec_, acc, tg, ioacc
 
 
+TILE0 = 0x2F0000                      # the CUS123 tile RAM ($2F0000-$2F7FFF): layers 0-3 below $2F7000, the fixed above
+CAP = 64                              # (ref/cover.py keeps at most this many I/O addresses per site)
+
+
+def tile_marks(acc, ioacc):
+    """the render's writer flags (src/render.s, TILE_FLAG): (v, ins) -> the lines after a store into tile RAM.  From the
+    coverage: a site that wrote tile RAM sets tile_written (layers 0-3) and / or tile_written_fix (the fixed layers);
+    a store the coverage never saw sets both."""
+    marks = {}
+    for v, s in acc.items():
+        pages = {pg for rw, slot, pg, odd in s if rw == "w" and TILE0 >> 13 <= pg <= (TILE0 >> 13) + 3}
+        if not pages:
+            continue
+        ws = [va for rw, va in ioacc.get(v, ()) if rw == "w"]
+        exact = 0 < len(ioacc.get(v, ())) < CAP
+        lay = bool(pages - {(TILE0 >> 13) + 3}) or not exact or any(va < TILE0 + 0x7000 for va in ws)
+        fix = (TILE0 >> 13) + 3 in pages and (not exact or any(va >= TILE0 + 0x7000 for va in ws))
+        marks[v] = ["st tile_written"] * lay + ["st tile_written_fix"] * fix
+
+    def after(v, ins):
+        if v in marks:
+            return marks[v]
+        if v not in acc and ins.mode in ("ext", "idx") and (m6809x.base_mn(ins.mn).startswith("st") or m6809x.base_mn(ins.mn) in (
+                "clr", "neg", "com", "inc", "dec", "asl", "lsl", "lsr", "asr", "rol", "ror")):
+            return ["st tile_written", "st tile_written_fix"]
+        return None
+    return after
+
+
 def io_site(accesses):
     """an access site that needs the runtime: the key custom, the sprite RAM's latch byte, the CUS123 control (mirrored
     over $2FD000-$2FDFFF), the C116 registers past their first copy"""
@@ -128,7 +157,8 @@ def program(cpu, regions, cover):
                           exec_cover={v for v, s in exec_[cpu]}, acc_cover=acc[cpu], targets=tg[cpu],
                           io_pages=IO_PAGES, hooks={idle_v: "%s_idle" % name}, page_addr=page_addr,
                           hook_next={idle_v: idle_v + 3}, static_read=key_read, inline_banks=True,
-                          io_fold=control_fold(ioacc[cpu]),
+                          io_fold=control_fold(ioacc[cpu]), indirect_live=not os.environ.get("NO_INDIRECT_LIVE"),
+                          after=tile_marks(acc[cpu], ioacc[cpu]),
                           natives={} if os.environ.get("NO_NATIVES") else NATIVES[cpu],
                           io_sites={v for v, s in ioacc[cpu].items() if io_site(s)} if any(ioacc[cpu].values()) else None)
     return prog, irq_v, idle_v

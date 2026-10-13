@@ -232,6 +232,7 @@ def main():
     stage = args.seed - 10 if 11 <= args.seed <= 17 else 0
     if stage:
         m.dipsw &= ~0x04
+    tile_frames = flag_frames = 0
     for f in range(args.frames):
         if stage and 130 <= f < 430:
             k, phase = (f - 180) // 30, (f - 180) % 30
@@ -267,6 +268,9 @@ def main():
         mem.w32(sp, sym["sim_wait"])
         cpu.w_reg(R.A7, sp)
         cpu.w_pc(sym["port_frame"])
+        tile0 = vio_get(0x2F0000, 0x8000)          # (the render's writer flags: tools/gen.py tile_marks)
+        mem.w8(sym["tile_written"], 0)
+        mem.w8(sym["tile_written_fix"], 0)
         if f == args.steplock:
             steplock(f)
             return 1
@@ -278,6 +282,16 @@ def main():
         except RuntimeError as ex:
             print("frame %d (%d after the start): %s" % (m.frame, f, ex))
             return 1
+        tile1 = vio_get(0x2F0000, 0x8000)
+        if tile0[:0x7000] != tile1[:0x7000]:
+            tile_frames += 1
+            if not mem.r8(sym["tile_written"]):
+                print("frame %d: tile RAM (layers 0-3) changed without tile_written" % f)
+                return 1
+        if tile0[0x7000:] != tile1[0x7000:] and not mem.r8(sym["tile_written_fix"]):
+            print("frame %d: tile RAM (the fixed layers) changed without tile_written_fix" % f)
+            return 1
+        flag_frames += bool(mem.r8(sym["tile_written"]))
         m.run_cpu(0)
         m.run_cpu(1)
         if not compare(f):
@@ -286,6 +300,7 @@ def main():
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1)), flush=True)
     print("%d frames identical; %.0f 68000 cycles a frame for the two CPUs" % (args.frames, cycles / args.frames))
+    print("tile RAM (layers 0-3) changed in %d frames, tile_written set in %d" % (tile_frames, flag_frames))
     return 0
 
 

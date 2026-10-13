@@ -144,7 +144,11 @@ main_unsupported:
 sub_unsupported:
 cpu_badpc:
 	move.w	d7,badpc
+	move.w	d6,badslot
 	move.l	a6,badctx
+    ifnd SIM
+	bra	port_crash		; (splatter.s: CRASH.TXT, back to the desktop)
+    endc
 sim_badpc:
 	bra.s	sim_badpc
 
@@ -392,10 +396,14 @@ rand_seed:
 ctx_main:	ds.b	CTXSIZE
 ctx_sub:	ds.b	CTXSIZE
 key_regs:	ds.b	8
+tile_written:	ds.b	1		; (the render's writer flags: set after the translated stores into tile RAM, tools/gen.py)
+tile_written_fix:	ds.b	1
+	even
 page_base_table:	ds.l	$400
 bad_table:	ds.l	$2000		; (filled with cpu_badpc)
 sprite_latch:	ds.b	2
 badpc:		ds.w	1
+badslot:	ds.w	1
 badctx:		ds.l	1
 vio:		ds.b	$28000
 nopage:		ds.b	$2000
