@@ -520,3 +520,29 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   static and inline bank switches, I/O sites from the coverage's addresses (the sprite RAM plain), cached slot bases,
   byte-direct 16 bit operations, jump tables for `JSR [B,X]`, natives for the sub CPU's sprite builder.  Profile by
   6809 instruction and by 256 byte region (`tools/profile.py`).
+
+## What the V30 translation added (R-Type, 2026-10-13)
+
+* **Little-endian words on the 68000**: keep the arcade CPU's memory with the bytes of every word swapped.  Words at even
+  addresses become native moves (R-Type reads 45 words for every byte), static byte addresses cost nothing, a byte at a
+  register address costs `moveq #1,d7; eor.w dX,d7`.  The renderer reads the video, palette and sprite RAM as native
+  words too.
+* **Random play does not reach every computed target**: R-Type's object handlers are stored as immediates
+  (`mov word ptr [bp+0h],2D50h`) and called later, some only through ROM tables copied to RAM, and its jump tables
+  have entries play rarely takes.  The translation takes them from the program (`games/rtype/tools/gen.py`: tables in
+  ROM, stored handlers, every stored code address, the idiom's bytes anywhere, code right after a RET that nothing
+  refers to; "plausible" = ordinary instructions up to a transfer, never starting inside covered code); the long
+  lock-step runs stopped at exactly these.  The flags these callers read cost ~10% more cycles: correct, not waste.
+* **Liveness through computed calls**: a RET reached only through a computed call or a jump table had no return points
+  and counted as reading every flag, which made shared functions keep flags for all callers (1055 wrapped
+  instructions; 117 once those RETs got the return points of the computed calls).
+* **Returns without the flags**: a table of 64K longs indexed by the popped IP (`move.w (a5)+,a0`, two `add.l a0,a0`)
+  jumps without touching the CCR, so functions returning a carry need no SR save.
+* **The port's schedule changes the game**: the VBL handler always runs to completion (MAME's game skips its logic when
+  a frame overruns), so long runs reach states the MAME-scheduled coverage never saw; and a stale object pointer
+  (seed 9, frame ~26900) reads unmapped memory, which the arcade reads as 0 and the image as what was written.
+* **The renderer reads the arcade's byte order, the image keeps it swapped**: `games/rtype/src/video.s` copies only what
+  changed - the translated stores into the video RAMs and palettes mark their 256-byte blocks (`gen.py` store_marks,
+  checked by logic_test), and before a picture the marked blocks are swapped back (`movep`, ~3k cycles a block) into the
+  renderer's video state, the sprite list after a DMA.  A swapped-order mode in `engine/rt/m72render.s` would make the
+  copies unnecessary.

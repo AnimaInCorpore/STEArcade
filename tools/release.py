@@ -51,6 +51,10 @@ GAMES = [
      "83% of the arcade's speed, 23 frames a second, 16 colours; music and effects on the YM",
      "shoot left / straight / right: Control / Space / Alternate, or Z / X / C; pad A / B / C.\n"
      "  The joystick's fire shoots straight."),
+    ("rtype", "RTYPE.PRG", "R-Type (Irem 1987)",
+     "playable, but slow: about 30% of the arcade's speed and 6 pictures a second in play (Hatari); exact logic,\n"
+     "  the centred 320 of the 384 pixels; no sound yet",
+     "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

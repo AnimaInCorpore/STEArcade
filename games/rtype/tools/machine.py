@@ -36,3 +36,78 @@ from m72 import Video as M72Video, VideoState, pens, bands  # noqa: F401
 class Video(M72Video):
     def __init__(self):
         super().__init__("rtype")
+
+
+# ---- the port's schedule (the translation's lock-step reference: tools/logic_test.py) ----
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "engine"))
+from m72board import M72  # noqa: E402
+
+START = 400                       # the port starts from the board's state at this frame (the boot is not translated)
+IDLE = (0x0040, 0x00D0)           # the main loop's head: mov bp,3060h; call [bp]; the queue [2ED8] / [2EDA]
+VBL_VECTOR, RASTER_VECTOR = 0x20, 0x22
+IDLE_TASK = 0x55E8                # [3060] while nothing runs in the foreground (a plain ret)
+
+
+class RType(M72):
+    """The board (MAME's schedule) to START; then the port's schedule: no sound CPU, no PIC, no time.  A port frame:
+    the VBL interrupt (vector $20) taken at the idle point, the handler (the game's logic) and the foreground until the
+    idle point again; then the raster interrupt (vector $22, the status bar's scroll) the same.  The idle point: the main
+    loop's head with the foreground queue empty and no foreground task.  Writes to the ports go to `port_writes`
+    ((port, value, width) this frame); the scroll, raster line and sprite DMA act as on the board."""
+
+    def __init__(self, **kw):
+        super().__init__("rtype", **kw)
+        self.port_frames = 0
+        self.port_writes = []
+        self.irq_psw_addr = None
+
+    def word(self, o):
+        return self.ram[o] | (self.ram[o + 1] << 8)
+
+    def idle(self):
+        c = self.main.core.cpu
+        return ((c.cs, c.ip) == IDLE and self.word(0x2ED8) == self.word(0x2EDA) and self.word(0x3060) == IDLE_TASK
+                and c.ds == 0x4000 and c.ss == 0x4000)
+
+    def boot(self, frames=START):
+        while self.frame < frames:
+            self.run_frame()
+        c = self.main.core.cpu
+        for _ in range(200):
+            if self.idle():
+                break
+            c.step()
+        if not self.idle():
+            raise RuntimeError("main CPU not idle at frame %d (%04X:%04X)" % (self.frame, c.cs, c.ip))
+        c.rd_op = c.rd
+        c.io_wr = self.port_wr
+        c.io_wr16 = self.port_wr16
+        c.icount = 1 << 40                               # (steps without a slice)
+
+    def port_wr(self, p, v):
+        self.port_writes.append((p & 0xFF, v, 1))
+        if p & 0xFF not in (0x00, 0x01, 0x02, 0x03, 0xC0, 0xC1):
+            self.io_wr(p, v)
+
+    def port_wr16(self, p, v):
+        self.port_writes.append((p & 0xFF, v, 2))
+        if p & 0xFE not in (0x00, 0x02, 0xC0):
+            self.io_wr16(p, v)
+
+    def run_irq(self, vector, limit=5000000):
+        """the interrupt at the idle point, then until the idle point again"""
+        c = self.main.core.cpu
+        self.irq_psw_addr = (c.ss << 4) + ((c.sp - 2) & 0xFFFF)
+        c.interrupt(vector)
+        for _ in range(limit):
+            c.step()
+            if self.idle():
+                return
+        raise RuntimeError("the main CPU did not come back to its idle point (%04X:%04X)" % (c.cs, c.ip))
+
+    def run_frame_port(self):
+        self.port_writes = []
+        self.run_irq(VBL_VECTOR)
+        self.run_irq(RASTER_VECTOR)
+        self.port_frames += 1

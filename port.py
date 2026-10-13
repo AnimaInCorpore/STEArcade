@@ -28,7 +28,7 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 
 # the ports, in the order of the README, and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
-         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG"}
+         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -37,6 +37,8 @@ COVER = {
              ("ref/cover.py", list(range(21, 41)), 60000)],    # 21-40: random play that dies, every start stage
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
+    "rtype": [("ref/cover.py", [1], 6000), ("ref/cover.py", [4, 5, 6], 12000),   # 1: attract; 4-6: play
+              ("ref/cover.py", [8], 20000), ("ref/cover.py", [9, 10], 40000)],   # 8-10: Invulnerability (stage 2)
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000)],   # 4-6: high scores, the name entry
@@ -46,6 +48,13 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "rtype": [("tools/prepare.py", [], None),
+              ("tools/build.py", ["--sim"], None),
+              ("tools/logic_test.py", ["{n}"], 3000),                    # attract
+              ("tools/logic_test.py", ["8000", "--seed", "4"], None),     # play
+              ("tools/logic_test.py", ["6000", "--seed", "8"], None),     # play, Invulnerability
+              ("tools/render_test.py", ["--quiet"], None),
+              ("tools/sprite_test.py", [], None)],
     "1943": [("tools/prepare.py", [], None), ("tools/video_test.py", [], None),
              ("tools/reference_test.py", ["700"], None),
              ("tools/build.py", ["--sim"], None),
@@ -109,6 +118,7 @@ ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/i
                 "engine/m6809_test.py", "engine/hd63701_test.py",   # (MAME traces: build/m6809/, build/hd63701/)
                 "engine/m6809x_test.py", "engine/konami1_test.py",
                 "engine/v30_test.py",                              # (MAME traces: build/v30/)
+                "engine/v30x_test.py",
                 "engine/i8051_test.py",                            # (MAME traces: build/i8051/)
                 "engine/z80m72_test.py"]                           # (MAME trace: build/z80m72/)
 assert set(COVER) == set(TESTS) == set(GAMES)

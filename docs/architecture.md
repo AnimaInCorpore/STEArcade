@@ -460,6 +460,35 @@ Tests: `engine/m6809x_test.py` (every documented instruction in every mode, rand
 Musashi; batches of 8 KB pages), the games' `logic_test.py` (frame by frame against the reference's port schedule, with
 `--steplock F`: instruction by instruction inside a frame) and `profile.py` (68000 cycles per 6809 instruction).
 
+## The V30 translator (`engine/v30x.py`, R-Type 2026-10-13)
+
+One snippet per V30 instruction, labelled `R<linear address>`; each code address runs with one CS (the coverage says
+which), so near jumps, calls and returns stay in their segment and PS-relative operands are absolute.  Structured
+decoding is `engine/v30dec.py` (the text stays `engine/v30dis.py`'s).
+
+* **Registers**: AW CW DW BW IX IY BP = d0 d1 d2 d3 d4 d5 d6 (upper words 0: any of them indexes as a long; the high
+  bytes AH..BH through the 68000 stack), a5 = SS:SP as a pointer, a4 / a3 / a2 = the SS / DS0 / DS1 bases
+  (image + segment * 16), a6 = the context (segment values, IE, DF, the parity and AC bytes), d7 a0 a1 scratch.
+* **Memory**: the V30's 1 MB is one block whose bytes are swapped in every word (V30 byte a at image + (a ^ 1)): words
+  at even addresses - the stack, the work RAM's words, video, sprite and palette RAM - are single native moves (R-Type
+  reads 45 words for every byte), static bytes cost nothing, a byte at a register address computes its offset ^ 1.
+  Odd words: static ones, and the sites the coverage saw odd (both parities, chosen at run time).
+* **Flags** in the CCR (S Z O C = N Z V C) with backward liveness and `wrap` as in the 6809 translator; P and AC only
+  where read (a result byte, dst ^ src ^ result in the context).  What made the liveness precise (wrapped instructions
+  1055 -> 117, 18% fewer cycles): RETs reached through computed calls and jump tables get their return points, computed
+  calls read only what the targets the coverage saw read, an unknown continuation reads S Z O C only.
+* **Control flow**: RET compares its function's most executed return points (flags dead), else jumps through a 64K-long
+  IP table of the main segment (`main_ip_mid + 4 * IP`, no flag spoiled: `move.w (a5)+,a0`, two `add.l a0,a0`);
+  elsewhere a hash table by linear address.  Jump tables the random play did not exhaust come from the ROM
+  (`games/rtype/tools/gen.py` `table_targets`: the table at the operand's segment + displacement, sized by an AND of the
+  index before it, or the ROM's runs of plausible entries that hold the seen targets).
+* **Interrupts**: the runtime pushes PSW, CS and IP of the idle point and runs a handler; IRET pops them and dispatches
+  to the idle hook, which returns to the runtime when the CPU is idle (`games/rtype/src/core.s`).
+
+Tests: `engine/v30x_test.py` (every opcode with random ModRM, prefixes and states against `engine/v30.py` on Musashi);
+`games/rtype/tools/logic_test.py` (frame by frame against the reference's port schedule, `--steplock F`) and
+`profile.py` (cycles per V30 instruction, per mnemonic, per 256 bytes).
+
 ## Namco System 1 (`engine/namcos1.py`)
 
 The board after MAME: the CUS117 MMU (a 23 bit virtual space, eight 8 KB slots per CPU), the key customs (types 1-3:
