@@ -22,6 +22,9 @@ BD_PALETTE = 1
 BD_HUD = 1
       endc
 MAX_BEHIND = 3
+      ifnd PIC_EVERY
+PIC_EVERY = 2				; (arcade frames a picture at most: the logic's share against the picture rate)
+      endc
 	include	"ikbd.s"
 	include	"borders.s"
 shown_pal = ren_vbl_pal
@@ -64,6 +67,12 @@ main_loop:
 	bsr	vblank_work
 	bsr	port_frame
 	addq.l	#1,cnt_logic
+	addq.b	#1,since_pic		; a picture after every PIC_EVERY-th arcade frame, or when the logic caught up
+	cmp.b	#PIC_EVERY,since_pic
+	bhs.s	.pic
+	tst.b	ticks
+	bne	main_loop
+.pic:	clr.b	since_pic
 	move.w	ren_skipped,-(sp)
 	bsr	render_frame
 	move.w	(sp)+,d0
@@ -479,6 +488,7 @@ old_linewid:	ds.b	1
 old_fine:	ds.b	1
 ticks:		ds.b	1
 tick_phase:	ds.b	1
+since_pic:	ds.b	1
 in_control0:	ds.b	1		; (mcu_frame reads these four in this order)
 in_control1:	ds.b	1
 in_coin:	ds.b	1
