@@ -53,6 +53,7 @@ h_wait:	bra.s	h_wait
 	even
 tile_written:	ds.b	1
 tile_written_fix:	ds.b	1
+tile_written_s:	ds.b	1
 tile_fix_all:	ds.b	1
 	even
 tile_fix_rows:	ds.b	56
@@ -165,6 +166,8 @@ class Harness:
         if old is not None:
             if v[:0x7000] != old[:0x7000]:
                 self.mem.w8(self.sym["tile_written"], 0xFF)
+            if v[:0x6000] != old[:0x6000]:
+                self.mem.w8(self.sym["tile_written_s"], 0xFF)
             if v[0x7000:] != old[0x7000:]:
                 self.mem.w8(self.sym["tile_written_fix"], 0xFF)
                 for k, base in enumerate((0x7010, 0x7810)):       # (TILE_ROWS: the rows that changed)
@@ -213,6 +216,66 @@ def mapped_index(h, pens):
     return np.where((pens < 0) | (key == 0), 0, idx)
 
 
+SIZE_CODE = {16: 0, 8: 1, 32: 2, 4: 3}
+
+
+def place(sr, e, r0, c0, sizex, sizey, code, colour, flipx, flipy, pri=6):
+    """sprite RAM entry e at picture row r0, column c0 (the inverse of stemodel's geometry; the flipped screen)"""
+    xoffs = sr[0x7F5] + ((sr[0x7F4] & 1) << 8)
+    yoffs = sr[0x7F7]
+    x = 361 - sizex - r0                       # r0 = 361 - x - sizex
+    v = ((-x - sizex) - xoffs) & 0x1FF          # x = (-(b13 + (b12 & 1) * 256 + xoffs) - sizex) & $1FF
+    off = e * 16
+    sr[off + 10] = (SIZE_CODE[sizex] << 6) | (0x20 if flipx else 0) | ((code >> 8) & 7)
+    sr[off + 11] = code & 0xFF
+    sr[off + 12] = (colour << 1) | (v >> 8)
+    sr[off + 13] = v & 0xFF
+    sr[off + 14] = (pri << 5) | (SIZE_CODE[sizey] << 1) | (1 if flipy else 0)
+    sr[off + 15] = (c0 + 32 - 17 - yoffs) & 0xFF
+
+
+def edge_states(base, bufs, seed=1):
+    """pictures of test sprites: across the left and right edges and inside, all 16 fine positions, the four flips,
+    the sizes, the top and bottom guards, and across the 64 KB boundaries of each shown buffer (bufs: their
+    addresses; a picture is drawn into each in turn); the other entries parked off the picture"""
+    import random
+    rng = random.Random(seed)
+    out = []
+    shapes = [(32, 32, 1348), (16, 16, 1348), (8, 8, 1348), (32, 16, 1348), (16, 32, 1348), (4, 4, 1348)]
+    for n in range(240):
+        st = dict(base)
+        sr = bytearray(base["spriteram"])
+        for e in range(127):
+            place(sr, e, 400, 0, 16, 16, 0, 0, 0, 0)          # (parked below the picture)
+        buf = bufs[n % len(bufs)]
+        for e in range(12):
+            sx, sy, code = shapes[rng.randrange(len(shapes))]
+            kind = rng.randrange(6)
+            if kind == 0:
+                c0 = -sy + 1 + rng.randrange(sy + 15)            # across the left edge
+            elif kind == 1:
+                c0 = 224 - sy + rng.randrange(sy + 15) - 14      # across the right edge
+            else:
+                c0 = rng.randrange(-sy + 1, 224)
+            c0 = (c0 & ~15) | (n % 16) if kind == 2 else c0      # (every fine position in turn)
+            if kind == 3:
+                r0 = -sx + 1 + rng.randrange(sx)                 # into the top guard
+            elif kind == 4:
+                r0 = 288 - rng.randrange(1, sx)                  # into the bottom guard
+            elif kind == 5:
+                # across a 64 KB boundary of this picture's buffer: the row whose line crosses it
+                line0 = buf + 32 * 160
+                k = (line0 + 0xFFFF) // 0x10000 * 0x10000
+                rc = (k - line0) // 160
+                r0 = max(-sx + 1, min(287, rc - rng.randrange(sx)))
+            else:
+                r0 = rng.randrange(-sx + 1, 288)
+            place(sr, e, r0, c0, sx, sy, code + rng.randrange(4), rng.randrange(1, 100), rng.randrange(2), rng.randrange(2))
+        st["spriteram"] = bytes(sr)
+        out.append(st)
+    return out
+
+
 def parse_range(s, n):
     if not s:
         return []
@@ -230,15 +293,25 @@ def main():
     ap.add_argument("--png", default="")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--profile", type=int, default=-1, help="a state (play): render_frame's cycles by routine")
+    ap.add_argument("--edges", action="store_true", help="test sprites at the edges, all fine positions, flips, sizes, "
+                    "the guards and 64 KB crossings (on play state 400's background)")
+    ap.add_argument("--bench", action="store_true", help="the BENCH game's states (tools/states.py --bench) as 'play'")
     ap.add_argument("--profile-range", default="", help="A-B: every --every-th play state from A to B, the cycles by "
                     "routine summed")
     args = ap.parse_args()
     if args.profile_range:
-        states = pickle.load(open(STATES, "rb"))
+        states = pickle.load(open(STATES if not args.bench else BUILD / "render_bench.pkl", "rb"))
+        if args.bench:
+            states = {"play": states["bench"]}
         a, b = map(int, args.profile_range.split("-"))
         h = Harness(args.defines)
-        h.put_state(states["play"][a])
+        w = max(0, a - 30 * args.every)          # (30 pictures before, not counted: the colours chosen, the caches warm)
+        h.put_state(states["play"][w])
         h.call("render_init")
+        for k in range(w, a, args.every):
+            h.put_state(states["play"][k])
+            h.call("render_frame")
+            h.call("render_vbl")
         tot = {}
         n = 0
         for k in range(a, b, args.every):
@@ -269,6 +342,15 @@ def main():
             h.call("render_vbl")
         return 0
     states = pickle.load(open(STATES, "rb"))
+    if args.bench:
+        states = {"play": pickle.load(open(BUILD / "render_bench.pkl", "rb"))["bench"], "attract": []}
+    if args.edges:
+        h0 = Harness(args.defines)
+        bufs = [h0.sym["ren_bufs"] + i * (288 + 64) * 160 for i in range(3)]
+        base = states["play"][400]
+        seq = [base] * 12 + edge_states(base, bufs)               # (12 pictures: the colours chosen first)
+        states = {"play": seq, "attract": []}
+        args.play, args.attract = "0-%d" % len(seq), ""
     pngs = {int(x) for x in args.png.split(",") if x}
     total_bad = 0
     for name in ("attract", "play"):

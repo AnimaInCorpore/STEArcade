@@ -441,6 +441,7 @@ key_quot:	ds.w	1
 key_nhigh:	ds.w	1
 tile_written:	ds.b	1		; (the render's writer flags: set after the translated stores into tile RAM, tools/gen.py)
 tile_written_fix:	ds.b	1
+tile_written_s:	ds.b	1		; (the star layers 0-2: render.s' star lists)
 tile_fix_all:	ds.b	1		; (and per row of the fixed layers: tools/gen.py tile_marks, render.s TILE_ROWS)
 	even
 tile_fix_rows:	ds.b	56

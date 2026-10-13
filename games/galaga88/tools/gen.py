@@ -80,8 +80,8 @@ CAP = 64                              # (ref/cover.py keeps at most this many I/
 
 def tile_marks(acc, ioacc):
     """the render's writer flags (src/render.s, TILE_FLAG): (v, ins) -> the lines after a store into tile RAM.  From the
-    coverage: a site that wrote tile RAM sets tile_written (layers 0-3) and / or tile_written_fix (the fixed layers);
-    a store the coverage never saw sets both."""
+    coverage: a site that wrote tile RAM sets tile_written (layers 0-3; tile_written_s too for the star layers 0-2)
+    and / or tile_written_fix (the fixed layers); a store the coverage never saw sets them all."""
     marks = {}
     for v, s in acc.items():
         pages = {pg for rw, slot, pg, odd in s if rw == "w" and TILE0 >> 13 <= pg <= (TILE0 >> 13) + 3}
@@ -91,7 +91,8 @@ def tile_marks(acc, ioacc):
         exact = 0 < len(ioacc.get(v, ())) < CAP
         lay = bool(pages - {(TILE0 >> 13) + 3}) or not exact or any(va < TILE0 + 0x7000 for va in ws)
         fix = (TILE0 >> 13) + 3 in pages and (not exact or any(va >= TILE0 + 0x7000 for va in ws))
-        marks[v] = ["st tile_written"] * lay + ["st tile_written_fix"] * fix
+        stars = bool(pages & {(TILE0 >> 13) + k for k in range(3)})     # (layers 0-2: render.s' star lists)
+        marks[v] = ["st tile_written"] * lay + ["st tile_written_s"] * stars + ["st tile_written_fix"] * fix
         if fix:
             # the fixed layers' rows it wrote (render.s TILE_ROWS: only those are compared); not known: all
             rows = sorted({fix_row(va - TILE0) for va in ws} - {None}) if exact else None
@@ -102,7 +103,7 @@ def tile_marks(acc, ioacc):
             return marks[v]
         if v not in acc and ins.mode in ("ext", "idx") and (m6809x.base_mn(ins.mn).startswith("st") or m6809x.base_mn(ins.mn) in (
                 "clr", "neg", "com", "inc", "dec", "asl", "lsl", "lsr", "asr", "rol", "ror")):
-            return ["st tile_written", "st tile_written_fix", "st tile_fix_all"]
+            return ["st tile_written", "st tile_written_s", "st tile_written_fix", "st tile_fix_all"]
         return None
     return after
 

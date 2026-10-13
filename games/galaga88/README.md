@@ -85,7 +85,7 @@ the HUD (priority 6), fixed layer 5 the backdrop (opaque, priority 1); ~250 dist
   composition), the star words, the sprite rectangles (Blitter).
 
 Test: `tools/states.py` (records 1500 play + 500 attract states once), `tools/render_test.py [--play A-B]
-[--attract A-B] [--every N] [--png N] [--profile N] [--profile-range A-B]`: every pixel's index against the
+[--attract A-B] [--every N] [--png N] [--profile N] [--profile-range A-B] [--bench] [--edges]`: every pixel's index against the
 reference's pen by the renderer's own mapping, the side bands clean, the colour error (Oklab), cycles by kind of
 picture, the reasons of the colour choices.  2026-10-13: play 1500 / 1500 and attract 500 / 500 exact (an earlier
 version); the final one every 3rd state: play 500 / 500, attract 167 / 167 exact; colour error 0.028 (play) /
@@ -95,6 +95,11 @@ Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 9.0 arcade f
 (a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame, the renderer the rest.  Costs (Musashi,
 play 300-700, every 2nd state): a picture ~1.3M cycles (median; the warps' star streaks ~0.6-0.9M of it), a colour
 choice ~12M (the full composition ~3.3M of it).
+
+The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
+and shift on first use: pieces ordered by their shifted masks, the reordered source, generated code); exact
+(`--edges`, the BENCH states); the BENCH game: equal Musashi cycles (622M), Hatari 9.74 -> 9.78 arcade frames/s
+(~1%, within the noise) for 96 KB: not on by default.  Details and numbers in the doc's table.
 
 Open: speed (stars in the warps, layer 3's bank / scroll changes, colour choices, the logic's ~130k cycles a
 frame); the last 11 rows; the HUD palette; sound; the stefastbobs2 sprite method still to be prototyped and measured

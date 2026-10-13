@@ -291,6 +291,7 @@ def main():
         tile0 = vio_get(0x2F0000, 0x8000)          # (the render's writer flags: tools/gen.py tile_marks)
         mem.w8(sym["tile_written"], 0)
         mem.w8(sym["tile_written_fix"], 0)
+        mem.w8(sym["tile_written_s"], 0)
         mem.w8(sym["tile_fix_all"], 0)
         mem.w_block(sym["tile_fix_rows"], bytes(56))
         if f == args.steplock:
@@ -310,6 +311,9 @@ def main():
             if not mem.r8(sym["tile_written"]):
                 print("frame %d: tile RAM (layers 0-3) changed without tile_written" % f)
                 return 1
+        if tile0[:0x6000] != tile1[:0x6000] and not mem.r8(sym["tile_written_s"]):
+            print("frame %d: tile RAM (the star layers 0-2) changed without tile_written_s" % f)
+            return 1
         if tile0[0x7000:] != tile1[0x7000:] and not mem.r8(sym["tile_written_fix"]):
             print("frame %d: tile RAM (the fixed layers) changed without tile_written_fix" % f)
             return 1

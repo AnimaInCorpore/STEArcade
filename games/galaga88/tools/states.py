@@ -6,6 +6,9 @@ A state is what the renderer reads after an arcade frame: the palette RAM (the C
 the C116 registers, the tile RAM, the CUS123 control, the sprite RAM (the latched list) and the flip.
     play     1500 consecutive frames from the port's start (seed 5's inputs: coin, start, random left / right / fire)
     attract  every 4th of 2000 attract frames (seed 1: no inputs)
+    bench    1600 consecutive frames of galaga88.s' BENCH game (bench_inputs: coin at 60, start at 140, from 300
+             right and left 60 frames each, fire 3 frames in 20): the game Hatari's benchmark plays
+             (build/galaga88/render_bench.pkl)
 """
 import pickle
 import random
@@ -55,6 +58,31 @@ def play_inputs(seed):
         f += 1
 
 
+def bench_inputs(f):
+    """galaga88.s bench_inputs at arcade frame f (frames counted from the port's start): (control0, coin)"""
+    coin, control = 0xFF, 0xFF
+    if 60 <= f < 66:
+        coin = 0xEF
+    elif 140 <= f < 146:
+        control = 0x7F
+    elif f >= 300:
+        control = 0xFE if f % 120 < 60 else 0xFD
+        if f % 20 < 3:
+            control &= 0xEF
+    return control, coin & 0xF8
+
+
+def record_bench(frames=1600):
+    m = Galaga88()
+    m.boot()
+    seq = []
+    for f in range(frames):
+        m.control_in[0], m.coin_in = bench_inputs(f)
+        m.run_frame_port()
+        seq.append(state(m))
+    return {"bench": seq}
+
+
 def record(play_frames=1500, attract_frames=2000, every=4):
     out = {}
     m = Galaga88()
@@ -77,6 +105,12 @@ def record(play_frames=1500, attract_frames=2000, every=4):
 
 
 if __name__ == "__main__":
+    if "--bench" in sys.argv:
+        data = record_bench()
+        with open(build_dir("galaga88") / "render_bench.pkl", "wb") as fh:
+            pickle.dump(data, fh)
+        print({k: len(v) for k, v in data.items()})
+        sys.exit(0)
     data = record()
     with open(build_dir("galaga88") / "render_states.pkl", "wb") as fh:
         pickle.dump(data, fh)

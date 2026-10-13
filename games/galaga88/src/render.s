@@ -25,7 +25,8 @@
 ; Interface: render_init (once, vio holds a state), render_frame (a picture: draws into a free buffer and publishes
 ; it), render_vbl (in the VBL: shows the published buffer, ren_vbl_pal its palette).  All registers kept.  Needs: vio
 ; (the virtual space $2E0000-$307FFF: the C116 at +0, tile RAM +$10000, sprite RAM +$1C800, CUS123 control +$1D000),
-; blit_go (borders.s), tile_written / tile_written_fix (set by the translated writers of tile RAM: TILE_FLAG).
+; blit_go (borders.s), tile_written / tile_written_fix / tile_written_s (set by the translated writers of tile RAM:
+; TILE_FLAG).
 
 	ifnd	REN_NBUF
 REN_NBUF = 3
@@ -81,6 +82,13 @@ render_init:
 	or.l	(a0)+,d1
 	sne	(a1)+
 	dbf	d0,.ne
+	lea	ren_ne16,a0		; non-empty by the whole tile word (4 copies of ren_nonempty's 16384)
+	moveq	#4-1,d1
+.n16:	lea	ren_nonempty,a1
+	move.w	#16384/4-1,d0
+.n16b:	move.l	(a1)+,(a0)+
+	dbf	d0,.n16b
+	dbf	d1,.n16
 	lea	ren_rep4,a0		; a mask byte in all four bytes
 	moveq	#0,d0
 .r4:	move.b	d0,d1
@@ -104,18 +112,59 @@ render_init:
 .rb3:	dbf	d2,.rb2
 	move.b	d1,(a1)+
 	dbf	d0,.rb
-	lea	ren_onebit,a0		; a mask byte with one pixel: its bit, else -1
-	move.w	#256/4-1,d0
+	lea	ren_onebit,a0		; a mask byte with one pixel: its bit and column (7 - bit), else -1
+	move.w	#512/4-1,d0
 .ob:	move.l	#-1,(a0)+
 	dbf	d0,.ob
 	lea	ren_onebit,a0
 	moveq	#0,d0
 	moveq	#1,d1
-.ob2:	move.b	d0,(a0,d1.w)
+.ob2:	move.w	d1,d2
+	add.w	d2,d2
+	move.b	d0,(a0,d2.w)
+	moveq	#7,d3
+	sub.b	d0,d3
+	move.b	d3,1(a0,d2.w)
 	add.w	d1,d1
 	addq.w	#1,d0
 	cmp.w	#8,d0
 	bne	.ob2
+	lea	ren_mask,a0		; per character: its run (column, first row, rows), or column -1
+	lea	ren_runs,a1
+	lea	ren_onebit,a2
+	move.w	#8192-1,d0
+.rr:	moveq	#0,d1			; the masks' OR
+	moveq	#8-1,d2
+.rr1:	or.b	(a0,d2.w),d1
+	dbf	d2,.rr1
+	move.w	d1,d2
+	add.w	d2,d2
+	move.b	1(a2,d2.w),d3		; one column: its number
+	bmi	.rno
+	moveq	#-1,d4			; the first row, the rows; the rows must follow each other
+	moveq	#0,d5
+	moveq	#0,d2
+.rr2:	tst.b	(a0,d2.w)
+	beq	.rr3
+	tst.w	d4
+	bpl	.rr4
+	move.w	d2,d4
+.rr4:	move.w	d2,d6
+	sub.w	d4,d6
+	cmp.w	d5,d6			; (a gap: not a run)
+	bne	.rno
+	addq.w	#1,d5
+.rr3:	addq.w	#1,d2
+	cmp.w	#8,d2
+	bne	.rr2
+	move.b	d3,(a1)+
+	move.b	d4,(a1)+
+	move.b	d5,(a1)+
+	clr.b	(a1)+
+	bra	.rnx
+.rno:	move.l	#-1,(a1)+
+.rnx:	addq.l	#8,a0
+	dbf	d0,.rr
 	lea	ren_ltab,a0		; the line offsets of the picture's rows -8 .. 295: (GUARD + r) * STRIDE + PIC_BYTE
 	move.l	#(GUARD-8)*STRIDE+PIC_BYTE,d0
 	move.w	#PIC_H+16-1,d1
@@ -159,6 +208,7 @@ render_frame:
 .pub:	ifd	TILE_FLAG
 	sf	tile_written		; (the flags are consumed)
 	sf	tile_written_fix
+	sf	tile_written_s
 	endc
 	ifd	TILE_ROWS
 	sf	tile_fix_all
@@ -2165,9 +2215,18 @@ ren_restore:
 	add.l	d0,a2
 	move.l	(a2)+,d7
 	bra	.sn
-.sl:	move.l	(a2)+,d0
-	move.l	(a0,d0.l),(a1,d0.l)
-	move.l	4(a0,d0.l),4(a1,d0.l)
+.sl:	move.l	(a2)+,d0		; (the top byte: further rows down)
+	move.l	d0,d1
+	rol.l	#8,d1
+	and.w	#$FF,d1
+	and.l	#$FFFFFF,d0
+	lea	(a0,d0.l),a3
+	lea	(a1,d0.l),a4
+.slr:	move.l	(a3),(a4)
+	move.l	4(a3),4(a4)
+	lea	STRIDE(a3),a3
+	lea	STRIDE(a4),a4
+	dbf	d1,.slr
 .sn:	subq.l	#1,d7
 	bpl	.sl
 	move.w	d6,d0			; the sprite rectangles (the Blitter: a pass of the lines, 3 groups x 4 planes)
@@ -2211,7 +2270,17 @@ ren_restore:
 ; get their pixels' indices from the bank's map (ren_bmap: the star banks cycle, so no converted characters), merged
 ; under the shown pixels' mask.
 ren_stars:
-	move.w	ren_cur,d0
+	ifd	TILE_FLAG
+	tst.b	tile_written_s		; star tiles written: the window scans (the warps write some every frame); none:
+	beq	.nw			; the lists of their non-empty cells, made once after the writing stopped
+	sf	ren_slok
+	bra	.go
+.nw:	tst.b	ren_slok
+	bne	.go
+	bsr	ren_star_lists
+	st	ren_slok
+	endc
+.go:	move.w	ren_cur,d0
 	mulu	#STAR_MAX*4+4,d0
 	lea	ren_sdmg,a0
 	add.l	d0,a0
@@ -2307,9 +2376,48 @@ ren_star_layer:
 	move.l	a5,ren_slay
 	move.l	ren_dst,a6
 	move.l	ren_sdw,a3		; (the damage list: the groups' offsets)
-	lea	ren_nonempty,a4
-	clr.w	ren_sc			; the cell column C
-.col:	move.w	ren_sc,d2		; the column's group in a line: (C >> 1) * 8, + 1 for an odd cell
+	move.l	ren_sbmap,a2
+	lea	ren_ne16,a4		; (non-empty by the whole tile word)
+	tst.b	ren_slok
+	beq	.scan
+	move.w	d5,d0			; the lists (no tile written since they were made): per non-empty cell, its
+	moveq	#13,d1			; column C = ly0 - ly and window column j = lx - lx0 (mod 64)
+	lsl.w	d1,d0
+	lea	ren_slist,a5
+	add.w	d0,a5
+	move.w	(a5)+,d6
+	bra	.lnx
+.le:	move.w	(a5)+,d0		; row ly * 64 + column lx
+	move.w	(a5)+,d3		; the character
+	move.w	ren_sly,d1
+	move.w	d0,d2
+	lsr.w	#6,d2
+	sub.w	d2,d1
+	and.w	#63,d1			; C
+	cmp.w	#CCOLS,d1
+	bhs	.lnx
+	moveq	#63,d7
+	and.w	d0,d7
+	sub.w	ren_slx0,d7
+	and.w	#63,d7			; j
+	cmp.w	#37,d7
+	bhs	.lnx
+	move.w	d1,ren_sc
+	move.w	d1,d0			; its group in a line: (C >> 1) * 8, + 1 for an odd cell
+	lsr.w	#1,d0
+	lsl.w	#3,d0
+	and.w	#1,d1
+	add.w	d1,d0
+	move.w	d0,ren_sgrp
+	bsr	.vis
+	bne	.full
+.lnx:	dbf	d6,.le
+	move.l	a3,ren_sdw
+	movem.l	(sp)+,d5-d6
+	rts
+.scan:	clr.w	ren_sc			; the cell column C
+.col:
+	move.w	ren_sc,d2		; the column's group in a line: (C >> 1) * 8, + 1 for an odd cell
 	move.w	d2,d0
 	lsr.w	#1,d0
 	lsl.w	#3,d0
@@ -2333,11 +2441,13 @@ ren_star_layer:
 	moveq	#37,d6
 .run:	move.w	d6,ren_srun
 	moveq	#0,d7			; j: the window's column
+	moveq	#0,d3			; (the tile word's index: its upper word 0)
 	subq.w	#1,d6
 .cell:	move.w	(a5)+,d3
-	and.w	#$3FFF,d3
-	tst.b	(a4,d3.w)
-	bne	.vis
+	tst.b	(a4,d3.l)
+	beq	.cnx
+	bsr	.vis
+	bne	.full
 .cnx:	addq.w	#1,d7
 	dbf	d6,.cell
 	cmp.w	#37,d7
@@ -2353,38 +2463,24 @@ ren_star_layer:
 .none:	movem.l	(sp)+,d5-d6
 	rts
 .vis:	; the cell: rows r0 = 8 j + ren_sr0b, columns 8C
+	and.w	#$3FFF,d3
 	movem.l	d6-d7/a4-a5,-(sp)
 	move.w	d7,d1
 	lsl.w	#3,d1
 	add.w	ren_sr0b,d1		; r0
-	moveq	#0,d0			; its pens
-	move.w	d3,d0
-	lsl.l	#6,d0
-	lea	ren_chr,a0
-	add.l	d0,a0
-	lea	ren_rowbits,a1
-	move.b	(a1,d3.w),d4		; the rows with pixels (bit 7: row 0)
-	moveq	#0,d0
-	move.w	d3,d0
-	lsl.l	#3,d0
-	lea	ren_mask,a1
-	add.l	d0,a1			; its masks
 	move.w	ren_sgrp,d7		; the cell's group in the line
-	move.l	ren_sbmap,a2
-	lea	ren_onebit,a4
 	moveq	#0,d6			; the cover: a layer above has pixels in one of the cell's two cell rows
-	tst.b	ren_scover
+	tst.b	ren_scover		; (ren_cellcov)
 	beq	.cf
-	lea	ren_cellcov,a5
+	lea	ren_rowcell(pc),a5
+	lea	ren_cellcov,a1
+	add.w	ren_sc,a1
 	move.w	d1,d2
 	bmi	.cf1
 	lsr.w	#3,d2
 	add.w	d2,d2
-	lea	ren_rowcell(pc),a5
 	move.w	(a5,d2.w),d2
-	add.w	ren_sc,d2
-	lea	ren_cellcov,a5
-	or.b	(a5,d2.w),d6
+	or.b	(a1,d2.w),d6
 .cf1:	move.w	d1,d2
 	addq.w	#7,d2
 	bmi	.cf
@@ -2392,12 +2488,196 @@ ren_star_layer:
 	bhs	.cf
 	lsr.w	#3,d2
 	add.w	d2,d2
-	lea	ren_rowcell(pc),a5
 	move.w	(a5,d2.w),d2
-	add.w	ren_sc,d2
-	lea	ren_cellcov,a5
-	or.b	(a5,d2.w),d6
-.cf:	moveq	#0,d3			; dr
+	or.b	(a1,d2.w),d6
+.cf:	moveq	#0,d0			; its pens
+	move.w	d3,d0
+	lsl.l	#6,d0
+	lea	ren_chr,a0
+	add.l	d0,a0
+	tst.b	d6			; a run (the character's pixels in one column, rows one after another) and no
+	bne	.rowsway		; cover: drawn down the column
+	move.w	d3,d2
+	add.w	d2,d2
+	add.w	d2,d2
+	lea	ren_runs,a5
+	add.w	d2,a5
+	moveq	#0,d0
+	move.b	(a5)+,d0		; its column
+	bmi	.rowsway
+	moveq	#0,d2
+	move.b	(a5)+,d2		; its first row
+	moveq	#0,d5
+	move.b	(a5)+,d5		; its rows
+	add.w	d2,d1			; the first picture row
+	add.w	d2,d2
+	add.w	d2,d2
+	add.w	d2,d2
+	add.w	d0,d2
+	add.w	d2,a0			; (its first pen)
+	tst.w	d1			; (clipped at the picture's top and bottom)
+	bpl	.top
+	add.w	d1,d5
+	ble	.cend
+	neg.w	d1
+	lsl.w	#3,d1
+	add.w	d1,a0
+	moveq	#0,d1
+.top:	move.w	d1,d2
+	add.w	d5,d2
+	sub.w	#PIC_H,d2
+	ble	.bot
+	sub.w	d2,d5
+	ble	.cend
+.bot:	add.w	d1,d1			; the first row's group: ren_ltab[r] + the cell's group
+	add.w	d1,d1
+	lea	ren_ltab+8*4,a5
+	move.l	(a5,d1.w),d1
+	add.w	d7,d1
+	move.l	d1,d2			; (the damage: rows - 1 in the top byte, the group)
+	and.w	#$FFFE,d2
+	move.l	d5,d4
+	subq.l	#1,d4
+	ror.l	#8,d4
+	or.l	d4,d2
+	move.l	d2,(a3)+
+	lea	(a6,d1.l),a5		; the byte of plane 0
+	moveq	#7,d2
+	sub.w	d0,d2			; the bit
+	subq.w	#1,d5
+.rl:	moveq	#0,d0
+	move.b	(a0),d0			; the pen
+	addq.l	#8,a0
+	move.b	(a2,d0.w),d0		; its index: the four planes' bits by a jump
+	add.w	d0,d0
+	move.w	.rtab(pc,d0.w),d0
+	jmp	.rtab(pc,d0.w)
+.rtab:
+	dc.w	.r0-.rtab
+	dc.w	.r1-.rtab
+	dc.w	.r2-.rtab
+	dc.w	.r3-.rtab
+	dc.w	.r4-.rtab
+	dc.w	.r5-.rtab
+	dc.w	.r6-.rtab
+	dc.w	.r7-.rtab
+	dc.w	.r8-.rtab
+	dc.w	.r9-.rtab
+	dc.w	.r10-.rtab
+	dc.w	.r11-.rtab
+	dc.w	.r12-.rtab
+	dc.w	.r13-.rtab
+	dc.w	.r14-.rtab
+	dc.w	.r15-.rtab
+.r0:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r1:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r2:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r3:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r4:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r5:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r6:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r7:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rnext
+.r8:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r9:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r10:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r11:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r12:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r13:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r14:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.r15:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rnext
+.rnext:	lea	STRIDE(a5),a5
+	dbf	d5,.rl
+	bra	.cend
+.rowsway:
+	lea	ren_rowbits,a1
+	move.b	(a1,d3.w),d4		; the rows with pixels (bit 7: row 0)
+	moveq	#0,d0
+	move.w	d3,d0
+	lsl.l	#3,d0
+	lea	ren_mask,a1
+	add.l	d0,a1			; its masks
+	lea	ren_onebit,a4
+	moveq	#0,d3			; dr
 .row:	add.b	d4,d4
 	bcc	.rn
 	move.w	d1,d5
@@ -2438,41 +2718,134 @@ ren_star_layer:
 	and.w	#$FFFE,d2
 	move.l	d2,(a3)+		; (the damage: the group)
 	lea	(a6,d5.l),a5		; the byte of plane 0
+	move.w	d0,d5
+	add.w	d5,d5
 	moveq	#0,d2
-	move.b	(a4,d0.w),d2		; one pixel: its bit, else -1
+	move.b	(a4,d5.w),d2		; one pixel: its bit (else -1) and column
 	bmi	.multi
-	move.w	d3,d5			; its pen: row * 8 + 7 - bit
-	lsl.w	#3,d5
-	addq.w	#7,d5
-	sub.w	d2,d5
+	move.b	1(a4,d5.w),d5
+	ext.w	d5
 	moveq	#0,d0
-	move.b	(a0,d5.w),d0
-	move.b	(a2,d0.w),d0		; its index
-	lsr.b	#1,d0
-	bcc	.a0
+	move.b	(a0,d5.w),d0		; its pen (a0: the row's pens)
+	move.b	(a2,d0.w),d0		; its index: the four planes' bits by a jump
+	add.w	d0,d0
+	move.w	.ptab(pc,d0.w),d0
+	jmp	.ptab(pc,d0.w)
+.ptab:
+	dc.w	.h0-.ptab
+	dc.w	.h1-.ptab
+	dc.w	.h2-.ptab
+	dc.w	.h3-.ptab
+	dc.w	.h4-.ptab
+	dc.w	.h5-.ptab
+	dc.w	.h6-.ptab
+	dc.w	.h7-.ptab
+	dc.w	.h8-.ptab
+	dc.w	.h9-.ptab
+	dc.w	.h10-.ptab
+	dc.w	.h11-.ptab
+	dc.w	.h12-.ptab
+	dc.w	.h13-.ptab
+	dc.w	.h14-.ptab
+	dc.w	.h15-.ptab
+.h0:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h1:
 	bset	d2,(a5)
-	bra	.b0
-.a0:	bclr	d2,(a5)
-.b0:	lsr.b	#1,d0
-	bcc	.a1
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h2:
+	bclr	d2,(a5)
 	bset	d2,2(a5)
-	bra	.b1
-.a1:	bclr	d2,2(a5)
-.b1:	lsr.b	#1,d0
-	bcc	.a2
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h3:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h4:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
 	bset	d2,4(a5)
-	bra	.b2
-.a2:	bclr	d2,4(a5)
-.b2:	lsr.b	#1,d0
-	bcc	.a3
+	bclr	d2,6(a5)
+	bra	.rn
+.h5:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h6:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h7:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bclr	d2,6(a5)
+	bra	.rn
+.h8:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
 	bset	d2,6(a5)
 	bra	.rn
-.a3:	bclr	d2,6(a5)
+.h9:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h10:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h11:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bclr	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h12:
+	bclr	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h13:
+	bset	d2,(a5)
+	bclr	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h14:
+	bclr	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
+	bra	.rn
+.h15:
+	bset	d2,(a5)
+	bset	d2,2(a5)
+	bset	d2,4(a5)
+	bset	d2,6(a5)
 	bra	.rn
 .multi:	movem.l	d1/d3-d4/a1/a4,-(sp)	; several: their indices spread into the 4 plane bytes, merged under the mask
-	move.w	d3,d2
-	lsl.w	#3,d2
-	lea	(a0,d2.w),a1		; the row's pens
+	move.l	a0,a1			; the row's pens
 	lea	ren_spread(pc),a4
 	moveq	#0,d5
 	moveq	#7,d1			; (the shift: 7 - column)
@@ -2501,15 +2874,53 @@ ren_star_layer:
 	movep.l	d2,0(a5)
 	movem.l	(sp)+,d1/d3-d4/a1/a4
 .rn:	addq.w	#1,d3
+	addq.l	#8,a0			; (the next row's pens)
 	tst.b	d4
 	bne	.row
-	movem.l	(sp)+,d6-d7/a4-a5
-	move.l	a3,d0			; (the damage list full: no more stars)
+.cend:	movem.l	(sp)+,d6-d7/a4-a5
+	move.l	a3,d0			; (the damage list full: NE, no more stars)
 	sub.l	ren_sdp,d0
 	cmp.l	#STAR_MAX*4-32,d0
-	blo	.cnx
-	move.l	a3,ren_sdw
+	bhs	.vfull
+	moveq	#0,d0
+	rts
+.vfull:	moveq	#1,d0
+	rts
+.full:	move.l	a3,ren_sdw
 	movem.l	(sp)+,d5-d6
+	rts
+
+; the lists of the non-empty cells of layers 0-2 (ren_slist + layer * 8192: count.w, then (row * 64 + column).w,
+; (character).w; at most 2047)
+ren_star_lists:
+	movem.l	d0-d7/a0-a4,-(sp)
+	lea	vio+VIO_TILE,a0
+	lea	ren_slist,a2
+	lea	ren_ne16,a4
+	moveq	#3-1,d5
+.lay:	move.l	a2,a3
+	addq.l	#2,a2
+	moveq	#0,d6			; the cell
+	move.w	#2047,d4
+	moveq	#0,d1
+	move.w	#4096-1,d7
+.b:	move.w	(a0)+,d1
+	tst.b	(a4,d1.l)
+	beq	.bn
+	tst.w	d4
+	beq	.bn
+	subq.w	#1,d4
+	move.w	d6,(a2)+
+	and.w	#$3FFF,d1
+	move.w	d1,(a2)+
+.bn:	addq.w	#1,d6
+	dbf	d7,.b
+	move.w	#2047,d0
+	sub.w	d4,d0
+	move.w	d0,(a3)
+	lea	8192(a3),a2
+	dbf	d5,.lay
+	movem.l	(sp)+,d0-d7/a0-a4
 	rts
 
 ren_adj:	dc.b	4,2,1,0
@@ -2785,12 +3196,20 @@ ren_spr_geom:
 	rts
 
 ; ---- the sprite cache: ren_skey / ren_scol -> a0 = the converted image (made now when missing) ----
+	ifd	REN_SB2
+CH_SIZE = 10+64
+	else
+CH_SIZE = 10
+	endc
 ren_cache_clear:
 	lea	ren_hash,a0
 	move.w	#HASH_N-1,d0
 .c:	clr.l	(a0)+
 	dbf	d0,.c
 	move.l	#ren_pool,ren_pool_ptr
+	ifd	REN_SB2
+	move.l	#ren_sb2_pool,ren_sb2_ptr
+	endc
 	rts
 
 ren_cache_get:
@@ -2813,13 +3232,13 @@ ren_cache_get:
 	move.w	ren_scol,d3
 	cmp.w	8(a0),d3
 	bne	.nx
-	lea	10(a0),a0		; (the image after the header)
+	lea	CH_SIZE(a0),a0		; (the image after the header)
 	rts
 .nx:	move.l	4(a0),a0
 	bra	.find
-.new:	move.l	ren_pool_ptr,a0		; header: key.l, next.l, colour.w; the image: rows.w, then 20 bytes a row
-	move.l	a0,d3
-	add.l	#10+2+32*20,d3
+.new:	move.l	ren_pool_ptr,a0		; header: key.l, next.l, colour.w (REN_SB2: the 16 shifts' plans); the image:
+	move.l	a0,d3			; rows.w, then 20 bytes a row
+	add.l	#CH_SIZE+2+32*20,d3
 	cmp.l	#ren_pool+POOL_SIZE,d3
 	bls	.fit
 	movem.l	d0/a1,-(sp)
@@ -2830,7 +3249,13 @@ ren_cache_get:
 	move.l	(a1),4(a0)
 	move.l	a0,(a1)
 	move.w	ren_scol,8(a0)
-	lea	10(a0),a0
+	ifd	REN_SB2
+	moveq	#16-1,d3
+	lea	10(a0),a1
+.cp:	clr.l	(a1)+
+	dbf	d3,.cp
+	endc
+	lea	CH_SIZE(a0),a0
 	move.l	a0,-(sp)
 	bsr	ren_convert		; a0 -> past the image
 	move.l	a0,ren_pool_ptr
@@ -3034,6 +3459,216 @@ ren_convert:
 	bne	.row
 	rts
 
+	ifd	REN_SB2
+; ---- the stefastbobs2 method (docs/sprite-preparation.md), a prototype: REN_SB2 ----
+; Per converted image and shift a plan, made on first use into ren_sb2_pool: the pieces (a row with pixels: rows are
+; at most 32 pixels, so a chain is the row, its holes zero bits of the masks) ordered by their shifted end masks; the
+; pieces' 4 plane words in that order (the reordered source: the Blitter's source address runs on); and code for the
+; shift: per piece the end masks it changes (move.w #m,$8a28.w ...), the destination's low word stepped to the piece
+; (addi.w #d,(a4): after a pass the destination is 8 bytes on), the Y count (move.w d6,(a5)) and the start
+; (move.b d7,(a6)).  Shift 0: 2-word passes (END1, END3), else 3 words with NFSR.  Plan: data.l, the first piece's
+; row offset.w, the code.
+; a0 = the image's first row record, d7.w = its rows, d6.w = the shift, a1 = the destination of its row 0
+ren_sb2_draw:
+	lea	-2-64(a0),a2		; the plans of the image
+	move.w	d6,d0
+	lsl.w	#2,d0
+	move.l	(a2,d0.w),d1
+	bne	.have
+	movem.l	d0/a0-a2,-(sp)
+	bsr	ren_sb2_make		; d1 = the plan
+	movem.l	(sp)+,d0/a0-a2
+	move.l	d1,(a2,d0.w)
+.have:	move.l	d1,a2
+	lea	$ffff8a20.w,a3
+	move.w	#2,(a3)+		; source X increment
+	tst.w	d6
+	bne	.s3
+	move.w	#2,(a3)+		; source Y increment (2 words a plane)
+	move.l	(a2),(a3)+		; source
+	addq.l	#6,a3
+	move.w	#8,(a3)+		; destination X / Y increment
+	move.w	#-6,(a3)+
+	moveq	#2,d0
+	moveq	#0,d2
+	bra	.set
+.s3:	clr.w	(a3)+			; (NFSR: the last word is neither read nor stepped)
+	move.l	(a2),(a3)+
+	addq.l	#6,a3
+	move.w	#8,(a3)+
+	move.w	#-14,(a3)+
+	moveq	#3,d0
+	moveq	#$40,d2
+	or.b	d6,d2
+.set:	moveq	#0,d1			; the destination: row 0 + the first piece's row offset
+	move.w	4(a2),d1
+	add.l	a1,d1
+	move.l	d1,(a3)+
+	move.w	d0,(a3)+		; X count
+	move.w	#$0203,$ffff8a3a.w
+	move.b	d2,$ffff8a3d.w
+	lea	$ffff8a34.w,a4		; (the destination's low word)
+	lea	$ffff8a38.w,a5
+	lea	$ffff8a3c.w,a6
+	moveq	#4,d6
+	move.l	#$c0,d7
+	jmp	6(a2)			; (its rts returns from here)
+
+; a0 = the image's first row record, d7.w = rows, d6.w = the shift -> d1.l = a new plan in ren_sb2_pool (a full pool:
+; the whole sprite cache is cleared, the plan made at its start)
+ren_sb2_make:
+	movem.l	d2-d7/a0-a6,-(sp)
+	lea	ren_sb2_pc,a3		; the pieces: w0, w1, w2, the row (8 bytes each)
+	moveq	#0,d5			; how many
+	moveq	#0,d4			; the row
+.pc:	move.l	(a0),d0			; the row's mask
+	beq	.pn
+	tst.w	d6
+	bne	.p3
+	swap	d0			; (shift 0: END1 the first word, END3 the second)
+	move.w	d0,(a3)+
+	clr.w	(a3)+
+	swap	d0
+	move.w	d0,(a3)+
+	bra	.pr
+.p3:	move.l	d0,d1			; w0 = mask >> (16 + s), w1 = (mask >> s) & $FFFF, w2 = (mask << (16 - s)) & $FFFF
+	lsr.l	d6,d1
+	swap	d1
+	move.w	d1,(a3)+
+	swap	d1
+	move.w	d1,(a3)+
+	moveq	#16,d3
+	sub.w	d6,d3
+	lsl.l	d3,d0
+	move.w	d0,(a3)+
+.pr:	move.w	d4,(a3)+
+	addq.w	#1,d5
+.pn:	lea	20(a0),a0
+	addq.w	#1,d4
+	cmp.w	d7,d4
+	bne	.pc
+	; the order: by the masks (insertion sort, stable)
+	lea	ren_sb2_pc,a3
+	moveq	#1,d4
+.so:	cmp.w	d5,d4
+	bhs	.sd
+	move.w	d4,d3
+.si:	tst.w	d3
+	beq	.sn
+	move.w	d3,d0
+	lsl.w	#3,d0
+	lea	(a3,d0.w),a4		; this one
+	lea	-8(a4),a5		; the one before
+	move.l	(a5),d1
+	cmp.l	(a4),d1
+	bhi	.sw
+	bne	.sn
+	move.w	4(a5),d1
+	cmp.w	4(a4),d1
+	bls	.sn
+.sw:	move.l	(a4),d0			; swap
+	move.l	(a5),(a4)
+	move.l	d0,(a5)
+	move.l	4(a4),d0
+	move.l	4(a5),4(a4)
+	move.l	d0,4(a5)
+	subq.w	#1,d3
+	bra	.si
+.sn:	addq.w	#1,d4
+	bra	.so
+.sd:	; the room: a header (6), per piece up to 3 x 6 + 4 + 4 bytes of code and 16 of data, the rts
+	move.w	d5,d0
+	mulu	#26+16,d0
+	add.l	#6+2+2,d0
+	move.l	ren_sb2_ptr,a2
+	lea	(a2,d0.l),a1
+	cmp.l	#ren_sb2_pool+REN_SB2_POOL,a1
+	bls	.fit
+	bsr	ren_cache_clear		; (pool full: everything converted again; this image's records stay readable)
+	move.l	ren_sb2_ptr,a2
+.fit:	move.l	a2,d1			; the plan
+	lea	6(a2),a1		; its code
+	moveq	#-1,d2			; the masks set (none: all differ)
+	moveq	#-1,d3
+	moveq	#-1,d7
+	lea	ren_sb2_pc,a3
+	move.w	d5,d4
+	subq.w	#1,d4
+	bmi	.none			; (no pixels: just rts)
+	moveq	#0,d6			; the previous piece's row offset
+.em:	move.w	6(a3),d0		; the row's offset
+	mulu	#STRIDE,d0
+	cmp.l	#ren_sb2_pc,a3
+	bne	.del
+	move.w	d0,4(a2)		; (the first: where the destination starts; all its masks written)
+	move.w	d0,d6
+	move.w	(a3),d2
+	move.w	2(a3),d3
+	move.w	4(a3),d7
+	move.w	#$31FC,(a1)+
+	move.w	d2,(a1)+
+	move.w	#$8A28,(a1)+
+	move.w	#$31FC,(a1)+
+	move.w	d3,(a1)+
+	move.w	#$8A2A,(a1)+
+	move.w	#$31FC,(a1)+
+	move.w	d7,(a1)+
+	move.w	#$8A2C,(a1)+
+	bra	.go
+.del:	move.w	d0,d1
+	sub.w	d6,d1
+	subq.w	#8,d1			; (after a pass the destination is 8 on)
+	beq	.msk
+	move.w	#$0654,(a1)+		; addi.w #d,(a4)
+	move.w	d1,(a1)+
+.msk:	move.w	d0,d6
+	move.w	(a3),d0
+	cmp.w	d2,d0
+	beq	.m2
+	move.w	d0,d2
+	move.w	#$31FC,(a1)+		; move.w #w0,$8a28.w
+	move.w	d0,(a1)+
+	move.w	#$8A28,(a1)+
+.m2:	move.w	2(a3),d0
+	cmp.w	d3,d0
+	beq	.m3
+	move.w	d0,d3
+	move.w	#$31FC,(a1)+		; END2
+	move.w	d0,(a1)+
+	move.w	#$8A2A,(a1)+
+.m3:	move.w	4(a3),d0
+	cmp.w	d7,d0
+	beq	.go
+	move.w	d0,d7
+	move.w	#$31FC,(a1)+		; END3
+	move.w	d0,(a1)+
+	move.w	#$8A2C,(a1)+
+.go:	move.w	#$3A86,(a1)+		; move.w d6,(a5): the Y count
+	move.w	#$1C87,(a1)+		; move.b d7,(a6): start
+	addq.l	#8,a3
+	dbf	d4,.em
+.none:	move.w	#$4E75,(a1)+		; rts
+	move.l	a1,(a2)			; the data: the pieces' planes in that order
+	lea	ren_sb2_pc,a3
+	move.l	6*4(sp),a0		; (the image's first row record: the saved a0)
+	move.w	d5,d4
+	subq.w	#1,d4
+	bmi	.dd
+.dc:	move.w	6(a3),d0
+	mulu	#20,d0
+	lea	4(a0,d0.l),a4
+	move.l	(a4)+,(a1)+
+	move.l	(a4)+,(a1)+
+	move.l	(a4)+,(a1)+
+	move.l	(a4)+,(a1)+
+	addq.l	#8,a3
+	dbf	d4,.dc
+.dd:	move.l	a1,ren_sb2_ptr
+	move.l	a2,d1			; the plan
+	movem.l	(sp)+,d2-d7/a0-a6
+	rts
+	endc
+
 ; ---- a sprite onto the buffer: a0 = its image, ren_sr0 / ren_sc0 the picture row / column of its top left ----
 ; A HOG pass a line: X count 3 (the groups at x and the two after), Y count 4 (the planes), the source the row's
 ; plane longs (16-bit words, the skew shifts them), the end masks the row's opaque mask shifted; groups left of the
@@ -3065,7 +3700,13 @@ ren_draw:
 .g3:	cmp.w	#14,d1
 	ble	.g4
 	moveq	#0,d4
-.g4:	move.w	d2,ren_em1
+.g4:
+	ifd	REN_NOCLIP
+	moveq	#-1,d2			; (the test's check: no clipping at the side edges)
+	moveq	#-1,d3
+	moveq	#-1,d4
+	endc
+	move.w	d2,ren_em1
 	move.w	d3,ren_em2
 	move.w	d4,ren_em3
 	move.w	ren_sr0,d2		; the destination of the first row
@@ -3084,7 +3725,28 @@ ren_draw:
 	clr.w	(a2)+
 	move.l	a2,ren_dmw
 	addq.l	#1,(a3)
-.full:	lea	$ffff8a20.w,a3		; the Blitter: source X inc 2, Y inc 0, destination X inc 8, Y inc -14 (the next plane)
+.full:
+	ifd	REN_SB2
+	tst.b	ren_order		; (the arcade's order, a clipped sprite, a 64 KB crossing: the row way)
+	bne	.rows
+	move.w	ren_em1,d0
+	and.w	ren_em2,d0
+	and.w	ren_em3,d0
+	addq.w	#1,d0
+	bne	.rows
+	move.w	d7,d0
+	mulu	#STRIDE,d0
+	add.w	#24,d0
+	move.l	a1,d1
+	and.l	#$FFFF,d1
+	add.l	d0,d1
+	cmp.l	#$10000,d1
+	bhs	.rows
+	bsr	ren_sb2_draw
+	rts
+.rows:
+	endc
+	lea	$ffff8a20.w,a3		; the Blitter: source X inc 2, Y inc 0, destination X inc 8, Y inc -14 (the next plane)
 	move.w	#2,(a3)+
 	clr.w	(a3)+			; (NFSR: the last word is neither read nor stepped; the next plane follows)
 	addq.l	#4,a3
@@ -3300,7 +3962,13 @@ ren_cellcov:	ds.b	NCELLS		; (the cells whose cover planes are not 0)
 ren_npend:	ds.w	REN_NBUF	; (per buffer: cells composed since it was drawn)
 ren_nonempty:	ds.b	16384		; (characters 8192 on: beyond the ROMs, empty)
 ren_rowbits:	ds.b	8192
-ren_onebit:	ds.b	256
+ren_onebit:	ds.b	512
+ren_runs:	ds.l	8192
+ren_slist:	ds.b	3*8192
+ren_slok:	ds.b	1
+	even
+
+ren_ne16:	ds.b	65536		; (ren_nonempty by the whole tile word)
 ren_ltab:	ds.l	PIC_H+16
 ren_ctab:	ds.w	PIC_H
 ren_bmap:	ds.b	8*256
@@ -3323,4 +3991,12 @@ ren_taken:	ds.b	PIC_H*CCOLS
 ren_sdmg:	ds.b	REN_NBUF*(STAR_MAX*4+4)
 ren_dmg:	ds.b	REN_NBUF*(DMG_MAX*8+4)
 ren_pool:	ds.b	POOL_SIZE
+	ifd	REN_SB2
+	ifnd	REN_SB2_POOL
+REN_SB2_POOL = 96*1024
+	endc
+ren_sb2_ptr:	ds.l	1
+ren_sb2_pc:	ds.b	32*8
+ren_sb2_pool:	ds.b	REN_SB2_POOL
+	endc
 ren_bufs:	ds.b	BUF_SIZE*(REN_NBUF+1)
