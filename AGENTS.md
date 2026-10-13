@@ -17,7 +17,10 @@ These rules apply to every game port and every sprite fallback path.
 - Try the reordered-source method from stefastbobs2 for every game's sprites:
   group rows with identical opaque masks, prepare shift masks, reuse Blitter state
   and advancing source addresses. Preserve transparent holes and priority order.
-  Measure CPU plus Blitter bus cycles before retaining an optimization.
+  Measure CPU plus Blitter bus cycles before retaining an optimization. The full
+  preparation (opaque runs, chains, mask order, reordered source, generated code per
+  shift) and each port's result are in `docs/sprite-preparation.md`: prototype it and
+  measure, do not decide from estimates; add your port's result there.
 - Use short HOG Blitter passes, at most 256 bus cycles, with the shared early,
   synchronized border handlers. Verify timer timing in the pinned Hatari build.
 - Verify sprites at every edge (clipped or whole), all 16 horizontal shifts, transparent holes,
