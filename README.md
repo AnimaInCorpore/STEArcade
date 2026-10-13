@@ -5,6 +5,11 @@ Static translation of Z80 and 6809 arcade programs to 68000 code, with a Blitter
 checked against it in lock-step, and a runtime that delivers the arcade's interrupts at the vertical blank and draws the
 arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, masks as end masks).
 
+This project is developed with AI coding agents (Claude Code): much of the translators, runtimes, tools and
+documentation was written by them under the author's direction.  Correctness is checked by testing rather than by
+trust: every translation runs in lock-step against its reference machine, and the pictures are compared with the
+reference renderer and MAME.
+
 | screenshot (Hatari) | game | CPUs |
 |---|---|---|
 | <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 |
