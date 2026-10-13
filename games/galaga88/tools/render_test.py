@@ -53,7 +53,9 @@ h_wait:	bra.s	h_wait
 	even
 tile_written:	ds.b	1
 tile_written_fix:	ds.b	1
+tile_fix_all:	ds.b	1
 	even
+tile_fix_rows:	ds.b	56
 vio:	ds.b	$28000
 h_stack:	ds.b	8192
 h_stack_top:
@@ -81,7 +83,7 @@ def build_harness(defines=()):
     (BUILD / "ren_harness.s").write_text(HARNESS)
     obj, prg = BUILD / (tag + ".o"), BUILD / (tag + ".PRG")
     cmd = [VASM, "-Fvobj", "-quiet", "-nowarn=2047", "-I", str(BUILD), "-I", str(RT_INCLUDE), "-I",
-           str(src_dir("galaga88")), "-DSIM=1", "-DTILE_FLAG=1"] + ["-D" + d for d in defines] + [
+           str(src_dir("galaga88")), "-DSIM=1", "-DTILE_FLAG=1", "-DTILE_ROWS=1"] + ["-D" + d for d in defines] + [
            "-o", str(obj), str(BUILD / "ren_harness.s")]
     for step in (cmd, [VLINK, "-b", "ataritos", "-s", "-o", str(prg), "-M" + str(BUILD / (tag + ".map")), str(obj)]):
         r = subprocess.run(step, capture_output=True, text=True)
@@ -165,6 +167,13 @@ class Harness:
                 self.mem.w8(self.sym["tile_written"], 0xFF)
             if v[0x7000:] != old[0x7000:]:
                 self.mem.w8(self.sym["tile_written_fix"], 0xFF)
+                for k, base in enumerate((0x7010, 0x7810)):       # (TILE_ROWS: the rows that changed)
+                    for r in range(28):
+                        a = base + 72 * r
+                        if v[a:a + 72] != old[a:a + 72]:
+                            self.mem.w8(self.sym["tile_fix_rows"] + 28 * k + r, 0xFF)
+                if v[0x7000:0x7010] != old[0x7000:0x7010] or v[0x7010 + 72 * 28:0x7810] != old[0x7010 + 72 * 28:0x7810]:
+                    self.mem.w8(self.sym["tile_fix_all"], 0xFF)
         self._vram = v
         vio = self.sym["vio"]
         self.mem.w_block(vio, c116_image(st))
@@ -221,7 +230,28 @@ def main():
     ap.add_argument("--png", default="")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--profile", type=int, default=-1, help="a state (play): render_frame's cycles by routine")
+    ap.add_argument("--profile-range", default="", help="A-B: every --every-th play state from A to B, the cycles by "
+                    "routine summed")
     args = ap.parse_args()
+    if args.profile_range:
+        states = pickle.load(open(STATES, "rb"))
+        a, b = map(int, args.profile_range.split("-"))
+        h = Harness(args.defines)
+        h.put_state(states["play"][a])
+        h.call("render_init")
+        tot = {}
+        n = 0
+        for k in range(a, b, args.every):
+            h.put_state(states["play"][k])
+            for name, c in h.profile("render_frame").items():
+                tot[name] = tot.get(name, 0) + c
+            h.call("render_vbl")
+            n += 1
+        allc = sum(tot.values())
+        print("%d pictures, %dk cycles a picture" % (n, allc // n // 1000))
+        for name, c in sorted(tot.items(), key=lambda x: -x[1])[:25]:
+            print("%-24s %8dk a picture  %4.1f%%" % (name, c // n // 1000, 100 * c / allc))
+        return 0
     if args.profile >= 0:
         states = pickle.load(open(STATES, "rb"))
         h = Harness(args.defines)
@@ -250,14 +280,18 @@ def main():
         h.put_state(st0)
         h.call("render_init")
         cyc = []
+        classes = {}
         errs = []
         bad = black = 0
         for n, k in enumerate(idxs):
             st = states[name][k]
             h.put_state(st)
+            ch0 = h.r32("ren_choices")
             c, b = h.call("render_frame")
             h.call("render_vbl")
             cyc.append(c + b)
+            kind = "choice" if h.r32("ren_choices") != ch0 else "big" if c + b > 1500000 else "normal"
+            classes.setdefault(kind, []).append(c + b)
             pic = h.shown()
             band = np.concatenate([pic[:, :48], pic[:, 272:]], 1)
             if band.any():
@@ -296,10 +330,15 @@ def main():
                 im[:, PIC_W + 8:] = pal[np.where(ref < 0, len(pal) - 1, ref)]
                 Image.fromarray(im).resize((im.shape[1] * 2, PIC_H * 2), Image.NEAREST).save(BUILD / ("render_%s_%d.png" % (name, k)))
         cyc = sorted(cyc)
+        print("   choices: new scenes %d (priorities %d, layer 5's bank %d, its tiles %d), rested %d" % (
+            h.r32("ren_ch_scene"), h.r32("ren_sc_pri"), h.r32("ren_sc_bank5"), h.r32("ren_sc_tiles"), h.r32("ren_ch_rest")))
         print("%s: %d pictures, %d differ, %d black, %d colour choices; colour error %.4f; cycles a picture: median %dk, "
               "90%% %dk, max %dk (least %dk)" % (
                   name, len(idxs), bad, black, h.r32("ren_choices"), float(np.mean(errs)) if errs else 0,
                   cyc[len(cyc) // 2] // 1000, cyc[int(len(cyc) * 0.9)] // 1000, cyc[-1] // 1000, cyc[0] // 1000))
+        tot = sum(cyc)
+        print("   total %dM cycles: %s" % (tot // 1000000, ", ".join("%s %d pictures %dM (%d%%)" % (
+            k, len(v), sum(v) // 1000000, 100 * sum(v) // max(tot, 1)) for k, v in sorted(classes.items()))))
         total_bad += bad
     return 1 if total_bad else 0
 

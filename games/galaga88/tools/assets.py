@@ -13,7 +13,7 @@ render_raw:
 Files:
   ren_chr.bin   8192 characters x 64 bytes: R[dr][dc] (8 bit pens), row by row
   ren_mask.bin  8192 x 8 bytes: per row dr the opaque pixels, bit 7 = column 0
-  ren_spr.bin   2048 sprites x 512 bytes: S[dr][dc] (4 bit pens, two a byte, the left one high), row by row
+  ren_spr.bin   1536 sprites x 512 bytes: S[dr][dc] (4 bit pens, two a byte, the left one high), row by row
   ren_pal.bin   16 STE colour words (index 0 black): a fixed palette from the recorded reference pictures
                 (build/galaga88/render_states.pkl; the first milestone, before the colours are chosen per scene)
   ren_lut.bin   4096 bytes: the index of an arcade colour by its 4 bit channels (R << 8 | G << 4 | B), the nearest in
@@ -34,7 +34,7 @@ from namcos1 import NamcoS1
 from paths import build_dir
 
 NCHR = 8192
-NSPR = 2048
+NSPR = 1536                      # (the six 128 KB sprite ROMs; render.s draws codes beyond as pen 0)
 
 
 def turned():

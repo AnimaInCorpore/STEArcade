@@ -58,33 +58,44 @@ Measured on the reference: all six layers are on in play: layers 0-2 the star fi
 non-empty cells of 4096 a layer, ~1-2 opaque pixels a cell), layer 3 the planets and the space station, fixed layer 4
 the HUD (priority 6), fixed layer 5 the backdrop (opaque, priority 1); ~250 distinct pens a picture.
 
-* **Background** (layers 3-5): composed per 8 x 8 cell into a clean buffer when their tiles (the writers' flags),
-  layer 3's scroll (its cells before and after), a bank (that layer's cells), the priorities or the colours change.
-  A cell line is the merge of its layers' converted character lines (ren_cimgs: 8 planar longs per character and
-  bank, made on first use, `movep.l` into the planes).  Cover planes (1 bit a pixel) of layers 3 and 4 for the stars
-  and sprites.
-* **Stars** (layers 0-2): plotted per picture from lists of their non-empty cells (rebuilt when their tiles change),
-  only the rows with pixels, under the layers above them; their words restored from the clean buffer later.
-* **Sprites**: converted per (code, part, flips, colour) into a cache (planar rows with their masks), one HOG Blitter
-  pass a line (4 planes, X count 3, the row's shifted mask as end masks; groups outside the picture get end mask 0;
-  whole into 32 guard lines at the top and bottom).  Sprites of a priority below layer 3 or 4 (the '88 emblem under
-  the HUD layer) lose the pixels those layers cover; a hidden sprite pixel still takes the pixel from the entries the
-  arcade draws after it (the emblem's dissolve), so with such a sprite on the picture the entries are painted in the
-  arcade's order with a taken plane.
+* **Background** (layers 3-5): composed per 8 x 8 cell into a clean buffer when their tiles (the writers' flags;
+  the fixed layers' rows, TILE_ROWS), layer 3's scroll or bank (its non-empty cells before and after), layer 4's bank,
+  the stacking order of the enabled layers or the colours change.  Per cell the layers' characters (ren_cell_chars),
+  a direct path for one layer of one character (its converted lines under its masks), else the merge of the layers'
+  converted character lines (ren_cimgs: a 2-way cache of 8 planar longs per character and bank, `movep.l` into the
+  planes).  Cover planes (1 bit a pixel) of layers 3 and 4 for the stars and sprites, a flag per cell.
+* **Stars** (layers 0-2): each layer's visible window of tile RAM scanned per picture (37 x 28 words; their tiles
+  change in the warps), the rows with pixels of its non-empty cells plotted under the layers above (a single pixel:
+  4 bset / bclr; several: their spread indices merged with `movep.l`), colours from the bank's index map (the star
+  banks cycle); their words restored from the clean buffer later.
+* **Sprites**: converted per (code, part, flips, colour) into a cache (a row's pens unpacked in column order, 8 at a
+  time through the colour's spread table), one HOG Blitter pass a line (4 planes, X count 3, the row's shifted mask
+  as end masks; groups outside the picture get end mask 0; whole into 32 guard lines at the top and bottom).
+  Sprites of a priority below layer 3 or 4 (the '88 emblem under the HUD layer) lose the pixels those layers cover;
+  a hidden sprite pixel still takes the pixel from the entries the arcade draws after it (the emblem's dissolve), so
+  with such a sprite on the picture the entries are painted in the arcade's order with a taken plane.
 * **Colours**: 15 + black per scene (as Splatterhouse: samples of the background, the stars and the sprites, weighted
-  by the root of their counts, a median cut and 4 rounds of k-means in Oklab); a pen's index is the nearest centre of
+  by the root of their counts, a median cut and 3 rounds of k-means in Oklab); a pen's index is the nearest centre of
   its colour when they were chosen; an index's STE colour is the current colour of a representative pen (fades and
-  colour cycling cost nothing).  A new scene (a new backdrop, priorities) shows black until the palette rests.
-* Restores: the cells composed since (copied from the clean buffer), the star words, the sprite rectangles (Blitter).
+  colour cycling cost nothing).  Chosen again: a new scene (a new backdrop: layer 5's bank or 64+ of its tiles;
+  black until the palette rests 2 pictures), or every 16 pictures when the colours on the picture (126 background
+  cells, the sprites) fit clearly worse than right after the choice (the mean Oklab distance above 1.25 x + 3: the
+  space station fading in after a choice).
+* Restores: the cells composed since (per 16-pixel group, or the whole picture by the Blitter after a full
+  composition), the star words, the sprite rectangles (Blitter).
 
 Test: `tools/states.py` (records 1500 play + 500 attract states once), `tools/render_test.py [--play A-B]
-[--attract A-B] [--every N] [--png N] [--profile N]`: every pixel's index against the reference's pen by the
-renderer's own mapping, the side bands clean, the colour error, cycles.  2026-10-13: play 1500 / 1500 and attract
-500 / 500 pictures exact; colour error 0.023 (play) / 0.029 (attract).
+[--attract A-B] [--every N] [--png N] [--profile N] [--profile-range A-B]`: every pixel's index against the
+reference's pen by the renderer's own mapping, the side bands clean, the colour error (Oklab), cycles by kind of
+picture, the reasons of the colour choices.  2026-10-13: play 1500 / 1500 and attract 500 / 500 exact (an earlier
+version); the final one every 3rd state: play 500 / 500, attract 167 / 167 exact; colour error 0.028 (play) /
+0.032 (attract).
 
-Hatari (BENCH, arcade frames 600-1600, a version before the compose speed-ups): 6.4 arcade frames/s, 3.2 pictures/s;
-the renderer takes ~89% of the time (colour choices and layer 3's changes recompose hundreds of cells), the logic
-~0.8 VBL an arcade frame.
+Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 9.0 arcade frames/s, 3.2 -> 4.5 pictures/s
+(a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame, the renderer the rest.  Costs (Musashi,
+play 300-700, every 2nd state): a picture ~1.3M cycles (median; the warps' star streaks ~0.6-0.9M of it), a colour
+choice ~12M (the full composition ~3.3M of it).
 
-Open: speed (recomposes: colour choices ~15M cycles, layer 3 bank / scroll changes; a picture ~0.3-0.5M); the last
-11 rows; the HUD palette; sound; the stefastbobs2 sprite method still to be prototyped and measured (AGENTS.md).
+Open: speed (stars in the warps, layer 3's bank / scroll changes, colour choices, the logic's ~130k cycles a
+frame); the last 11 rows; the HUD palette; sound; the stefastbobs2 sprite method still to be prototyped and measured
+(AGENTS.md).

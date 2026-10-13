@@ -25,6 +25,7 @@ TA_NOPS = 84
 BD_PALETTE = 0
 MAX_BEHIND = 3
 TILE_FLAG = 1				; (render.s compares tile RAM only after the translated writers set the flags)
+TILE_ROWS = 1				; (and the fixed layers' rows they wrote only)
       ifnd PIC_EVERY
 PIC_EVERY = 2				; (arcade frames a picture at most)
       endc
