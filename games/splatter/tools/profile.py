@@ -19,15 +19,22 @@ def main():
     ap.add_argument("--start", type=int, default=600)
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--top", type=int, default=40)
+    ap.add_argument("--pcs", type=int, default=0)
     args = ap.parse_args()
     prof = collections.Counter()
+    pch = collections.Counter()                 # (runtime cycles per 68000 pc: --pcs N prints the top N)
     counts = collections.Counter()
     state = {}
 
     def stepper(cpu, mem, sym, labels, stop):
         lv = [v for v, k in labels]
-        names = sorted((v, k) for k, v in sym.items())
+        import re
+        from paths import build_dir
+        absolute = {m[1] for m in re.finditer(r"0x[0-9a-f]+ (\S+): local abs",
+                                               (build_dir("splatter") / "splatter_sim.map").read_text())}
+        names = sorted((v, k) for k, v in sym.items() if k not in absolute)
         nv = [v for v, k in names]
+        state["names"] = names
         total = 0
         while True:
             pc = cpu.r_pc()
@@ -43,6 +50,7 @@ def main():
                     counts[labels[i][1]] += 1
             elif j >= 0:
                 prof["rt:" + names[j][1]] += n
+                pch[pc] += n
     logic_test.PROFILE = dict(start=args.start, frames=args.frames, stepper=stepper)
     logic_test.main_args = ["%d" % (args.start + args.frames), "--seed", str(args.seed)]
     sys.argv = [sys.argv[0]] + logic_test.main_args
@@ -87,6 +95,12 @@ def main():
     for k, n in kinds.most_common(30):
         c = kcount[k]
         print("  %-12s %5.1f%% %8d %7.1f" % (k, 100 * n / total, c, n / c if c else 0))
+    if args.pcs:
+        print("runtime by 68000 pc (offset from the program's start):")
+        for pc, n in pch.most_common(args.pcs):
+            nm = state["names"]
+            j = bisect.bisect_right([v for v, k in nm], pc) - 1
+            print("  %-22s %5.2f%%" % ("%s+%X" % (nm[j][1], pc - nm[j][0]), 100 * n / total))
     print("top instructions (share, executions, 68000 cycles per execution):")
     for k, n in prof.most_common(args.top):
         c = counts.get(k, 0)
