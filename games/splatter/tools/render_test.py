@@ -487,6 +487,8 @@ def main():
     ap.add_argument("--edges", action="store_true")
     ap.add_argument("--png", default="")
     ap.add_argument("-D", dest="defines", action="append", default=[])
+    ap.add_argument("--every", type=int, default=1, help="a picture every N recorded frames (the program: PIC_EVERY)")
+    ap.add_argument("--phase", type=int, default=0, help="with --every: the frames whose number %% N is this")
     args = ap.parse_args()
     states = load_states()
     h = Harness(args.defines)
@@ -501,10 +503,13 @@ def main():
             continue
         a, b = (int(x) for x in spec.split("-"))
         fr = [f for f in sorted(states[kind]) if a <= f <= b]
+        if kind == "play" and args.every > 1:       # (attract states are recorded every 4th frame already)
+            fr = [f for f in fr if f % args.every == args.phase]
         n, costs = run_sequence(h, states[kind], fr, kind, pngs)
         fails += n
         if costs:
-            print("%s: %d pictures, median %d, max %d cycles" % (kind, len(costs), np.median(costs), max(costs)))
+            print("%s: %d pictures, median %d, 10%% %d, 90%% %d, max %d cycles" % (
+                kind, len(costs), np.median(costs), np.percentile(costs, 10), np.percentile(costs, 90), max(costs)))
     print("FAIL" if fails else "PASS")
     return 1 if fails else 0
 

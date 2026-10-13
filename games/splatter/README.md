@@ -30,22 +30,37 @@ control, the latched sprite list.  `tools/assets.py` converts the graphics ROMs 
 * **Sprites**: the list in arcade order from entry 0 up (the arcade draws from the last entry and the first drawn pixel
   wins, so the STE paints the other way round).  Each (code, colour, sub-rectangle, flip x, palette) is converted once
   into a cache (`REN_POOL`, 128 KB; per row the opaque mask and the 4 plane words plane by plane, so the Blitter's
-  source runs on), drawn one HOG pass a line (4 planes, the row mask shifted into END1-3), flip y by drawing upwards.
-  Clipped at the group boundaries in the side bands nearest the picture's edges (END mask 0 for the words outside,
-  `ren_cl`/`ren_cr`), culled when wholly outside; top and bottom whole into the guard lines.  Sprites below a group
+  source runs on).  The conversion reads the cell's box bytes directly: one unrolled step a byte of the row
+  (`ren_cvf`, flip x `ren_cvb`; only the bytes inside the box run: an `rts` is put after the last one for the time of
+  the image), each two table lookups by the byte * 16: the colour's pair table (4 KB: the pair's plane bits at each of
+  the 4 positions in 8 pixels, `REN_PTS` of them) and the mask table `ren_pm16` (the pair's mask bits at each of the
+  8 positions in 16 pixels).  Drawn one HOG pass a line (4 planes), flip y by drawing upwards: a row whose mask is
+  the row before's leaves the Blitter as it is (destination, Y count, start: ~70 cycles); a new mask is shifted once
+  into its three destination words and the pass covers only the words that are not 0 (END3 0: two words; END1 0:
+  from the second word with FXSR; both: one word), so the Blitter skips the empty end words (~90 instead of 128 bus
+  cycles a line).  Clipped at the group boundaries in the side bands nearest the picture's edges (the clip masks
+  ANDed into the new mask's words: END mask 0 for the words outside, `ren_cl`/`ren_cr`), culled when wholly outside;
+  top and bottom whole into the guard lines.  An object drawn in one palette's lines (`ren_linesel`, across the HUD
+  boundary) is drawn as the interval of those lines; only bar lines of a higher priority inside the range (not at
+  its ends) need the line-by-line path.  Sprites below a group
   layer's priority (Rick behind the foreground) are drawn and then *repaired*: where the priority planes say a layer
   above shows, the background is copied back from the twin column (only in the cell rows that need it).
 * **Overlays**: enabled layers 0-3 outside the group (layer 3: the flickering lightning and objects of stages 4 and 6)
   and the fixed layers' cells outside the HUD bars are drawn per picture as 8 x 8 images through the same sprite code,
   between the sprites by priority.  Cells hidden by bars, wholly covered by group layers of higher priority, or opaque
-  black under the whole group (the attract mode's backdrop) are skipped.
+  black under the whole group (the attract mode's backdrop) are skipped, and cells wholly outside the clip groups
+  before their image is looked up.  With `TILE_FLAG` layers 0-3 keep a bitmap of their non-empty cells (`ren_obm`,
+  a row rebuilt when tile RAM was written since: `ren_tgen`), so a picture tests 5-6 bytes a visible row instead of
+  37 words (stage 1's layer 3, on in every other frame: ~1000 words and ~60 blank cells of other codes a picture).
 * **Fixed layers 4/5**: rows of 36 opaque cells whose lowest priority is at least the group's form *bars* (the HUD:
   32 lines at the top, 32 at the bottom); they are a bar image (`ren_fi`, black side bands) copied into each buffer's
   bar lines at the window's position when the window moved (4 passes a run of lines, fine-shifted) or the lines were
   damaged.  Sprites below a bar's priority skip its lines.
 * **Damage**: what a picture draws (sprites, overlay cells, the clip window) goes into the buffer's list (adjacent
   rectangles merged) and is copied back from the twin columns at the buffer's next turn (12 words a line at most;
-  overflow: the whole window); bar lines are copied again from the bar image instead.
+  overflow: the whole window).  In bar lines the rectangle is copied from the bar image instead (words | $8000 in the
+  list: a pass a plane, the window's fine scroll as skew with FXSR; only when the window and the bar image are as
+  they were, else ren_bars copies all bar lines anyway): a sprite over the HUD no longer costs whole bar lines.
 * **C116 window**: outside it black rectangles (attract mode's iris).
 * **Blitter**: every pass HOG and at most 256 bus cycles (`blit_go` of `engine/rt/borders.s` for the restores, bars and
   fills; a sprite line is 3 words x 4 planes).  `BLIT_STATS=256` on the test lists no longer pass and none without HOG.
@@ -116,11 +131,13 @@ reference's pen (evaluated in Python from the renderer's centres and palette sna
 must have black palettes).  `--edges`: a 32 x 32 and a 16 x 16 sprite across both edges, all 16 fine positions with
 all flips, the top and bottom guards, lines across a 64 KB boundary of each buffer, at six window positions (aligned
 and not): exact, and no sprite pixel outside the clip groups in the side bands (the check bites: `-D REN_NOCLIP=1`
-fails 47 cases).  `--png`: STE | reference into `build/splatter/render_*.png`.
+fails).  `--png`: STE | reference into `build/splatter/render_*.png`.  `--every 2 --phase 0|1`: every other play frame
+(the program's `PIC_EVERY`; stage 1 enables layer 3 in every other frame, so the two phases cost differently).
 
 Results (2026-10-12): play 1100 / 1100 pictures exact, attract 475 / 475, edges 218 / 218; stages 2-7 from
 stage-select captures (every 25th frame, ~90 pictures each) exact; also `-D REN_NBUF=3`, `-D REN_DMG=6` (overflow
-path), `-D TILE_FLAG=1`, `-D REN_ONEPAL=1` exact.
+path), `-D TILE_FLAG=1`, `-D REN_ONEPAL=1` exact.  2026-10-13 (the speed-up below): play, attract, edges, both
+`--every 2` phases, with and without `TILE_FLAG`, `REN_NBUF=3`, `REN_ONEPAL=1`, `REN_DMG=6`: all exact.
 
 ### Measurements
 
@@ -128,24 +145,41 @@ Cycles a picture on Musashi (CPU + Blitter bus cycles; the game's logic is apart
 
 | | median | 10% | 90% | max (new scene) |
 |---|---|---|---|---|
-| play (1100 pictures) | 488k (CPU 431k) | 391k | 845k | 25M |
-| play, `TILE_FLAG` | 346k (CPU 291k) | 248k | 710k | 25M |
-| attract (475) | 234k | 224k | 849k | 28M |
-| attract, `TILE_FLAG` | 169k | 154k | 779k | 28M |
+| play (1100 pictures) | 448k (2026-10-12: 488k) | 351k (391k) | 608k (845k) | 25M |
+| play, `TILE_FLAG` | 261k (346k) | 208k (248k) | 462k (710k) | 25M |
+| play, `TILE_FLAG`, `--every 2`, phase 0 (layer 3 off) | 251k (298k) | 197k (242k) | 454k (719k) | 25M |
+| play, `TILE_FLAG`, `--every 2`, phase 1 (layer 3 on) | 348k (486k) | 228k (342k) | 606k (865k) | 25M |
+| attract (475) | 220k (234k) | 219k (224k) | 750k (849k) | 27M |
+| attract, `TILE_FLAG` | 150k (169k) | 149k (154k) | 684k (779k) | 26M |
 
-In play: sprite lines ~120 cycles CPU + ~130 Blitter each (a 32 x 32 sprite ~8k), conversions of new sprite images
-~25-35k each, the bars ~16k CPU + ~40k Blitter when the window moved, the sprite list ~28k, the tile RAM diff ~110k
-(without `TILE_FLAG`).  A new scene: ~1200 window cells (~5-7k each), the samples and k-means (~3-5M), the bar image.
+In play (`TILE_FLAG`, the mean over 1100 pictures without new scenes: ~318k): the sprite and overlay draws ~98k
+(their setup ~2k a draw, ~16-20 draws; lines ~70 cycles CPU + ~90 Blitter when the mask repeats, ~200 + ~90 when
+not), the restores ~27k (mostly Blitter), the palette ~20k, the damage lists ~19k, the repairs ~18k, the sprite list
+~17k, the overlay layers ~17k, the group cells ~12k, conversions of new sprite images ~13k (~10-15k a 32 x 32 image;
+before: ~60-70k).  A new scene: ~1200 window cells (~5-7k each), the samples and k-means (~3-5M), the bar image.
+
+Hatari (BENCH=1 build, arcade frames 600-1100 of the scripted game): 12.38 -> 13.30 arcade frames/s, 6.18 -> 6.64
+pictures/s.  The rate depends on which arcade frames get a picture (layer 3's phase): the same renderer with ~4000
+cycles of nops at render_frame's start gives 13.69, a variant ~1k cycles a picture slower 13.75; read changes of a
+few % with care.
+
+Tried and dropped: the stefastbobs2 reordered source (rows of equal masks grouped across the image, the destination
+from a table of row offsets).  Measured over 400 play pictures: 94213 sprite rows drawn, 58178 mask changes in row
+order, 49777 groups of equal masks: grouping saves ~21 mask changes a picture (~2.5k cycles), less than grouping
+costs in the conversions (~5-10k an image, ~0.5 images a picture), and the rows left out at bars and palette
+boundaries would need the line-by-line path.  Row order with the Blitter left as it is for repeated masks keeps most
+of the gain (38% of the rows).
 
 Memory (the harness without vio): text 16 KB, data 1.59 MB (characters 768 KB, masks 128 KB, sprite boxes 595 KB,
-tables), bss 0.74 MB (2 buffers 295 KB, cache 128 KB, priority planes 57 KB, bar image 38 KB, tile copy 32 KB, ...):
-2.35 MB.  With the program's ~1.2 MB (code, 512 KB ROM image, vio, the snapshot) about 3.55 MB of 4 MB.
+tables), bss 0.84 MB (2 buffers 295 KB, cache 128 KB, the pair tables 128 KB (`REN_PTS` 32 x 4 KB), priority planes
+57 KB, bar image 38 KB, tile copy 32 KB, ...): 2.45 MB.  With the program's ~1.2 MB (code, 512 KB ROM image, vio, the
+snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).
 
 ### Open problems
 
-* Speed: ~2-3 VBLs a picture in play besides the logic; a new scene takes ~1/2 s of black pictures.  Next: the
-  `TILE_FLAG` writers, cheaper sprite conversion (the per-colour pair tables), the stefastbobs2 row grouping (30% of
-  sprite rows repeat the row before), fewer slow-path draws of overlay cells at the edges.
+* Speed: ~2 VBLs a picture in play besides the logic; a new scene takes ~1/2 s of black pictures.  Next: the draw
+  setup (~2k a sprite or overlay cell: many memory variables), the restores (Blitter), the palette's per-picture
+  checksum and representatives (~20k), the damage lists and repairs.
 * The HUD palette needs the Timer B extension; `REN_ONEPAL` meanwhile.
 * Colours: a representative pen that does not fade like its colour's other pens (the HUD skulls stay white in a
   fade); colours appearing after the choice (stage 4's purple lightning, sprites of a new colour) map to the nearest
