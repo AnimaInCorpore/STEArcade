@@ -364,7 +364,11 @@ ren_palette:
 	bsr	ren_choose
 	sf	ren_scene
 	rts
-.old:	addq.b	#1,ren_qtick		; every 16 pictures: chosen again when the colours fit clearly worse than right
+.old:
+	ifd	REN_NOCYCLE
+	rts				; (a measurement: no choices for colours that fit worse)
+	endc
+	addq.b	#1,ren_qtick		; every 16 pictures: chosen again when the colours fit clearly worse than right
 	and.b	#15,ren_qtick		; after the choice
 	bne	.r
 	tst.b	ren_allblack
@@ -1362,7 +1366,9 @@ ren_bg_check:
 	st	ren_all
 	st	ren_scene
 	addq.l	#1,ren_sc_bank5
-.b4:	lsr.l	#8,d1
+.b4:
+	ifnd	REN_NOCYCLE			; (a measurement: the bank changes of layers 3 and 4 ignored)
+	lsr.l	#8,d1
 	tst.b	d1			; layer 4
 	beq	.b3
 	bsr	ren_mark4_all
@@ -1370,6 +1376,7 @@ ren_bg_check:
 	tst.b	d1			; layer 3
 	beq	.b
 	bsr	ren_mark3_all
+	endc
 .b:	move.l	12(a0),d0		; layer 3's scroll
 	cmp.l	(a1),d0
 	beq	.s
@@ -2360,6 +2367,9 @@ ren_stars:
 	move.l	a0,ren_sdp
 	clr.l	(a0)+
 	move.l	a0,ren_sdw
+	ifd	REN_NOSTARS
+	rts				; (a measurement: no stars)
+	endc
 	moveq	#0,d6			; priority
 .pri:	moveq	#0,d5			; layer
 .lay:	lea	vio+VIO_CTL,a0

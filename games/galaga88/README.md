@@ -99,6 +99,18 @@ CPU), stars ~30% (the warps' streaks: ~1400 pixels a picture), the background's 
 Tried and dropped: star runs by the Blitter (`-D REN_STARBLIT=1`: most runs are 1-2 rows, a pass costs more than
 four bit operations).
 
+Measurement switches (not exact; 2026-10-13, Hatari BENCH, arcade frames 600-1600, a picture every 2 frames):
+
+| build | arcade frames/s | pictures/s | render VBLs | colour choices |
+|---|---|---|---|---|
+| as shipped | 10.62 | 5.32 | 3882 | 10 |
+| `-D REN_NOSTARS=1` (no star layers) | 16.10 | 8.06 | 2262 | 8 |
+| `-D REN_NOCYCLE=1` (layer 3 / 4 bank changes ignored, no re-choice for a worse fit) | 15.08 | 7.55 | 2499 | 3 |
+| both | 25.06 | 12.57 | 1176 | 3 |
+
+The logic stays ~810-840 VBLs in all four.  Both off, a picture is ~291k cycles in Musashi (BENCH states), sprites
+the largest part (draw 48k, conversion 40k, geometry 28k).
+
 The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
 and shift on first use: pieces ordered by their shifted masks, the reordered source, generated code); exact
 (`--edges`, the BENCH states); the BENCH game: equal Musashi cycles (622M), Hatari 9.74 -> 9.78 arcade frames/s
