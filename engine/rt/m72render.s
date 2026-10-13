@@ -54,9 +54,10 @@
 ;                store); returns at once when none is free (m72r_skipped + 1)
 ;   m72r_vbl     in the VBL: shows a published buffer (video base and counter, $ffff8265 fine scroll, $ffff820f line
 ;                width; PIC_TOP lines are subtracted when PIC_TOP is defined) and copies its palettes and HUD lines to
-;                m72r_vbl_pal (16 words: the playfield), m72r_vbl_hpal (the HUD bars), m72r_vbl_htop / m72r_vbl_hbot
+;                m72r_vbl_pal (16 words: the playfield), m72r_vbl_hpal (the status bar), m72r_vbl_htop / m72r_vbl_hbot
 ;                (words: picture lines 0 .. htop - 1 and hbot .. 255 use hpal; 0 / 256: none): the main program
-;                hands them to engine/rt/borders.s (BD_PALETTE, BD_HUD: shown_pal, hud_pal, hud_top, hud_bot).
+;                hands them to engine/rt/borders.s (BD_PALETTE, BD_HUD: shown_pal, hud_pal, hud_top, hud_bot); with
+;                BD_VSWITCH (borders.s) it also sets bd_vs_* so the status bar's lines come from its own screen.
 ;                A VBL without a new picture frees the buffer shown before.
 ;
 ; =====================================================================================================================
@@ -108,17 +109,28 @@
 ;   copies, 4-8 lines a pass) and copied back before the buffer's next composition (any order: all were saved
 ;   clean); a piece the save area has no room for marks its cells as damage (recomposed) instead.
 ;
-; Colours: pens map to STE indices through m72r_pidx (the HUD bars' FG rows through m72r_hidx).  A choice samples the
-; picture (a pixel every 8 x M72_NSAMP: the visible tile pen) and the visible sprites' pens, weighs the colours (STE
-; levels, the square root of the samples), keeps index 0 black (the side borders), seeds 15 centres by the farthest
-; colour (Oklab L1 x weight) and refines them by 6 rounds of k-means; each pen's index is its colour's nearest centre.
-; An index's STE colour is the current colour of its representative pen (the heaviest pen of the colour nearest the
-; centre), so fades and colour cycles change the STE palette without redrawing.  A new choice: the first picture, a
-; palette that rested 2 pictures with 16 or more pens changed since the last choice; the HUD's when a bar appears or
-; changes rows.  It flushes the conversions and the sprite cache and draws every buffer again (~17-20M cycles: the
-; window's ~2700 tiles, the clustering).  The HUD bars (R-Type's status bar, Mr. HELI's panel) get their own 15 colours
-; when FG covers them completely; borders.s switches the palette at their lines (BD_HUD).
-;
+; Colours: pens map to STE indices through m72r_pidx.  A choice takes the offline scene whose reference tile palette
+; fits (engine/m72_palettes.py), else (an unknown scene at rest, or pens no scene colour fits) samples the picture
+; and the visible sprites' pens and clusters (Oklab, k-means); index 0 stays black.  An index's STE colour is the
+; current colour of its representative: the pen nearest its centre among the pens in use (m72r_suse: marked by
+; the tile conversions and the sprites drawn; m72r_urep every 32 pictures, m72r_repfix when a representative's colour
+; leaves its centre), so fades and colour cycles change the STE palette without redrawing.  The mapping is repaired
+; incrementally (m72r_sdiv, when the palette or the pens in use change, before a picture's tiles and again before its
+; sprites when new sprite pens appear): a pen in use more than M72_DIV from the colour its index shows goes to the
+; nearest shown colour once its colour has settled (M72_STABLE / M72_SSTABLE pictures); a sprite colour row then gets
+; a new mapping version (m72r_shrow: its conversions keyed by it, a cycle's last M72_SROWS mappings reused), a tile
+; colour row only its own tiles converted again (m72r_cinval: per-row tile maps m72r_rowmap, conversions keyed by the
+; row's version m72r_cver; a row at most every M72_CWAIT pictures); no shown colour near: the index of the nearer of
+; the two most alike shown colours takes the pen's colour (m72r_repurp, its pens to the other one); many far pens: a
+; new choice.  A new choice: the first picture, a palette that rested 2 pictures with 16 or more pens changed,
+; m72r_sdiv.  It converts the window's tiles again (~13-16M cycles over 15-18 calls).
+; The status bar (R-Type's bottom bar, Mr. HELI's top panel; a band FG covers completely, on the 8-pixel grid) is a
+; screen of its own: drawn from its FG tiles into the buffer's bar area (m72r_bardraw: the tiles changed since that
+; buffer's last picture), its colours exact (m72r_barpens: each pen its tiles use an index of its own, the index's
+; colour that pen's current colour), its band black and out of the playfield's colours; borders.s (BD_VSWITCH, with
+; BD_HUD) switches the video address, the fine scroll, the line width and the palette at its first line (and back
+; at a top bar's end): m72r_vbl sets bd_vs_* from the picture shown (m72r_disp_bar, m72r_disp_hud).
+
 ; Every Blitter pass is HOG and at most 256 bus cycles (AGENTS.md; checked with BLIT_STATS=256): passes are cut into
 ; pieces of lines from a table of the bus accesses a line.  No NFSR in the composition passes (Hatari and engine/sim.py
 ; apply the source increments differently after an NFSR line end); the sprite passes use NFSR only with SXI = SYI.
@@ -375,10 +387,24 @@ m72r_init:
 .ps:	move.l	#$ffffffff,(a0)+
 	dbf	d0,.ps
 	bsr	m72r_stinit
+	lea	m72r_rowmap,a0		; (every tile in colour row 0's maps: m72r_tcol all 0)
+	move.w	#2*16*512/4-1,d0
+.rm:	clr.l	(a0)+
+	dbf	d0,.rm
+	lea	m72r_rowmap,a0
+	moveq	#512/4-1,d0
+.r0:	move.l	#-1,16*512(a0)
+	move.l	#-1,(a0)+
+	dbf	d0,.r0
+	lea	m72r_tcol,a0
+	move.w	#2*4096/4-1,d0
+.tc:	clr.l	(a0)+
+	dbf	d0,.tc
 	bsr	m72r_flush
 	clr.l	m72r_svc		; (no sprite backgrounds saved)
 	clr.b	m72r_ready
 	move.w	#-1,m72r_shown
+	move.w	#-2,m72r_kscene		; (none)
 	move.w	#-1,m72r_prev
 	clr.w	m72r_follow
 	clr.w	m72r_fcount
@@ -417,6 +443,26 @@ m72r_classes:
 	or.b	#8,d2
 .c5:	move.b	d2,(a1)+
 	dbf	d0,.t
+	rts
+
+; m72r_sflush: the sprite conversions and the colours' tables only (a sprite pen's index changed: the mask streams and
+; the generated routines depend on the shapes alone)
+m72r_sflush:
+	move.l	a0,-(sp)
+	move.l	d0,-(sp)
+	clr.l	m72r_stv
+	clr.l	m72r_stv+4
+	clr.l	m72r_stv+8
+	clr.l	m72r_stv+12
+	lea	m72r_hash,a0
+	move.w	#M72_HASH-1,d0
+.h:	clr.l	(a0)+
+	clr.l	(a0)+
+	dbf	d0,.h
+	move.l	#m72r_pool,m72r_poolp
+	addq.l	#1,m72r_flushes
+	move.l	(sp)+,d0
+	move.l	(sp)+,a0
 	rts
 
 ; the sprite cache: empty
@@ -482,7 +528,12 @@ m72r_frame:
 	bsr	m72r_bulkstep		; (after a mass change: the flags again, a part a call)
 	bsr	m72r_bands		; the bands, the window, the offsets
 	bsr	m72r_palette		; the colours (a new choice when the palette rests on other colours)
+	tst.b	m72r_divp
+	beq	.nd
+	bsr	m72r_sdiv		; (pens in use far from the colour their index shows: mapped again)
+.nd:
 	bsr	m72r_hud		; the HUD bars
+	bsr	m72r_bar		; (a bar: its own buffer and colours)
 	tst.b	m72r_need
 	beq	.nn
 	bsr	m72r_choose		; (a new choice: no picture this call; the conversions from the next)
@@ -499,8 +550,29 @@ m72r_frame:
 	rts
 .draw:	bsr	m72r_srestore		; (the background under the buffer's last sprites)
 	bsr	m72r_compose
+	bsr	m72r_bardraw
 	bsr	m72r_follow_check
 	bsr	m72r_sprites
+	bsr	m72r_uwork		; (the pens used: the representatives)
+	addq.w	#1,m72r_since
+	bcc	.sn
+	subq.w	#1,m72r_since
+.sn:	tst.w	m72r_kwait
+	beq	.kw
+	subq.w	#1,m72r_kwait
+.kw:	tst.w	m72r_rpwait
+	beq	.kr
+	subq.w	#1,m72r_rpwait
+.kr:	lea	m72r_cwait,a0
+	moveq	#0,d0
+.cw:	tst.b	(a0,d0.w)
+	beq	.cw1
+	subq.b	#1,(a0,d0.w)
+	bne	.cw1
+	st	m72r_divp		; (its pending pens: m72r_sdiv)
+.cw1:	addq.w	#1,d0
+	cmp.w	#32,d0
+	blo	.cw
 	; publish: the window's first line, the fine scroll, the palettes, then the buffer (one byte store)
 	move.l	m72r_cbs,a5
 	move.w	m72r_draw,d0
@@ -535,6 +607,13 @@ m72r_frame:
 	lea	m72r_disp_hud,a1
 	move.w	m72r_htop,(a1,d0.w)
 	move.w	m72r_hbot,2(a1,d0.w)
+	move.w	m72r_draw,d0
+	move.w	d0,d1
+	mulu	#M72_BARSZ,d1
+	add.l	#m72r_barbuf,d1
+	lsl.w	#2,d0
+	lea	m72r_disp_bar,a1
+	move.l	d1,(a1,d0.w)
 	move.w	m72r_draw,d0
 	addq.b	#1,d0
 	move.b	d0,m72r_ready
@@ -583,6 +662,36 @@ m72r_vbl:
 	beq	.w
 	subq.b	#4,d1
 .w:	move.b	d1,$ffff820f.w
+	ifd	BD_VSWITCH
+	if	BD_VSWITCH
+	ext.w	d1			; (borders.s switches to the bar's own screen and back: the playfield's registers)
+	move.w	d1,bd_vs_pfl
+	ext.w	d2
+	move.w	d2,bd_vs_pfh
+	move.w	#M72_LB,bd_vs_pfs
+	move.w	#M72_LB,bd_vs_bas
+	move.w	#(M72_LB-160)/2,bd_vs_bal
+	clr.w	bd_vs_bah
+	move.w	d0,d1
+	lsl.w	#2,d1
+	lea	m72r_disp_addr,a0
+	move.l	(a0,d1.w),bd_vs_pf
+	lea	m72r_disp_bar,a0
+	move.l	(a0,d1.w),d2		; the bar's line 0 (its first line)
+	lea	m72r_disp_hud,a0
+	clr.b	bd_vs_on
+	tst.w	(a0,d1.w)		; a top bar: from picture line 0
+	bne	.vt
+	move.w	2(a0,d1.w),d1		; a bottom bar: from its first line
+	cmp.w	#256,d1
+	bhs	.vx
+	mulu	#M72_LB,d1
+	sub.l	d1,d2
+.vt:	move.l	d2,bd_vs_bar
+	st	bd_vs_on
+.vx:
+	endc
+	endc
 	lsl.w	#5,d0
 	lea	m72r_disp_pal,a0
 	add.w	d0,a0
@@ -680,6 +789,8 @@ m72r_tiles:
 	move.w	d0,d3
 	lsl.w	#6,d3
 	add.w	d2,d3
+	st	(a6,d3.w)
+	lea	m72r_vrchg,a6		; (and for the status bar: its rows changed)
 	st	(a6,d3.w)
 	addq.w	#1,d6
 	cmp.w	#M72_BULK,d6
@@ -786,6 +897,13 @@ m72r_bkcount:
 ; the BG's count of bod tiles
 m72r_bulk:
 	movem.l	d0-d7/a0-a6,-(sp)
+	move.w	d1,d2			; (the row's tiles in their colour rows' maps)
+	moveq	#0,d1
+.tr:	bsr	m72r_trow
+	addq.w	#1,d1
+	cmp.w	#64,d1
+	blo	.tr
+	move.w	d2,d1
 	move.w	d0,m72r_cl
 	move.w	d1,d7			; the row
 .row:	move.w	d7,-(sp)
@@ -919,9 +1037,59 @@ m72r_tchg:
 	dbf	d7,.b
 	rts
 
+; m72r_trow: tile (d0 layer, d1 tx, d2 ty) into the map of its colour row (m72r_rowmap: per layer and colour row the
+; tiles of that colour, the valid bits' layout; m72r_tcol: each tile's colour as mapped): m72r_cinval finds a row's
+; tiles there.  Keeps all registers.
+m72r_trow:
+	movem.l	d3-d6/a0-a1,-(sp)
+	move.w	d0,d3
+	lsl.w	#6,d3
+	add.w	d2,d3
+	lsl.w	#6,d3
+	add.w	d1,d3			; layer * 4096 + ty * 64 + tx
+	move.w	d2,d4
+	lsl.w	#6,d4
+	add.w	d1,d4
+	lsl.w	#2,d4			; the entry
+	lea	m72v_fg,a0
+	tst.w	d0
+	beq	.f
+	lea	m72v_bg,a0
+.f:	moveq	#15,d5
+	and.b	2(a0,d4.w),d5		; its colour
+	lea	m72r_tcol,a1
+	moveq	#0,d6
+	move.b	(a1,d3.w),d6		; as mapped
+	cmp.b	d6,d5
+	beq	.x
+	move.b	d5,(a1,d3.w)
+	move.w	d2,d3			; the bit: byte ty * 8 + tx / 8, bit 7 - tx & 7
+	lsl.w	#3,d3
+	move.w	d1,d4
+	lsr.w	#3,d4
+	add.w	d4,d3
+	moveq	#7,d4
+	and.w	d1,d4
+	eor.w	#7,d4
+	lea	m72r_rowmap,a0
+	tst.w	d0
+	beq	.l
+	lea	16*512(a0),a0
+.l:	lsl.w	#8,d6
+	add.w	d6,d6
+	add.w	d3,d6
+	bclr	d4,(a0,d6.w)
+	lsl.w	#8,d5
+	add.w	d5,d5
+	add.w	d3,d5
+	bset	d4,(a0,d5.w)
+.x:	movem.l	(sp)+,d3-d6/a0-a1
+	rts
+
 ; m72r_tflags: the flags of tile (d0 layer, d1 tx, d2 ty) from its entry (the pens it uses: pen 0, any of 1-7, any of
 ; 8-15; its group; BG nn also from the colour mapping); keeps all registers
 m72r_tflags:
+	bsr	m72r_trow
 	movem.l	d0-d6/a0-a2,-(sp)
 	move.w	d2,d3
 	lsl.w	#6,d3
@@ -1159,19 +1327,36 @@ m72r_conv:
 	moveq	#0,d4
 	move.b	2(a0),d4		; colour, group
 	move.w	d4,m72r_cattr
-	; the mapping row of the colour: tiles are pens 256-511; FG rows shown in a HUD bar map through m72r_hidx
+	movem.l	d3-d4/a3,-(sp)	; (its pens in use from now on: m72r_suse; new ones for m72r_sdiv)
+	and.w	#15,d4
+	add.w	d4,d4
+	lea	m72r_suse+32,a3
+	add.w	d4,a3
+	move.w	m72r_cpens,d4
+	tst.w	d0
+	bne	.ub
+	and.w	#$fffe,d4		; (FG pen 0: transparent)
+.ub:	move.w	(a3),d3
+	not.w	d3
+	and.w	d3,d4			; (the new ones)
+	beq	.uo
+	or.w	d4,(a3)
+	st	m72r_divp
+	movem.l	d2-d3,-(sp)
+	move.w	d4,d2
+	moveq	#15,d3
+	and.b	m72r_cattr+1,d3
+	add.w	#16,d3
+	lsl.w	#4,d3
+	bsr	m72r_pnew
+	movem.l	(sp)+,d2-d3
+.uo:	movem.l	(sp)+,d3-d4/a3
+	; the mapping row of the colour: tiles are pens 256-511
 	and.w	#15,d4
 	lsl.w	#4,d4
-	moveq	#0,d3			; (the HUD mapping)
+	moveq	#0,d3			; (the HUD mapping: none, the bar is drawn by m72r_bartile)
 	lea	m72r_pidx+256,a4
-	tst.w	d0
-	bne	.mp
-	lea	m72r_hudrow,a3
-	tst.b	(a3,d2.w)
-	beq	.mp
-	lea	m72r_hidx+256,a4
-	moveq	#1,d3
-.mp:	add.w	d4,a4
+	add.w	d4,a4
 	; the destination: column tx / 2, line ty * 8, byte tx & 1
 	lea	m72r_imgf,a5
 	tst.w	d0
@@ -1214,9 +1399,15 @@ m72r_conv:
 	lea	m72r_cc_slots,a6
 	add.l	d5,a6
 	move.l	a6,m72r_ccslot
+	moveq	#15,d5			; (the epoch: the choice's + its colour row's remaps, m72r_pdiv)
+	and.b	m72r_cattr+1,d5
+	add.w	d5,d5
+	lea	m72r_cver,a0
+	move.w	(a0,d5.w),d5
+	add.w	m72r_epoch,d5
+	move.w	d5,m72r_cepk
 	cmp.l	(a6),d4
 	bne	.cmiss
-	move.w	m72r_epoch,d5
 	cmp.w	4(a6),d5
 	bne	.cmiss
 	; a hit: the 12 longs into the image
@@ -1234,7 +1425,7 @@ m72r_conv:
 	rts
 .cmiss:	addq.l	#1,m72r_nmiss
 	move.l	d4,(a6)			; (this tile's from now on)
-	move.w	m72r_epoch,4(a6)
+	move.w	m72r_cepk,4(a6)
 	lea	8(a6),a6
 	move.l	a6,m72r_ccdat
 	; the 8 longs (plane b: rows 0-3, rows 4-7) into the X tables (half 0: m72r_xt, half 1: m72r_xt+32), flipped
@@ -3845,6 +4036,34 @@ m72r_sprites:
 	ifd	M72_STATS
 	add.l	d0,m72r_st_drawn
 	endif
+	bsr	m72r_usprites		; (their pens in use; new ones looked at before they are drawn: m72r_sdiv)
+	movem.l	d0-d3/a0-a1,-(sp)
+	lea	m72r_umask,a0
+	lea	m72r_suse,a1
+	moveq	#0,d0
+	moveq	#16-1,d1
+.su:	move.w	(a0),d2
+	clr.w	(a0)+
+	move.w	(a1),d3
+	not.w	d3
+	and.w	d3,d2			; (the new ones)
+	beq	.sn
+	or.w	d2,(a1)
+	moveq	#1,d0
+	move.w	d1,-(sp)
+	moveq	#15,d3
+	sub.w	d1,d3
+	lsl.w	#4,d3			; (the row's first pen)
+	bsr	m72r_pnew
+	move.w	(sp)+,d1
+.sn:	addq.l	#2,a1
+	dbf	d1,.su
+	tst.w	d0
+	beq	.so
+	st	m72r_sonly		; (the sprites' pens only: the tiles of this picture are drawn already)
+	bsr	m72r_sdiv
+	clr.b	m72r_sonly
+.so:	movem.l	(sp)+,d0-d3/a0-a1
 	bsr	m72r_ssave
 	move.l	m72r_cbs,a0		; (any priority cell? none: m72r_spri skipped)
 	lea	BS_PRI(a0),a0
@@ -4316,7 +4535,12 @@ m72r_scache:
 	and.w	#15,d1			; colour
 	move.w	m72r_pcode,d0
 	moveq	#0,d2
-	move.w	m72r_epoch,d2
+	move.w	d1,d2			; (the epoch: the choice's + the colour row's remaps, m72r_sdiv)
+	add.w	d2,d2
+	lea	m72r_scver,a0
+	move.w	(a0,d2.w),d2
+	add.w	m72r_epoch,d2
+	move.w	d2,m72r_skv
 	lsl.l	#4,d2
 	or.w	d1,d2
 	lsl.l	#1,d2
@@ -4332,7 +4556,10 @@ m72r_scache:
 	btst	#11,m72r_sattr
 	beq	.s
 	eor.w	#$400,d3
-.s:	and.w	#M72_HASH-1,d3
+.s:	move.w	m72r_skv,d1		; (the version too: a colour cycle's mappings in different slots)
+	rol.w	#7,d1
+	eor.w	d1,d3
+	and.w	#M72_HASH-1,d3
 	lsl.w	#3,d3
 	lea	m72r_hash,a0
 	add.w	d3,a0
@@ -4347,7 +4574,7 @@ m72r_scache:
 	cmp.l	#m72r_pool+M72_POOL,d3
 	bls	.room
 	move.l	a0,-(sp)
-	bsr	m72r_flush		; (full: start again)
+	bsr	m72r_sflush		; (full: start again)
 	move.l	(sp)+,a0
 	move.l	d2,(a0)
 	move.l	m72r_poolp,a2
@@ -5047,6 +5274,7 @@ m72r_palette:
 	tst.b	m72r_pchg		; changed since the last picture?
 	beq	.rest
 	clr.w	m72r_rest
+	st	m72r_divp		; (pens now far from the colour their index shows: mapped again)
 	bra	.ste
 .rest:	cmp.w	#1000,m72r_rest
 	bhs	.ste
@@ -5087,11 +5315,14 @@ m72r_palette:
 	tst.w	d0
 	bmi	.unk
 	clr.b	m72r_unk		; (a known scene: no run-time choice later)
-	cmp.w	m72r_scene,d0
+	cmp.w	m72r_kscene,d0		; (the scene m72r_sdiv found wanting: the run-time choice stays)
+	bne	.mk
+	move.w	m72r_scene,d0
+.mk:	cmp.w	m72r_scene,d0
 	bne	.sw
 	tst.w	d2			; the same scene: the sprites' pens mapped again
 	beq	.ste
-	bsr	m72r_sprremap
+	st	m72r_divp		; (the sprites' pens: m72r_sdiv, per colour row)
 	bra	.ste
 .sw:	move.w	d0,m72r_nscene
 .sw1:	or.b	#1,m72r_need
@@ -5103,7 +5334,7 @@ m72r_palette:
 	bpl	.unk1
 	tst.w	d2
 	beq	.unk1
-	bsr	m72r_sprremap
+	st	m72r_divp		; (the sprites' pens: m72r_sdiv, per colour row)
 .unk1:	cmp.w	#16,d1
 	blo	.ste
 	st	m72r_unk		; (a fade or an unknown scene: wait)
@@ -5198,8 +5429,753 @@ m72r_sprremap:
 	blo	.p
 	tst.w	d6
 	beq	.x
-	bsr	m72r_flush
+	bsr	m72r_sflush
 .x:	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; m72r_sdiv: a pen in use (m72r_suse: the sprites' and the window's tiles' pens, m72r_urep) whose colour is now more
+; than M72_DIV (Oklab bytes, L1) from the colour its index shows (its representative's) goes to the index whose shown
+; colour is nearest (a palette that never rests, colour cycles: the mapping of the last choice would show such pens in
+; a wrong colour): a sprite pen empties the sprite cache, a tile pen makes its colour row's tiles be converted again
+; (m72r_cinval).  No shown colour near enough (a fade in from black, a new scene): a new choice (m72r_need).  Run when
+; the palette changed and after new representatives (m72r_divp), before the picture is drawn.
+M72_DIV		= 45
+M72_NFAR	= 8
+M72_CHOICEGAP	= 8
+M72_KWAIT	= 500
+M72_CWAIT	= 4
+M72_STABLE	= 2
+M72_SSTABLE	= 1
+M72_SWAIT	= 1
+M72_RPWAIT	= 32
+M72_RPTWIN	= 40
+m72r_sdiv:
+	movem.l	d0-d7/a0-a6,-(sp)
+	clr.b	m72r_divp
+	clr.b	m72r_cnn
+	clr.b	m72r_dpend
+	clr.b	m72r_rpdone
+	clr.l	m72r_rpmask
+	tst.b	m72r_ncent
+	beq	.x
+	tst.b	m72r_sonly
+	bne	.rf
+	bsr	m72r_repfix		; (representatives that moved away from their centres: another pen in use)
+.rf:
+	lea	m72r_pcur,a2
+	lea	m72r_lab,a3
+	lea	m72r_slab,a1		; the shown colours' Oklab bytes
+	lea	m72r_rep,a0
+	moveq	#0,d0
+.sl:	moveq	#0,d1			; (index 0: black)
+	tst.w	d0
+	beq	.s0
+	move.w	d0,d1
+	add.w	d1,d1
+	move.w	(a0,d1.w),d1
+	add.w	d1,d1
+	move.w	(a2,d1.w),d1
+.s0:	lsl.w	#2,d1
+	move.l	(a3,d1.w),d1
+	cmp.l	(a1),d1			; (the indices whose shown colour changed: m72r_dchg)
+	beq	.s1
+	move.w	m72r_dchg,d2
+	bset	d0,d2
+	move.w	d2,m72r_dchg
+.s1:	move.l	d1,(a1)+
+	addq.w	#1,d0
+	cmp.w	#16,d0
+	blo	.sl
+	lea	m72r_suse,a0
+	lea	m72r_pidx,a4
+	lea	m72r_slab,a5
+	moveq	#0,d6			; (bit 31: a sprite pen moved; bits 0-15: tile colour rows)
+	moveq	#0,d7			; the pen
+	clr.w	m72r_nfar
+.row:	tst.b	m72r_sonly		; (the sprites' rows only)
+	beq	.ro
+	cmp.w	#256,d7
+	bhs	.end
+.ro:	move.w	(a0)+,d5
+	bne	.pen
+	add.w	#16,d7			; (no pen of the row in use)
+	cmp.w	#512,d7
+	blo	.row
+	bra	.end
+.pen:	lsr.w	#1,d5
+	bcc	.pn
+	move.w	d7,d0			; (the pen's colour and its index's shown colour as at its last look: that result)
+	add.w	d0,d0
+	move.w	(a2,d0.w),d1
+	lea	m72r_dcol,a1
+	cmp.w	(a1,d0.w),d1
+	bne	.chk
+	moveq	#0,d1
+	move.b	(a4,d7.w),d1
+	move.w	m72r_dchg,d2
+	btst	d1,d2
+	bne	.chk
+	lea	m72r_dres,a1
+	move.b	(a1,d7.w),d1
+	beq	.pn
+	cmp.b	#1,d1			; (pending: looked at again)
+	beq	.ag
+	move.w	m72r_dchg,d4		; (far at its last look: looked at again when a shown colour changed to one
+	beq	.fc			; nearer than its nearest then)
+	move.w	(a2,d0.w),d1
+	lsl.w	#2,d1
+	lea	(a3,d1.w),a6
+	moveq	#0,d1
+.fl:	btst	d1,d4
+	beq	.fln
+	movem.w	d1/d4,-(sp)
+	lsl.w	#2,d1
+	bsr	.dist
+	movem.w	(sp)+,d1/d4
+	move.w	d7,d0
+	add.w	d0,d0
+	lea	m72r_dbest,a1
+	cmp.w	(a1,d0.w),d2
+	blo	.ag0
+.fln:	addq.w	#1,d1
+	cmp.w	#16,d1
+	blo	.fl
+.fc:	addq.w	#1,m72r_nfar
+	bra	.pn
+.ag0:	move.w	d7,d0
+	add.w	d0,d0
+.ag:	lea	m72r_dcol,a1
+.chk:	move.w	(a2,d0.w),d1		; (its colour changed since its last look: the time noted)
+	cmp.w	(a1,d0.w),d1
+	beq	.ck1
+	move.w	d1,(a1,d0.w)
+	lea	m72r_dtime,a1
+	move.w	m72r_pictures+2,(a1,d0.w)
+.ck1:	lea	m72r_dres,a1
+	clr.b	(a1,d7.w)
+	move.w	(a2,d0.w),d0
+	lsl.w	#2,d0
+	lea	(a3,d0.w),a6		; the pen's colour
+	moveq	#0,d1
+	move.b	(a4,d7.w),d1
+	lsl.w	#2,d1
+	bsr	.dist			; to its index's shown colour
+	cmp.w	#M72_DIV,d2
+	bls	.pn
+	move.w	d7,d0			; (a pen whose colour changed in the last M72_STABLE (sprites: M72_SSTABLE)
+	add.w	d0,d0			; pictures, a cycling or fading pen: pending, looked at again next picture)
+	lea	m72r_dtime,a1
+	move.w	m72r_pictures+2,d1
+	sub.w	(a1,d0.w),d1
+	moveq	#M72_STABLE,d0
+	cmp.w	#256,d7
+	bhs	.st0
+	moveq	#M72_SSTABLE,d0
+.st0:	cmp.w	d0,d1
+	bhs	.stb
+.pend:	lea	m72r_dres,a1		; (not counted far: no choice for it)
+	move.b	#1,(a1,d7.w)
+	st	m72r_dpend
+	bra	.pn
+.stb:	move.w	d7,d0			; (its row remapped lately: pending)
+	lsr.w	#4,d0
+	lea	m72r_cwait,a1
+	tst.b	(a1,d0.w)
+	bne	.pend
+.sq:	moveq	#0,d1			; the nearest shown colour
+	move.w	#$7fff,d3
+	moveq	#0,d4
+.nr:	movem.w	d1/d3-d4,-(sp)
+	bsr	.dist
+	movem.w	(sp)+,d1/d3-d4
+	cmp.w	d3,d2
+	bhs	.nn
+	move.w	d2,d3
+	move.w	d1,d4
+.nn:	addq.w	#4,d1
+	moveq	#0,d0
+	move.b	m72r_ncent,d0
+	lsl.w	#2,d0
+	cmp.w	d0,d1
+	blo	.nr
+	cmp.w	#M72_DIV,d3
+	bls	.near
+	move.w	d7,d0			; (its nearest: m72r_dbest)
+	add.w	d0,d0
+	lea	m72r_dbest,a1
+	move.w	d3,(a1,d0.w)
+	tst.b	m72r_rpdone		; no index near: once a pass an index given to this pen's colour (m72r_repurp)
+	bne	.nf
+	tst.b	m72r_sonly
+	bne	.nf
+	tst.w	m72r_rpwait		; (none found lately: not looked for again yet)
+	bne	.nf
+	bsr	m72r_repurp
+	tst.w	d0
+	beq	.nf
+	move.w	d0,d4			; (the pen to it)
+	lsl.w	#2,d4
+	bra	.near
+.nf:	addq.w	#1,m72r_nfar		; (no index near: counted; the nearest taken if clearly nearer)
+	lea	m72r_dres,a1
+	st	(a1,d7.w)
+	movem.w	d1/d3-d4,-(sp)
+	moveq	#0,d1
+	move.b	(a4,d7.w),d1
+	lsl.w	#2,d1
+	bsr	.dist
+	movem.w	(sp)+,d1/d3-d4
+	sub.w	#M72_DIV/2,d2
+	cmp.w	d2,d3
+	bhs	.pn
+.near:	lsr.w	#2,d4
+	cmp.b	(a4,d7.w),d4
+	beq	.pn
+	move.w	d7,d0
+	lsr.w	#4,d0
+	lea	m72r_cwait,a1		; (a row remapped in the last M72_CWAIT pictures: not again yet, pending)
+	tst.b	(a1,d0.w)
+	bne	.pend
+	move.b	m72r_p0,d1		; (a BG tile's nn flag depends on the index m72r_p0)
+	cmp.b	(a4,d7.w),d1
+	beq	.p0
+	cmp.b	d4,d1
+	bne	.p1
+.p0:	st	m72r_cnn
+.p1:	move.b	d4,(a4,d7.w)
+	cmp.w	#256,d7
+	bhs	.tp
+	add.w	#16,d0
+	bset	d0,d6			; (bits 16-31: sprite colour rows)
+	bra	.pn
+.tp:	sub.w	#16,d0
+	bset	d0,d6			; (its colour row)
+.pn:	addq.w	#1,d7
+	moveq	#15,d0
+	and.w	d7,d0
+	bne	.pen
+	cmp.w	#512,d7
+	blo	.row
+.end:	tst.b	m72r_sonly		; (the tiles' pens: the next full pass sees the changed indices)
+	bne	.e1
+	clr.w	m72r_dchg
+.e1:
+	tst.b	m72r_dpend		; (pens pending: the next picture again)
+	beq	.np
+	st	m72r_divp
+.np:
+	or.l	m72r_rpmask,d6		; (the rows of the pens m72r_repurp moved)
+	moveq	#16,d0			; sprite rows remapped: their conversions stale, their colour tables built again
+.sr:	btst	d0,d6
+	beq	.sn
+	move.w	d0,d1
+	sub.w	#16,d1
+	bsr	m72r_shrow		; (the row's mapping's version: the conversions' key; its colour table again)
+	lea	m72r_cwait,a1		; (the row waits M72_SWAIT pictures)
+	move.b	#M72_SWAIT,(a1,d1.w)
+.sn:	addq.w	#1,d0
+	cmp.w	#32,d0
+	blo	.sr
+.nt:	moveq	#0,d0
+.cr:	btst	d0,d6
+	beq	.cn
+	bsr	m72r_cinval
+.cn:	addq.w	#1,d0
+	cmp.w	#16,d0
+	blo	.cr
+	; pens far from every shown colour, the last choice M72_CHOICEGAP pictures ago or more: many of them (a fade in
+	; from black, a new scene) a new choice; still (or a few) then the run-time choice (k-means over the picture and
+	; the sprites' pens), the offline scene of now not taken again until the tile palette changes; then a pause
+	tst.w	m72r_nfar
+	beq	.x
+	tst.w	m72r_kwait
+	bne	.w
+	st	m72r_divp		; (looked at again next picture, until it is time)
+.w:	cmp.w	#M72_CHOICEGAP,m72r_since
+	blo	.x
+	tst.w	m72r_kwait
+	bne	.x
+	tst.b	m72r_dtry
+	bne	.k
+	cmp.w	#M72_NFAR,m72r_nfar
+	blo	.k
+	st	m72r_dtry
+	or.b	#1,m72r_need
+	bra	.x
+.k:	clr.b	m72r_dtry
+	move.w	m72r_scene,m72r_kscene
+	move.w	#-1,m72r_nscene
+	move.w	#M72_KWAIT,m72r_kwait
+	or.b	#1,m72r_need
+.x:	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+; d2 = Oklab L1 between the colour a6 and the shown colour at m72r_slab + d1; destroys d0, d4
+.dist:	moveq	#0,d2
+	move.b	(a6),d2
+	moveq	#0,d0
+	move.b	(a5,d1.w),d0
+	sub.w	d0,d2
+	bpl	.d1
+	neg.w	d2
+.d1:	moveq	#0,d4
+	move.b	1(a6),d4
+	moveq	#0,d0
+	move.b	1(a5,d1.w),d0
+	sub.w	d0,d4
+	bpl	.d2
+	neg.w	d4
+.d2:	add.w	d4,d2
+	moveq	#0,d4
+	move.b	2(a6),d4
+	moveq	#0,d0
+	move.b	2(a5,d1.w),d0
+	sub.w	d0,d4
+	bpl	.d3
+	neg.w	d4
+.d3:	add.w	d4,d2
+	rts
+
+; m72r_shrow: sprite colour row d1's mapping changed: its version (m72r_scver, in the sprite conversions' key: one of
+; the row's last M72_SROWS mappings keeps its version, so a colour cycle's mappings find their conversions again; a
+; new one gets a new version) and its colour table built again.  Keeps all registers.
+m72r_shrow:
+	movem.l	d0-d3/a0-a2,-(sp)
+	lea	m72r_pidx,a0
+	move.w	d1,d0
+	lsl.w	#4,d0
+	add.w	d0,a0			; the row's 16 indices
+	lea	m72r_srows,a1		; its last M72_SROWS mappings (16 bytes, version word)
+	move.w	d1,d0
+	mulu	#M72_SROWS*18,d0
+	add.l	d0,a1
+	moveq	#M72_SROWS-1,d2
+.f:	move.l	a1,a2
+	move.l	(a0),d0
+	cmp.l	(a2)+,d0
+	bne	.n
+	move.l	4(a0),d0
+	cmp.l	(a2)+,d0
+	bne	.n
+	move.l	8(a0),d0
+	cmp.l	(a2)+,d0
+	bne	.n
+	move.l	12(a0),d0
+	cmp.l	(a2)+,d0
+	bne	.n
+	move.w	(a2),d0			; (seen before: its conversions are in the cache still)
+	bra	.set
+.n:	lea	18(a1),a1
+	dbf	d2,.f
+	lea	m72r_srows,a1		; (new: a slot in turn, a new version)
+	move.w	d1,d0
+	mulu	#M72_SROWS*18,d0
+	add.l	d0,a1
+	lea	m72r_srnext,a2
+	moveq	#0,d0
+	move.b	(a2,d1.w),d0
+	addq.b	#1,(a2,d1.w)
+	and.w	#M72_SROWS-1,d0
+	mulu	#18,d0
+	add.l	d0,a1
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	addq.w	#1,m72r_srver
+	move.w	m72r_srver,d0
+	move.w	d0,(a1)
+.set:	lea	m72r_scver,a0
+	add.w	d1,a0
+	add.w	d1,a0
+	move.w	d0,(a0)
+	lea	m72r_stv,a0
+	clr.b	(a0,d1.w)
+	movem.l	(sp)+,d0-d3/a0-a2
+	rts
+
+; m72r_shall: every sprite row's hash (after a choice)
+m72r_shall:
+	move.l	d1,-(sp)
+	moveq	#0,d1
+.r:	bsr	m72r_shrow
+	addq.w	#1,d1
+	cmp.w	#16,d1
+	blo	.r
+	move.l	(sp)+,d1
+	rts
+
+; m72r_pnew: pens newly in use (d2: a mask of row d3's 16, its first pen d3): looked at by m72r_sdiv at once (pending,
+; their colour as now and settled).  Keeps all registers.
+m72r_pnew:
+	movem.l	d0-d3/a0-a2,-(sp)
+	lea	m72r_dcol,a0
+	lea	m72r_dtime,a1
+	lea	m72r_dres,a2
+	move.w	m72r_pictures+2,d1
+	sub.w	#100,d1
+.p:	lsr.w	#1,d2
+	bcc	.n
+	move.w	d3,d0
+	move.b	#1,(a2,d0.w)
+	add.w	d0,d0
+	move.w	d1,(a1,d0.w)
+	move.l	a0,-(sp)
+	lea	m72r_pcur,a0
+	move.w	(a0,d0.w),d0
+	move.l	(sp)+,a0
+	move.w	d3,-(sp)
+	add.w	d3,d3
+	move.w	d0,(a0,d3.w)
+	move.w	(sp)+,d3
+.n:	addq.w	#1,d3
+	tst.w	d2
+	bne	.p
+	movem.l	(sp)+,d0-d3/a0-a2
+	rts
+
+; m72r_repfix: an index whose representative's colour is now more than M72_DIV from its centre (a cycling or flashing
+; pen) gets the pen in use (m72r_suse) on it nearest its centre instead, when that one is nearer (no conversion: only
+; the STE colour changes)
+m72r_repfix:
+	movem.l	d0-d7/a0-a6,-(sp)
+	lea	m72r_pcur,a2
+	lea	m72r_lab,a3
+	lea	m72r_cent,a4
+	lea	m72r_rep,a5
+	lea	m72r_pidx,a6
+	moveq	#1,d7			; the index
+.i:	moveq	#0,d0
+	move.b	m72r_ncent,d0
+	cmp.w	d0,d7
+	bhs	.x
+	move.w	d7,d0
+	add.w	d0,d0
+	move.w	(a5,d0.w),d0		; its representative
+	bsr	.dc			; d2 = its distance to the centre
+	cmp.w	#M72_DIV,d2
+	bls	.n
+	move.w	d2,d6			; the best so far
+	lea	m72r_suse,a0
+	moveq	#0,d5			; the pen
+.r:	move.w	(a0)+,d4
+	bne	.p
+	add.w	#16,d5
+	bra	.rn
+.p:	lsr.w	#1,d4
+	bcc	.pn
+	cmp.b	(a6,d5.w),d7
+	bne	.pn
+	move.w	d5,d0
+	bsr	.dc
+	cmp.w	d6,d2
+	bhs	.pn
+	move.w	d2,d6
+	move.w	d7,d0
+	add.w	d0,d0
+	move.w	d5,(a5,d0.w)
+	addq.l	#1,m72r_nrepfix
+.pn:	addq.w	#1,d5
+	moveq	#15,d0
+	and.w	d5,d0
+	bne	.p
+.rn:	cmp.w	#512,d5
+	blo	.r
+.n:	addq.w	#1,d7
+	bra	.i
+.x:	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+; d2 = Oklab L1 between pen d0's colour and index d7's centre; destroys d0, d1, d3
+.dc:	add.w	d0,d0
+	move.w	(a2,d0.w),d0
+	lsl.w	#2,d0
+	move.w	d7,d1
+	lsl.w	#2,d1
+	moveq	#0,d2
+	moveq	#3-1,d3
+.dl:	movem.w	d0-d1,-(sp)
+	move.b	(a3,d0.w),d0
+	and.w	#$ff,d0
+	move.b	(a4,d1.w),d1
+	and.w	#$ff,d1
+	sub.w	d1,d0
+	bpl	.dp
+	neg.w	d0
+.dp:	add.w	d0,d2
+	movem.w	(sp)+,d0-d1
+	addq.w	#1,d0
+	addq.w	#1,d1
+	dbf	d3,.dl
+	rts
+
+; m72r_repurp (m72r_sdiv): pen d7 (colour a6's Oklab, its row not waiting) far from every shown colour: of the two
+; nearest shown colours (at most M72_RPTWIN apart) the index fewer pens in use map to (m72r_suse) becomes this colour (its centre, its representative this pen; the pens on it
+; are looked at again next pass: m72r_dchg); d0 = that index (the pen goes to it), 0 none (no index, a pass done
+; already).  Keeps d1-d7, a0-a6 but m72r_slab's entry and m72r_cent are updated.
+m72r_repurp:
+	movem.l	d1-d7/a0-a6,-(sp)
+	st	m72r_rpdone
+	; the victim: of the two nearest shown colours (not 0, not m72r_p0; at most M72_RPTWIN apart) the one fewer pens
+	; in use map to (its pens have the other one near)
+	lea	m72r_slab,a5
+	moveq	#0,d0			; the pair
+	moveq	#0,d6
+	move.w	#M72_RPTWIN+1,d5	; its distance
+	moveq	#0,d7
+	move.b	m72r_ncent,d7
+	moveq	#1,d1			; i
+.i:	cmp.w	d7,d1
+	bhs	.pr
+	cmp.b	m72r_p0,d1
+	beq	.in
+	move.w	d1,d2
+	addq.w	#1,d2			; j
+.j:	cmp.w	d7,d2
+	bhs	.in
+	cmp.b	m72r_p0,d2
+	beq	.jn
+	bsr	.pd
+	cmp.w	d5,d3
+	bhs	.jn
+	move.w	d3,d5
+	move.w	d1,d0
+	move.w	d2,d6
+.jn:	addq.w	#1,d2
+	bra	.j
+.in:	addq.w	#1,d1
+	bra	.i
+.pr:	tst.w	d0
+	beq	.nw			; (none near enough: no index given)
+	lea	m72r_rpcnt,a0		; the pens in use per index
+	moveq	#16/2-1,d1
+.c:	clr.l	(a0)+
+	dbf	d1,.c
+	lea	m72r_suse,a0
+	lea	m72r_pidx,a1
+	lea	m72r_rpcnt,a2
+	moveq	#0,d2			; the pen
+.r:	move.w	(a0)+,d3
+	bne	.p
+	add.w	#16,d2
+	bra	.rn
+.p:	lsr.w	#1,d3
+	bcc	.pn
+	moveq	#0,d4
+	move.b	(a1,d2.w),d4
+	add.w	d4,d4
+	addq.w	#1,(a2,d4.w)
+.pn:	addq.w	#1,d2
+	moveq	#15,d4
+	and.w	d2,d4
+	bne	.p
+.rn:	cmp.w	#512,d2
+	blo	.r
+	move.w	d0,d1
+	add.w	d1,d1
+	move.w	d6,d2
+	add.w	d2,d2
+	move.w	(a2,d1.w),d3
+	cmp.w	(a2,d2.w),d3
+	bls	.v
+	exg	d0,d6			; (the other one has fewer)
+.v:	bsr	.free			; its pens' rows not waiting? else the other one
+	beq	.v1
+	exg	d0,d6
+	bsr	.free
+	bne	.no
+.v1:	; its pens to the twin d6: their rows' conversions stale (m72r_rpmask, bits as m72r_sdiv's d6)
+	lea	m72r_suse,a0
+	lea	m72r_pidx,a1
+	moveq	#0,d2
+.mv:	move.w	(a0)+,d3
+	bne	.mp
+	add.w	#16,d2
+	bra	.mvn
+.mp:	lsr.w	#1,d3
+	bcc	.mq
+	cmp.b	(a1,d2.w),d0
+	bne	.mq
+	move.b	d6,(a1,d2.w)
+	move.l	a1,-(sp)		; (looked at again on its new index)
+	lea	m72r_dres,a1
+	move.b	#1,(a1,d2.w)
+	move.l	(sp)+,a1
+	move.w	d2,d4
+	lsr.w	#4,d4
+	cmp.w	#16,d4
+	bhs	.mt
+	add.w	#16,d4			; (sprite rows: bits 16-31)
+	bra	.ms
+.mt:	sub.w	#16,d4			; (tile rows: bits 0-15)
+	st	m72r_cnn
+.ms:	move.l	m72r_rpmask,d5
+	bset	d4,d5
+	move.l	d5,m72r_rpmask
+.mq:	addq.w	#1,d2
+	moveq	#15,d4
+	and.w	d2,d4
+	bne	.mp
+.mvn:	cmp.w	#512,d2
+	blo	.mv
+	lea	m72r_rep,a2		; the pen its representative, its colour the centre
+	move.w	d0,d2
+	add.w	d2,d2
+	move.w	24+2(sp),(a2,d2.w)	; (the saved d7: the pen)
+	move.w	d0,d2
+	lsl.w	#2,d2
+	move.l	(a6),d3
+	clr.b	d3
+	lea	m72r_cent,a2
+	move.l	d3,(a2,d2.w)
+	move.l	(a6),(a5,d2.w)		; (m72r_slab)
+	move.w	m72r_dchg,d3		; (the pens on it: looked at again)
+	bset	d0,d3
+	move.w	d3,m72r_dchg
+	addq.l	#1,m72r_nrepurp
+	st	m72r_divp		; (the pens on it: next picture)
+.x:	movem.l	(sp)+,d1-d7/a0-a6
+	rts
+.no:	moveq	#0,d0
+.nw:	move.w	#M72_RPWAIT,m72r_rpwait
+	bra	.x
+; Z: no pen in use on index d0 has its row waiting (m72r_cwait); destroys d2-d4, a0-a1
+.free:	lea	m72r_suse,a0
+	lea	m72r_pidx,a1
+	moveq	#0,d2
+.fr:	move.w	(a0)+,d3
+	bne	.fp
+	add.w	#16,d2
+	bra	.fn2
+.fp:	lsr.w	#1,d3
+	bcc	.fn
+	cmp.b	(a1,d2.w),d0
+	bne	.fn
+	move.w	d2,d4
+	lsr.w	#4,d4
+	move.l	a0,-(sp)
+	lea	m72r_cwait,a0
+	tst.b	(a0,d4.w)
+	move.l	(sp)+,a0
+	bne	.fx			; (NZ)
+.fn:	addq.w	#1,d2
+	moveq	#15,d4
+	and.w	d2,d4
+	bne	.fp
+.fn2:	cmp.w	#512,d2
+	blo	.fr
+	moveq	#0,d2			; (Z)
+.fx:	rts
+; d3 = Oklab L1 between the shown colours of indices d1 and d2 (m72r_slab, a5)
+.pd:	movem.l	d1-d2/d4-d5,-(sp)
+	lsl.w	#2,d1
+	lsl.w	#2,d2
+	moveq	#0,d3
+	moveq	#0,d4
+	move.b	(a5,d1.w),d4
+	moveq	#0,d5
+	move.b	(a5,d2.w),d5
+	sub.w	d5,d4
+	bpl	.p1
+	neg.w	d4
+.p1:	add.w	d4,d3
+	moveq	#0,d4
+	move.b	1(a5,d1.w),d4
+	moveq	#0,d5
+	move.b	1(a5,d2.w),d5
+	sub.w	d5,d4
+	bpl	.p2
+	neg.w	d4
+.p2:	add.w	d4,d3
+	moveq	#0,d4
+	move.b	2(a5,d1.w),d4
+	moveq	#0,d5
+	move.b	2(a5,d2.w),d5
+	sub.w	d5,d4
+	bpl	.p3
+	neg.w	d4
+.p3:	add.w	d4,d3
+	movem.l	(sp)+,d1-d2/d4-d5
+	rts
+
+; m72r_cinval: tile colour row d0's pens mapped anew: its conversions stale (m72r_cver), its tiles not valid and dirty
+; in every buffer (both maps scanned)
+m72r_cinval:
+	movem.l	d0-d7/a0-a6,-(sp)
+	addq.l	#1,m72r_ncinval
+	move.w	d0,d7
+	lea	m72r_cwait+16,a0
+	move.b	#M72_CWAIT,(a0,d0.w)
+	lea	m72r_cver,a0
+	add.w	d0,a0
+	add.w	d0,a0
+	addq.w	#1,(a0)
+	st	m72r_vclr
+	moveq	#0,d6			; the layer
+.lay:	lea	m72r_rowmap,a0		; the row's tiles
+	move.w	d6,d0
+	lsl.w	#4,d0
+	add.w	d7,d0
+	moveq	#9,d1
+	lsl.w	d1,d0
+	add.w	d0,a0
+	lea	m72r_flags+V_F,a1
+	move.w	#BS_DIRF,d4
+	moveq	#1,d5
+	tst.w	d6
+	beq	.f
+	lea	m72r_flags+V_B,a1
+	move.w	#BS_DIRB,d4
+	moveq	#2,d5
+.f:	moveq	#0,d3			; (any)
+	moveq	#512/4-1,d0
+.v:	move.l	(a0)+,d1		; not valid
+	or.l	d1,d3
+	not.l	d1
+	and.l	d1,(a1)+
+	dbf	d0,.v
+	tst.l	d3
+	beq	.nl
+	lea	-512(a0),a0
+	lea	m72r_bs,a2		; dirty in every buffer
+	moveq	#REN_NBUF-1,d2
+.b:	lea	(a2,d4.w),a3
+	move.l	a0,a4
+	moveq	#512/4-1,d0
+.d:	move.l	(a4)+,d1
+	or.l	d1,(a3)+
+	dbf	d0,.d
+	or.w	d5,BS_ND(a2)
+	lea	BS_SIZE(a2),a2
+	dbf	d2,.b
+	tst.w	d6			; BG: the nn flags of its tiles again (they depend on the mapping)
+	beq	.nl
+	tst.b	m72r_cnn
+	beq	.nl
+	moveq	#0,d4			; the byte (ty * 8 + tx / 8)
+.nb:	move.b	(a0,d4.w),d3
+	beq	.nn
+	move.w	d4,d2
+	lsr.w	#3,d2			; ty
+	moveq	#7,d1
+	and.w	d4,d1
+	lsl.w	#3,d1			; tx of bit 7
+.nt:	add.b	d3,d3
+	bcc	.nz
+	moveq	#1,d0
+	bsr	m72r_tflags
+.nz:	addq.w	#1,d1
+	tst.b	d3
+	bne	.nt
+.nn:	addq.w	#1,d4
+	cmp.w	#512,d4
+	blo	.nb
+	lea	m72r_brver,a1		; (the cached projections are stale)
+	moveq	#64-1,d0
+.bv:	addq.w	#1,(a1)+
+	dbf	d0,.bv
+.nl:	addq.w	#1,d6
+	cmp.w	#2,d6
+	blo	.lay
+	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
 ; m72r_usescene: the offline scene m72r_nscene's colours (d7 = 0: the playfield's, m72r_p0; 1: the HUD's): every pen's
@@ -5500,14 +6476,7 @@ m72r_hud:
 .rn:	addq.w	#1,d2
 	cmp.w	#64,d2
 	blo	.r
-	tst.b	m72r_hud_on
-	beq	.x
-	tst.b	m72r_hncent
-	beq	.need
-	tst.w	d5
-	beq	.x
-.need:	or.b	#2,m72r_need
-.x:	rts
+	rts
 ; Z: band a4 (not off) covers lines d6 .. d7 - 1 completely in the window (FG full in every cell)
 .full:	tst.w	BT_OFF(a4)
 	bne	.no
@@ -5576,6 +6545,616 @@ m72r_hud:
 
 
 ; ======================================================================================================================
+; the representatives among the pens the picture uses
+; ======================================================================================================================
+; An index's STE colour is its representative pen's current colour (fades and cycles follow).  The representative is
+; the pen nearest the index's centre among the pens the picture uses: the tiles of the playfield's window (both layers,
+; display-on bands; one of the 32 cell rows a picture, all at once after a new choice) and the
+; sprites drawn (every picture), as 16-bit pen masks per colour row (m72r_umask: 0-15 the sprites' palette 0 rows,
+; 16-31 the tiles' palette 1 rows).  An index no used pen maps to keeps its representative.  (A representative among
+; all 512 pens, as before, could be a pen of the same colour at the choice that is unused and later changes: a whole
+; index shown in the wrong colour.)
+
+; m72r_uwork: a picture's share: its sprites, every second picture a cell row (after a new choice: all 32), every
+; 32nd row (and
+; after a new choice) the representatives and the STE palettes again
+m72r_uwork:
+	movem.l	d0-d2/a0-a1,-(sp)
+	tst.b	m72r_ufull		; every 32nd picture and after a new choice: the representatives
+	bne	.r
+	addq.w	#1,m72r_ucyc
+	and.w	#31,m72r_ucyc
+	bne	.x
+.r:	clr.b	m72r_ufull
+	bsr	m72r_urep
+	st	m72r_divp		; (m72r_sdiv before the next picture is drawn)
+	bsr	m72r_stepals
+.x:	movem.l	(sp)+,d0-d2/a0-a1
+	rts
+
+; m72r_usprites: the pieces of m72r_plist into m72r_umask (rows 0-15)
+m72r_usprites:
+	movem.l	d0-d2/a0-a2,-(sp)
+	lea	m72r_plist,a0
+	lea	m72r_su,a1
+	lea	m72r_umask,a2
+	move.w	m72r_np,d2
+	subq.w	#1,d2
+	bmi	.x
+.p:	move.w	(a0)+,d0		; code
+	lsl.w	#2,d0
+	move.w	(a1,d0.w),d0		; its pens
+	and.w	#$fffe,d0
+	moveq	#15,d1
+	and.w	(a0)+,d1		; colour
+	add.w	d1,d1
+	or.w	d0,(a2,d1.w)
+	addq.l	#4,a0
+	dbf	d2,.p
+.x:	movem.l	(sp)+,d0-d2/a0-a2
+	rts
+
+; m72r_urep: the representatives from m72r_umask (each index: its used pen nearest its centre); the masks cleared
+m72r_urep:
+	movem.l	d0-d7/a0-a6,-(sp)
+	lea	m72r_ubest,a0
+	moveq	#16-1,d0
+.b:	move.w	#$7fff,(a0)+
+	dbf	d0,.b
+	lea	m72r_suse,a0
+	lea	m72r_pidx,a1
+	lea	m72r_pcur,a2
+	lea	m72r_lab,a3
+	lea	m72r_cent,a4
+	lea	m72r_ubest,a5
+	lea	m72r_rep,a6
+	moveq	#0,d7			; the pen
+.row:	move.w	(a0),d6			; the row's mask
+	addq.l	#2,a0
+.pen:	lsr.w	#1,d6
+	bcc	.pn
+	moveq	#0,d0
+	move.b	(a1,d7.w),d0		; its index
+	beq	.pn
+	move.w	d7,d1
+	add.w	d1,d1
+	move.w	(a2,d1.w),d1		; its colour
+	lsl.w	#2,d1
+	move.w	d0,d2
+	lsl.w	#2,d2			; the centre
+	moveq	#0,d3
+	move.b	(a3,d1.w),d3
+	moveq	#0,d4
+	move.b	(a4,d2.w),d4
+	sub.w	d4,d3
+	bpl	.d1
+	neg.w	d3
+.d1:	moveq	#0,d5
+	move.b	1(a3,d1.w),d5
+	moveq	#0,d4
+	move.b	1(a4,d2.w),d4
+	sub.w	d4,d5
+	bpl	.d2
+	neg.w	d5
+.d2:	add.w	d5,d3
+	moveq	#0,d5
+	move.b	2(a3,d1.w),d5
+	moveq	#0,d4
+	move.b	2(a4,d2.w),d4
+	sub.w	d4,d5
+	bpl	.d3
+	neg.w	d5
+.d3:	add.w	d5,d3			; the distance
+	add.w	d0,d0
+	cmp.w	(a5,d0.w),d3
+	bhs	.pn
+	move.w	d3,(a5,d0.w)
+	move.w	d7,(a6,d0.w)
+.pn:	addq.w	#1,d7
+	moveq	#15,d0
+	and.w	d7,d0
+	bne	.pen
+	cmp.w	#512,d7
+	blo	.row
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; ======================================================================================================================
+; the status bar: its own buffer, its own palette (a raster split: borders.s' BD_HUDSCR events switch the video
+; address, the fine scroll and the palette at the bar's first line and back at a top bar's end)
+; ======================================================================================================================
+; A bar (m72r_hud: a band at M72_HUD_TOP / M72_HUD_BOT that FG covers completely) whose tiles lie on the 8-pixel grid
+; is drawn from its FG tiles into the buffer's bar area (m72r_barbuf: 320 pixels, M72_LB a line, fine scroll 0) and
+; its band is display-off for the playfield (black there, nothing composed, no conversions, its pens out of the
+; playfield's colours).  Its colours are exact: each pen its tiles use gets an index of its own (16 or more: the pens
+; of equal colours share one, beyond 15 colours the nearest of the first 15), the index's colour is that pen's current
+; colour (m72r_hrep, m72r_stepals), so fades and cycles follow.  A buffer's bar is drawn again where its tiles changed
+; since that buffer's last picture (m72r_barcp), wholly when the mapping or the bar's place changed (m72r_barfull).
+M72_BARL	= 32			; the bar's lines at most
+M72_BARSZ	= M72_BARL*M72_LB
+
+; m72r_bar: the bar of this picture (after m72r_hud): its place, its tiles' pens and their indices
+m72r_bar:
+	movem.l	d0-d7/a0-a6,-(sp)
+	clr.b	m72r_baron
+	lea	m72r_bt,a4
+	moveq	#0,d6			; y0
+	move.w	m72r_htop,d7		; y1
+	bne	.got
+	move.w	m72r_hbot,d6
+	move.w	#256,d7
+	cmp.w	d7,d6
+	bhs	.off
+	move.w	m72r_nb,d0
+	subq.w	#1,d0
+	lsl.w	#4,d0
+	add.w	d0,a4
+.got:	move.w	d7,d0
+	sub.w	d6,d0
+	cmp.w	#M72_BARL,d0
+	bhi	.no
+	moveq	#7,d1
+	and.w	d0,d1
+	bne	.no
+	move.w	BT_OXF(a4),d2
+	add.w	m72r_W,d2
+	and.w	#511,d2			; map x of the bar's x 0
+	moveq	#7,d1
+	and.w	d2,d1
+	bne	.no
+	move.w	BT_OYF(a4),d3
+	add.w	d6,d3
+	and.w	#511,d3			; map y of its line 0
+	moveq	#7,d1
+	and.w	d3,d1
+	bne	.no
+	st	m72r_baron
+	move.w	#1,BT_OFF(a4)		; (the playfield: black there)
+	; its place changed: every buffer's bar drawn again, the pens again
+	cmp.w	m72r_bary0,d6
+	bne	.new
+	cmp.w	m72r_bary1,d7
+	bne	.new
+	cmp.w	m72r_barmx,d2
+	bne	.new
+	cmp.w	m72r_barmy,d3
+	beq	.same
+.new:	move.w	d6,m72r_bary0
+	move.w	d7,m72r_bary1
+	move.w	d2,m72r_barmx
+	move.w	d3,m72r_barmy
+	st	m72r_barfull
+	st	m72r_barpd
+.same:	; the tiles (m72r_barsig): changed ones make the pens be looked at again (only when its rows changed)
+	move.w	d3,d0
+	lsr.w	#3,d0
+	move.w	d7,d1
+	sub.w	d6,d1
+	lsr.w	#3,d1
+	subq.w	#1,d1
+	lea	m72r_vrchg,a0
+	moveq	#0,d4
+.vc:	and.w	#63,d0
+	or.b	(a0,d0.w),d4
+	addq.w	#1,d0
+	dbf	d1,.vc
+	tst.b	d4
+	bne	.sig
+	tst.b	m72r_barpd
+	beq	.ng
+.sig:	move.w	d7,d5
+	sub.w	d6,d5
+	lsr.w	#3,d5
+	subq.w	#1,d5			; rows - 1
+	lsr.w	#3,d3			; map row
+	lsr.w	#3,d2			; map column
+	lea	m72r_barsig,a1
+.sr:	lea	m72v_fg,a0
+	move.w	d3,d0
+	and.w	#63,d0
+	lsl.w	#8,d0
+	add.w	d0,a0
+	moveq	#40-1,d4
+	move.w	d2,d1
+.sc:	and.w	#63,d1
+	move.w	d1,d0
+	lsl.w	#2,d0
+	move.l	(a0,d0.w),d0
+	cmp.l	(a1),d0
+	beq	.sn
+	move.l	d0,(a1)
+	bsr	m72r_barchk		; (a pen the bar did not use: its indices again)
+.sn:	addq.l	#4,a1
+	addq.w	#1,d1
+	dbf	d4,.sc
+	addq.w	#1,d3
+	dbf	d5,.sr
+	tst.b	m72r_bargrp		; (pens sharing indices by colour: a colour change makes the grouping again)
+	beq	.ng
+	lea	m72r_barpl,a0
+	lea	m72r_barpc,a1
+	lea	m72r_pcur,a2
+	move.w	m72r_barnp,d0
+	subq.w	#1,d0
+.gc:	move.w	(a0)+,d1
+	add.w	d1,d1
+	move.w	(a2,d1.w),d1
+	cmp.w	(a1)+,d1
+	beq	.gn
+	st	m72r_barpd
+	bra	.ng
+.gn:	dbf	d0,.gc
+.ng:	tst.b	m72r_barpd
+	beq	.x
+	clr.b	m72r_barpd
+	bsr	m72r_barpens
+	bra	.x
+.no:	clr.w	m72r_htop		; (not on the grid: no bar, the playfield shows those lines)
+	move.w	#256,m72r_hbot
+	clr.b	m72r_hud_on
+.off:	clr.w	m72r_bary1		; (a bar later: its place is new)
+.x:	lea	m72r_vrchg,a0		; (seen)
+	moveq	#64/4-1,d0
+.vx:	clr.l	(a0)+
+	dbf	d0,.vx
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; m72r_barchk: tile entry d0 (video RAM order) in the bar: any of its pens not in m72r_barset makes m72r_barpd
+m72r_barchk:
+	movem.l	d0-d2/a0,-(sp)
+	move.l	d0,d1
+	swap	d0
+	ror.w	#8,d0
+	and.w	#M72_NTF-1,d0
+	add.w	d0,d0
+	lea	m72r_uf,a0
+	move.w	(a0,d0.w),d2
+	and.w	#$fffe,d2
+	lsr.w	#8,d1
+	and.w	#15,d1
+	lsl.w	#4,d1
+	add.w	#256,d1
+	lea	m72r_barset,a0
+.p:	lsr.w	#1,d2
+	bcc	.n
+	tst.b	(a0,d1.w)
+	bne	.n
+	st	m72r_barpd
+	bra	.x
+.n:	addq.w	#1,d1
+	tst.w	d2
+	bne	.p
+.x:	movem.l	(sp)+,d0-d2/a0
+	rts
+
+; m72r_barpens: the pens the bar's tiles use (m72r_barsig) -> m72r_barpl (m72r_barnp of them, ascending), their
+; indices (m72r_hidx; another mapping than before: every buffer's bar drawn again), m72r_hrep, m72r_hncent
+m72r_barpens:
+	lea	m72r_barset,a0
+	moveq	#512/4-1,d0
+.c:	clr.l	(a0)+
+	dbf	d0,.c
+	lea	m72r_barset,a0
+	lea	m72r_uf,a2
+	lea	m72r_barsig,a1
+	move.w	m72r_bary1,d7
+	sub.w	m72r_bary0,d7
+	lsr.w	#3,d7
+	mulu	#40,d7
+	subq.w	#1,d7
+.t:	move.l	(a1)+,d0		; code low, code high, attribute (colour), -
+	move.w	d0,d1
+	swap	d0
+	ror.w	#8,d0			; the code
+	and.w	#M72_NTF-1,d0
+	add.w	d0,d0
+	move.w	(a2,d0.w),d2		; its pens
+	and.w	#$fffe,d2		; (pen 0: transparent)
+	lsr.w	#8,d1
+	and.w	#15,d1
+	lsl.w	#4,d1
+	add.w	#256,d1			; pen 0 of its colour row
+.p:	lsr.w	#1,d2
+	bcc	.pn
+	st	(a0,d1.w)
+.pn:	addq.w	#1,d1
+	tst.w	d2
+	bne	.p
+	dbf	d7,.t
+	; the list
+	lea	m72r_barpl,a1
+	moveq	#0,d0
+	moveq	#0,d1
+.l:	tst.b	(a0,d0.w)
+	beq	.ln
+	move.w	d0,(a1)+
+	addq.w	#1,d1
+.ln:	addq.w	#1,d0
+	cmp.w	#512,d0
+	blo	.l
+	move.w	d1,m72r_barnp
+	; the indices: a pen each (15 at most), else by colour (equal colours share), beyond 15 colours the nearest
+	lea	m72r_barnew,a3		; the new mapping (512 bytes)
+	move.l	a3,a0
+	moveq	#512/4-1,d0
+.cn:	clr.l	(a0)+
+	dbf	d0,.cn
+	lea	m72r_hrep,a4
+	clr.w	(a4)+			; (index 0: black)
+	clr.b	m72r_bargrp
+	lea	m72r_barpl,a1
+	move.w	m72r_barnp,d7
+	beq	.done
+	cmp.w	#15,d7
+	bhi	.grp
+	subq.w	#1,d7
+	moveq	#1,d0
+.one:	move.w	(a1)+,d1
+	move.b	d0,(a3,d1.w)
+	move.w	d1,(a4)+
+	addq.w	#1,d0
+	dbf	d7,.one
+	bra	.done
+.grp:	st	m72r_bargrp
+	lea	m72r_pcur,a2
+	lea	m72r_barpc,a5		; (the colours, to see them change)
+	moveq	#1,d6			; the next index
+	subq.w	#1,d7
+.g:	move.w	(a1)+,d1		; the pen
+	move.w	d1,d2
+	add.w	d2,d2
+	move.w	(a2,d2.w),d2		; its colour
+	move.w	d2,(a5)+
+	lea	m72r_hrep+2,a0		; an index of that colour already?
+	moveq	#1,d0
+.gf:	cmp.w	d6,d0
+	bhs	.gnew
+	move.w	(a0)+,d3
+	add.w	d3,d3
+	cmp.w	(a2,d3.w),d2
+	beq	.gset
+	addq.w	#1,d0
+	bra	.gf
+.gnew:	cmp.w	#16,d6
+	bhs	.near
+	move.w	d6,d0
+	move.w	d1,(a4)+
+	addq.w	#1,d6
+	bra	.gset
+.near:	movem.l	d1/d6-d7/a1,-(sp)	; the nearest of the 15 (Oklab L1)
+	lea	m72r_lab,a6
+	lsl.w	#2,d2
+	moveq	#0,d3
+	move.b	(a6,d2.w),d3
+	moveq	#0,d4
+	move.b	1(a6,d2.w),d4
+	moveq	#0,d5
+	move.b	2(a6,d2.w),d5
+	lea	m72r_hrep+2,a0
+	moveq	#1,d0			; the best index
+	move.w	#$7fff,d7		; its distance
+	moveq	#1,d6
+.nr:	move.w	(a0)+,d1		; the index's pen
+	add.w	d1,d1
+	move.w	(a2,d1.w),d1		; its colour
+	lsl.w	#2,d1
+	lea	(a6,d1.w),a1
+	moveq	#0,d2
+	move.b	(a1)+,d2
+	sub.w	d3,d2
+	bpl	.n1
+	neg.w	d2
+.n1:	moveq	#0,d1
+	move.b	(a1)+,d1
+	sub.w	d4,d1
+	bpl	.n2
+	neg.w	d1
+.n2:	add.w	d1,d2
+	moveq	#0,d1
+	move.b	(a1)+,d1
+	sub.w	d5,d1
+	bpl	.n3
+	neg.w	d1
+.n3:	add.w	d1,d2
+	cmp.w	d7,d2
+	bhs	.nn
+	move.w	d2,d7
+	move.w	d6,d0
+.nn:	addq.w	#1,d6
+	cmp.w	#16,d6
+	blo	.nr
+	movem.l	(sp)+,d1/d6-d7/a1
+.gset:	move.b	d0,(a3,d1.w)
+	dbf	d7,.g
+	move.w	d6,d1
+	bra	.cnt
+.done:	move.l	a4,d1
+	sub.l	#m72r_hrep,d1
+	lsr.w	#1,d1			; indices
+.cnt:	move.b	d1,m72r_hncent
+	; another mapping: every buffer's bar again
+	lea	m72r_barnew,a0
+	lea	m72r_hidx,a1
+	moveq	#512/4-1,d0
+	moveq	#0,d1
+.cm:	move.l	(a0)+,d2
+	cmp.l	(a1),d2
+	beq	.cs
+	moveq	#1,d1
+.cs:	move.l	d2,(a1)+
+	dbf	d0,.cm
+	tst.w	d1
+	beq	.r
+	st	m72r_barfull
+.r:	rts
+
+; m72r_bardraw: the drawn buffer's bar (its tiles changed since its last picture, or all)
+m72r_bardraw:
+	tst.b	m72r_baron
+	beq	.r
+	movem.l	d0-d7/a0-a6,-(sp)
+	move.w	m72r_draw,d0
+	move.w	d0,d1
+	mulu	#M72_BARSZ,d1
+	lea	m72r_barbuf,a5
+	add.l	d1,a5			; the buffer's bar
+	move.w	d0,d1
+	mulu	#M72_BARL/8*40*4,d1
+	lea	m72r_barcp,a4
+	add.l	d1,a4			; its tiles as last drawn
+	moveq	#0,d7			; (all)
+	bclr	d0,m72r_barfull
+	beq	.p
+	moveq	#1,d7
+.p:	lea	m72r_barsig,a3
+	move.w	m72r_bary1,d6
+	sub.w	m72r_bary0,d6
+	lsr.w	#3,d6
+	subq.w	#1,d6			; rows - 1
+	moveq	#0,d4			; the row
+.r0:	moveq	#0,d5			; the column
+.c0:	move.l	(a3)+,d0
+	tst.w	d7
+	bne	.dr
+	cmp.l	(a4),d0
+	beq	.cn
+.dr:	move.l	d0,(a4)
+	movem.l	d4-d7/a3-a5,-(sp)
+	bsr	m72r_bartile
+	movem.l	(sp)+,d4-d7/a3-a5
+.cn:	addq.l	#4,a4
+	addq.w	#1,d5
+	cmp.w	#40,d5
+	blo	.c0
+	addq.w	#1,d4
+	dbf	d6,.r0
+	movem.l	(sp)+,d0-d7/a0-a6
+.r:	rts
+
+; m72r_bartile: tile entry d0 (as in video RAM) at bar row d4, column d5 of the bar a5, its pens through m72r_hidx
+m72r_bartile:
+	move.l	d0,d6
+	swap	d6
+	ror.w	#8,d6			; code with the flips (bits 14, 15)
+	moveq	#0,d1
+	move.w	d6,d1
+	and.w	#M72_NTF-1,d1
+	lea	m72r_uf,a0
+	add.w	d1,d1
+	move.w	(a0,d1.w),m72r_cpens
+	lsl.l	#4,d1			; * 32
+	lea	m72r_tf,a1
+	add.l	d1,a1
+	lsr.w	#8,d0
+	and.w	#15,d0
+	lsl.w	#4,d0
+	lea	m72r_hidx+256,a4
+	add.w	d0,a4			; the colour row's indices
+	; the destination: row d4 (8 lines), column d5 (byte d5 & 1 of word group d5 / 2)
+	moveq	#0,d0
+	move.w	d4,d0
+	moveq	#12,d1
+	lsl.l	d1,d0			; * 8 * 512
+	add.l	d0,a5
+	move.w	d5,d0
+	lsr.w	#1,d0
+	lsl.w	#3,d0
+	add.w	d0,a5
+	moveq	#1,d0
+	and.w	d5,d0
+	add.w	d0,a5
+	; the X tables (as m72r_conv), flipped
+	lea	m72r_xt,a2
+	lea	m72r_rev8,a3
+	moveq	#4-1,d7
+.ld:	move.l	(a1)+,d4
+	move.l	(a1)+,d5
+	btst	#14,d6
+	beq	.nx
+	moveq	#4-1,d3
+.fx:	moveq	#0,d0
+	rol.l	#8,d4
+	move.b	d4,d0
+	move.b	(a3,d0.w),d4
+	moveq	#0,d0
+	rol.l	#8,d5
+	move.b	d5,d0
+	move.b	(a3,d0.w),d5
+	dbf	d3,.fx
+.nx:	btst	#15,d6
+	beq	.ny
+	exg	d4,d5
+	ror.w	#8,d4
+	swap	d4
+	ror.w	#8,d4
+	ror.w	#8,d5
+	swap	d5
+	ror.w	#8,d5
+.ny:	move.l	d4,(a2)
+	not.l	d4
+	move.l	d4,4(a2)
+	move.l	d5,32(a2)
+	not.l	d5
+	move.l	d5,36(a2)
+	addq.l	#8,a2
+	dbf	d7,.ld
+	lea	m72r_xt,a2
+	bsr	.half
+	lea	m72r_xt+32,a2
+	add.l	#4*M72_LB,a5
+.half:	moveq	#0,d0
+	moveq	#0,d1
+	moveq	#0,d2
+	moveq	#0,d3
+	move.w	m72r_cpens,d6
+	and.w	#$fffe,d6
+	lea	m72r_moff,a3
+	moveq	#0,d7
+.pen:	lsr.w	#1,d6
+	bcc	.np
+	move.l	a3,a6
+	moveq	#0,d5
+	move.b	(a6)+,d5
+	move.l	(a2,d5.w),d4
+	move.b	(a6)+,d5
+	and.l	(a2,d5.w),d4
+	move.b	(a6)+,d5
+	and.l	(a2,d5.w),d4
+	move.b	(a6)+,d5
+	and.l	(a2,d5.w),d4
+	move.b	(a4,d7.w),d5
+	lsr.b	#1,d5
+	bcc	.o1
+	or.l	d4,d0
+.o1:	lsr.b	#1,d5
+	bcc	.o2
+	or.l	d4,d1
+.o2:	lsr.b	#1,d5
+	bcc	.o3
+	or.l	d4,d2
+.o3:	lsr.b	#1,d5
+	bcc	.np
+	or.l	d4,d3
+.np:	addq.l	#4,a3
+	addq.w	#1,d7
+	tst.w	d6
+	bne	.pen
+	move.l	a5,a6			; 4 lines: the planes' bytes 2 apart
+	moveq	#4-1,d7
+.w:	rol.l	#8,d0
+	move.b	d0,(a6)
+	rol.l	#8,d1
+	move.b	d1,2(a6)
+	rol.l	#8,d2
+	move.b	d2,4(a6)
+	rol.l	#8,d3
+	move.b	d3,6(a6)
+	lea	M72_LB(a6),a6
+	dbf	d7,.w
+	rts
+
+; ======================================================================================================================
 ; m72r_choose: a new colour choice (m72r_need bit 0: the playfield, bit 1: the HUD bars)
 ; ======================================================================================================================
 m72r_choose:
@@ -5607,12 +7186,26 @@ m72r_choose:
 	move.w	#1024/4-1,d0
 .v:	clr.l	(a0)+
 	dbf	d0,.v
-	bsr	m72r_flush
+	bsr	m72r_sflush
+	bsr	m72r_shall		; (the sprite rows' mapping hashes)
 	bclr	#0,m72r_need
-	tst.b	m72r_hud_on
-	beq	.all
-	or.b	#2,m72r_need
-.hud:	btst	#1,m72r_need
+	clr.w	m72r_since
+	lea	m72r_suse,a0		; (the pens in use: from now on)
+	moveq	#16-1,d0
+.cu:	clr.l	(a0)+
+	dbf	d0,.cu
+	lea	m72r_dcol,a0		; (every pen looked at again: pending, its colour as now)
+	lea	m72r_pcur,a1
+	move.w	#512/2-1,d0
+.cd:	move.l	(a1)+,(a0)+
+	dbf	d0,.cd
+	lea	m72r_dres,a0
+	move.w	#512/4-1,d0
+.cr:	move.l	#$01010101,(a0)+
+	dbf	d0,.cr
+	st	m72r_ufull		; (the representatives among the used pens: the next picture)
+.hud:	bra	.all			; (the bars' colours: m72r_barpens, exact; no choice here)
+	btst	#1,m72r_need
 	beq	.all
 	tst.b	m72r_hud_on
 	beq	.all
@@ -6315,6 +7908,23 @@ m72r_disp_fine:	ds.b	REN_NBUF
 m72r_disp_pal:	ds.w	16*REN_NBUF
 m72r_disp_hpal:	ds.w	16*REN_NBUF
 m72r_disp_hud:	ds.w	2*REN_NBUF
+m72r_disp_bar:	ds.l	REN_NBUF
+m72r_baron:	ds.b	1
+m72r_barfull:	ds.b	1
+m72r_barpd:	ds.b	1
+m72r_bargrp:	ds.b	1
+m72r_bary0:	ds.w	1
+m72r_bary1:	ds.w	1
+m72r_barmx:	ds.w	1
+m72r_barmy:	ds.w	1
+m72r_barnp:	ds.w	1
+m72r_barpl:	ds.w	512
+m72r_barpc:	ds.w	512
+m72r_barset:	ds.b	512
+m72r_barnew:	ds.b	512
+m72r_barsig:	ds.l	M72_BARL/8*40
+m72r_barcp:	ds.l	REN_NBUF*M72_BARL/8*40
+m72r_barbuf:	ds.b	REN_NBUF*M72_BARSZ
 m72r_buf:	ds.l	REN_NBUF+1
 m72r_dbuf:	ds.l	1
 m72r_cbs:	ds.l	1
@@ -6346,6 +7956,7 @@ m72r_clusters:	ds.l	1
 m72r_flushes:	ds.l	1
 m72r_nconv:	ds.l	1
 m72r_nsconv:	ds.l	1
+m72r_ncinval:	ds.l	1
 m72r_st_ent:	ds.l	1
 m72r_st_entin:	ds.l	1
 m72r_st_pc:	ds.l	1
@@ -6447,6 +8058,7 @@ m72r_nbod:	ds.w	1
 m72r_bkpend:	ds.w	1
 m72r_bkmark:	ds.b	128
 m72r_rowchg:	ds.b	128
+m72r_vrchg:	ds.b	128
 m72r_cstage:	ds.b	1
 	even
 m72r_bulks:	ds.l	1
@@ -6506,6 +8118,50 @@ m72r_psnap:	ds.w	512
 m72r_pidx:	ds.b	512
 m72r_hidx:	ds.b	512
 m72r_rep:	ds.w	16
+m72r_umask:	ds.w	32
+m72r_ubest:	ds.w	16
+m72r_ucyc:	ds.w	1
+m72r_ufull:	ds.b	1
+	even
+m72r_suse:	ds.w	32
+m72r_cver:	ds.w	16
+m72r_rowmap:	ds.b	2*16*512
+m72r_tcol:	ds.b	2*4096
+m72r_cnn:	ds.b	1
+	even
+m72r_rpcnt:	ds.w	16
+m72r_nrepurp:	ds.l	1
+m72r_nrepfix:	ds.l	1
+m72r_rpmask:	ds.l	1
+m72r_rpwait:	ds.w	1
+m72r_dpend:	ds.b	1
+m72r_sonly:	ds.b	1
+	even
+m72r_rpdone:	ds.b	1
+	even
+m72r_scver:	ds.w	16
+M72_SROWS	= 4
+m72r_srows:	ds.b	16*M72_SROWS*18
+m72r_srnext:	ds.b	16
+m72r_srver:	ds.w	1
+m72r_skv:	ds.w	1
+m72r_dcol:	ds.w	512
+m72r_dtime:	ds.w	512
+m72r_dbest:	ds.w	512
+m72r_dres:	ds.b	512
+m72r_dchg:	ds.w	1
+m72r_cepk:	ds.w	1
+m72r_nfar:	ds.w	1
+m72r_since:	ds.w	1
+m72r_kwait:	ds.w	1
+m72r_kscene:	ds.w	1
+m72r_dtry:	ds.b	1
+m72r_cwait:	ds.b	32
+	even
+m72r_divp:	ds.b	1
+	even
+m72r_slab:	ds.l	16
+	even
 m72r_hrep:	ds.w	16
 m72r_stepal:	ds.w	16
 m72r_stehpal:	ds.w	16

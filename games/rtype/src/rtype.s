@@ -13,7 +13,7 @@
 ; is waiting); arcade frames the logic falls behind by more than MAX_BEHIND are dropped (the game slows down, its
 ; pace stays even).  The logic rate and the picture rate are counted apart (COUNTERS.BIN on quitting).
 ; The display: the renderer's buffers, engine/rt/borders.s (top and bottom border open, the picture's palette and the
-; status bar's own one: BD_HUD).  Sound: none yet (the sound latch's bytes are kept in core.s' ring).
+; status bar's own screen and palette: BD_HUD, BD_VSWITCH).  Sound: none yet (the sound latch's bytes are kept in core.s' ring).
 ; Untranslated code reached: CRASH.TXT "BADPC xxxxx" (the linear address), back to the desktop.
 
 KEY_ESC = $01
@@ -24,6 +24,7 @@ TA_NOPS = 84
 PIC_LINES = 256
 BD_PALETTE = 1
 BD_HUD = 1
+BD_VSWITCH = 1			; (the status bar: its own screen and palette from its first line, borders.s)
 MAX_BEHIND = 3
       ifnd PIC_EVERY
 PIC_EVERY = 2				; (arcade frames a picture at most: the logic's share against the picture rate)

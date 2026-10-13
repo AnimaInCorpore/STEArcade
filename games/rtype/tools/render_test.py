@@ -230,8 +230,18 @@ class Harness:
         return self.r32("m72r_disp_addr", 4 * d), self.r8("m72r_disp_fine", d)
 
     def screen(self, addr=None, fine=None, lines=(0, 256), width=320):
-        if addr is None:
+        if addr is None:                # the picture shown: the playfield, the status bar's lines from its own buffer
             addr, fine = self.shown()
+            out = self.screen(addr, fine, lines, width)
+            if lines == (0, 256):
+                d = self.r16("m72r_shown")
+                top, bot = self.r16("m72r_disp_hud", 4 * d), self.r16("m72r_disp_hud", 4 * d + 2)
+                bar = self.r32("m72r_disp_bar", 4 * d)
+                if top > 0:
+                    out[:top] = self.screen(bar, 0, (0, top), width)
+                elif bot < 256:
+                    out[bot:] = self.screen(bar, 0, (0, 256 - bot), width)
+            return out
         y0, y1 = lines
         n = y1 - y0
         raw = self.block(addr + y0 * LB, n * LB).reshape(n, LB)[:, :21 * 8].reshape(n, 21, 4, 2)
@@ -361,6 +371,9 @@ def reference(game, st, mame=False):
     return v.render_raw(bands)[:, 96:416]
 
 
+GROSS, GROSS_GAP, GROSS_PART, GROSS_REST = 0.2, 0.1, 0.01, 3
+
+
 def check(h, game, st, name, png=False):
     """(differing pixels, mid-frame VRAM pixels, colour error, saturated error, notes)"""
     pens = reference(game, st)
@@ -375,20 +388,7 @@ def check(h, game, st, name, png=False):
     hs = int(np.count_nonzero(hud[:, None] & (pens < 256)))
     if hs:                              # (sprite pixels map through m72r_pidx: shown with the HUD palette they are wrong)
         notes.append("%d sprite pixels in the HUD bars' lines" % hs)
-    # the mapping: nearest centre of the pen's STE colour (index 0 black)
-    for which, idx, cent, nc in (("pidx", pidx, "m72r_cent", "m72r_ncent"), ("hidx", hidx, "m72r_hcent", "m72r_hncent")):
-        n = h.r8(nc)
-        if n == 0:
-            continue
-        cc = h.block(h.sym[cent], 64).reshape(16, 4)[:n, :3].astype(int)
-        pcur = np.array([h.r16("m72r_psnap", 2 * i) for i in range(512)]) if which == "pidx" else None
-        if pcur is None:
-            continue
-        lab = m72_assets.lab_table()[:, :3].astype(int)
-        d = np.abs(lab[pcur][:, None, :] - cc[None]).sum(-1)
-        near = d.argmin(1)
-        if (near != idx).any():
-            notes.append("%s: %d pens not mapped to the nearest centre" % (which, int((near != idx).sum())))
+    # (the mapping itself is not checked: the colours shown are, below)
     # mid-frame VRAM writes: MAME's picture differs from the port's input there
     mid = 0
     if "mame" in st:
@@ -400,6 +400,28 @@ def check(h, game, st, name, png=False):
     la, lb = m72_assets.oklab(shown), m72_assets.oklab(rgb)
     e = np.sqrt(((la - lb) ** 2).sum(-1))
     sat = np.hypot(lb[..., 1], lb[..., 2]) > 0.08
+    # gross colour errors: a pixel shown GROSS or more (Oklab) from its colour while an index of its palette (the
+    # playfield's or the HUD bar's, the colours shown) is GROSS_GAP closer: a representative pen whose colour is not
+    # the colour of the pens it stands for (the shown colours, not the mapping, are checked here)
+    gross = 0
+    for rows, pw in ((~hud, h.palette()), (hud, h.palette(True))):
+        if not rows.any():
+            continue
+        lp = m72_assets.oklab(pw.astype(float))                          # 16 x 3
+        best = np.sqrt(((lb[rows][:, :, None, :] - lp[None, None]) ** 2).sum(-1)).min(-1)
+        er = e[rows]
+        g = (er >= GROSS) & (er - best >= GROSS_GAP) & (pens[rows] < 512)
+        gross += int(np.count_nonzero(g))
+        if g.any():
+            ys, xs = np.nonzero(g)
+            yl = np.nonzero(rows)[0][ys]
+            bad_pens = sorted(set(int(v) for v in pens[rows][g]))[:8]
+            # a failure from GROSS_PART of the region's pixels on (a whole index shown wrong: a HUD label, a sprite's
+            # colour); fewer (a colour-cycling pen between remaps) are reported only
+            n = int(g.sum())
+            notes.append("%s%d pixels in %s shown GROSSLY wrong (lines %d-%d, pens %s)" % (
+                "" if n >= GROSS_PART * int(rows.sum()) * pens.shape[1] else "(info) ", n,
+                "the HUD bars" if rows is hud else "the playfield", yl.min(), yl.max(), bad_pens))
     if png or diff.any():
         from PIL import Image
         a = shown.astype(np.uint8)
@@ -414,21 +436,27 @@ def check(h, game, st, name, png=False):
 def run_sequence(h, game, states, label, png_at=(), alldirty=False, verbose=True, stop_after=None):
     costs = []
     fails = 0
+    rest, prevpal = 0, None
     for f, item in states:
         st = pickle.loads(zlib.decompress(item))
+        pal = (bytes(st["pal0"]), bytes(st["pal1"]))
+        rest = rest + 1 if pal == prevpal else 0       # (pictures the palette has rested: gross colour errors
+        prevpal = pal                                   # while it changes are the choices' lag, reported only)
         h.put_state(st, alldirty)
         r = h.frame()
         if r is None:
             print("%s %d: no buffer free" % (label, f))
             continue
         bad, mid, err, sat, notes = check(h, game, st, "%s_%d" % (label, f), png=f in png_at)
+        if rest < GROSS_REST:
+            notes = [("(transient) " + n) if "GROSSLY" in n and not n.startswith("(") else n for n in notes]
         costs.append((f, r[0], r[1], h.calls, h.callmax))
         if verbose or bad or notes:
             print("%s %5d: %s, CPU %7d + Blitter %6d cycles%s, colour error %.4f (saturated %.4f)%s%s" % (
                 label, f, "exact" if not bad else "%d pixels DIFFER" % bad, r[0], r[1],
                 " (%d calls, the longest %d)" % (h.calls, h.callmax) if h.calls > 1 else "", err, sat,
                 ", mid-frame VRAM %d px" % mid if mid else "", "; " + "; ".join(notes) if notes else ""), flush=True)
-        fails += (bad != 0) + bool(notes)
+        fails += (bad != 0) + bool([n for n in notes if not n.startswith("(")])
         if stop_after and fails >= stop_after:
             break
     return fails, costs
