@@ -1111,10 +1111,13 @@ class Emitter:
             return
         prev = []
         w = v
+        xcheck = False                  # (a join between the LDX and here: X is checked at run time)
         for _ in range(4):
             cands = [u for u in self.code if u < w and self.next_v(u, self.code[u]) == w]
-            if len(cands) != 1 or w in self.joins and w != v:
+            if len(cands) != 1:
                 return
+            if w in self.joins and w != v:
+                xcheck = True
             w = cands[0]
             pi = self.code[w]
             if pi.mn == "ldx" and pi.mode == "imm16":
@@ -1139,6 +1142,12 @@ class Emitter:
             tpage = next(iter(pages))
         data = self.p.page(tpage)
         entries = []
+        # targets in another bankable slot: the page the coverage saw this site go to there (one page: checked at run
+        # time before the table is used)
+        seen = collections.defaultdict(set)
+        for t in self.p.targets.get(v, ()):
+            seen[self.p.slot_of.get(t >> 13)].add(t >> 13)
+        checks = set()
         for k in range(64):
             o = (table & 0x1FFF) + 2 * k
             if o + 1 >= 0x2000:
@@ -1149,6 +1158,11 @@ class Emitter:
                 tv = (v & ~0x1FFF) | (t & 0x1FFF)
             elif self.fixed_slot(ts) and len(self.p.slot_pages.get(ts, ())) == 1:
                 tv = (next(iter(self.p.slot_pages[ts])) << 13) | (t & 0x1FFF)
+            elif len(seen.get(ts, ())) == 1:
+                pg = next(iter(seen[ts]))
+                tv = (pg << 13) | (t & 0x1FFF)
+                if not (self.fixed_slot(ts) and len(self.p.slot_pages.get(ts, ())) == 1):
+                    checks.add((ts, pg))
             else:
                 break
             if tv not in self.code:
@@ -1160,7 +1174,12 @@ class Emitter:
         generic = self.new_label()
         tab = "%s_jt%d" % (self.p.label(v), self.uid)
         if tpage != v >> 13 and not (self.fixed_slot(tslot) and len(self.p.slot_pages.get(tslot, ())) == 1):
-            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(tpage), 4 * tslot))
+            checks.add((tslot, tpage))
+        if xcheck:
+            self.e("cmp.w #$%04X,d2" % table)
+            self.e("bne %s" % generic)
+        for ts, pg in sorted(checks):
+            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(pg), 4 * ts))
             self.e("bne %s" % generic)
         self.e("moveq #0,d7")
         self.e("move.b %s,d7" % ("d0" if x.kind == "acc_a" else "d1"))
