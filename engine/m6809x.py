@@ -148,7 +148,7 @@ class Program:
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
-                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False,
+                 hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False, pid_checks=False,
                  dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False):
         self.name, self.prefix = name, prefix
         self.dp = dp                              # the direct page register's usual value
@@ -157,6 +157,7 @@ class Program:
         self.a3_slot, self.a4_slot = a3_slot, a4_slot     # the slots whose VB a3 / a4 hold (a3: DP's and the stack's)
         assert a3_slot <= 3 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot
         self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
+        self.pid_checks = pid_checks              # page checks compare the slot's page number (PID) instead of PB
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
         self.indirect_live = indirect_live        # computed jumps / calls read what their seen targets read (see liveness)
         self.page_bytes = page_bytes
@@ -1089,7 +1090,7 @@ class Emitter:
             return
         for t in tg:
             skip = self.new_label()
-            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), tslot * 4))
+            self.page_cmp(t >> 13, tslot)
             self.e("bne.s %s" % skip)
             if saved:
                 self.e("move.w d5,ccr")
@@ -1179,7 +1180,7 @@ class Emitter:
             self.e("cmp.w #$%04X,d2" % table)
             self.e("bne %s" % generic)
         for ts, pg in sorted(checks):
-            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(pg), 4 * ts))
+            self.page_cmp(pg, ts)
             self.e("bne %s" % generic)
         self.e("moveq #0,d7")
         self.e("move.b %s,d7" % ("d0" if x.kind == "acc_a" else "d1"))
@@ -1200,6 +1201,13 @@ class Emitter:
         for tv in entries:
             self.tail.append("\tdc.l %s" % self.lab(tv))
         self.lines.append(generic + ":")
+
+    def page_cmp(self, page, slot):
+        """the CCR's Z = the slot holds the page (its page number when the runtime keeps them: cheaper than PB)"""
+        if self.p.pid_checks:
+            self.e("cmp.w #$%X,%d(a6)" % (page, PID_OFF + 2 * slot))
+        else:
+            self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(page), 4 * slot))
 
     def live_flags(self, v):
         return self.live_out.get(v, NZVC) & NZVC
@@ -1224,7 +1232,7 @@ class Emitter:
                 self.e("cmp.w #$%04X,d7" % pc)
                 self.e("bne.s %s" % skip)
                 if not self.fixed_slot(pc >> 13):
-                    self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
+                    self.page_cmp(t >> 13, pc >> 13)
                     self.e("bne.s %s" % skip)
                 self.e("bra %s" % self.lab(t))
                 self.lines.append(skip + ":")
@@ -1241,7 +1249,7 @@ class Emitter:
                 skip = self.new_label()
                 self.e("cmp.w #$%04X,d7" % pc)
                 self.e("bne.s %s" % skip)
-                self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
+                self.page_cmp(t >> 13, pc >> 13)
                 self.e("bne.s %s" % skip)
                 self.e("move.w d5,ccr")
                 self.e("bra %s" % self.lab(t))
@@ -1269,7 +1277,7 @@ class Emitter:
             self.e("cmp.w #$%04X,d7" % pc)
             self.e("bne.s %s" % skip)
             if not self.fixed_slot(pc >> 13):
-                self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
+                self.page_cmp(t >> 13, pc >> 13)
                 self.e("bne.s %s" % skip)
             if live:
                 self.e("move.w d5,ccr")
@@ -1427,7 +1435,7 @@ class Emitter:
                 self.e("cmp.w #$%04X,d7" % pc)
                 self.e("bne.s %s" % skip)
                 if not self.fixed_slot(pc >> 13):
-                    self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(t >> 13), (pc >> 13) * 4))
+                    self.page_cmp(t >> 13, pc >> 13)
                     self.e("bne.s %s" % skip)
                 if keep:
                     self.e("move.w d5,ccr")
