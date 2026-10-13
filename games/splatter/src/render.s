@@ -2761,6 +2761,22 @@ ren_fixed:
 	tst.b	tile_written_fix
 	beq	.cells
 	sf	tile_written_fix
+	ifd	TILE_ROWS
+	; (the writers' rows: tile_fix_rows, 28 bytes a layer; tile_fix_all: a writer without rows, all of them)
+	tst.b	tile_fix_all
+	bne	.all
+	lea	tile_fix_rows,a3
+	move.w	#$7010,d5
+	bsr	.rows
+	move.w	#$7810,d5
+	bsr	.rows
+	bra	.cells
+.all:	sf	tile_fix_all
+	lea	tile_fix_rows,a0
+	moveq	#56/4-1,d0
+.clr:	clr.l	(a0)+
+	dbf	d0,.clr
+	endc
 	endc
 	move.w	#$7010,d5
 	bsr	.cmp
@@ -2900,6 +2916,41 @@ ren_fixed:
 	addq.w	#1,d6
 .a5:	rts
 ; d5 = a fixed layer's offset in tile RAM: its changed longs mark their cells
+	ifd	TILE_ROWS
+; the flagged rows of the fixed layer at d5 (a3: its 28 flags, cleared; a3 ends past them)
+.rows:	moveq	#0,d6			; row
+.row:	tst.b	(a3)+
+	beq.s	.ron
+	clr.b	-1(a3)
+	move.w	d6,d0
+	mulu	#72,d0
+	add.w	d5,d0
+	lea	vio+V_TILE,a0
+	add.w	d0,a0
+	lea	ren_tcopy,a1
+	add.w	d0,a1
+	moveq	#18-1,d1		; the row's 18 longs
+.rol:	cmpm.l	(a0)+,(a1)+
+	dbne	d1,.rol
+	beq.s	.ron
+	move.l	-4(a0),-4(a1)
+	moveq	#17,d0			; the long in the row
+	sub.w	d1,d0
+	move.w	d6,d2
+	mulu	#18,d2
+	add.w	d2,d0
+	add.w	d0,d0			; the first word's cell
+	lea	ren_fdirty,a2
+	st	(a2,d0.w)
+	st	1(a2,d0.w)
+	st	ren_fany
+	dbf	d1,.rol
+.ron:	addq.w	#1,d6
+	cmp.w	#28,d6
+	blo.s	.row
+	rts
+	endc
+
 .cmp:	lea	vio+V_TILE,a0
 	add.w	d5,a0
 	lea	ren_tcopy,a1

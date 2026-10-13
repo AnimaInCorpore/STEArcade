@@ -398,7 +398,9 @@ ctx_sub:	ds.b	CTXSIZE
 key_regs:	ds.b	8
 tile_written:	ds.b	1		; (the render's writer flags: set after the translated stores into tile RAM, tools/gen.py)
 tile_written_fix:	ds.b	1
+tile_fix_all:	ds.b	1		; (and per row of the fixed layers: tools/gen.py tile_marks, render.s TILE_ROWS)
 	even
+tile_fix_rows:	ds.b	56
 page_base_table:	ds.l	$400
 bad_table:	ds.l	$2000		; (filled with cpu_badpc)
 sprite_latch:	ds.b	2

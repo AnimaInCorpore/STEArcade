@@ -236,7 +236,7 @@ def main():
     stage = args.seed - 10 if 11 <= args.seed <= 17 else 0
     if stage:
         m.dipsw &= ~0x04
-    tile_frames = flag_frames = 0
+    tile_frames = flag_frames = all_frames = 0
     probe = {int(x, 16) for x in os.environ.get("PROBE_PCS", "").split(",") if x}
     probe_frame = int(os.environ.get("PROBE_FRAME", "-1"))     # (debugging: the sub CPU at these pcs in that frame)
     probe_on = [False]
@@ -288,6 +288,8 @@ def main():
         tile0 = vio_get(0x2F0000, 0x8000)          # (the render's writer flags: tools/gen.py tile_marks)
         mem.w8(sym["tile_written"], 0)
         mem.w8(sym["tile_written_fix"], 0)
+        mem.w8(sym["tile_fix_all"], 0)
+        mem.w_block(sym["tile_fix_rows"], bytes(56))
         if f == args.steplock:
             steplock(f)
             return 1
@@ -308,7 +310,15 @@ def main():
         if tile0[0x7000:] != tile1[0x7000:] and not mem.r8(sym["tile_written_fix"]):
             print("frame %d: tile RAM (the fixed layers) changed without tile_written_fix" % f)
             return 1
+        if not mem.r8(sym["tile_fix_all"]):
+            for k, base in enumerate((0x7010, 0x7810)):
+                for r in range(28):
+                    a = base + 72 * r
+                    if tile0[a:a + 72] != tile1[a:a + 72] and not mem.r8(sym["tile_fix_rows"] + 28 * k + r):
+                        print("frame %d: fixed layer %d row %d changed without its tile_fix_rows flag" % (f, 4 + k, r))
+                        return 1
         flag_frames += bool(mem.r8(sym["tile_written"]))
+        all_frames += bool(mem.r8(sym["tile_fix_all"]))
         m.run_cpu(0)
         m.run_cpu(1)
         if not compare(f):
@@ -319,7 +329,8 @@ def main():
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1)), flush=True)
     print("%d frames identical; %.0f 68000 cycles a frame for the two CPUs" % (args.frames, cycles / args.frames))
-    print("tile RAM (layers 0-3) changed in %d frames, tile_written set in %d" % (tile_frames, flag_frames))
+    print("tile RAM (layers 0-3) changed in %d frames, tile_written set in %d; tile_fix_all set in %d" % (
+        tile_frames, flag_frames, all_frames))
     return 0
 
 

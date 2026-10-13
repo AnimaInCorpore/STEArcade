@@ -56,7 +56,9 @@ h_wait:	bra.s	h_wait
 	ifd	TILE_FLAG
 tile_written:	ds.b	1
 tile_written_fix:	ds.b	1
+tile_fix_all:	ds.b	1
 	even
+tile_fix_rows:	ds.b	56
 	endc
 vio:	ds.b	$28000
 h_stack:	ds.b	8192
@@ -162,12 +164,25 @@ class Harness:
     def put_state(self, st):
         if "tile_written" in self.sym:
             # (TILE_FLAG: what the translated writers would say; any change of tile RAM sets both flags)
-            if st["vram"] != getattr(self, "_vram", None):
+            old = getattr(self, "_vram", None)
+            if st["vram"] != old:
                 self.mem.w8(self.sym["tile_written"], 0xFF)
                 self.mem.w8(self.sym["tile_written_fix"], 0xFF)
+                # (TILE_ROWS: the fixed layers' rows that changed; none known before: all)
+                if old is None:
+                    self.mem.w8(self.sym["tile_fix_all"], 0xFF)
+                else:
+                    for k, base in enumerate((0x7010, 0x7810)):
+                        for r in range(28):
+                            a = base + 72 * r
+                            if st["vram"][a:a + 72] != old[a:a + 72]:
+                                self.mem.w8(self.sym["tile_fix_rows"] + 28 * k + r, 0xFF)
             if st.get("fix_written"):
-                # (the program's HUD writers run in every frame of play: the flag is set even without a change)
+                # (the program's HUD writers run in every frame of play: the flag is set even without a change, with
+                # the rows they write: layer 4's 1, 2 and 25)
                 self.mem.w8(self.sym["tile_written_fix"], 0xFF)
+                for r in (1, 2, 25):
+                    self.mem.w8(self.sym["tile_fix_rows"] + r, 0xFF)
             self._vram = st["vram"]
         v = bytearray(VIO_SIZE)
         v[0:0x8000] = st["pal"]

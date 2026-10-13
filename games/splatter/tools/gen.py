@@ -86,15 +86,28 @@ def tile_marks(acc, ioacc):
         lay = bool(pages - {(TILE0 >> 13) + 3}) or not exact or any(va < TILE0 + 0x7000 for va in ws)
         fix = (TILE0 >> 13) + 3 in pages and (not exact or any(va >= TILE0 + 0x7000 for va in ws))
         marks[v] = ["st tile_written"] * lay + ["st tile_written_fix"] * fix
+        if fix:
+            # the fixed layers' rows it wrote (render.s TILE_ROWS: only those are compared); not known: all
+            rows = sorted({fix_row(va - TILE0) for va in ws} - {None}) if exact else None
+            marks[v] += ["st tile_fix_rows+%d" % r for r in rows] if rows is not None else ["st tile_fix_all"]
 
     def after(v, ins):
         if v in marks:
             return marks[v]
         if v not in acc and ins.mode in ("ext", "idx") and (m6809x.base_mn(ins.mn).startswith("st") or m6809x.base_mn(ins.mn) in (
                 "clr", "neg", "com", "inc", "dec", "asl", "lsl", "lsr", "asr", "rol", "ror")):
-            return ["st tile_written", "st tile_written_fix"]
+            return ["st tile_written", "st tile_written_fix", "st tile_fix_all"]
         return None
     return after
+
+
+def fix_row(off):
+    """a tile RAM offset -> its fixed layer row flag (28 a layer: layer 4 at $7010, layer 5 at $7810, 72 bytes a row),
+    or None (not shown)"""
+    for k, base in enumerate((0x7010, 0x7810)):
+        if base <= off < base + 28 * 72:
+            return 28 * k + (off - base) // 72
+    return None
 
 
 def io_site(accesses):
