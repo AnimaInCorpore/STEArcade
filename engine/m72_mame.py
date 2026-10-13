@@ -56,3 +56,43 @@ def compare(game, video, frames, rompath, keep=None):
             "; %d video RAM bytes not explained by the log" % miss if miss else ""))
     print("compare pictures (reference | MAME | differences) in", d)
     return int(worst != 0)
+
+
+def logic(game, frames, rompath, keep=None):
+    """The board (engine/m72board.py) from power-on against MAME's memory at the frames: work RAM, sound RAM, video
+    RAMs, palettes (and mrheli's dual-port RAM); then the board's own picture against MAME's."""
+    import m72board
+    info = m72board.GAMES[game]
+    ranges = [("work", info["ram"], 0x4000), ("sound", 0xE0000, 0x10000), ("fg", m72.FG_RAM, 0x4000),
+              ("bg", m72.BG_RAM, 0x4000), ("pal0", m72.PAL0, 0xC00), ("pal1", m72.PAL1, 0xC00)]
+    if info["mcu"]:
+        ranges.append(("dpram", 0xB0000, 0x1000))
+    d = C.run_mame(game, frames, ["maincpu:0x%x:0x%x" % (a, a + n - 1) for _, a, n in ranges], keep=keep,
+                   rompath=rompath)
+    b = m72board.M72(game)
+    video = m72.Video(game)
+    own = {"work": lambda: b.ram, "sound": lambda: b.soundram, "fg": lambda: b.videoram[0],
+           "bg": lambda: b.videoram[1], "pal0": lambda: b.palette[0], "pal1": lambda: b.palette[1],
+           "dpram": lambda: b.dpram}
+    bad = 0
+    for f in sorted(frames):
+        while b.frame < f:
+            b.run_frame()
+        out = []
+        for name, a, n in ranges:
+            mame = C.load_dump(d, f, "maincpu", a)[a:a + n]
+            mine = bytes(own[name]())
+            if name.startswith("pal"):                     # MAME reads bits 5-15 as ones; A9 unused
+                mame = bytes(x | 0xE0 if not i & 1 else 0xFF for i, x in enumerate(mame))
+                mine = bytes(x | 0xE0 if not i & 1 else 0xFF for i, x in enumerate(mine))
+                keep_ = [i for i in range(n) if not (i & 0x200)]
+                mame, mine = bytes(mame[i] for i in keep_), bytes(mine[i] for i in keep_)
+            diff = [i for i in range(len(mame)) if mame[i] != mine[i]]
+            bad += len(diff)
+            out.append("%s %d%s" % (name, len(diff), (" (@%X..)" % (a + diff[0])) if diff else ""))
+        rgb = video.render_rgb(b.frame_bands, m72.pens(b.palette[0], b.palette[1]))
+        px = C.diff_pixels(rgb, C.load_shot(d, f))
+        print("frame %5d: bytes differ: %s; own picture %d pixels (%d bands)" % (
+            f, ", ".join(out), px, len(b.frame_bands)), flush=True)
+    print("MAME capture in", d)
+    return int(bad != 0)

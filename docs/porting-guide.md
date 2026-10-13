@@ -125,6 +125,16 @@ prints 0 differing pixels for all four frames now.  Notes:
   where the handler re-programs the raster line.  Pens never written keep MAME's default pattern (pen bits 0/1/2 ->
   full red/green/blue), not black: 448 pens "differ" during R-Type's boot; compare after the game wrote the palette.
 
+* **The M72 board's logic** (`engine/m72board.py`, 2026-10-13; R-Type and Mr. HELI equal to MAME in all RAM and in
+  the picture through frame 4000, `games/<game>/ref/logic_<game>.py`): what it took beyond exact cores (`v30.py`,
+  `i8051.py`, `z80mame.py`, each checked against MAME traces).  `abort_timeslice` takes the rest of icount as *stolen*
+  cycles (a core that counts `start - icount` must give them back); suspended CPUs (a CPU held in reset) go to the
+  end of the execute list but still eat cycles and can lower a round's target; the sound manager's 50 Hz update is a
+  timer that cuts slices even with `-sound none`; `machine().time()` inside a timer callback is the timer's expiry,
+  not the base time; ymfm's sample count at a register write is floor(t * rate) + 1 (the stream is brought up to
+  the sample containing t), which sets timer B's start (-(count & 15)).  The V30's REP string instructions run in
+  slice-sized chunks, so any of these shows up as a few cycles of drift in the main CPU.
+
 #### Frames from an old MAME without Lua snapshots (F030Arcade `wolfmame-0162`, Windows)
 
 `F030Arcade/third_party/wolfmame-0162/mame.exe` knows Bubble Bobble (`bublbobl` Japan Ver 0.1, `bublboblr` US Ver 5.1;
