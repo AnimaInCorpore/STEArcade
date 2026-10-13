@@ -38,17 +38,53 @@ Test: `tools/build.py --sim`, then `tools/logic_test.py FRAMES --seed N` (frame 
 RAM, TRIRAM, the CUS30 RAM, tile RAM, palette, sprite RAM, CUS123 control, the key custom, both CPUs' registers and
 pages; `--steplock F` instruction by instruction).
 
-## The picture (measured on the reference, plan)
+## The STE program (src/galaga88.s)
 
-The arcade picture is 288 x 224, turned (ROT270) to 224 x 288 portrait; the game always flips the screen.  All six
-layers are on in play: layers 0-2 the star fields (each scrolls on its own: one of them changes in 50-80% of the
-frames; ~110-520 non-empty cells of 4096 a layer, ~1-2 opaque pixels a cell), layer 3 the planets and the space
-station (mostly still), fixed layer 4 the HUD (priority 6, on top), fixed layer 5 the backdrop (a full opaque
-nebula image, priority 1).  Priorities: L4 6 > L3 5 > L0 4 > L1 3 > L2 2 > L5 1.  ~250 distinct pens a picture.
-Sprites: 16 x 16 mostly, 32 x 32, 8 x 8.
+The snapshot of the reference at frame 300 (tools/snapshot.py), then in turn an arcade frame (the vertical blank's
+work: the sprite list latch; the MCU: Splatterhouse's native model of the same CUS64 program, games/splatter/src/
+mcu.s - tools/mcu_test.py: 1500 frames of play, 0 differences against the board; the sound CPU's handshake: the
+command byte $240 of the CUS30 RAM taken at once; then the main and the sub CPU) and a picture every PIC_EVERY (2)
+arcade frames.  Top and bottom borders open (engine/rt/borders.s, Galaga's timing): 277 lines, the picture's rows
+0-276 (the last 11 rows, the lives and stage flags, are not shown yet).  Keys: arrows, space / Z fire, 1 start, 5 /
+6 coin, Esc quits (COUNTERS.BIN); joystick 1.  Uncovered code: CRASH.TXT.  `tools/build.py` (and `-D BENCH=1`: the
+scripted game of bench_inputs, counters at arcade frame 600 and the end at 1600).
 
-Plan for the STE (224 pixels at x 48-271: the picture's edges on 16-pixel groups; open top and bottom borders, ~277
-of the 288 lines as the Galaga port): the backdrop and layer 3 composed into the buffers when they change; the star
-fields as lists of pixels per tile code, plotted per picture under the layer 3 mask and restored; sprites rotated at
-build time, drawn with the Blitter (clipped at the side edges, whole into guard rows at the top and bottom); colours
-per scene as Splatterhouse (15 + a HUD palette).
+## Renderer (src/render.s)
+
+The arcade picture is 288 x 224, turned (ROT270) to 224 x 288 portrait; the game always flips the screen; the STE
+shows it at x 48-271 (the picture's edges on 16-pixel groups).  tools/assets.py turns the graphics ROMs,
+tools/stemodel.py is the renderer's geometry in Python (0 pixels against the reference's turned picture).
+Measured on the reference: all six layers are on in play: layers 0-2 the star fields (each scrolls on its own; ~110-520
+non-empty cells of 4096 a layer, ~1-2 opaque pixels a cell), layer 3 the planets and the space station, fixed layer 4
+the HUD (priority 6), fixed layer 5 the backdrop (opaque, priority 1); ~250 distinct pens a picture.
+
+* **Background** (layers 3-5): composed per 8 x 8 cell into a clean buffer when their tiles (the writers' flags),
+  layer 3's scroll (its cells before and after), a bank (that layer's cells), the priorities or the colours change.
+  A cell line is the merge of its layers' converted character lines (ren_cimgs: 8 planar longs per character and
+  bank, made on first use, `movep.l` into the planes).  Cover planes (1 bit a pixel) of layers 3 and 4 for the stars
+  and sprites.
+* **Stars** (layers 0-2): plotted per picture from lists of their non-empty cells (rebuilt when their tiles change),
+  only the rows with pixels, under the layers above them; their words restored from the clean buffer later.
+* **Sprites**: converted per (code, part, flips, colour) into a cache (planar rows with their masks), one HOG Blitter
+  pass a line (4 planes, X count 3, the row's shifted mask as end masks; groups outside the picture get end mask 0;
+  whole into 32 guard lines at the top and bottom).  Sprites of a priority below layer 3 or 4 (the '88 emblem under
+  the HUD layer) lose the pixels those layers cover; a hidden sprite pixel still takes the pixel from the entries the
+  arcade draws after it (the emblem's dissolve), so with such a sprite on the picture the entries are painted in the
+  arcade's order with a taken plane.
+* **Colours**: 15 + black per scene (as Splatterhouse: samples of the background, the stars and the sprites, weighted
+  by the root of their counts, a median cut and 4 rounds of k-means in Oklab); a pen's index is the nearest centre of
+  its colour when they were chosen; an index's STE colour is the current colour of a representative pen (fades and
+  colour cycling cost nothing).  A new scene (a new backdrop, priorities) shows black until the palette rests.
+* Restores: the cells composed since (copied from the clean buffer), the star words, the sprite rectangles (Blitter).
+
+Test: `tools/states.py` (records 1500 play + 500 attract states once), `tools/render_test.py [--play A-B]
+[--attract A-B] [--every N] [--png N] [--profile N]`: every pixel's index against the reference's pen by the
+renderer's own mapping, the side bands clean, the colour error, cycles.  2026-10-13: play 1500 / 1500 and attract
+500 / 500 pictures exact; colour error 0.023 (play) / 0.029 (attract).
+
+Hatari (BENCH, arcade frames 600-1600, a version before the compose speed-ups): 6.4 arcade frames/s, 3.2 pictures/s;
+the renderer takes ~89% of the time (colour choices and layer 3's changes recompose hundreds of cells), the logic
+~0.8 VBL an arcade frame.
+
+Open: speed (recomposes: colour choices ~15M cycles, layer 3 bank / scroll changes; a picture ~0.3-0.5M); the last
+11 rows; the HUD palette; sound; the stefastbobs2 sprite method still to be prototyped and measured (AGENTS.md).

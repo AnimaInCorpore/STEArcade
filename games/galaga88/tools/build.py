@@ -1,4 +1,4 @@
-"""Build GALAGA88.PRG (--sim: the Musashi build the tests run; the only one so far).
+"""Build GALAGA88.PRG (--sim: the Musashi build the tests run).
 
     venv/bin/python games/galaga88/tools/build.py --sim
 """
@@ -9,7 +9,7 @@ import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / "engine")]
 import gen
-from paths import ROOT
+from paths import ROOT, build_dir
 from toolchain import assemble_link
 
 
@@ -21,6 +21,16 @@ def main():
     if not (ROOT / "assets" / "roms" / "extracted" / "galaga88").is_dir():
         subprocess.run([sys.executable, str(Path(__file__).with_name("prepare.py"))], check=True)
     report = gen.generate()
+    if not args.sim:
+        import snapshot
+        import assets
+        sys.path.append(str(ROOT / "games" / "splatter" / "tools"))
+        import mcu                                  # (the CUS64 model: Splatterhouse's, the same program)
+        from namcos1 import load_regions
+        r = load_regions("galaga88")
+        mcu.write_tables(build_dir("galaga88") / "mcu_samples.s", r["voice"], r["mcu"])
+        snapshot.write()
+        assets.build()
     for name, r in report.items():
         print("%s: %d instructions, %d unsupported, %d missing targets, %s" % (
             name, r["instructions"], len(r["unsupported"]), len(r["missing"]), r["stats"]))
