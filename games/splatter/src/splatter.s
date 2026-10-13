@@ -57,7 +57,7 @@ sim_wait:
 	bsr	init_hardware
 main_loop:
 	tst.b	quit_flag
-	bne.s	.quit
+	bne	.quit
 	tst.b	ticks
 	beq.s	main_loop
 	cmp.b	#MAX_BEHIND,ticks	; (behind: drop frames)
@@ -68,8 +68,12 @@ main_loop:
 	ifd	BENCH
 	bsr	bench_inputs
 	endc
+	move.l	cnt_vbls,-(sp)
 	bsr	vblank_work
 	bsr	port_frame
+	move.l	cnt_vbls,d0
+	sub.l	(sp)+,d0
+	add.l	d0,cnt_lvbl		; (VBLs that passed in the logic)
 	addq.l	#1,cnt_logic
 	addq.b	#1,since_pic		; a picture after every PIC_EVERY-th arcade frame, or when the logic caught up
 	cmp.b	#PIC_EVERY,since_pic
@@ -77,13 +81,25 @@ main_loop:
 	tst.b	ticks
 	bne	main_loop
 .pic:	clr.b	since_pic
-	move.w	ren_skipped,-(sp)
+	ifd	BENCH_NOPIC
+	bra	main_loop		; (the logic alone)
+	endc
+	move.l	cnt_vbls,-(sp)
+	move.l	ren_skipped,-(sp)
 	bsr	render_frame
-	move.w	(sp)+,d0
-	cmp.w	ren_skipped,d0
-	bne.s	main_loop
+	move.l	cnt_vbls,d0
+	sub.l	4(sp),d0
+	add.l	d0,cnt_rvbl		; (VBLs that passed in render_frame)
+	move.l	(sp)+,d0
+	addq.l	#4,sp
+	cmp.l	ren_skipped,d0
+	bne	main_loop
+	tst.b	ren_newcols		; (new colours chosen: counted)
+	beq.s	.cnt
+	addq.l	#1,cnt_newcols
+.cnt:
 	addq.l	#1,cnt_pictures
-	bra.s	main_loop
+	bra	main_loop
 .quit:	bsr	restore_hardware
 	bsr	write_counters
 	move.l	old_ssp,-(sp)
@@ -267,19 +283,19 @@ bench_inputs:
 	blo.s	.n
 	tst.l	cnt_from
 	bne.s	.n
-	movem.l	cnt_vbls,d1-d5
-	movem.l	d1-d5,cnt_from
+	move.l	ren_skipped,cnt_skipped
+	movem.l	cnt_vbls,d1-d7/a0
+	movem.l	d1-d7/a0,cnt_from
 .n:	cmp.l	#BENCH_TO,d0
 	blo.s	.q
 	st	quit_flag
 .q:	rts
     endc
 
-; COUNTERS.BIN (longs): VBLs, arcade frames run, pictures drawn, frames dropped, pictures skipped (no free buffer)
+; COUNTERS.BIN (longs): VBLs, arcade frames run, pictures drawn, frames dropped, pictures skipped (no free buffer),
+; pictures with new colours; BENCH: the same six at its first frame
 write_counters:
-	moveq	#0,d0
-	move.w	ren_skipped,d0
-	move.l	d0,cnt_skipped
+	move.l	ren_skipped,cnt_skipped
 	clr.w	-(sp)
 	pea	.name(pc)
 	move.w	#$3C,-(sp)		; Fcreate
@@ -289,11 +305,20 @@ write_counters:
 	bmi.s	.r
 	move.w	d0,-(sp)
 	pea	cnt_vbls
-	pea	40.w				; (and cnt_from: BENCH)
+	pea	64.w				; (and cnt_from: BENCH)
 	move.w	d0,-(sp)
 	move.w	#$40,-(sp)		; Fwrite
 	trap	#1
 	lea	12(sp),sp
+	ifd	REN_PHASES
+	move.w	(sp),d0			; (then render.s' phase VBLs)
+	pea	ren_ph_vbl
+	pea	40.w
+	move.w	d0,-(sp)
+	move.w	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	endc
 	move.w	#$3E,-(sp)		; Fclose (the handle is on the stack)
 	trap	#1
 	addq.l	#4,sp
@@ -527,7 +552,10 @@ cnt_logic:	ds.l	1
 cnt_pictures:	ds.l	1
 cnt_dropped:	ds.l	1
 cnt_skipped:	ds.l	1
-cnt_from:	ds.l	5		; (BENCH: the counters at VBL BENCH_FROM)
+cnt_newcols:	ds.l	1		; (pictures that chose new colours)
+cnt_lvbl:	ds.l	1		; (VBLs that passed in the logic / in render_frame)
+cnt_rvbl:	ds.l	1
+cnt_from:	ds.l	8		; (BENCH: the counters at VBL BENCH_FROM)
 old_mfp:	ds.b	14
 old_res:	ds.b	1
 old_hz:		ds.b	1

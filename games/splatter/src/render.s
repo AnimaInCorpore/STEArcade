@@ -251,6 +251,21 @@ ren_flush:
 ; ======================================================================================================================
 ; render_frame
 ; ======================================================================================================================
+	ifd	REN_PHASES
+; (measuring in the program: the VBLs that pass in each phase of render_frame, summed: ren_ph_vbl, 10 longs; the main
+; program's cnt_vbls is the clock)
+REN_PH_IN	macro
+	move.l	cnt_vbls,ren_ph_t
+	endm
+REN_PH_OUT	macro
+	move.l	d0,-(sp)
+	move.l	cnt_vbls,d0
+	sub.l	ren_ph_t,d0
+	add.l	d0,ren_ph_vbl+4*\1
+	move.l	(sp)+,d0
+	endm
+	endc
+
 render_frame:
 	movem.l	d0-d7/a0-a6,-(sp)
 	; the buffer: not shown, not the one shown before, not waiting
@@ -279,24 +294,84 @@ render_frame:
 	lsl.w	#2,d0
 	lea	ren_buf,a0
 	move.l	(a0,d0.w),ren_dbuf
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_config
+	ifd	REN_PHASES
+	REN_PH_OUT 0
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_fixed
+	ifd	REN_PHASES
+	REN_PH_OUT 1
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_sprites_list
+	ifd	REN_PHASES
+	REN_PH_OUT 2
+	endc
 	sf	ren_newcols
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_palette
+	ifd	REN_PHASES
+	REN_PH_OUT 3
+	endc
 	tst.b	ren_newcols
 	beq	.nc
 	moveq	#-1,d0			; new colours: the bar image again
 	move.l	d0,ren_fix_old
 	bsr	ren_fixed
-.nc:	bsr	ren_tiles
+.nc:	ifd	REN_PHASES
+	REN_PH_IN
+	endc
+	bsr	ren_tiles
+	ifd	REN_PHASES
+	REN_PH_OUT 4
+	endc
 	tst.b	ren_black		; (a black picture: nothing drawn, the changes kept for later)
 	bne	.pub
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_bg
+	ifd	REN_PHASES
+	REN_PH_OUT 5
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_restore
+	ifd	REN_PHASES
+	REN_PH_OUT 6
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_bars
+	ifd	REN_PHASES
+	REN_PH_OUT 7
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_objects
+	ifd	REN_PHASES
+	REN_PH_OUT 8
+	endc
+	ifd	REN_PHASES
+	REN_PH_IN
+	endc
 	bsr	ren_clipwin
+	ifd	REN_PHASES
+	REN_PH_OUT 9
+	endc
 	move.w	ren_draw,d0		; (the damage list's end)
 	lsl.w	#2,d0
 	lea	ren_dmg_end,a0
@@ -5901,6 +5976,10 @@ ren_prev:	ds.w	1
 ren_ck:		ds.l	1
 ren_ck_cluster:	ds.l	1
 ren_skipped:	ds.l	1
+	ifd	REN_PHASES
+ren_ph_t:	ds.l	1
+ren_ph_vbl:	ds.l	10
+	endc
 ren_pictures:	ds.l	1
 ren_clusters:	ds.l	1
 ren_flushes:	ds.l	1
