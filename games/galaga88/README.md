@@ -91,10 +91,13 @@ picture, the reasons of the colour choices.  2026-10-13: play 1500 / 1500 and at
 version); the final one every 3rd state: play 500 / 500, attract 167 / 167 exact; colour error 0.028 (play) /
 0.032 (attract).
 
-Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 9.0 arcade frames/s, 3.2 -> 4.5 pictures/s
-(a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame, the renderer the rest.  Costs (Musashi,
-play 300-700, every 2nd state): a picture ~1.3M cycles (median; the warps' star streaks ~0.6-0.9M of it), a colour
-choice ~12M (the full composition ~3.3M of it).
+Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 10.3 arcade frames/s, 3.2 -> 5.2 pictures/s
+(a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame (~130k cycles), the renderer the rest.  The
+BENCH game's states (`tools/states.py --bench`, `render_test.py --bench`): a picture 1.1M cycles on average (Musashi,
+CPU), stars ~30% (the warps' streaks: ~1400 pixels a picture), the background's compositions (colour choices, layer
+3's bank cycling through all 8 banks every ~7 frames) ~25%, restores ~9%, sprites ~15%; a calm picture ~0.4M.
+Tried and dropped: star runs by the Blitter (`-D REN_STARBLIT=1`: most runs are 1-2 rows, a pass costs more than
+four bit operations).
 
 The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
 and shift on first use: pieces ordered by their shifted masks, the reordered source, generated code); exact
