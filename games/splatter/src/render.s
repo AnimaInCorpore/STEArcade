@@ -306,6 +306,16 @@ render_init:
 .bw:	move.w	#-1,(a0)+
 	dbf	d1,.bw
 	move.w	#1,ren_fi_ver
+	lea	ren_bi_addr,a0		; (the bar images: one a buffer)
+	move.l	#ren_bi_area,d0
+	moveq	#REN_NBUF-1,d1
+.bia:	move.l	d0,(a0)+
+	add.l	#224*FI_STRIDE,d0
+	dbf	d1,.bia
+	lea	ren_biv,a0
+	moveq	#REN_NBUF-1,d1
+.biv:	move.w	#-1,(a0)+
+	dbf	d1,.biv
 	clr.w	ren_htop		; (no HUD region yet)
 	move.w	#224,ren_hbot
 	clr.w	ren_hudn
@@ -431,8 +441,12 @@ render_frame:
 	ifd	REN_PHASES
 	REN_PH_OUT 4
 	endc
+	sf	ren_vsw
 	tst.b	ren_black		; (a black picture: nothing drawn, the changes kept for later)
 	bne	.pub
+	ifd	REN_VSW
+	bsr	ren_vsw_decide
+	endc
 	ifd	REN_PHASES
 	REN_PH_IN
 	endc
@@ -507,6 +521,8 @@ render_frame:
 	move.w	ren_htop,(a1,d0.w)
 	move.w	ren_hbot,2(a1,d0.w)
 	move.w	ren_draw,d0
+	lea	ren_disp_vsw,a1		; (the HUD region from the bar image)
+	move.b	ren_vsw,(a1,d0.w)
 	addq.b	#1,d0
 	move.b	d0,ren_ready
 	addq.l	#1,ren_pictures
@@ -554,6 +570,24 @@ render_vbl:
 	beq	.w
 	subq.b	#4,d1
 .w:	move.b	d1,$ffff820f.w
+	if	BD_VSWITCH
+	ext.w	d1
+	move.w	d1,bd_vs_pfl
+	ext.w	d2
+	move.w	d2,bd_vs_pfh
+	move.w	#REN_LINEB,bd_vs_pfs
+	move.w	d0,d1
+	lsl.w	#2,d1
+	lea	ren_disp_addr,a0
+	move.l	(a0,d1.w),bd_vs_pf
+	lea	ren_bi_addr,a0
+	move.l	(a0,d1.w),bd_vs_bar
+	move.w	#FI_STRIDE,bd_vs_bas
+	move.w	#(FI_STRIDE-160)/2,bd_vs_bal
+	clr.w	bd_vs_bah
+	lea	ren_disp_vsw,a0
+	move.b	(a0,d0.w),bd_vs_on
+	endc
 	lsl.w	#5,d0
 	lea	ren_disp_pal,a0
 	add.w	d0,a0
@@ -3252,6 +3286,20 @@ ren_bars:
 	move.w	ren_draw,d7
 	move.w	d7,d6
 	add.w	d6,d6
+	lea	ren_bvsw,a0		; (the mode changed in this buffer: all bar lines again)
+	move.b	ren_vsw,d0
+	cmp.b	(a0,d7.w),d0
+	beq	.sm
+	move.b	d0,(a0,d7.w)
+	lea	ren_bar_w,a0
+	move.w	#-1,(a0,d6.w)
+.sm:
+	ifd	REN_VSW
+	tst.b	ren_vsw
+	beq	.nbi
+	bsr	ren_bi_sync
+.nbi:
+	endc
 	lea	ren_bar_dirty,a2
 	mulu	#224,d7
 	add.w	d7,a2
@@ -3307,6 +3355,12 @@ ren_bars:
 	move.b	d5,BLT_SKEW.w
 	lea	ren_bar_line,a1
 	moveq	#0,d3			; line
+	move.w	#224,ren_bend
+	tst.b	ren_vsw
+	beq	.ln
+	move.w	ren_htop,d3		; (the HUD region comes from the bar image: the lines between only)
+	move.w	ren_hbot,ren_bend
+	bra	.lt
 .ln:	tst.b	(a1,d3.w)
 	beq	.nx
 	tst.b	ren_allbars
@@ -3315,7 +3369,7 @@ ren_bars:
 	beq	.nx
 .st:	move.w	d3,d2			; a run: d3 .. d2 - 1
 .rl:	addq.w	#1,d2
-	cmp.w	#224,d2
+	cmp.w	ren_bend,d2
 	bhs	.re
 	tst.b	(a1,d2.w)
 	beq	.re
@@ -3327,7 +3381,7 @@ ren_bars:
 	move.w	d2,d3
 	bra	.lt
 .nx:	addq.w	#1,d3
-.lt:	cmp.w	#224,d3
+.lt:	cmp.w	ren_bend,d3
 	blo	.ln
 .clr:	moveq	#224/4-1,d0
 .c:	clr.l	(a2)+
@@ -4030,9 +4084,24 @@ ren_draw_image:
 	move.w	d6,d0
 	addq.w	#1,d0
 	move.w	d0,ren_nw		; destination words
-	; x
+	; x (the HUD region's lines of an object in the bar image: screen x)
+	sf	ren_tgt
 	move.w	SL_X(a2),d0
-	add.w	ren_w,d0
+	tst.b	ren_vsw
+	beq	.tpf
+	cmp.b	#2,ren_linesel
+	bne	.tpf
+	st	ren_tgt
+	add.w	#16,d0
+	moveq	#15,d1
+	and.w	d0,d1
+	move.w	d1,ren_s
+	asr.w	#4,d0
+	move.w	d0,ren_g0
+	moveq	#1,d2			; (the clip groups: screen x 16 .. 303)
+	moveq	#19,d3
+	bra	.tx
+.tpf:	add.w	ren_w,d0
 	add.w	#16,d0			; buffer x
 	moveq	#15,d1
 	and.w	d0,d1
@@ -4041,6 +4110,7 @@ ren_draw_image:
 	move.w	d0,ren_g0
 	move.w	ren_cl,d2
 	move.w	ren_cr,d3
+.tx:
 	move.w	d0,d1
 	add.w	ren_nw,d1		; the group after
 	cmp.w	d2,d1
@@ -4100,7 +4170,10 @@ ren_draw_image:
 	move.w	SL_Y(a2),d0
 	move.w	2(a1),d1		; first row
 	move.w	#REN_LINEB,d4
-	btst	#1,SL_FL(a2)
+	tst.b	ren_tgt
+	beq	.lb
+	move.w	#FI_STRIDE,d4
+.lb:	btst	#1,SL_FL(a2)
 	beq	.ny
 	moveq	#0,d2			; flip y: line y' + height - 1 - row, upwards
 	move.b	SL_SY(a2),d2
@@ -4234,6 +4307,8 @@ ren_draw_image:
 	move.l	a3,ren_srcp
 	move.l	a0,ren_maskp
 	; the first line's address
+	tst.b	ren_tgt
+	bne	.tba
 	move.w	ren_y0,d0
 	add.w	#REN_GUARD,d0
 	ext.l	d0
@@ -4245,6 +4320,16 @@ ren_draw_image:
 	add.l	d1,d0
 	add.l	ren_dbuf,d0
 	move.l	d0,a1
+	bra	.tbd
+.tba:	move.w	ren_y0,d0		; (the bar image: FI_STRIDE bytes a line, lines 0-223)
+	muls	#FI_STRIDE,d0
+	move.w	ren_g0,d1
+	ext.l	d1
+	lsl.l	#3,d1
+	add.l	d1,d0
+	add.l	ren_dbi,d0
+	move.l	d0,a1
+.tbd:
 	movem.l	a2/a4-a6,-(sp)
 	lea	BLT_DST.w,a3
 	lea	BLT_YC.w,a4
@@ -4578,7 +4663,12 @@ ren_draw_image:
 	move.w	ren_dg1,d1
 	move.w	ren_ya,d2
 	move.w	ren_yb,d3
+	tst.b	ren_tgt
+	bne	.tdm
 	bsr	ren_damage
+	bra	.tdd
+.tdm:	bsr	ren_damage_bi
+.tdd:
 	tst.b	ren_prep
 	beq	.out
 	bsr	ren_repair
@@ -4740,6 +4830,155 @@ ren_sel_range:
 	move.w	d0,d4
 	move.w	d1,d5
 .pn:	rts
+
+
+	ifd	REN_VSW
+; The HUD region (the bar lines at the top and the bottom, ren_htop / ren_hbot) shown from the buffer's bar image
+; (ren_bi: borders.s' BD_VSWITCH switches the video counter at its ends): ren_vsw, when the region is there, its
+; switch lines are kept exact by borders.s' plan (BD_K + 1 lines between events, none at the bottom border's), and
+; the C116 window is the whole picture (no black rectangles).  Uses d0-d1.
+REN_PT	= 26				; (the picture's first displayed line: splatter.s' PIC_TOP)
+ren_vsw_decide:
+	ifd	REN_ONEPAL
+	rts				; (one palette: borders.s without BD_HUD, no switches)
+	endc
+	movem.l	d0-d7/a0,-(sp)
+	move.w	ren_htop,d0
+	move.w	ren_hbot,d1
+	tst.w	d0
+	bne	.h
+	cmp.w	#224,d1
+	beq	.no			; (no HUD region)
+.h:	tst.w	d0
+	beq	.t
+	cmp.w	#BD_K+1,d0
+	blt	.no
+.t:	move.w	d1,d2
+	sub.w	d0,d2
+	cmp.w	#BD_K+1,d2
+	blt	.no
+	cmp.w	#224,d1
+	beq	.b
+	move.w	d1,d2
+	add.w	#REN_PT,d2
+	cmp.w	#BD_LOW-BD_K-1,d2
+	ble	.b
+	cmp.w	#BD_LOW+BD_K+1,d2
+	blt	.no
+	cmp.w	#REN_PT+224-BD_K-1,d2
+	bgt	.no
+.b:	bsr	ren_cwrect		; (the C116 window the whole picture)
+	tst.w	d0
+	bne	.no
+	st	ren_vsw
+	move.w	ren_draw,d0
+	lsl.w	#2,d0
+	lea	ren_bi_addr,a0
+	move.l	(a0,d0.w),ren_dbi
+.no:	movem.l	(sp)+,d0-d7/a0
+	rts
+
+; the draw buffer's bar image as ren_fi in the HUD region's lines (when ren_fi or the region changed since)
+ren_bi_sync:
+	movem.l	d0-d7/a0-a1,-(sp)
+	move.w	ren_draw,d7
+	move.w	d7,d6
+	add.w	d6,d6
+	lea	ren_biv,a0
+	move.w	ren_fi_ver,d0
+	cmp.w	(a0,d6.w),d0
+	bne	.cp
+	lea	ren_bih,a0
+	add.w	d6,d6
+	move.l	ren_htop,d0		; (ren_htop, ren_hbot)
+	cmp.l	(a0,d6.w),d0
+	beq	.out
+	lsr.w	#1,d6
+.cp:	lea	ren_biv,a0
+	move.w	ren_fi_ver,(a0,d6.w)
+	lea	ren_bih,a0
+	add.w	d6,d6
+	move.l	ren_htop,(a0,d6.w)
+	moveq	#-1,d0
+	move.w	d0,BLT_E1.w
+	move.w	d0,BLT_E2.w
+	move.w	d0,BLT_E3.w
+	move.w	#2,BLT_SXI.w
+	move.w	#2,BLT_DXI.w
+	move.w	#2,BLT_SYI.w
+	move.w	#2,BLT_DYI.w
+	move.w	#$0203,BLT_HOP.w
+	clr.b	BLT_SKEW.w
+	move.w	#FI_STRIDE/2,BLT_XC.w
+	moveq	#0,d0			; the top part: lines 0 .. htop - 1
+	move.w	ren_htop,d1
+	bsr	.copy
+	move.w	ren_hbot,d0		; the bottom part
+	move.w	#224,d1
+	bsr	.copy
+.out:	movem.l	(sp)+,d0-d7/a0-a1
+	rts
+.copy:	sub.w	d0,d1
+	ble	.cn
+	mulu	#FI_STRIDE,d0
+	lea	ren_fi,a0
+	add.l	d0,a0
+	move.l	a0,BLT_SRC.w
+	add.l	ren_dbi,d0
+	move.l	d0,BLT_DST.w
+	move.w	d1,BLT_YC.w
+	bsr	blit_go
+.cn:	rts
+	endc
+
+; The damage of a draw into the bar image (groups d0 .. d1 - 1, lines d2 .. d3 - 1 of 0-223): put back from ren_fi
+; (words | $4000 in the damage list).  Keeps d4-d7/a2-a6.
+ren_damage_bi:
+	cmp.w	d1,d0
+	bge	.out
+	tst.w	d2
+	bpl	.c0
+	moveq	#0,d2
+.c0:	cmp.w	#224,d3
+	ble	.c1
+	move.w	#224,d3
+.c1:	cmp.w	d3,d2
+	bge	.out
+	move.l	ren_dmgp,a0
+	cmp.l	ren_dmglim,a0
+	bhs	.full
+	movem.l	d4-d5,-(sp)
+	move.w	d2,d4
+	mulu	#FI_STRIDE,d4
+	move.w	d0,d5
+	lsl.w	#3,d5
+	add.l	d5,d4			; (the offset in the image)
+	move.l	ren_dbi,d5
+	add.l	d4,d5
+	move.l	d5,(a0)+		; destination
+	add.l	#ren_fi,d4
+	move.l	d4,(a0)+		; source
+	move.w	d1,d4
+	sub.w	d0,d4
+	lsl.w	#2,d4
+	or.w	#$4000,d4
+	move.w	d4,(a0)+		; words | $4000
+	move.w	d3,d4
+	sub.w	d2,d4
+	move.w	d4,(a0)+		; lines
+	move.l	a0,ren_dmgp
+	movem.l	(sp)+,d4-d5
+.out:	rts
+.full:	addq.l	#1,ren_dmg_over		; (the list full: the whole window and the bar image's region next time)
+	move.w	ren_draw,d0
+	add.w	d0,d0
+	lea	ren_dmgall,a0
+	move.w	ren_w,d1
+	bset	#15,d1
+	move.w	d1,(a0,d0.w)
+	lea	ren_biv,a0
+	move.w	#-1,(a0,d0.w)		; (the bar image copied again)
+	rts
 
 ; d0.w = a line (any): the line clamped to 0-224
 ren_bar_clamp:
@@ -5549,6 +5788,8 @@ ren_restore_list:
 	move.w	(a2)+,d3		; lines
 	tst.w	d2
 	bmi	.bar
+	btst	#14,d2
+	bne	.bi
 	move.w	d2,d4
 	subq.w	#1,d4
 	add.w	d4,d4
@@ -5595,6 +5836,23 @@ ren_restore_list:
 	move.w	#2,BLT_DXI.w
 	clr.b	BLT_SKEW.w
 .bsk:	cmp.l	a3,a2
+	blo	.r
+	rts
+.bi:	and.w	#$3fff,d2		; a bar image rectangle: from the bar image ren_fi (FI_STRIDE bytes a line)
+	move.w	d2,d4
+	subq.w	#1,d4
+	add.w	d4,d4
+	neg.w	d4
+	add.w	#FI_STRIDE,d4
+	move.w	d4,BLT_SYI.w
+	move.w	d4,BLT_DYI.w
+	move.w	d2,BLT_XC.w
+	move.l	d1,BLT_SRC.w
+	move.l	d0,BLT_DST.w
+	move.w	d3,BLT_YC.w
+	bsr	blit_go
+	addq.l	#1,ren_restores
+	cmp.l	a3,a2
 	blo	.r
 	rts
 
@@ -6067,6 +6325,43 @@ ren_covered:
 	moveq	#0,d7			; (Z set)
 	rts
 
+; d2 .. d3 - 1 = an object's lines, d6 = its priority + 1, a0 = ren_bar_line: d4 = 1 when a line of it in the HUD
+; region is a bar line that shows it (a fixed row's 8 lines have one value: a line a row is looked at).  Uses d0-d1.
+ren_hud_vis:
+	move.w	d2,d0			; the top part: max(d2, 0) .. min(d3, htop) - 1
+	bpl	.t0
+	moveq	#0,d0
+.t0:	move.w	d3,d1
+	cmp.w	ren_htop,d1
+	ble	.t1
+	move.w	ren_htop,d1
+.t1:	bsr	.rows
+	bne	.yes
+	move.w	d2,d0			; the bottom part: max(d2, hbot) .. min(d3, 224) - 1
+	cmp.w	ren_hbot,d0
+	bge	.b0
+	move.w	ren_hbot,d0
+.b0:	move.w	d3,d1
+	cmp.w	#224,d1
+	ble	.b1
+	move.w	#224,d1
+.b1:	bsr	.rows
+	bne	.yes
+	rts
+.yes:	moveq	#1,d4
+	rts
+.rows:	cmp.w	d1,d0			; lines d0 .. d1 - 1: Z clear when one shows the object
+	bge	.no
+	cmp.b	(a0,d0.w),d6
+	bhs	.vis
+	or.w	#7,d0
+	addq.w	#1,d0
+	bra	.rows
+.no:	cmp.w	d0,d0
+	rts
+.vis:	moveq	#1,d0
+	rts
+
 ; (ren_getter for overlay cells: the character ren_gcode of bank ren_gbank)
 ren_cell_getg:
 	move.w	ren_gcode,d0
@@ -6091,7 +6386,11 @@ ren_draw_obj:
 	moveq	#0,d4			; in the HUD region (visible there)?
 	moveq	#0,d5			; in the playfield's lines?
 	lea	ren_bar_line,a0
-	move.w	ren_htop,d0		; the top part: lines 0 .. htop - 1
+	tst.b	ren_vsw
+	beq	.nv
+	bsr	ren_hud_vis		; (the HUD region from the bar image: visible in any of its lines there?)
+	bra	.p
+.nv:	move.w	ren_htop,d0		; the top part: lines 0 .. htop - 1
 	beq	.b
 	cmp.b	(a0),d6
 	blo	.b
@@ -6127,6 +6426,9 @@ ren_draw_obj:
 	bsr	.draw
 	bra	.out
 .hud:	st	ren_curmap		; (its lines all in the HUD region: drawn as usual, in the HUD's palette)
+	tst.b	ren_vsw
+	beq	.pf
+	move.b	#2,ren_linesel		; (into the bar image)
 .pf:	bsr	.draw
 .out:	sf	ren_curmap
 	clr.b	ren_linesel
@@ -6219,49 +6521,12 @@ ren_cell_get:
 ; The C116's window: outside it the picture is black (MAME: no layer, no sprite there).  Black rectangles over the
 ; picture's parts outside it, put back next time like sprites.
 ren_clipwin:
-	lea	vio+V_C116,a0
-	move.w	(a0),d0
-	subq.w	#1,d0			; x0 = max(73, left - 1)
-	cmp.w	#73,d0
-	bge	.a
-	moveq	#73,d0
-.a:	move.w	2(a0),d1
-	subq.w	#2,d1			; x1 = min(360, right - 2)
-	cmp.w	#360,d1
-	ble	.b
-	move.w	#360,d1
-.b:	move.w	4(a0),d2
-	sub.w	#$11,d2			; y0 = max(16, top - 17)
-	cmp.w	#16,d2
-	bge	.c
-	moveq	#16,d2
-.c:	move.w	6(a0),d3
-	sub.w	#$12,d3			; y1 = min(239, bottom - 18)
-	cmp.w	#239,d3
-	ble	.d
-	move.w	#239,d3
-.d:	cmp.w	d1,d0
-	bgt	.allb
-	cmp.w	d3,d2
-	bgt	.allb
-	; the player's view: x' 360 - x1 .. 360 - x0, y' 239 - y1 .. 239 - y0 (inclusive)
-	move.w	#360,d4
-	sub.w	d1,d4			; xa
-	move.w	#361,d5
-	sub.w	d0,d5			; xb (exclusive)
-	move.w	#239,d6
-	sub.w	d3,d6			; ya
-	move.w	#240,d7
-	sub.w	d2,d7			; yb (exclusive)
-	tst.w	d4
-	bne	.cut
-	cmp.w	#288,d5
-	bne	.cut
-	tst.w	d6
-	bne	.cut
-	cmp.w	#224,d7
-	bne	.cut
-	rts				; (the whole picture)
+	bsr	ren_cwrect
+	tst.w	d0
+	beq	.r			; (the whole picture)
+	bmi	.allb
+	bra	.cut
+.r:	rts
 .cut:	movem.w	d4-d7,-(sp)
 	moveq	#0,d0			; above
 	move.w	#288,d1
@@ -6291,6 +6556,58 @@ ren_clipwin:
 	moveq	#0,d2
 	move.w	#224,d3
 	bra	ren_fill
+
+; the C116 window: d0 = 0 the whole picture, -1 none (all black), 1 the player's view's rectangle d4 .. d5 - 1,
+; d6 .. d7 - 1
+ren_cwrect:
+	lea	vio+V_C116,a0
+	move.w	(a0),d0
+	subq.w	#1,d0			; x0 = max(73, left - 1)
+	cmp.w	#73,d0
+	bge	.a
+	moveq	#73,d0
+.a:	move.w	2(a0),d1
+	subq.w	#2,d1			; x1 = min(360, right - 2)
+	cmp.w	#360,d1
+	ble	.b
+	move.w	#360,d1
+.b:	move.w	4(a0),d2
+	sub.w	#$11,d2			; y0 = max(16, top - 17)
+	cmp.w	#16,d2
+	bge	.c
+	moveq	#16,d2
+.c:	move.w	6(a0),d3
+	sub.w	#$12,d3			; y1 = min(239, bottom - 18)
+	cmp.w	#239,d3
+	ble	.d
+	move.w	#239,d3
+.d:	cmp.w	d1,d0
+	bgt	.none
+	cmp.w	d3,d2
+	bgt	.none
+	; the player's view: x' 360 - x1 .. 360 - x0, y' 239 - y1 .. 239 - y0 (inclusive)
+	move.w	#360,d4
+	sub.w	d1,d4			; xa
+	move.w	#361,d5
+	sub.w	d0,d5			; xb (exclusive)
+	move.w	#239,d6
+	sub.w	d3,d6			; ya
+	move.w	#240,d7
+	sub.w	d2,d7			; yb (exclusive)
+	tst.w	d4
+	bne	.cut
+	cmp.w	#288,d5
+	bne	.cut
+	tst.w	d6
+	bne	.cut
+	cmp.w	#224,d7
+	bne	.cut
+	moveq	#0,d0			; (the whole picture)
+	rts
+.cut:	moveq	#1,d0
+	rts
+.none:	moveq	#-1,d0
+	rts
 
 ; Black over picture x d0 .. d1 - 1, y d2 .. d3 - 1 (clamped to the picture): a Blitter pass a plane, the end masks at
 ; the rectangle's edges; into the damage list.
@@ -6387,6 +6704,11 @@ ren_q4:		incbin	"ren_q4.bin"
 	section	bss,bss
 	even
 ren_buf_area:	ds.b	REN_NBUF*REN_BUFSZ+256
+	ifd	REN_VSW
+ren_bi_area:	ds.b	REN_NBUF*224*FI_STRIDE
+	else
+ren_bi_area:	ds.b	2
+	endc
 ren_pri:	ds.b	224*256
 ren_tcopy:	ds.b	$8000
 ren_dirty:	ds.b	4096
@@ -6620,6 +6942,16 @@ ren_pictures:	ds.l	1
 ren_clusters:	ds.l	1
 ren_flushes:	ds.l	1
 ren_disp_fine:	ds.b	4
+ren_disp_vsw:	ds.b	4
+ren_bvsw:	ds.b	4
+ren_vsw:	ds.b	1
+ren_tgt:	ds.b	1
+	even
+ren_bi_addr:	ds.l	3
+ren_biv:	ds.w	3
+ren_bih:	ds.l	3
+ren_dbi:	ds.l	1
+ren_bend:	ds.w	1
 ren_ready:	ds.b	1
 ren_grp_n:	ds.b	1
 ren_grp_max:	ds.b	1

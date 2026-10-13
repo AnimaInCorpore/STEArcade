@@ -20,6 +20,8 @@ PIC_LINES = 224
 BD_PALETTE = 1
       ifnd REN_ONEPAL
 BD_HUD = 1
+BD_VSWITCH = 1				; (the HUD bars from their own image: the video address switched at the bar lines)
+REN_VSW = 1
       endc
 MAX_BEHIND = 3
 TILE_FLAG = 1				; (render.s compares tile RAM only after the translated writers set tile_written)

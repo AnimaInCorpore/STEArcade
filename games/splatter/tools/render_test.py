@@ -214,7 +214,22 @@ class Harness:
         for p in range(4):
             for b in range(16):
                 out[:, b::16] |= (((words[:, :, p] >> (15 - b)) & 1).astype(np.uint8) << p)
-        return out[:, fine:fine + width]
+        out = out[:, fine:fine + width]
+        if "ren_disp_vsw" in self.sym and self.r8("ren_disp_vsw", d):
+            # (REN_VSW: the HUD region's lines come from the buffer's bar image, borders.s' BD_VSWITCH switches the
+            # video counter, the fine scroll (0) and the line width at its ends: 168 bytes a line)
+            htop, hbot = self.r16("ren_disp_hud", 4 * d), self.r16("ren_disp_hud", 4 * d + 2)
+            bi = self.r32("ren_bi_addr", 4 * d)
+            img = self.block(bi, 224 * 168).reshape(224, 21, 4, 2)
+            iw = (img[..., 0].astype(np.uint16) << 8) | img[..., 1]
+            bar = np.zeros((224, 21 * 16), np.uint8)
+            for p in range(4):
+                for b in range(16):
+                    bar[:, b::16] |= (((iw[:, :, p] >> (15 - b)) & 1).astype(np.uint8) << p)
+            for y in range(y0, y1):
+                if y < htop or y >= hbot:
+                    out[y - y0] = bar[y, :width]
+        return out
 
     def picture(self):
         return self.screen()[:, 16:304]

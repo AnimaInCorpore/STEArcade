@@ -60,6 +60,22 @@ control, the latched sprite list.  `tools/assets.py` converts the graphics ROMs 
   32 lines at the top, 32 at the bottom); they are a bar image (`ren_fi`, black side bands) copied into each buffer's
   bar lines at the window's position when the window moved (4 passes a run of lines, fine-shifted) or the lines were
   damaged.  Sprites below a bar's priority skip its lines.
+* **The HUD region from bar images** (`-D REN_VSW=1` with borders.s' `BD_VSWITCH=1`): the HUD region's lines (the
+  bars at the top and the bottom) are shown from a bar image per buffer (`ren_bi`, `FI_STRIDE` bytes a line, fine
+  scroll 0) instead of the scrolled playfield: borders.s' HUD palette events load the video counter, the line width
+  and the fine scroll at the bars' ends (render_vbl publishes `bd_vs_*`), so the bars are not copied when the window
+  moves.  An object's lines in the region are drawn into the bar image (as the HUD palette's part, `ren_linesel` 2:
+  screen x, clipped at groups 1 and 19) and put back from `ren_fi` (damage words | $4000); a buffer's bar image is
+  copied from `ren_fi` when it or the region changed.  Bar lines between the bars are still copied into the buffer.
+  The mode is per picture (`ren_vsw`): only when borders.s' plan keeps the switch lines exact (htop 0 or >= 3, 3
+  lines between the bars, the bottom bar's line not within 3 lines of the bottom border's) and the C116 window is
+  the whole picture; a buffer that changes mode gets all its bar lines again.  An object is drawn in the HUD
+  region only when a bar line it covers shows it (`ren_hud_vis`, a line a fixed row).  Measured 2026-10-13 (BENCH
+  states, `TILE_FLAG`, median): 582k -> 538k a picture; Hatari (`dbench`, `REN_PHASES`, the same sources built
+  back to back): 14.52 -> 14.88 arcade frames/s, 7.19 -> 7.43 pictures/s, render 1111 -> 1048 VBLs, bars 103 -> 18
+  VBLs (66k -> 12k a picture); the DEBUG counters show no late Timer B event (bd_late_* 0, one fallback at the
+  start), screenshots while scrolling show clean bar edges.  On in splatter.s with `BD_VSWITCH = 1` and
+  `REN_VSW = 1` (with `BD_HUD`, not with `REN_ONEPAL`).
 * **Damage**: what a picture draws (sprites, overlay cells, the clip window) goes into the buffer's list (adjacent
   rectangles merged) and is copied back from the twin columns at the buffer's next turn (12 words a line at most;
   overflow: the whole window).  In bar lines the rectangle is copied from the bar image instead (words | $8000 in the
@@ -141,6 +157,9 @@ fails).  `--png`: STE | reference into `build/splatter/render_*.png`.  `--every 
 400 right with an attack 4 frames in 40; `build/splatter/render_bench.pkl`, recorded once): stage 1 scrolling with
 more enemies, the picture Hatari's `dbench` measures.  The fixed layers' flag is set in every frame there (the
 program's HUD writers run every frame), so their diff runs in every picture as in the program.
+
+`-D REN_VSW=1`: the Shifter read-back takes the HUD region's lines from the shown buffer's bar image (168 bytes a line,
+fine scroll 0) when the picture was published with the switch.
 
 Results (2026-10-12): play 1100 / 1100 pictures exact, attract 475 / 475, edges 218 / 218; stages 2-7 from
 stage-select captures (every 25th frame, ~90 pictures each) exact; also `-D REN_NBUF=3`, `-D REN_DMG=6` (overflow

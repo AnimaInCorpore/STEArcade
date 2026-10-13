@@ -36,12 +36,30 @@
 ; frame's: it lays out the frame's Timer B events (bd_evs) in line order: the palette on, the playfield palette at
 ; the top bar's end, hud_pal at the bottom bar, the bottom border (its line stays exact), black.  Events stay
 ; BD_K + 1 lines apart (a bar line that would come closer moves by up to two lines, or the bar's switch is left out).
+;
+; BD_VSWITCH (with BD_HUD): the same events can also switch the picture's source: the bars from an image of their own
+; (no copies into the scrolled playfield).  The port sets bd_vs_on (byte: 0 = no switching this frame) and, for the
+; playfield and the bar image, the address of picture line 0 (bd_vs_pf, bd_vs_bar), the bytes a line (bd_vs_pfs,
+; bd_vs_bas), the fine scroll ($ffff8265: bd_vs_pfh, bd_vs_bah) and the line width ($ffff820f: bd_vs_pfl,
+; bd_vs_bal), before bd_hud_plan.  The events at the bars' ends (the playfield palette: the playfield, hud_pal: the
+; bar image, also the first one at the picture's top) then load the video counter (movep.l to $ffff8203: the base's
+; middle byte again, the counter's three), the fine scroll and the line width right after the line end, before the
+; palette: ~60 cycles, all done within the horizontal blank.  The port only switches when the plan keeps the bars'
+; lines exact (no event moved).
 
 	ifnd BD_PALETTE
 BD_PALETTE = 0
 	endc
 	ifnd BD_HUD
 BD_HUD = 0
+	endc
+	ifnd BD_VSWITCH
+BD_VSWITCH = 0
+	endc
+	if BD_VSWITCH
+BD_EVSZ = 12				; (an event: count.b, next.b, kind.w, the counter's bytes.l, line width.w, fine scroll.w)
+	else
+BD_EVSZ = 4
 	endc
 
 BD_K = 2				; Timer B events fire this many lines early
@@ -52,7 +70,11 @@ BD_ON = PIC_TOP				; the line end after which the palette comes on
 BD_OFF = PIC_TOP+PIC_LINES		; and goes off
 BD_FIRST = BD_ON
 	if BD_HUD
-BD_SAVED = 48				; (Timer B's saved registers)
+	if BD_VSWITCH
+BD_SAVED = 60				; (Timer B's saved registers)
+	else
+BD_SAVED = 48
+	endc
 	else
 BD_SAVED = 44
 	endc
@@ -170,25 +192,73 @@ bd_ta_chain:
 ; Timer B with the HUD palette: the events bd_hud_plan laid out (bd_evs: the counter's value at the event's line end,
 ; the next event's count (0: none), the kind: 0 shown_pal, 4 hud_pal, 8 black_pal, 12 the bottom border).
 timer_b:
+	if BD_VSWITCH
+	movem.l	d0-d7/a0-a6,-(sp)
+	else
 	movem.l	d0-d7/a0-a3,-(sp)
+	endc
 	lea	$fffffa21.w,a0
 	moveq	#BD_POLL,d1
 	move.l	bd_ev_ptr,a3
+	if BD_VSWITCH
+	add.l	#BD_EVSZ,bd_ev_ptr
+	else
 	addq.l	#4,bd_ev_ptr
+	endc
 	moveq	#0,d0
 	move.b	(a3),d0			; the counter at the line end
 	move.w	2(a3),d2
 	cmp.w	#12,d2
+	if BD_VSWITCH
+	beq	.low
+	bhi	.vs
+	else
 	beq.s	.low
+	endc
 	move.l	.pals(pc,d2.w),a1
 	movem.l	(a1),d2-d7/a1-a2
 	bd_poll
 	movem.l	d2-d7/a1-a2,$ffff8240.w
+	if BD_VSWITCH
+	if BD_VSWITCH
+	bsr	.next			; (the switching code: out of a short branch's reach)
+	else
 	bsr.s	.next
+	endc
+	else
+	bsr.s	.next
+	endc
 	bd_check_late bd_late_on
+	if BD_VSWITCH
+	movem.l	(sp)+,d0-d7/a0-a6
+	else
 	movem.l	(sp)+,d0-d7/a0-a3
+	endc
 	rte
 .pals:	dc.l	shown_pal,hud_pal,black_pal
+	if BD_VSWITCH
+.vs:	move.l	.pals-16(pc,d2.w),a1	; (kinds 16, 20: shown_pal, hud_pal and the picture's source)
+	move.l	4(a3),a5		; (the counter's bytes)
+	move.l	8(a3),a6		; (line width, fine scroll)
+	lea	$ffff8203.w,a4
+	movem.l	(a1),d2-d7/a1-a2
+	bd_poll
+	move.l	a5,d0
+	movep.l	d0,0(a4)		; $ffff8203 (the base again), 8205 8207 8209: the next line's address
+	move.l	a6,d0
+	move.b	d0,$ffff8265.w
+	swap	d0
+	move.b	d0,$ffff820f.w
+	movem.l	d2-d7/a1-a2,$ffff8240.w
+	if BD_VSWITCH
+	bsr	.next			; (the switching code: out of a short branch's reach)
+	else
+	bsr.s	.next
+	endc
+	bd_check_late bd_late_on
+	movem.l	(sp)+,d0-d7/a0-a6
+	rte
+	endc
 .low:	bd_poll
 	clr.b	$ffff820a.w		; Remove the bottom border
 	moveq	#2,d2
@@ -205,9 +275,21 @@ timer_b:
 	move.b	#4,$fffffa19.w
 	move.b	#BD_TA_P2,$fffffa1f.w	; (the reload)
 	move.b	#2,bd_ta_state
+	if BD_VSWITCH
+	if BD_VSWITCH
+	bsr	.next			; (the switching code: out of a short branch's reach)
+	else
 	bsr.s	.next
+	endc
+	else
+	bsr.s	.next
+	endc
 	bd_check_late bd_late_low
+	if BD_VSWITCH
+	movem.l	(sp)+,d0-d7/a0-a6
+	else
 	movem.l	(sp)+,d0-d7/a0-a3
+	endc
 	rte
 .next:	clr.b	$fffffa1b.w		; the next event (none: the VBL starts the next frame's)
 	move.b	1(a3),d2
@@ -282,6 +364,9 @@ bd_hud_plan:
 	subq.w	#BD_K,d2
 	move.b	d2,(a1)			; the counter at the line end
 	move.w	2(a0),2(a1)
+	if BD_VSWITCH
+	bsr.s	.vsw
+	endc
 	addq.l	#4,a0
 	cmp.l	a0,d4
 	beq.s	.last
@@ -289,11 +374,43 @@ bd_hud_plan:
 	sub.w	d3,d2
 	subq.w	#BD_K,d2
 	move.b	d2,1(a1)		; the next event's count
+	if BD_VSWITCH
+	add.w	#BD_EVSZ,a1
+	else
 	addq.l	#4,a1
+	endc
 	bra.s	.c
 .last:	clr.b	1(a1)
 	movem.l	(sp)+,d0-d4/a0-a1
 	rts
+	if BD_VSWITCH
+; a0 = the event's (line, kind), a1 = its bd_evs entry: the playfield / the bar image from its line on (kind + 16)
+.vsw:	tst.b	bd_vs_on
+	beq.s	.vn
+	move.w	2(a0),d2
+	cmp.w	#4,d2
+	bhi.s	.vn			; (black, the bottom border)
+	movem.l	d0-d1/a2,-(sp)
+	add.w	#16,2(a1)
+	move.w	(a0),d0
+	sub.w	#BD_ON,d0		; the picture line
+	lea	bd_vs_pf,a2		; (kind 0: the playfield, 4: the bar image)
+	tst.w	d2
+	beq.s	.v0
+	lea	bd_vs_bar,a2
+.v0:	muls	4(a2),d0
+	add.l	(a2),d0			; the line's address
+	lsl.l	#8,d0
+	move.b	$ffff8203.w,d0		; (the base's middle byte: written again unchanged)
+	ror.l	#8,d0
+	move.l	d0,4(a1)		; base mid, counter high, middle, low
+	move.w	6(a2),d0		; line width
+	swap	d0
+	move.w	8(a2),d0		; fine scroll
+	move.l	d0,8(a1)
+	movem.l	(sp)+,d0-d1/a2
+.vn:	rts
+	endc
 	else
 
 ; Bottom border and palette (Timer B).  bd_tb_state: 0 the palette on, 1 the bottom border, 2 the palette off.
@@ -567,8 +684,20 @@ bd_tb_state:	ds.b	1
 	even
 	if BD_HUD
 bd_ev_ptr:	ds.l	1		; (the next Timer B event)
-bd_evs:		ds.l	6		; counter at the line end.b, next count.b, kind.w
+bd_evs:		ds.b	6*BD_EVSZ	; counter at the line end.b, next count.b, kind.w (BD_VSWITCH: 8 bytes more)
 bd_lines_k:	ds.l	6		; (bd_hud_plan: line.w, kind.w)
+	if BD_VSWITCH
+bd_vs_pf:	ds.l	1		; the playfield: picture line 0's address.l, bytes a line.w, line width.w, fine
+bd_vs_pfs:	ds.w	1		; scroll.w
+bd_vs_pfl:	ds.w	1
+bd_vs_pfh:	ds.w	1
+bd_vs_bar:	ds.l	1		; the bar image: the same
+bd_vs_bas:	ds.w	1
+bd_vs_bal:	ds.w	1
+bd_vs_bah:	ds.w	1
+bd_vs_on:	ds.b	1
+	even
+	endc
 	endc
 bd_c_syi:	ds.w	1		; (blit_go's column strips: the pass's Y increments and end masks)
 bd_c_dyi:	ds.w	1
