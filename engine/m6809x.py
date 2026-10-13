@@ -1294,9 +1294,8 @@ class Emitter:
                 else:
                     src = REG16[r]
                 self.e("move.b %s,-(%s)" % (src, sp))
-                self.e("move.w %s,d7" % src)
-                self.e("lsr.w #8,d7")
-                self.e("move.b d7,-(%s)" % sp)
+                self.e("move.w %s,-(sp)" % src)         # (the high byte through the stack: no shift)
+                self.e("move.b (sp)+,-(%s)" % sp)
             elif r == "dp":
                 self.e("clr.b -(%s)" % sp)
             elif r == "b":
@@ -1341,21 +1340,20 @@ class Emitter:
             elif r == "dp":
                 self.e("addq.l #1,%s" % sp)
             elif r in ("x", "y", "us"):
-                self.e("move.b (%s)+,d6" % sp)
-                self.e("lsl.w #8,d6")
-                self.e("move.b (%s)+,d6" % sp)
-                if r == "us":
-                    if user:
-                        new_s = True
-                        self.e("move.w d6,-(sp)")
-                    else:
-                        self.e("move.w d6,d4")
+                if r == "us" and user:
+                    new_s = True
+                    self.e("move.b (%s)+,d6" % sp)
+                    self.e("lsl.w #8,d6")
+                    self.e("move.b (%s)+,d6" % sp)
+                    self.e("move.w d6,-(sp)")
                 else:
-                    self.e("move.w d6,%s" % REG16[r])
+                    dr = "d4" if r == "us" else REG16[r]     # (the high byte through the stack: no shift)
+                    self.e("move.b (%s)+,-(sp)" % sp)
+                    self.e("move.w (sp)+,%s" % dr)
+                    self.e("move.b (%s)+,%s" % (sp, dr))
             elif r == "pc":
-                self.e("moveq #0,d7")
-                self.e("move.b (%s)+,d7" % sp)
-                self.e("lsl.w #8,d7")
+                self.e("move.b (%s)+,-(sp)" % sp)
+                self.e("move.w (sp)+,d7")
                 self.e("move.b (%s)+,d7" % sp)
         if user:
             self.a1_to_u()
