@@ -46,6 +46,7 @@ def build():
     orders=[sorted(range(16),key=lambda r:(int(mask[r])==0,int(mask[r]),r)) for mask in opaque]
     (BUILD/'spr_order.bin').write_bytes(bytes(r for order in orders for r in order))
     result=sg.write(str(BUILD),opaque,orders)
+    vranges()
     print('Blitter routines/bytes, streams/bytes, checked pairs, plan bytes:',result,flush=True)
     # Shifted character masks are baked as words for fixed 8px positions (0 or 8).
     chars=g.chars.transpose(0,2,1)[:,::-1]
@@ -66,4 +67,16 @@ def build():
     for shift in range(16):
         lines.append('\tdc.w $%04x,%d,8' % (((0x80|(16-shift))<<8) if shift else 0,384-(112 if shift else 104)))
     (BUILD/'render_tables.s').write_text('\n'.join(lines)+'\n')
+def vranges():
+    """spr_vrange.bin: per sprite variant (code * 4 + flips, the generated routines' index) its opaque screen rows as
+    one byte: the first << 4 | their number - 1 (a blank variant: 0; it is never drawn).  draw_sprites records the damage
+    of these rows only."""
+    g=Gfx()
+    oriented=g.sprites.transpose(0,2,1)[:,::-1]
+    out=bytearray()
+    for t in oriented:
+        for flip in range(4):
+            rows=np.flatnonzero((t[::-1 if flip&1 else 1, ::-1 if flip&2 else 1]!=15).any(axis=1))
+            out.append(int(rows[0])<<4|int(rows[-1]-rows[0]) if len(rows) else 0)
+    (BUILD/'spr_vrange.bin').write_bytes(bytes(out))
 if __name__=='__main__':build()

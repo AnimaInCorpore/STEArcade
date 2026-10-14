@@ -1002,6 +1002,7 @@ draw_sprites:
  move.w (a0),d2
  cmp.w (a1),d2
  bne .slot_miss
+ move.b 12(a1),spr_vr
  move.l 8(a1),d2
  move.l 4(a1),a1
 .slot_hit:
@@ -1022,8 +1023,8 @@ draw_sprites:
  move.l d4,d0			; x / 16 * 8 (d4: 0 .. 208, its upper word 0)
  lsr.w #1,d0
  and.w #$fff8,d0
- add.l d0,d2			; damage: 16 lines of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
- move.w d3,d0
+ add.l d0,d2			; damage: the shape's opaque rows (spr_vr) of 1 or 2 chunks, the twin as source (split at
+ move.w d3,d0			; line RING_H: add_damage)
  add.w cur_top,d0
  moveq #4,d3
  moveq #15,d1
@@ -1031,29 +1032,42 @@ draw_sprites:
  beq.s .one
  moveq #8,d3
 .one:
+ moveq #0,d1
+ move.b spr_vr,d1
+ moveq #15,d5
+ and.w d1,d5
+ addq.w #1,d5			; the lines
+ lsr.w #4,d1			; the first
+ add.w d1,d0			; its buffer line
+ lsl.w #8,d1
+ add.l d2,d1			; its address
  move.l dmg_ptr,a0
- moveq #16,d1
- cmp.w #RING_H-16,d0
+ move.w d0,d6			; (d6: .regs' 4 again below)
+ add.w d5,d6
+ cmp.w #RING_H,d6
  bgt.s .lower
- move.l d2,(a0)+
- move.l d2,d5
- add.l #RING_H*STRIDE,d5
+ move.l d1,(a0)+
+ add.l #RING_H*STRIDE,d1
  bra.s .store
 .lower:
  cmp.w #RING_H,d0
  blt.s .split
- move.l d2,(a0)+
- move.l d2,d5
- sub.l #RING_H*STRIDE,d5
+ move.l d1,(a0)+
+ sub.l #RING_H*STRIDE,d1
 .store:
- move.l d5,(a0)+
+ move.l d1,(a0)+
  move.w d3,(a0)+
- move.w d1,(a0)+
+ move.w d5,(a0)+
  move.l a0,dmg_ptr
  bra.s .damaged
 .split:
+ move.l d2,-(sp)
+ move.l d1,d2
+ move.w d5,d1
  bsr add_damage
+ move.l (sp)+,d2
 .damaged:
+ moveq #4,d6
  move.l a1,BLT_SRC_ADDR.w
  move.l d2,BLT_DST_ADDR.w
  move.l (a2),a1
@@ -1098,6 +1112,9 @@ draw_sprites:
  lsr.w #2,d5
  and.w #3,d5
  or.w d5,d2
+ lea spr_vrange,a1		; (its opaque rows)
+ move.b (a1,d2.w),12(a2)
+ move.b (a1,d2.w),spr_vr
  ext.l d2
  lsl.l #7,d2
  move.l d2,8(a2)
@@ -1551,6 +1568,8 @@ spr_order: incbin "spr_order.bin"
 chr_opaque: incbin "chr_opaque.bin"
 spr_plan_offsets: incbin "spr_plan_offsets.bin"
 spr_plan: incbin "spr_plan.bin"
+spr_vrange: incbin "spr_vrange.bin"
+ even
  section bss,bss
 POOL_SIZE = $20000
 cache: ds.b 3*4096*8
@@ -1560,6 +1579,8 @@ cache_misses: ds.l 1
 pool_epoch: ds.w 1
 spr_slots_epoch: ds.w 1
 spr_base: ds.l 1
+spr_vr: ds.b 1
+ even
 spr_slots: ds.b $180/4*16
 bg_roll: ds.w 1
 fg_roll: ds.w 1

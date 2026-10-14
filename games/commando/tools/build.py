@@ -15,6 +15,7 @@ def main():
     ap.add_argument('--frames',type=int,default=0);ap.add_argument('-D',dest='defines',action='append',default=[])
     a=ap.parse_args();prepare()
     if a.assets or not (build_dir("commando")/"spr_code.s").exists(): assets.build()
+    if not (build_dir("commando")/"spr_vrange.bin").exists(): assets.vranges()
     if a.sound or not (build_dir('commando')/'sfx_data.s').exists():
         import sound_sfx;print('sfx_data.s: %d bytes'%sound_sfx.emit(build_dir('commando')/'sfx_data.s'))
     if a.sound or not (build_dir('commando')/'music_data.s').exists():
