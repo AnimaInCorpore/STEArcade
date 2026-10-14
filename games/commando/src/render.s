@@ -49,6 +49,7 @@ show_address:
  rts
 init_render:
  move.w #STRIDE,dest_stride
+ bsr spr_slots_clear
  clr.l ring_valid
  lea ring_dmg,a0
  move.l a0,ring_dmg_end
@@ -250,6 +251,7 @@ get_object_bake:
  cmp.l #pool+POOL_SIZE-128,d2
  blo .room
  addq.w #1,pool_epoch
+ bsr spr_slots_clear		; (draw_sprites' slots point into the pool)
  lea cache,a0
  move.w #3*4096*8/4-1,d3
 .clear:
@@ -926,10 +928,28 @@ destination:
  add.l d0,d2
  rts
 
+; spr_slots: no slot known (the key $00FF: attribute $FF, a hidden sprite, is never looked up).  Keeps all registers.
+spr_slots_clear:
+ movem.l d0/a0,-(sp)
+ lea spr_slots,a0
+ moveq #$180/4-1,d0
+.c:
+ move.w #$00ff,(a0)
+ lea 16(a0),a0
+ dbf d0,.c
+ move.w pool_epoch,spr_slots_epoch
+ movem.l (sp)+,d0/a0
+ rts
+
 ; Draw sprite parts in original priority order, after explicit C806 latch: whole (the top and bottom in guard lines),
 ; except across the window's left and right edges (sprite_edge: the inner word only).  The Blitter registers no sprite
 ; routine changes are set once.
 draw_sprites:
+ move.w pool_epoch,d0		; (the pool rolled over: the slots' baked planes are gone)
+ cmp.w spr_slots_epoch,d0
+ beq.s .slots_ok
+ bsr spr_slots_clear
+.slots_ok:
  move.w #2,BLT_SRC_XINC.w
  move.w #2,BLT_SRC_YINC.w
  move.w #8,BLT_DST_XINC.w
@@ -967,48 +987,25 @@ draw_sprites:
  ble.s .next
  cmp.w #256,d3
  bge.s .next
- move.w d1,d2			; the shape: bank, code, flips
- and.w #$c0,d2
- moveq #0,d0
- move.b (a0),d0
- lsl.w #2,d2
- or.w d0,d2
- lsl.w #2,d2
- move.w d1,d5
- lsr.w #2,d5
- and.w #3,d5
- or.w d5,d2
- move.w d2,spr_pcode		; (generic_part)
- ext.l d2
- lsl.l #4,d2
- moveq #15,d5
+ move.l a0,d2			; the slot's entry in spr_slots (16 bytes: code and attribute, the baked planes, the
+ sub.l #sprite_buffer,d2	; shape's spr_code_tab offset without the shift): as in the last picture (83% in play),
+ lsl.w #2,d2			; no decoding, no cache lookup
+ lea spr_slots,a1
+ add.w d2,a1
+ move.w (a0),d2
+ cmp.w (a1),d2
+ bne .slot_miss
+ move.l 8(a1),d2
+ move.l 4(a1),a1
+.slot_hit:
+ moveq #15,d5			; its code for this shift; none: blank, nothing to draw
  and.w d4,d5
+ lsl.w #3,d5
  or.w d5,d2
- lsl.l #3,d2
- lea spr_code_tab,a2		; its code for this shift; none: blank, nothing to draw
+ lea spr_code_tab,a2
  add.l d2,a2
  tst.l (a2)
  beq .next
- lsl.w #8,d1			; the baked planes (get_object's hit path)
- or.w d1,d0
- move.w d0,d5
- lsr.w #4,d5
- eor.w d0,d5
- and.w #$fff,d5
- lsl.w #3,d5
- lea cache+32768,a1
- add.w d5,a1
- moveq #1,d6
- swap d6
- move.w d0,d6
- cmp.l (a1),d6
- bne.s .bake
- move.l 4(a1),a1
- move.l a1,d6
- bne.s .baked
-.bake:
- moveq #1,d1
- bsr get_object_bake
 .baked:
  move.l a0,-(sp)
  move.w d3,d2			; the destination chunk (destination)
@@ -1071,10 +1068,54 @@ draw_sprites:
  move.l (sp)+,a0
  bra .next
 .generic:
+ move.l a2,d0			; spr_pcode: the entry's offset >> 7 (the shift's bits dropped)
+ sub.l #spr_code_tab,d0
+ lsr.l #7,d0
+ move.w d0,spr_pcode
  move.w d4,d3
  bsr generic_part
  move.l (sp)+,a0
  bra .next
+.slot_miss:			; d2 = code, attribute: decoded, the planes baked or found, the slot updated
+ move.w d2,(a1)
+ move.l a1,a2
+ move.w d1,d2			; the shape: bank, code, flips
+ and.w #$c0,d2
+ moveq #0,d0
+ move.b (a0),d0
+ lsl.w #2,d2
+ or.w d0,d2
+ lsl.w #2,d2
+ move.w d1,d5
+ lsr.w #2,d5
+ and.w #3,d5
+ or.w d5,d2
+ ext.l d2
+ lsl.l #7,d2
+ move.l d2,8(a2)
+ lsl.w #8,d1			; the baked planes (get_object's hit path)
+ or.w d1,d0
+ move.w d0,d5
+ lsr.w #4,d5
+ eor.w d0,d5
+ and.w #$fff,d5
+ lsl.w #3,d5
+ lea cache+32768,a1
+ add.w d5,a1
+ moveq #1,d6
+ swap d6
+ move.w d0,d6
+ cmp.l (a1),d6
+ bne.s .bake
+ move.l 4(a1),a1
+ move.l a1,d6
+ bne.s .found
+.bake:
+ moveq #1,d1
+ bsr get_object_bake
+.found:
+ move.l a1,4(a2)
+ bra .slot_hit
 .edge:				; d4.b = x: 241 .. 255 = -15 .. -1, 209 .. 223, 224 .. 239 hidden
  cmp.b #240,d4			; (the loop's set-up again, off the hot path; the baked planes through get_object)
  bhi.s .left
@@ -1508,6 +1549,8 @@ pool_ptr: ds.l 1
 pool: ds.b POOL_SIZE
 cache_misses: ds.l 1
 pool_epoch: ds.w 1
+spr_slots_epoch: ds.w 1
+spr_slots: ds.b $180/4*16
 bg_roll: ds.w 1
 fg_roll: ds.w 1
 fg_epoch: ds.w 1
