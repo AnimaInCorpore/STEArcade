@@ -34,6 +34,8 @@ def main():
                     'a button skips it)')
     ap.add_argument('--stage',type=int,help='start the game at this stage (0-7): the stage number $f3a1 set on both machines '
                     'while the game sets up, the lives $f3a0 kept at 3 (the cheats of ref/cover.py seeds 4-11)')
+    ap.add_argument('--play',action='store_true',help='the recorded play (play_search.py) against a sim build with -D PLAYBACK=1, '
+                    'whose pb_inputs feeds the ticks (and the lives)')
     ap.add_argument('--audit',action='store_true',help='record the translated instructions that touch the image of the banked window and '
                     'the background bank (g_block to +$4FFF: an access there is one gen.py left unguarded) -> build/bt_wsites_audit_*.pkl')
     args = ap.parse_args()
@@ -183,7 +185,7 @@ def main():
     print('boot matched',flush=True)
     def save_audit():
         if args.audit:
-            out = build_dir('blktiger') / f"bt_wsites_audit_{'walk' if args.walk else args.seed or 0}{'_idle' if args.idle else ''}.pkl"
+            out = build_dir('blktiger') / f"bt_wsites_audit_{'play' if args.play else 'walk' if args.walk else args.seed or 0}{'_idle' if args.idle else ''}.pkl"
             found = {int(k[1:], 16) for k in audit}
             if out.exists():                    # (sites guarded since an earlier run are no longer seen: keep them)
                 found |= set(pickle.load(out.open('rb')))
@@ -192,8 +194,15 @@ def main():
 
     rng = random.Random(args.seed)
     values = (255,255,255)
+    if args.play:
+        import playbot
+    play = playbot.load(build_dir('blktiger') / 'play_inputs.bin') if args.play else None
     for frame in range(args.frames):
-        if args.seed is None:
+        if play:
+            values = (*play[frame], 255)
+            if frame >= 1000:
+                ref.mem[0xf3a0] = 3
+        elif args.seed is None:
             values = inputs(frame)
         elif frame > 700 and frame % 30 == 0:
             system = 255 & ~(0x40 if frame % 180 == 0 else 0) & ~(1 if frame % 120 == 0 else 0)
@@ -208,8 +217,9 @@ def main():
                     ref.mem[addr] = value
                     mem.w8(block + addr - 0x8000, value)
         ref.inputs[:3] = values
-        for i,value in enumerate(values):
-            mem.w8(sym['bt_inputs']+i,value)
+        if not play:                            # (with --play the port's pb_inputs sets them)
+            for i,value in enumerate(values):
+                mem.w8(sym['bt_inputs']+i,value)
         ref.run_frame_port()
         mem.w8(sym['vbl_pending'],1)
         resume()

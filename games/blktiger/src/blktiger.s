@@ -248,6 +248,9 @@ z80_hook:
     move.b d1,bt_inputs+1
     movem.l (sp)+,d0-d1
     endc
+    ifd PLAYBACK
+    bsr pb_inputs
+    endc
     st frame_dirty
     st isr_stage
     ; The sprite RAM as the VBL latches it, for this tick's frame: not when that frame will be skipped (VBLs still
@@ -473,17 +476,73 @@ bg_copy:
 
 hbl:
     rte
+    ifd PLAYBACK
+; The recorded play (tools/play_search.py, build/blktiger/play_inputs.bin; engine/playbot.py: runs of count, SYSTEM,
+; P1, a count of 0 at the end): the inputs of the tick about to run (the ticks come in order; cnt_ticks - 1 have run),
+; and from tick PB_PLAY on the bot's infinite lives ($F3A0 = 3), as the bot had them.
+PB_PLAY = 1000
+pb_inputs:
+    movem.l d0/a0,-(sp)
+    tst.b pb_left
+    bne.s .same
+    move.l pb_ptr,a0
+    cmp.w #0,a0
+    bne.s .next
+    lea pb_data,a0
+.next:
+    move.b (a0)+,pb_left
+    bne.s .run
+    st quit_flag                 ; (the recording is over)
+    bra.s .out
+.run:
+    move.b (a0)+,pb_sys
+    move.b (a0)+,pb_p1
+    move.l a0,pb_ptr
+.same:
+    subq.b #1,pb_left
+    move.b pb_sys,bt_inputs
+    move.b pb_p1,bt_inputs+1
+    move.b #$ff,bt_inputs+2
+    moveq #0,d0
+    move.w cnt_ticks,d0
+    subq.l #1,d0
+    cmp.w #PB_PLAY,d0
+    blo.s .out
+    move.b #3,G_Z80+$f3a0-$10000
+.out:
+    movem.l (sp)+,d0/a0
+    rts
+    endc
+
 vbl:
     ifnd SIM
     borders_vbl
     endc
     movem.l d0-d7/a0,-(sp)
     addq.l #1,frame_counter
+    ifd DEBUG
+    subq.w #1,dbg_tl_n           ; every 100 VBLs: the game ticks and pictures so far (RATE.BIN, bench.sh)
+    bgt.s .tl
+    move.w #100,dbg_tl_n
+    move.l dbg_tl_p,a0
+    cmp.w #0,a0
+    bne.s .tl1
+    lea dbg_tl,a0
+.tl1:
+    cmp.l #dbg_tl_end,a0
+    bhs.s .tl
+    move.w cnt_ticks,(a0)+
+    move.w cnt_renders,(a0)+
+    move.l a0,dbg_tl_p
+.tl:
+    endc
     ifnd AUTOPLAY                ; (the benchmark's inputs are set at each tick)
+    ifnd PLAYBACK
     bsr jagpad_poll              ; (the pads merged)
     jp_merge in_sys,bt_inputs,0
     jp_merge in_p1,bt_inputs+1,1
     jp_merge in_p2,bt_inputs+2,2
+    endc
     endc
     bsr vbl_video
     ifnd NOSOUND
@@ -520,6 +579,27 @@ vbl:
 ; / palette off events that started too late (engine/rt/borders.s), 0; then longs: blit_go's passes run in pieces,
 ; the text rows rebuilt, the frames a ring kept its text, the byte tables bake_pixels built
 dbg_counters:
+    clr -(sp)                    ; RATE.BIN: the timeline
+    pea dbg_name3
+    move #$3c,-(sp)
+    trap #1
+    addq #8,sp
+    move d0,d6
+    pea dbg_tl
+    move.l dbg_tl_p,d0
+    sub.l #dbg_tl,d0
+    bpl.s .tl_len
+    moveq #0,d0
+.tl_len:
+    move.l d0,-(sp)
+    move d6,-(sp)
+    move #$40,-(sp)
+    trap #1
+    lea 12(sp),sp
+    move d6,-(sp)
+    move #$3e,-(sp)
+    trap #1
+    addq #4,sp
     lea dbg_buf,a0
     move.w frame_counter+2,(a0)+
     move.w cnt_renders,(a0)+
@@ -554,6 +634,8 @@ dbg_counters:
     rts
 dbg_name:
     dc.b "COUNTERS.BIN",0
+dbg_name3:
+    dc.b "RATE.BIN",0
     even
     else
 dbg_counters:
@@ -594,6 +676,11 @@ sim_render_ret:
     bra.s sim_render_ret
     endc
     section data,data
+    ifd PLAYBACK
+pb_data:
+    incbin "play_inputs.bin"
+    even
+    endc
 bt_inputs:
     dc.b $ff,$ff,$ff,$ff,$6f,$ff
     even
@@ -689,6 +776,19 @@ g_wdispatch: ds.l 1
 g_dispatch_pc: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
+    ifd DEBUG
+dbg_tl_n: ds.w 1
+dbg_tl_p: ds.l 1
+dbg_tl: ds.l 200                ; (20000 VBLs)
+dbg_tl_end:
+    endc
+    ifd PLAYBACK
+pb_ptr: ds.l 1
+pb_left: ds.b 1
+pb_sys: ds.b 1
+pb_p1: ds.b 1
+    even
+    endc
 dbg_buf: ds.w 18
 dbg_text_rows: ds.l 1
 dbg_text_kept: ds.l 1

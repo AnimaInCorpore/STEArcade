@@ -11,7 +11,9 @@ from cover import inputs
 def main():
     n=int(sys.argv[1]) if len(sys.argv)>1 else 3000
     # play: the recorded play (play_search.py) against a sim build with -D PLAYBACK=1, whose pb_inputs feeds the ticks
-    play=(BUILD/'play_inputs.bin').read_bytes() if len(sys.argv)>2 and sys.argv[2]=='play' else None
+    play=None
+    if len(sys.argv)>2 and sys.argv[2]=='play':
+        import playbot;play=playbot.load(BUILD/'play_inputs.bin')
     run=ROOT/'run/commando_sim';s=Sim(str(run/'COMMANDO.PRG'),run_dir=run)
     sym={k:v+s.base for k,v in s.symbols(BUILD/'commando_sim.map').items()}
     mem,cpu=s.mem,s.cpu;s.mem.set_trace_mode(False)
@@ -51,7 +53,7 @@ def main():
     run_to({wait});m.run_to_idle();m.booted=True;compare(-1);hooks(-1)
     for f in range(n):
         if play:
-            m.inputs[:3]=[play[2*f],play[2*f+1],255]
+            m.inputs[:3]=[*play[f],255]
             if f>=780:m.mem[0xeda0]=3
         else:
             m.inputs[:3]=inputs(f,rnd)

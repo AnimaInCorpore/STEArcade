@@ -392,11 +392,28 @@ vbl:
 	endc
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	subq.w	#1,dbg_tl_n		; every 100 VBLs: the game ticks and pictures so far (RATE.BIN, bench.sh)
+	bgt.s	.tl
+	move.w	#100,dbg_tl_n
+	move.l	dbg_tl_p,a0
+	cmp.w	#0,a0
+	bne.s	.tl1
+	lea	dbg_tl,a0
+.tl1:	cmp.l	#dbg_tl_end,a0
+	bhs.s	.tl
+	move.w	isr_count,(a0)+
+	move.w	dbg_renders,(a0)+
+	move.l	a0,dbg_tl_p
+.tl:
+	endc
 	bsr	vbl_video
+	ifnd PLAYBACK
 	bsr	jagpad_poll
 	jp_merge	in_sys,Z_SYSTEM,0	; (the program only reads them; the pads merged)
 	jp_merge	in_p1,Z_SYSTEM+1,1
 	jp_merge	in_p2,Z_SYSTEM+2,2
+	endc
 	ifd AUTOPLAY				; (benchmark build: scripted coin, start, fire and joystick, period 3000 ticks)
 	moveq #0,d0
 	move.w isr_count,d0
@@ -483,6 +500,9 @@ z80_hook:
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 .deliver:
+	ifd PLAYBACK
+	bsr	pb_inputs
+	endc
 	ifnd NOSOUND
 	bsr	cs_tick			; (the sound driver's tick: the latch the last tick left)
 	endc
@@ -493,6 +513,35 @@ z80_hook:
 	addq.w	#1,isr_count
 	move.w	#RESCAN,-(a5)
 	jmp	Z0038
+
+	ifd PLAYBACK
+; The recorded play (tools/play_search.py, build/gunsmoke/play_inputs.bin; engine/playbot.py: runs of count, SYSTEM,
+; P1, a count of 0 at the end): the inputs of the game tick about to run (the ticks come in order), and from tick
+; PB_PLAY on the bot's infinite lives ($E040 = 3), as the bot had them.
+PB_PLAY = 800
+pb_inputs:
+	tst.b	pb_left
+	bne.s	.same
+	move.l	pb_ptr,a0
+	cmp.w	#0,a0
+	bne.s	.next
+	lea	pb_data,a0
+.next:	move.b	(a0)+,pb_left
+	bne.s	.run
+	st	quit_flag		; (the recording is over)
+	rts
+.run:	move.b	(a0)+,pb_sys
+	move.b	(a0)+,pb_p1
+	move.l	a0,pb_ptr
+.same:	subq.b	#1,pb_left
+	move.b	pb_sys,Z_SYSTEM
+	move.b	pb_p1,Z_SYSTEM+1
+	move.b	#$FF,Z_SYSTEM+2
+	cmp.w	#PB_PLAY,isr_count
+	blo.s	.out
+	move.b	#3,G_Z80+$E040-$10000
+.out:	rts
+	endc
 
 ; C806 (005F, gen config write hook) latches the sprite list: the first four bytes of each of the 128 entries of 32
 ; bytes at F000-FFFF (code, attribute, y, x).  Keeps every register and the condition codes.
@@ -780,6 +829,27 @@ dbg_counters:
 	move.w	bd_late_low,(a0)+
 	move.w	bd_late_off,(a0)+
 	move.l	bd_pieced,(a0)+
+	clr	-(sp)			; RATE.BIN: the timeline (before COUNTERS.BIN: bench.sh waits for that one)
+	pea	dbg_name3
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	dbg_tl
+	move.l	dbg_tl_p,d0
+	sub.l	#dbg_tl,d0
+	bpl.s	.tl_len
+	moveq	#0,d0
+.tl_len:
+	move.l	d0,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
 	clr	-(sp)
 	pea	dbg_name2
 	move	#$3c,-(sp)
@@ -823,6 +893,8 @@ bd_pc_name:
 	endc
 dbg_name2:
 	dc.b	"COUNTERS.BIN",0
+dbg_name3:
+	dc.b	"RATE.BIN",0
 	even
 	endc
 
@@ -863,6 +935,9 @@ CS_LATCH = G_Z80-$3800			; C800: the main CPU's sound latch
 	section data,data
 ; ------------------------------------------------------------------------------
 
+	ifd PLAYBACK
+pb_data:	incbin	"play_inputs.bin"
+	endc
 	even
 fixed_rom:	incbin "fixed.rom"
 bank_rom:	incbin "banks.rom"
@@ -917,6 +992,19 @@ in_p2:		ds.b	1
 	even
 isr_count:	ds.w	1
 dbg_renders:	ds.w	1
+	ifd PLAYBACK
+pb_ptr:		ds.l	1
+pb_left:	ds.b	1
+pb_sys:		ds.b	1
+pb_p1:		ds.b	1
+	even
+	endc
+	ifd DEBUG
+dbg_tl_n:	ds.w	1
+dbg_tl_p:	ds.l	1
+dbg_tl:		ds.l	200		; (20000 VBLs)
+dbg_tl_end:
+	endc
 	even
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1

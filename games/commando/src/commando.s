@@ -490,23 +490,29 @@ z80_irq_ret:
 	jmp Z8001_r
 
 	ifd PLAYBACK
-; The recorded play (tools/play_search.py, build/commando/play_inputs.bin): SYSTEM and P1 of the game tick about to
-; run (isr_count ticks have run), and from tick PB_PLAY on the bot's infinite lives ($EDA0 = 3), as the bot had them.
+; The recorded play (tools/play_search.py, build/commando/play_inputs.bin; engine/playbot.py: runs of count, SYSTEM,
+; P1, a count of 0 at the end): the inputs of the game tick about to run (the ticks come in order), and from tick
+; PB_PLAY on the bot's infinite lives ($EDA0 = 3), as the bot had them.
 PB_PLAY = 780
 pb_inputs:
-	moveq	#0,d0
-	move.w	isr_count,d0
-	cmp.l	#(pb_end-pb_data)/2,d0
-	blo.s	.in
+	tst.b	pb_left
+	bne.s	.same
+	move.l	pb_ptr,a0
+	cmp.w	#0,a0
+	bne.s	.next
+	lea	pb_data,a0
+.next:	move.b	(a0)+,pb_left
+	bne.s	.run
 	st	quit_flag		; (the recording is over)
 	rts
-.in:	lea	pb_data,a0
-	add.l	d0,a0
-	add.l	d0,a0
-	move.b	(a0)+,Z_SYSTEM
-	move.b	(a0),Z_SYSTEM+1
+.run:	move.b	(a0)+,pb_sys
+	move.b	(a0)+,pb_p1
+	move.l	a0,pb_ptr
+.same:	subq.b	#1,pb_left
+	move.b	pb_sys,Z_SYSTEM
+	move.b	pb_p1,Z_SYSTEM+1
 	move.b	#$FF,Z_SYSTEM+2
-	cmp.w	#PB_PLAY,d0
+	cmp.w	#PB_PLAY,isr_count
 	blo.s	.out
 	move.b	#3,g_block+$8000+$EDA0-$10000
 .out:	rts
@@ -934,7 +940,6 @@ z80_unsupported:
 	section data,data
 	ifd PLAYBACK
 pb_data:	incbin	"play_inputs.bin"
-pb_end:
 	even
 	endc
 ; ------------------------------------------------------------------------------
@@ -1000,6 +1005,13 @@ in_p2:		ds.b	1
 cnt_acia:	ds.w	1
 dbg_c1:	ds.w	1
 dbg_c2:	ds.w	1
+	ifd PLAYBACK
+pb_ptr:		ds.l	1
+pb_left:	ds.b	1
+pb_sys:		ds.b	1
+pb_p1:		ds.b	1
+	even
+	endc
 	ifd DEBUG
 dbg_tl_n:	ds.w	1
 dbg_tl_p:	ds.l	1

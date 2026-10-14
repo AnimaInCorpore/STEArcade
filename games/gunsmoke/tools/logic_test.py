@@ -25,6 +25,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--play', action='store_true', help='the recorded play (play_search.py) against a sim build with '
+                    '-D PLAYBACK=1, whose pb_inputs feeds the ticks')
     ap.add_argument('--audit', action='store_true', help="record the translated instructions that read the block's own window area "
                     "(a read there is a site gen.py left unguarded) -> build/w_sites_audit_*.pkl")
     args = ap.parse_args()
@@ -151,10 +153,18 @@ def main():
     text_flag(-1)
     state = {}
     cycles[0] = 0
+    if args.play:
+        import playbot
+    play = playbot.load(build_dir('gunsmoke') / 'play_inputs.bin') if args.play else None
     for f in range(args.frames):
-        m.inputs[0], m.inputs[1] = cover.inputs(f, rnd, state)
-        for a, v in zip((0xc000, 0xc001), m.inputs[:2]):
-            mem.w8(addr(a), v)
+        if play:
+            m.inputs[0], m.inputs[1] = play[f]
+            if f >= 800:
+                m.mem[0xe040] = 3
+        else:
+            m.inputs[0], m.inputs[1] = cover.inputs(f, rnd, state)
+            for a, v in zip((0xc000, 0xc001), m.inputs[:2]):
+                mem.w8(addr(a), v)
         if cheats:
             m.mem[0xe040] = 6
             mem.w8(addr(0xe040), 6)

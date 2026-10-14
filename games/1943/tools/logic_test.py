@@ -38,6 +38,8 @@ def main():
     ap.add_argument('--every', type=int, default=1, help='with --render: compare every n-th picture (all are drawn)')
     ap.add_argument('--cheat', type=int, help='MAME cheats on both machines: energy, invincibility, start at this stage')
     ap.add_argument('--verbose', action='store_true')
+    ap.add_argument('--play', action='store_true', help='the recorded play (play_search.py) against a sim build with '
+                    '-D PLAYBACK=1, whose pb_inputs feeds the ticks (and the cheats)')
     ap.add_argument('--twins', action='store_true', help='with --render: the twin lines of the window must hold the back layer alone')
     ap.add_argument('--trace', type=int)
     ap.add_argument('--trace-at', default='draw_sprites,draw_front,draw_chars,sim_frame_done')
@@ -378,8 +380,15 @@ def main():
     frame_now = [0]
     rng = random.Random(args.seed)
     values = (255, 255, 255)
+    if args.play:
+        import playbot
+    play = playbot.load(build_dir('1943') / 'play_inputs.bin') if args.play else None
     for frame in range(args.frames):
-        if args.seed is None:
+        if play:
+            values = (*play[frame], 255)
+            if frame >= 1000:
+                ref.mem[0xf206], ref.mem[0xf214] = 0x40, 2
+        elif args.seed is None:
             values = inputs(frame)
         elif frame > 700 and frame % 30 == 0:
             system = 255 & ~(0x40 if frame % 180 == 0 else 0) & ~(1 if frame % 120 == 0 else 0)
@@ -390,10 +399,11 @@ def main():
                     ref.mem[addr] = value
                     mem.w8(block + addr, value)
         ref.inputs[:3] = values
-        vbl = mem.r8(sym['g_inputs']) & 8
-        mem.w8(sym['g_inputs'], values[0] & ~8 | vbl)
-        mem.w8(sym['g_inputs']+1, values[1])
-        mem.w8(sym['g_inputs']+2, values[2])
+        if not play:                            # (with --play the port's pb_inputs sets them)
+            vbl = mem.r8(sym['g_inputs']) & 8
+            mem.w8(sym['g_inputs'], values[0] & ~8 | vbl)
+            mem.w8(sym['g_inputs']+1, values[1])
+            mem.w8(sym['g_inputs']+2, values[2])
         frame_now[0] = frame
         ref.run_frame_port()
         mem.w8(sym['vbl_pending'], 1)

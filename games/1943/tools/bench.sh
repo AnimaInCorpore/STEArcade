@@ -3,7 +3,8 @@
 # writes COUNTERS.BIN (and BORDERS.BIN, the border code's counters).
 #
 #   games/1943/tools/bench.sh [frames]          EXTRA="-D ..." extra build.py options (-D STAGE=n: a stage with the cheats);
-#                                                WAIT=300: seconds to wait at most
+#                                                WAIT=300: seconds to wait at most; PLAY=1: the recorded play
+#                                                (build/1943/play_inputs.bin) instead
 # Hatari is started here, not by tools/hatari.sh (that one stops every running "hatari" first, other benchmarks too);
 # HATARI / TOS may point at other builds.  run/1943 gets the normal build back.
 # Reports the game ticks a second (the arcade: 60) and the frames drawn a second; the first VBLs are the boot.
@@ -12,10 +13,11 @@ cd "$ROOT"
 PY=venv/bin/python; [ -x $PY ] || PY=python3
 FRAMES=${1:-6000}
 BENCH=run/1943_bench; mkdir -p $BENCH
-$PY games/1943/tools/build.py --debug -D AUTOPLAY=1 --frames $FRAMES $EXTRA 2>&1 | grep -i "built\|rror" | tail -1
+MODE="-D AUTOPLAY=1"; [ -n "$PLAY" ] && MODE="-D PLAYBACK=1"   # PLAY=1: the recorded play (tools/play_search.py) by game tick
+$PY games/1943/tools/build.py --debug $MODE --frames $FRAMES $EXTRA 2>&1 | grep -i "built\|rror" | tail -1
 cp run/1943/1943.PRG $BENCH/1943.PRG
 $PY games/1943/tools/build.py 2>&1 | grep -i "built\|rror" | tail -1
-rm -f $BENCH/COUNTERS.BIN $BENCH/BORDERS.BIN $BENCH/CRASH.TXT
+rm -f $BENCH/COUNTERS.BIN $BENCH/BORDERS.BIN $BENCH/RATE.BIN $BENCH/CRASH.TXT
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
 (cd $BENCH && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
@@ -36,4 +38,13 @@ if os.path.exists('run/1943_bench/BORDERS.BIN'):
     b = open('run/1943_bench/BORDERS.BIN', 'rb').read()
     f, top, on, low, off = struct.unpack('>5H', b[:10])
     print("borders: top border armed by the VBL in %d frames; events that started too late: top %d, palette on %d, bottom %d, palette off %d; passes run in pieces %d" % (f, top, on, low, off, struct.unpack('>L', b[10:14])[0]))
+if os.path.exists('run/1943_bench/RATE.BIN'):          # the timeline: per 100 VBLs, from the first game tick on
+    t = open('run/1943_bench/RATE.BIN', 'rb').read()
+    pts = [struct.unpack('>2H', t[k:k + 4]) for k in range(0, len(t) - 3, 4)]
+    rows = [((b[0] - a[0]) & 0xffff, (b[1] - a[1]) & 0xffff) for a, b in zip(pts, pts[1:])]
+    print("per 100 VBLs (ticks/s, pictures/s):", " ".join("%d/%d" % (t2 / 2, p2 / 2) for t2, p2 in rows))
+    live = [r for r in rows if r[0]]
+    if live:
+        print("from the first tick: game ticks %.1f /s (%.0f%%), pictures %.1f /s" % (sum(r[0] for r in live) / len(live) / 2,
+              sum(r[0] for r in live) / len(live) / 2 / 60 * 100, sum(r[1] for r in live) / len(live) / 2))
 P
