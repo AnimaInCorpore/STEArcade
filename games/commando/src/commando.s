@@ -520,6 +520,13 @@ pb_inputs:
 
 ; C806 explicitly latches the entire sprite list; keep all translated registers.
 buffer_sprites:
+	ifnd SIM			; (the tick's picture will not be drawn: VBLs are pending and the hook may still skip one;
+	tst.b vbl_pending		; every tick latches the list once, so the drawn tick's own copy is the one shown)
+	beq.s .copy
+	cmp.b #MAX_SKIP,render_skips
+	blo.s .skip
+.copy:
+	endc
 	movem.l d0-d1/a0-a1,-(sp)
 	lea G_Z80-$0200,a0
 	lea sprite_buffer,a1
@@ -531,6 +538,7 @@ buffer_sprites:
 	move.l (a0)+,(a1)+
 	dbf d0,.loop
 	movem.l (sp)+,d0-d1/a0-a1
+.skip:
 	rts
 
 	borders_handlers

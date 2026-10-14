@@ -21,9 +21,9 @@ SL_SERIAL = 18				; .w  the start order (the YM plays the chip whose effect star
 SL_LEFT = 20				; .b  steps left in the current run
 SL_PHASE = 21				; .b
 SL_EXCPH = 22				; .b  the phase SL_EXC belongs to, $FF: none
-SL_REGS = 23				; 11 bytes: the registers of phase 0
-SL_OUT = 34				; 11 bytes: the output of the last step
-SL_SIZE = 46
+SL_REGS = 24				; 11 bytes (+1): the registers of phase 0 (even: copied as longs)
+SL_OUT = 36				; 11 bytes (+1): the output of the last step
+SL_SIZE = 48
 
 ; sfx_table entries (sfx_data.s)
 SE_CHIP = 0				; .b  0 / 1, $FE: clear every slot, $FF: nothing
@@ -96,9 +96,10 @@ sfx_irq:
 	bra.s	.set
 .idle:
 	lea	sfx_idle,a1
-	move.w	d7,d0
-	mulu	#11,d0
-	add.w	d0,a1
+	tst.w	d7
+	beq.s	.idle0
+	lea	11(a1),a1
+.idle0:
 	sub.l	a0,a0			; (no slot: serial 0)
 .set:
 	move.w	d7,d0
@@ -114,11 +115,11 @@ sfx_irq:
 
 ; a0 = the highest active slot of chip d7 (Z clear), or Z set
 sfx_top:
-	move.w	d7,d0
-	mulu	#4*SL_SIZE,d0
 	lea	sfx_slots+3*SL_SIZE,a0
-	add.w	d0,a0
-	moveq	#4-1,d0
+	tst.w	d7
+	beq.s	.c0
+	lea	4*SL_SIZE(a0),a0
+.c0:	moveq	#4-1,d0
 .t:	tst.l	SL_ENT(a0)
 	bne.s	.found
 	lea	-SL_SIZE(a0),a0
@@ -153,14 +154,11 @@ sfx_step:
 	move.b	(a2)+,d0
 	lsl.w	#8,d0
 	move.b	(a2)+,d0
-	lea	SL_REGS(a0),a3
-	moveq	#11-1,d1
-.r:	lsr.w	#1,d0
-	bcc.s	.r_keep
-	move.b	(a2)+,(a3)
-.r_keep:
-	addq.l	#1,a3
-	dbf	d1,.r
+	rept	11			; (the mask's bits: the registers that change)
+	lsr.w	#1,d0
+	bcc.s	*+6
+	move.b	(a2)+,SL_REGS+REPTN(a0)
+	endr
 	move.l	a2,SL_POS(a0)
 .in_run:
 	subq.b	#1,SL_LEFT(a0)
@@ -169,11 +167,9 @@ sfx_step:
 	beq.s	.seeked
 	bsr	sfx_seek
 .seeked:
-	lea	SL_REGS(a0),a2		; the output: phase 0's registers
-	lea	SL_OUT(a0),a3
-	moveq	#11-1,d1
-.o:	move.b	(a2)+,(a3)+
-	dbf	d1,.o
+	move.l	SL_REGS(a0),SL_OUT(a0)	; the output: phase 0's registers
+	move.l	SL_REGS+4(a0),SL_OUT+4(a0)
+	move.l	SL_REGS+8(a0),SL_OUT+8(a0)
 	tst.b	d3
 	beq.s	.done
 	move.l	SL_EXC(a0),a2		; this phase's exception at this index
@@ -188,14 +184,11 @@ sfx_step:
 	move.b	(a2)+,d0
 	lsl.w	#8,d0
 	move.b	(a2)+,d0
-	lea	SL_OUT(a0),a3
-	moveq	#11-1,d1
-.x:	lsr.w	#1,d0
-	bcc.s	.x_keep
-	move.b	(a2)+,(a3)
-.x_keep:
-	addq.l	#1,a3
-	dbf	d1,.x
+	rept	11
+	lsr.w	#1,d0
+	bcc.s	*+6
+	move.b	(a2)+,SL_OUT+REPTN(a0)
+	endr
 	move.l	a2,SL_EXC(a0)
 .done:
 	addq.w	#1,d2
