@@ -1359,6 +1359,11 @@ draw_foreground:
 .full:
  clr.b fg_full
  move.w pool_epoch,fg_epoch
+ lea fg_pair_tag,a4		; (the pool rolled over: a baked character's address may hold another one now)
+ moveq #FG_PAIRS*2-1,d0
+.untag:
+ clr.l (a4)+
+ dbf d0,.untag
  move.w #255,d0
 .copy:
  move.l $400(a2),$400(a3)
@@ -1432,7 +1437,7 @@ draw_foreground:
  bra .full
 .same:
  tst.b fg_dirty
- beq.s .draw
+ beq .draw
 .list:
  lea fg_rows,a3			; (the first and last chunk of each character row: $ff = none)
  moveq #-1,d1
@@ -1444,13 +1449,14 @@ draw_foreground:
  lea fg_ptr+2*4*32,a0		; (columns 0 and 1 and 30 and 31 are outside the window)
  lea fg_list,a1
  lea fg_offsets+2*4*32,a2
+ lea fg_plist,a6		; the pairs: both characters of a chunk (an even and the next odd column) drawn as
+ lea fg_pair_buf,a5		; longs from a composed buffer (fg_pair_buf, made again only when one of the two changed)
+ lea fg_pair_tag,a4
  moveq #64,d3
  move.w #28*32-1,d0
 .gather:
  move.l (a0)+,d1
  beq.s .empty
- move.l (a2),(a1)+
- move.l d1,(a1)+
  move.w d3,d4
  and.w #31,d4
  move.w d3,d5
@@ -1462,11 +1468,42 @@ draw_foreground:
  move.b d5,(a3,d4.w)
 .known:
  move.b d5,32(a3,d4.w)
+ btst #5,d3
+ bne.s .odd
+ move.l 128-4(a0),d4		; an even column: the odd one beside it
+ beq.s .single
+ cmp.l #fg_pair_tag+FG_PAIRS*8,a4
+ bhs.s .both			; (no pair buffer left: both as single characters)
+ cmp.l (a4),d1
+ bne.s .compose
+ cmp.l 4(a4),d4
+ beq.s .composed
+.compose:
+ move.l d1,(a4)
+ move.l d4,4(a4)
+ bsr fg_compose
+.composed:
+ move.l (a2),(a6)+
+ move.l a5,(a6)+
+ lea 128(a5),a5
+ addq.l #8,a4
+ bra.s .empty
+.both:
+ move.l 128(a2),(a1)+
+ move.l d4,(a1)+
+ bra.s .single
+.odd:
+ tst.l -128-4(a0)		; (an odd column beside a character: done with it, as a pair or a single)
+ bne.s .empty
+.single:
+ move.l (a2),(a1)+
+ move.l d1,(a1)+
 .empty:
  addq.l #4,a2
  addq.w #1,d3
  dbf d0,.gather
  move.l a1,fg_list_end
+ move.l a6,fg_plist_end
  sf fg_dirty
 .draw:
  lea fg_rows,a3			; damage: each character row's chunks, in four pieces of 2 lines
@@ -1516,6 +1553,46 @@ draw_foreground:
 .test:
  cmp.l a3,a2
  blo.s .char
+ lea fg_plist,a2
+ move.l fg_plist_end,a3
+ bra .ptest
+.pair:				; 16 pixels a line: the planes as two longs, the masks and data composed (fg_compose)
+ move.l (a2)+,a1
+ add.l d1,a1
+ move.l (a2)+,a0
+ rept 8
+ movem.l (REPTN*STRIDE)(a1),d2-d3
+ and.l (a0)+,d2
+ and.l (a0)+,d3
+ or.l (a0)+,d2
+ or.l (a0)+,d3
+ movem.l d2-d3,(REPTN*STRIDE)(a1)
+ endr
+.ptest:
+ cmp.l a3,a2
+ blo .pair
+ rts
+
+; a5 = a pair's buffer (128 bytes), d1 / d4 = the baked characters of its even (left byte) and odd column: per line
+; the and masks of planes 0-3 interleaved as two longs, then the or data (movep writes every other byte).
+fg_compose:
+ movem.l d0/d3/a0-a1,-(sp)
+ move.l d1,a0
+ move.l d4,a1
+ moveq #7,d3
+.line:
+ move.l (a0)+,d0
+ movep.l d0,0(a5)
+ move.l (a1)+,d0
+ movep.l d0,1(a5)
+ move.l (a0)+,d0
+ movep.l d0,8(a5)
+ move.l (a1)+,d0
+ movep.l d0,9(a5)
+ lea 16(a5),a5
+ dbf d3,.line
+ lea -128(a5),a5
+ movem.l (sp)+,d0/d3/a0-a1
  rts
 
 ; d6 = the cell: fg_ptr[cell] = its baked character or 0 (blank or outside the window).  Keeps d6.
@@ -1592,6 +1669,11 @@ fg_full: ds.b 1
 fg_dirty: ds.b 1
 fg_retry: ds.b 1
 fg_list_end: ds.l 1
+FG_PAIRS = 48
+fg_plist_end: ds.l 1
+fg_plist: ds.l 2*FG_PAIRS
+fg_pair_tag: ds.l 2*FG_PAIRS
+fg_pair_buf: ds.b 128*FG_PAIRS
 bg_raw: ds.b 2048
 fg_raw: ds.b 2048
 fg_ptr: ds.l 1024

@@ -4,7 +4,7 @@
 #
 #   games/commando/tools/bench.sh [hatari items ...]        e.g. shot@60 shot@100;  EXTRA="-D ..." extra build.py options,
 #                                                          PLAY=1: the recorded play (build/commando/play_inputs.bin) instead,
-#                                                          WAIT=140: seconds before Hatari is stopped
+#                                                          WAIT=400: seconds before Hatari is stopped at the latest
 # Hatari is started here, not by tools/hatari.sh (that one stops every running "hatari" first, other benchmarks too):
 # HATARI may name a renamed copy of the pinned build.  Screenshots: $OUT (default /tmp/hrun_commando).
 #
@@ -23,10 +23,14 @@ OUT=${OUT:-/tmp/hrun_commando}; mkdir -p "$OUT"; rm -f "$OUT/cmd.fifo"
 HP=$!
 for i in $(seq 50); do [ -p "$OUT/cmd.fifo" ] && break; sleep 0.2; done
 T=0
-for ITEM in "$@" wait@${WAIT:-128}; do
+for ITEM in "$@"; do
   S=${ITEM##*@}; sleep $((S - T)); T=$S
   case ${ITEM%@*} in shot) printf 'hatari-debug screenshot %s\n' "$OUT/commando_$S.png" > "$OUT/cmd.fifo"; sleep 1; T=$((T+1)) ;; esac
 done
+# (the program writes COUNTERS.BIN when its 6000 VBLs are done: waited for, at most WAIT seconds in all; a busy host
+# makes Hatari slower than real time)
+while [ $T -lt ${WAIT:-400} ] && [ ! -f run/commando/COUNTERS.BIN ] && kill -0 $HP 2>/dev/null; do sleep 1; T=$((T+1)); done
+sleep 1
 kill $HP 2>/dev/null; wait $HP 2>/dev/null
 [ -f run/commando/CRASH.TXT ] && { echo "--- CRASH.TXT"; head -10 run/commando/CRASH.TXT; }
 python3 - <<'P'
