@@ -813,7 +813,16 @@ restore_damage:
  bhi.s .divide			; (wider than the table: blit_go divides)
  moveq #0,d1
  move.b -1(a0,d2.w),d1		; the lines a piece: BLIT_PIECE / the words a line
- bsr blit_go_lines		; (up to 8 x 16 words: in pieces)
+.piece:				; (blit_go_lines' pieces, started here: the same short HOG passes without its calls)
+ cmp.w d1,d3
+ bls.s .last
+ move.w d1,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ sub.w d1,d3
+ bra.s .piece
+.last:
+ move.w d3,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
 .test:
  cmp.l a3,a2
  blo .rect
@@ -1235,6 +1244,11 @@ generic_part:
  move.l (a0,d0.w),d0
  lea spr_plan,a0
  add.l d0,a0
+ lea BLT_DST_ADDR.w,a3		; (draw_sprites sets a2-a6, d4-d7 again for the next sprite)
+ lea BLT_COUNT+2.w,a4
+ lea BLT_CTRL.w,a5
+ moveq #4,d6
+ move.w #$c0,d7
  moveq #1,d5
 .group:
  move.w (a0)+,d1
@@ -1252,9 +1266,9 @@ generic_part:
  subq.w #1,d1
 .row:
  adda.w (a0)+,a1
- move.l a1,BLT_DST_ADDR.w
- move.w #4,BLT_COUNT+2.w
- move.b #$c0,BLT_CTRL.w
+ move.l a1,(a3)
+ move.w d6,(a4)
+ move.b d7,(a5)
  dbf d1,.row
  bra .group
 .done:

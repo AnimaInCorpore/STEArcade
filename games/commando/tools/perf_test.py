@@ -3,6 +3,7 @@ with the seeded attract/play inputs of ref/cover.py.
 
     python perf_test.py [ticks] [first] [profile]   (first: ticks not counted; profile: render_frame's CPU cycles by routine)
     PLAY=1 python perf_test.py ...                 the recorded play's inputs (play_search.py, as bench.sh PLAY=1)
+    PERF_PCS=1 (with profile)                      the hottest single instructions (CPU cycles a picture)
     PERF_CALLS=a,b (with profile)                  how often these routines run a picture
     PERF_LOGIC=1 (with profile)                    the logic's cycles by runtime routine (the translated code as Z)
     PERF_BLIT=1 (with profile)                     the Blitter's bus cycles by the routine that started the pass (blit:...)
@@ -31,6 +32,7 @@ def main():
     names=sorted((v,k) for k,v in sym.items() if not k.startswith('Z') and not k.startswith('.') and not k.isupper())  # (no constants)
     addrs=[v for v,_ in names];by_name=collections.Counter()
     split=bool(os.environ.get('PERF_BLIT'))
+    pcs_prof=bool(os.environ.get('PERF_PCS'));by_pc=collections.Counter()
     calls={sym[k]:k for k in os.environ.get('PERF_CALLS','').split(',') if k in sym};ncalls=collections.Counter()
     logic_prof=bool(os.environ.get('PERF_LOGIC'));by_logic=collections.Counter()
     zl=sorted(v for k,v in sym.items() if k.startswith('Z') and k[1:].isalnum())
@@ -56,6 +58,7 @@ def main():
                 if pc in calls:ncalls[calls[pc]]+=1
                 r=cpu.execute(1);b=s.blitter.cycles;s.blitter.cycles=0
                 by_name[names[bisect.bisect_right(addrs,pc)-1][1]]+=r.cycles+b*(not split);total+=r.cycles+b
+                if pcs_prof:by_pc[pc]+=r.cycles
                 if b and split:                 # (PERF_BLIT=1: a pass's bus cycles to the routine that asked for it)
                     sp=cpu.r_reg(R.A7)
                     for k in range(0,96,2):
@@ -101,6 +104,9 @@ def main():
     fs=sorted(frames);q=lambda p:fs[min(n-1,int(p*n))]
     print(f'pictures: median {q(.5)}, 90% {q(.9)}, 99% {q(.99)}; over 300k: {sum(f>300000 for f in fs)} '
           f'({sum(f for f in fs if f>300000)*100//max(1,sum(fs))}% of the cycles)')
+    for pc,v in by_pc.most_common(40):
+        i=bisect.bisect_right(addrs,pc)-1
+        print(f'pc {names[i][1]}+{pc-addrs[i]:<5d} {v//n:7d}  {cpu.disassemble(pc)[1] if hasattr(cpu,"disassemble") else ""}')
     for k,v in ncalls.most_common():print(f'calls {k:24s} {v/n:8.1f} a picture')
     if prof and logic_prof:
         tot=sum(by_logic.values())
