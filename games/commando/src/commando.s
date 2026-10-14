@@ -1,6 +1,10 @@
 ; Commando World for Atari STE; translated main CPU, the sound effects (sfx.s) and the music (music.s) on the YM2149.
+	ifnd MAX_PENDING
 MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
+	endc
+	ifnd MAX_SKIP
 MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
+	endc
 
 BUSY = %10000000
 HOG = %01000000
@@ -343,13 +347,30 @@ vbl:
 	movem.l	d0-d1/a0,-(sp)
 	dbgcnt	dbg_c4,3
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	subq.w	#1,dbg_tl_n		; every 100 VBLs: the game ticks and pictures so far (RATE.BIN, bench.sh)
+	bgt.s	.tl
+	move.w	#100,dbg_tl_n
+	move.l	dbg_tl_p,a0
+	cmp.w	#0,a0
+	bne.s	.tl1
+	lea	dbg_tl,a0
+.tl1:	cmp.l	#dbg_tl_end,a0
+	bhs.s	.tl
+	move.w	isr_count,(a0)+
+	move.w	dbg_c2,(a0)+
+	move.l	a0,dbg_tl_p
+.tl:
+	endc
 	tst.b	quit_flag
 	bne	quit
 	bsr	vbl_video
+	ifnd PLAYBACK
 	bsr	jagpad_poll
 	jp_merge	in_sys,Z_SYSTEM,0	; (the program only reads them; the pads merged)
 	jp_merge	in_p1,Z_SYSTEM+1,1
 	jp_merge	in_p2,Z_SYSTEM+2,2
+	endc
 	ifd AUTOPLAY				; (benchmark build: scripted coin, start, fire and joystick, period 3000 frames)
 	moveq #0,d0
 	move.w isr_count,d0
@@ -443,6 +464,9 @@ z80_hook:
 	movem.l (sp)+,d0-d7/a0-a6
 	rts
 .deliver:
+	ifd PLAYBACK
+	bsr pb_inputs
+	endc
 	bsr sfx_tick			; (the sound driver's four IRQs of the tick: the latch of the tick before)
 	movem.l (sp)+,d0-d7/a0-a6
 	; Drop just the hook continuation; preserve the native task/call stack.
@@ -464,6 +488,29 @@ z80_irq_ret:
 .done:
 	clr.b isr_stage
 	jmp Z8001_r
+
+	ifd PLAYBACK
+; The recorded play (tools/play_search.py, build/commando/play_inputs.bin): SYSTEM and P1 of the game tick about to
+; run (isr_count ticks have run), and from tick PB_PLAY on the bot's infinite lives ($EDA0 = 3), as the bot had them.
+PB_PLAY = 780
+pb_inputs:
+	moveq	#0,d0
+	move.w	isr_count,d0
+	cmp.l	#(pb_end-pb_data)/2,d0
+	blo.s	.in
+	st	quit_flag		; (the recording is over)
+	rts
+.in:	lea	pb_data,a0
+	add.l	d0,a0
+	add.l	d0,a0
+	move.b	(a0)+,Z_SYSTEM
+	move.b	(a0),Z_SYSTEM+1
+	move.b	#$FF,Z_SYSTEM+2
+	cmp.w	#PB_PLAY,d0
+	blo.s	.out
+	move.b	#3,g_block+$8000+$EDA0-$10000
+.out:	rts
+	endc
 
 ; C806 explicitly latches the entire sprite list; keep all translated registers.
 buffer_sprites:
@@ -815,6 +862,24 @@ dbg_counters:
 	move.l	dbg_idle_b,(a0)+
 	move.l	dbg_idle_f,(a0)+
 	move.l	bd_pieced,(a0)+
+	clr	-(sp)			; RATE.BIN: the timeline
+	pea	dbg_name3
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	dbg_tl
+	move.l	dbg_tl_p,d0
+	sub.l	#dbg_tl,d0
+	move.l	d0,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
 	clr	-(sp)
 	pea	dbg_name2
 	move	#$3c,-(sp)
@@ -834,6 +899,8 @@ dbg_counters:
 	rts
 dbg_name2:
 	dc.b	"COUNTERS.BIN",0
+dbg_name3:
+	dc.b	"RATE.BIN",0
 	even
 	endc
 
@@ -865,6 +932,11 @@ z80_unsupported:
 
 ; ------------------------------------------------------------------------------
 	section data,data
+	ifd PLAYBACK
+pb_data:	incbin	"play_inputs.bin"
+pb_end:
+	even
+	endc
 ; ------------------------------------------------------------------------------
 
 rom_table:				; source, destination, bytes
@@ -928,6 +1000,12 @@ in_p2:		ds.b	1
 cnt_acia:	ds.w	1
 dbg_c1:	ds.w	1
 dbg_c2:	ds.w	1
+	ifd DEBUG
+dbg_tl_n:	ds.w	1
+dbg_tl_p:	ds.l	1
+dbg_tl:		ds.l	200		; (20000 VBLs)
+dbg_tl_end:
+	endc
 dbg_c3:	ds.w	1
 dbg_c4:	ds.w	1
 dbg_c5:	ds.w	1
