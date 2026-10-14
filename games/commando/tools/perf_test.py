@@ -104,7 +104,12 @@ def main():
     fs=sorted(frames);q=lambda p:fs[min(n-1,int(p*n))]
     print(f'pictures: median {q(.5)}, 90% {q(.9)}, 99% {q(.99)}; over 300k: {sum(f>300000 for f in fs)} '
           f'({sum(f for f in fs if f>300000)*100//max(1,sum(fs))}% of the cycles)')
-    for pc,v in by_pc.most_common(40):
+    focus=os.environ.get('PERF_FOCUS')           # (PERF_PCS=1 PERF_FOCUS=draw_sprites: that routine's instructions in order)
+    if focus:
+        for pc in sorted(by_pc):
+            i=bisect.bisect_right(addrs,pc)-1
+            if names[i][1]==focus:print(f'pc {focus}+{pc-addrs[i]:<5d} {by_pc[pc]//n:7d}  {cpu.disassemble(pc)[1]}')
+    for pc,v in by_pc.most_common(0 if focus else 40):
         i=bisect.bisect_right(addrs,pc)-1
         print(f'pc {names[i][1]}+{pc-addrs[i]:<5d} {v//n:7d}  {cpu.disassemble(pc)[1] if hasattr(cpu,"disassemble") else ""}')
     for k,v in ncalls.most_common():print(f'calls {k:24s} {v/n:8.1f} a picture')

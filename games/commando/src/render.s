@@ -50,6 +50,7 @@ show_address:
 init_render:
  move.w #STRIDE,dest_stride
  bsr spr_slots_clear
+ move.b #1,spr_sentinel+2
  clr.l ring_valid
  lea ring_dmg,a0
  move.l a0,ring_dmg_end
@@ -716,7 +717,7 @@ draw_band:
 ; d0 = a cell: its tile, if it covers the band (window lines -16 .. 271) and a visible column, at its buffer line and
 ; the twin (and above line 0 when it crosses line RING_H).  Keeps all registers.
 draw_cell:
- movem.l d0-d7/a0-a6,-(sp)
+ movem.l d0-d3/d6/a0-a1,-(sp)	; (what it, get_object, draw_tile and destination change)
  move.w d0,d6
  move.w d6,d1
  lsr.w #5,d1
@@ -777,7 +778,7 @@ draw_cell:
  move.w d0,dest_y
  bsr draw_tile
 .out:
- movem.l (sp)+,d0-d7/a0-a6
+ movem.l (sp)+,d0-d3/d6/a0-a1
  rts
 
 ; The damage list of the buffer (dmg_start .. its end): copied back from the twin lines.
@@ -955,12 +956,18 @@ draw_sprites:
  move.w #8,BLT_DST_XINC.w
  move.w #$ffff,BLT_END2.w
  move.w #$0203,BLT_HOP_OP.w
+ move.l draw_base,d0
+ add.l #GAME_X,d0
+ move.l d0,spr_base
+ bsr .regs
  lea sprite_buffer+$180,a0
  bra.s .next
 .to_edge:
  bra .edge
-.next:
+.next:				; (empty slots: x + 16 = 0; the sentinel before the list is not 0)
  subq.l #4,a0
+ tst.b 2(a0)
+ beq.s .next
  cmp.l #sprite_buffer,a0
  bhs.s .loop
  rts
@@ -1011,12 +1018,10 @@ draw_sprites:
  move.w d3,d2			; the destination chunk (destination)
  ext.l d2
  lsl.l #8,d2			; (STRIDE)
- add.l draw_base,d2
- move.w d4,d0
- asr.w #4,d0
- lsl.w #3,d0
- add.w #GAME_X,d0
- ext.l d0
+ add.l spr_base,d2		; (draw_base + GAME_X)
+ move.l d4,d0			; x / 16 * 8 (d4: 0 .. 208, its upper word 0)
+ lsr.w #1,d0
+ and.w #$fff8,d0
  add.l d0,d2			; damage: 16 lines of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
  move.w d3,d0
  add.w cur_top,d0
@@ -1031,17 +1036,17 @@ draw_sprites:
  cmp.w #RING_H-16,d0
  bgt.s .lower
  move.l d2,(a0)+
- move.l d2,d7
- add.l #RING_H*STRIDE,d7
+ move.l d2,d5
+ add.l #RING_H*STRIDE,d5
  bra.s .store
 .lower:
  cmp.w #RING_H,d0
  blt.s .split
  move.l d2,(a0)+
- move.l d2,d7
- sub.l #RING_H*STRIDE,d7
+ move.l d2,d5
+ sub.l #RING_H*STRIDE,d5
 .store:
- move.l d7,(a0)+
+ move.l d5,(a0)+
  move.w d3,(a0)+
  move.w d1,(a0)+
  move.l a0,dmg_ptr
@@ -1055,18 +1060,20 @@ draw_sprites:
  move.l 4(a2),a0
  cmp.w #$efe0,d2
  bhi .generic
- lea BLT_END1.w,a2
+ lea BLT_END1.w,a2		; (a3-a6, d6, d7: .regs, kept from sprite to sprite)
+ move.w #248,d4
+ move.w #-264,d5
+ jsr (a1)
+ move.l (sp)+,a0
+ bra .next
+.regs:				; the generated routines' fixed registers (generic_part and clip_part use them otherwise)
  lea BLT_END3.w,a3
  lea BLT_DST_ADDR+2.w,a4
  lea BLT_COUNT+2.w,a5
  lea BLT_CTRL.w,a6
- move.w #248,d4
- move.w #-264,d5
  moveq #4,d6
  move.w #$c0,d7
- jsr (a1)
- move.l (sp)+,a0
- bra .next
+ rts
 .generic:
  move.l a2,d0			; spr_pcode: the entry's offset >> 7 (the shift's bits dropped)
  sub.l #spr_code_tab,d0
@@ -1074,6 +1081,7 @@ draw_sprites:
  move.w d0,spr_pcode
  move.w d4,d3
  bsr generic_part
+ bsr .regs
  move.l (sp)+,a0
  bra .next
 .slot_miss:			; d2 = code, attribute: decoded, the planes baked or found, the slot updated
@@ -1102,13 +1110,13 @@ draw_sprites:
  lsl.w #3,d5
  lea cache+32768,a1
  add.w d5,a1
- moveq #1,d6
- swap d6
- move.w d0,d6
- cmp.l (a1),d6
+ moveq #1,d5
+ swap d5
+ move.w d0,d5
+ cmp.l (a1),d5
  bne.s .bake
  move.l 4(a1),a1
- move.l a1,d6
+ move.l a1,d5
  bne.s .found
 .bake:
  moveq #1,d1
@@ -1169,6 +1177,7 @@ draw_sprites:
  bsr get_object
  move.l a0,-(sp)
  bsr sprite_edge
+ bsr .regs
  move.l (sp)+,a0
  bra .next
 
@@ -1550,6 +1559,7 @@ pool: ds.b POOL_SIZE
 cache_misses: ds.l 1
 pool_epoch: ds.w 1
 spr_slots_epoch: ds.w 1
+spr_base: ds.l 1
 spr_slots: ds.b $180/4*16
 bg_roll: ds.w 1
 fg_roll: ds.w 1

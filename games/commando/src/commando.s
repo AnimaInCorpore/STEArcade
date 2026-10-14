@@ -1048,5 +1048,6 @@ own_stack_top:
 
 g_block:	ds.b	$14000		; the Z80's 64 KB
 g_win:		ds.b	0		; the ROM banks' copies: 3 + the empty one
+spr_sentinel:	ds.l	1		; (draw_sprites' scan stops at its x byte: init_render sets it)
 sprite_buffer:	ds.b $180
 z80_dispatch_sw:	ds.l	65536
