@@ -33,6 +33,11 @@ reference renderer and MAME.
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
 
+**Screenshots and trademarks.** The screenshots and captures show the original games' graphics, which remain the
+copyright of their owners: Donkey Kong © 1981 Nintendo; Galaga © 1981 Namco; Bubble Bobble © 1986 Taito;
+1942 © 1984 Capcom; 1943 © 1987 Capcom; Black Tiger © 1987 Capcom; Commando © 1985 Capcom; Gun.Smoke © 1985 Capcom;
+R-Type © 1987 Irem. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
+
 ## Download
 
 [Release 0.3](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.3): `STEArcade-0.3.zip` with one

@@ -1,6 +1,7 @@
 # games/bublbobl/docs — reference captures, palette, ROM manifest
 
-Everything here was produced from the original ROMs / MAME, not from the STE port.
+Everything here was produced from the original ROMs / MAME, not from the STE port. The captures show Bubble
+Bobble's graphics, © 1986 Taito; Bubble Bobble is a trademark of Taito.
 
 | file | what | reproduce |
 |---|---|---|
