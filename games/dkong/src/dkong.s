@@ -306,7 +306,8 @@ init_video:
 	movem.l	dk_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w	; 16 colors from d0-d7 = 8 longs = 16 words
 
-	clr.b	$ffff8260.w		; low resolution
+	clr.b	$ffff8260.w		; low resolution, 50 Hz (an NTSC desktop runs at 60: the border timing is for 50)
+	move.b	#2,$ffff820a.w
 	move.b	#(512-320)/2/2,$ffff820f.w	; virtual line width 512 pixels
 
 	; buffer 1 shows first, buffer 0 is drawn into

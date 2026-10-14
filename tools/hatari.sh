@@ -8,6 +8,7 @@
 #                           tap:5@20                   key held for 0.2 s (coins: 1942 ignores a coin held for 40 ticks)
 #                           dbg:COMMAND@50             a debugger command (dbg:profile on, dbg:profile save /tmp/p.txt ...)
 #                           dump:0xADDR:0xSIZE@50      memory dump (debugger savebin) -> $OUT/<game>_<s>_<ADDR>.bin
+#   MACHINE=megaste (default ste), HATARI_ARGS='--cpuclock 16': other Hatari options.
 #   no items: run interactively.   A CRASH.TXT written by the program is printed.
 # The program is started from run/<game>/ (its GEMDOS drive: CRASH.TXT and dumps go there).  $OUT defaults to /tmp/hrun.
 set -e
@@ -22,7 +23,7 @@ RUN=${RUN:-$ROOT/run/$GAME}
 mkdir -p "$OUT"; rm -f "$RUN/CRASH.TXT" "$OUT/cmd.fifo"
 pkill -x hatari 2>/dev/null || true
 cd "$RUN"
-"$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+"$HATARI" --machine "${MACHINE:-ste}" --memsize 4 ${HATARI_ARGS:-} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --cmd-fifo "$OUT/cmd.fifo" --log-file "$OUT/hatari.log" "$PRG" &
 HP=$!
 if [ $# -eq 0 ]; then wait $HP; exit 0; fi

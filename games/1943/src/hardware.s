@@ -7,6 +7,8 @@ init_hardware:
 	move.b	$ffff8260.w,old_res
 	move.b	$ffff820a.w,old_hz
 	move.b	$ffff820f.w,old_linewid
+	clr.b	$ffff8260.w		; low resolution (the desktop may be in medium), 50 Hz (an NTSC desktop runs at 60:
+	move.b	#2,$ffff820a.w		; the border timing is for 50)
 	move.b	$ffff8265.w,old_fine
 
 	move.b	$ffff8201.w,old_screen+1

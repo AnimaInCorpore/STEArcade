@@ -123,7 +123,8 @@ init_video:
 	dbf	d3,.ruler_line
 	dbf	d4,.ruler_ring
 	endc
-	clr.b	$ffff8260.w		; low resolution
+	clr.b	$ffff8260.w		; low resolution, 50 Hz (an NTSC desktop runs at 60: the border timing is for 50)
+	move.b	#2,$ffff820a.w
 	move.b	#(STRIDE-160)/2,$ffff820f.w	; line offset in words
 
 	move.l	ring_base,d0		; the first picture: ring 0, line 0

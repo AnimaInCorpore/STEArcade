@@ -377,7 +377,8 @@ init_video:
 	add.l	#SCREEN_SIZE,d0
 	dbf	d1,.buf
 
-	clr.b	$ffff8260.w		; low resolution
+	clr.b	$ffff8260.w		; low resolution, 50 Hz (an NTSC desktop runs at 60: the border timing is for 50)
+	move.b	#2,$ffff820a.w
 	move.b #48,$ffff820f.w
 
 	move.l	scr_address+4,draw_screen_address

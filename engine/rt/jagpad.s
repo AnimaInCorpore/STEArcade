@@ -19,7 +19,10 @@
 ; The port merges jp_in where it merges its keyboard bits.
 ;
 ; jagpad_init (supervisor, interrupts may be on) probes the ports: on a plain ST $FF9202 is a bus error, and
-; jagpad_poll then does nothing.  The SIM build leaves jagpad_init out (jp_present stays 0).
+; jagpad_poll then does nothing.  The Mega STE has the registers but not the ports ($FF9200 holds its DIP switches,
+; the row lines are not pulled up: a tester's Mega STE read fire, Pause and Option held on both pads, so no coin or
+; start ever came, tools/mstediag.s): its _MCH cookie ($00010010) leaves the pads off, and so does an idle reading
+; (no row selected) with any line low: a pad button held while a game starts also does.  The SIM build leaves jagpad_init out (jp_present stays 0).
 ; The port places jagpad_text and jagpad_maps in its text, jagpad_vars in its bss; it defines quit_flag.
 
 JP_UP = 0
@@ -58,17 +61,39 @@ jp_merge macro
 jagpad_text macro
 
 jagpad_init:
-	movem.l	a0-a2,-(sp)
+	movem.l	d0/a0-a2,-(sp)
 	sf	jp_present
+	move.l	$5a0.w,d0		; the cookie jar
+	beq.s	.probe\@
+	move.l	d0,a0
+.cookie\@:
+	move.l	(a0)+,d0
+	beq.s	.probe\@
+	cmp.l	#'_MCH',d0
+	beq.s	.mch\@
+	addq.l	#4,a0
+	bra.s	.cookie\@
+.mch\@:	cmp.l	#$00010010,(a0)		; a Mega STE: no ports
+	beq.s	.out\@
+.probe\@:
 	move.l	$8.w,a1
 	move.l	sp,a2
 	move.l	#.berr\@,$8.w
 	move.w	#$ffff,$ffff9202.w	; (deselects every row)
+	moveq	#$f,d0			; idle: no fire / Pause line low
+	and.w	$ffff9200.w,d0
+	cmp.w	#$f,d0
+	bne.s	.berr\@
+	move.w	$ffff9202.w,d0		; and no row line
+	and.w	#$ff00,d0
+	cmp.w	#$ff00,d0
+	bne.s	.berr\@
 	st	jp_present
 .berr\@:
 	move.l	a2,sp
 	move.l	a1,$8.w
-	movem.l	(sp)+,a0-a2
+.out\@:
+	movem.l	(sp)+,d0/a0-a2
 	rts
 
 jagpad_poll:
