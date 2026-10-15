@@ -261,6 +261,27 @@ was flushed every ~33 pictures, the direct-mapped hash evicted the wall's cells)
 Hatari play: 10.49 -> 13.80 arcade frames/s, 4.87 -> 6.29 pictures/s, render 8.03 -> 5.68 VBLs a picture.  Load
 size 4,034,040 bytes (27 KB free from the desktop).
 
+Picture phase (2026-10-15): the game flickers some layers at 30 Hz (stage 1's lightning objects and stage 2's wall
+are layer 3, enabled in every other frame), and with `PIC_EVERY` 2 the program's pictures lock to one phase for a
+whole play: the committed build drew the wall in every picture, a timing change of a few cycles made another build
+draw none of it (Hatari "20 frames/s", the objects phase 2.5 times cheaper: phase luck, not work saved).  splatter.s
+now makes a due picture wait a frame (once) when a layer enabled in the frame before is off in this one, so such
+layers are always shown (solid) and the benchmark is the same phase in every build; the BENCH build writes the
+arcade frame of each picture (PICS.BIN).  Compare renderers in Hatari only with that, and in `render_test.py --rec`
+use the phase the program draws (`--rec 3000-3500` = frames after the wall's on frames; `2999-...` the off phase,
+~350k a picture in stage 2).
+
+Sprites behind a group layer (Rick behind the cage bars): the pixels the layer hides got the background from the twin
+column in every such draw (`ren_pr_twin`, or drawn whole and repaired); now only when an object drawn before in this
+picture meets the sprite's rectangle (`ren_under`: this picture's damage list so far), else the buffer has the
+background there already.  Stage 1 (frames 2000-2500): 697k -> 653k a picture; Hatari play (phase steered, both
+builds): 13.64 -> 13.80 arcade frames/s, 6.26 -> 6.40 pictures/s, render 5.71 -> 5.56 VBLs a picture.
+
+Tried and dropped (2026-10-15): sprites that stay in the buffer (a record per simple draw; kept when nothing put back
+or drawn before meets it, no group cell under it drawn since; a coarse map of 8-line bands and groups): exact, but in
+stage 1 only ~2.6 sprites a picture stayed (the unchanged ones lie near the HUD lines or under moving sprites), ~20k
+saved against ~160k for the bookkeeping.
+
 ### Open problems
 
 * Speed: ~2 VBLs a picture in play besides the logic; a new scene takes ~1/2 s of black pictures.  Next: the draw

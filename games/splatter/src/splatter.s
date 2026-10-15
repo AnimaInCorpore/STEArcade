@@ -58,6 +58,9 @@ sim_wait:
 	bsr	snapshot_load
 	bsr	render_init
 	bsr	init_hardware
+	ifd	BENCH
+	move.l	#pics,pics_ptr
+	endc
 main_loop:
 	tst.b	quit_flag
 	bne	.quit
@@ -81,14 +84,42 @@ main_loop:
 	sub.l	(sp)+,d0
 	add.l	d0,cnt_lvbl		; (VBLs that passed in the logic)
 	addq.l	#1,cnt_logic
+	lea	vio+$1D010,a0		; the enabled layers (CUS123 $10-$15 bit 3 clear): one on in the frame before and
+	moveq	#0,d0			; off now (a layer the game flickers at 30 Hz: stage 1's lightning, stage 2's wall)
+	moveq	#6-1,d1			; makes the picture wait a frame (once), so it is shown, not lost by the phase
+.lay:	btst	#3,(a0)+
+	seq	d2
+	add.b	d2,d2
+	addx.b	d0,d0
+	dbf	d1,.lay
+	move.b	lay_prev,d1
+	move.b	d0,lay_prev
+	not.b	d0
+	and.b	d0,d1
+	sne	lay_drop
 	addq.b	#1,since_pic		; a picture after every PIC_EVERY-th arcade frame, or when the logic caught up
 	cmp.b	#PIC_EVERY,since_pic
-	bhs.s	.pic
+	bhs.s	.due
 	tst.b	ticks
 	bne	main_loop
-.pic:	clr.b	since_pic
+.due:	tst.b	lay_drop
+	beq.s	.pic
+	tst.b	pic_waited
+	bne.s	.pic
+	st	pic_waited
+	bra	main_loop
+.pic:	sf	pic_waited
+	clr.b	since_pic
 	ifd	BENCH_NOPIC
 	bra	main_loop		; (the logic alone)
+	endc
+	ifd	BENCH
+	move.l	pics_ptr,a0		; (PICS.BIN: the arcade frame of each picture)
+	cmp.l	#pics_end,a0
+	bhs.s	.pf
+	move.w	cnt_logic+2,(a0)+
+	move.l	a0,pics_ptr
+.pf:
 	endc
 	move.l	cnt_vbls,-(sp)
 	move.l	ren_skipped,-(sp)
@@ -372,8 +403,31 @@ write_rate:
 	move.w	#$3E,-(sp)		; Fclose
 	trap	#1
 	addq.l	#4,sp
-.r:	rts
+.r:	move.l	pics_ptr,d1
+	sub.l	#pics,d1
+	beq.s	.rr
+	clr.w	-(sp)
+	pea	.pname(pc)
+	move.w	#$3C,-(sp)
+	trap	#1
+	addq.l	#8,sp
+	tst.w	d0
+	bmi.s	.rr
+	move.w	d0,-(sp)
+	pea	pics
+	move.l	pics_ptr,d1
+	sub.l	#pics,d1
+	move.l	d1,-(sp)
+	move.w	d0,-(sp)
+	move.w	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move.w	#$3E,-(sp)
+	trap	#1
+	addq.l	#4,sp
+.rr:	rts
 .name:	dc.b	"RATE.BIN",0
+.pname:	dc.b	"PICS.BIN",0
 	even
     endc
 
@@ -652,6 +706,9 @@ cnt_rvbl:	ds.l	1
 cnt_from:	ds.l	8		; (BENCH: the counters at VBL BENCH_FROM)
     ifd BENCH
 rate_tab:	ds.l	3*RATE_N
+pics_ptr:	ds.l	1
+pics:		ds.w	5000
+pics_end:
     endc
 old_mfp:	ds.b	14
 old_res:	ds.b	1
@@ -669,6 +726,9 @@ kbd_control:	ds.b	1
 kbd_coin:	ds.b	1
 joy_control:	ds.b	1
 quit_flag:	ds.b	1
+lay_prev:	ds.b	1
+lay_drop:	ds.b	1
+pic_waited:	ds.b	1
 	even
     ifd PLAYBACK
 pb_ptr:		ds.l	1

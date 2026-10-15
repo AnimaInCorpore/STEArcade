@@ -5297,7 +5297,8 @@ ren_prio_rows:
 	move.l	d6,ren_rmask
 	beq	.out
 	addq.l	#1,ren_repairs
-	st	ren_pover		; (an object drawn before it may be under it: its pixels behind the layer put back too)
+	bsr	ren_under		; (an object drawn before it under it: its pixels behind the layer put back too)
+	sne	ren_pover
 	st	ren_prio
 	add.w	d7,d7			; (the routine for P)
 	lea	ren_pfn_tab,a0
@@ -5322,6 +5323,53 @@ ren_prio_rows:
 	dbf	d1,.po
 .out:	movem.l	(sp)+,d0-d7/a0-a2
 .r:	rts
+
+; Z clear when a rectangle of this picture's damage list so far (the objects drawn before) meets the sprite's
+; (ren_dg0 .. ren_dg1, ren_ya .. ren_yb), or the list is full.  Keeps all.
+ren_under:
+	movem.l	d0-d7/a0,-(sp)
+	move.l	ren_dmgp,a0		; (the list full: not known, so yes)
+	cmp.l	ren_dmglim,a0
+	bhs	.yes
+	move.l	ren_dmgbase,a0
+	move.w	ren_dg0,d4
+	move.w	ren_dg1,d5
+	move.w	ren_ya,d6
+	add.w	#REN_GUARD,d6
+	move.w	ren_yb,d7
+	add.w	#REN_GUARD,d7
+	bra	.t
+.e:	move.l	(a0),d0			; destination: its line and group
+	sub.l	ren_dbuf,d0
+	move.l	d0,d2
+	lsr.l	#8,d2
+	lsr.l	#1,d2
+	cmp.w	d7,d2
+	bge	.n			; (below)
+	add.w	10(a0),d2
+	cmp.w	d6,d2
+	ble	.n			; (above)
+	and.w	#511,d0
+	lsr.w	#3,d0
+	cmp.w	d5,d0
+	bge	.n			; (right of it)
+	move.w	8(a0),d1		; words: groups
+	bmi	.bar
+	and.w	#$3fff,d1
+	lsr.w	#2,d1
+.bar:	and.w	#$7fff,d1
+	add.w	d1,d0
+	cmp.w	d4,d0
+	bgt	.yes			; (not left of it)
+.n:	lea	12(a0),a0
+.t:	cmp.l	ren_dmgp,a0
+	blo	.e
+	movem.l	(sp)+,d0-d7/a0
+	ori	#4,ccr
+	rts
+.yes:	movem.l	(sp)+,d0-d7/a0
+	andi	#$fb,ccr
+	rts
 
 ; The repair of the sprite just drawn whole (ren_prep: an object drawn before it in this picture may be under it, see
 ; ren_prio_rows): in the cell rows of ren_rmask, where the group's priority (ren_pri planes) is above the sprite's,
@@ -6668,7 +6716,11 @@ ren_draw_obj:
 	moveq	#0,d3
 	move.b	SL_SY(a2),d3
 	add.w	d2,d3			; lines d2 .. d3 - 1
-	moveq	#0,d4			; in the HUD region (visible there)?
+	cmp.w	ren_htop,d2		; (all of them the playfield's: as without a HUD)
+	blt	.hv
+	cmp.w	ren_hbot,d3
+	ble	.pf
+.hv:	moveq	#0,d4			; in the HUD region (visible there)?
 	moveq	#0,d5			; in the playfield's lines?
 	lea	ren_bar_line,a0
 	tst.b	ren_vsw
