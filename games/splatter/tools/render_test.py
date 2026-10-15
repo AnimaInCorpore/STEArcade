@@ -440,6 +440,10 @@ def check(h, st, name, png=False):
         ys, xs = np.nonzero(diff)
         print("  differing pixels (y, x: got, want, pen):", ", ".join(
             "%d,%d: %d %d $%X" % (y, x, got[y, x], want[y, x], drawn_pens[y, x]) for y, x in zip(ys, xs)))
+    if os.environ.get("DIFFBOX") and diff.any():
+        ys, xs = np.nonzero(diff)
+        print("  differing: x %d-%d, y %d-%d; first:" % (xs.min(), xs.max(), ys.min(), ys.max()), ", ".join(
+            "%d,%d: %d %d" % (y, x, got[y, x], want[y, x]) for y, x in list(zip(ys, xs))[:12]))
     if png or diff.any():
         from PIL import Image
         a = shown.astype(np.uint8)

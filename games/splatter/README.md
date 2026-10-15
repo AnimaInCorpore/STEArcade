@@ -81,6 +81,12 @@ control, the latched sprite list.  `tools/assets.py` converts the graphics ROMs 
   before their image is looked up.  With `TILE_FLAG` layers 0-3 keep a bitmap of their non-empty cells (`ren_obm`,
   a row rebuilt when tile RAM was written since: `ren_tgen`), so a picture tests 5-6 bytes a visible row instead of
   37 words (stage 1's layer 3, on in every other frame: ~1000 words and ~60 blank cells of other codes a picture).
+  *Fast rows* (2026-10-15, stage 2's lightning wall: layer 3, priority 5, ~110-140 cells a picture): a row whose 8
+  lines are all playfield lines no bar hides, of a layer no group layer is above, draws its cells inside the clip
+  groups straight from the cache (`ren_orow_draw`, the lookup inline; `ren_ocell_img`): an opaque cell in four
+  passes, a plane each with its 8 lines (SXI 8: a line's one source read with NFSR steps by SXI, not SYI), others a
+  pass a line (empty rows left out, a repeated mask keeps the end masks); a run of adjacent cells is one damage
+  rectangle.  Cells at a clip group's edge take the generic path.
 * **Fixed layers 4/5**: rows of 36 opaque cells whose lowest priority is at least the group's form *bars* (the HUD:
   32 lines at the top, 32 at the bottom); they are a bar image (`ren_fi`, black side bands) copied into each buffer's
   bar lines at the window's position when the window moved (4 passes a run of lines, fine-shifted) or the lines were
@@ -247,6 +253,13 @@ snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).  2026-10-1
 `build/splatter/splatter.map`) had grown to 4.17 MB, more than a 4 MB STE gives a program started from the desktop
 (4,061,212 bytes, `tools/memfree.sh`; Hatari: "Program too large").  The start snapshot's 160 KB of vio is now packed
 (`snapshot_vio.lz`, engine/lz.py: ~6 KB, unpacked by `lz_unpack` at the start): 4.01 MB, 51 KB free.
+
+Recorded play (2026-10-15, `tools/play_search.py`, 9000 frames from the start into stage 2; `bench.sh` with
+`PLAY=1`, `render_test.py --rec A-B`): stage 2's wall cost ~1.8M cycles a picture (Musashi, frames 3000-4000) with
+the generic overlay path; fast rows 1.04M; with a 192 KB cache, 16 pair tables and 4096 hash slots (the pool
+was flushed every ~33 pictures, the direct-mapped hash evicted the wall's cells): frames 4000-4500 1.21M -> 1.07M.
+Hatari play: 10.49 -> 13.80 arcade frames/s, 4.87 -> 6.29 pictures/s, render 8.03 -> 5.68 VBLs a picture.  Load
+size 4,034,040 bytes (27 KB free from the desktop).
 
 ### Open problems
 

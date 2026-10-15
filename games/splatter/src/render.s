@@ -34,9 +34,15 @@ REN_NCHR	= $C0000/64		; characters with data (higher codes: pens 0)
 	ifnd	REN_DMG
 REN_DMG		= 400			; damage rectangles a buffer (12 bytes)
 	endc
-REN_POOL	= 128*1024
-REN_PTS		= 32			; the sprite colours' pair tables (1 KB each)		; the cache of converted sprites and overlay cells
-REN_HASH	= 2048			; its slots (direct mapped: key, address)
+	ifnd	REN_POOL
+REN_POOL	= 192*1024		; the cache of converted sprites and overlay cells
+	endc
+	ifnd	REN_PTS
+REN_PTS		= 16			; the sprite colours' pair tables (4 KB each)
+	endc
+	ifnd	REN_HASH
+REN_HASH	= 4096			; its slots (direct mapped: key, address)
+	endc
 REN_BUDGET	= 12			; group cells outside the window drawn a picture
 REN_MAXPTS	= 1024			; colour samples (distinct pens)
 REN_WAIT	= 6			; pictures a new scene waits at most for its palette to rest
@@ -6018,7 +6024,12 @@ ren_overlay:
 .bok:	lea	ren_obr,a0
 	tst.b	(a0,d0.w)
 	beq	.bnx
-	lsl.w	#4,d0
+	bsr	ren_orow_fast
+	tst.b	ren_ofast
+	beq	.gen
+	bsr	ren_orow_draw		; (a fast row: its own loop)
+	bra	.bnx
+.gen:	lsl.w	#4,d0
 	lea	ren_obm,a0
 	add.w	d0,a0
 	move.w	ren_oc0,d0
@@ -6053,6 +6064,9 @@ ren_overlay:
 	cmp.w	ren_cr,d3
 	bge	.bn			; (wholly right)
 	movem.l	d0-d6/a0/a3,-(sp)
+	move.w	ren_obx,d3
+	add.w	d7,d3
+	move.w	d3,ren_qbx		; (the cell's buffer x)
 	add.w	ren_ox,d7
 	move.w	d7,SL_X(a2)
 	move.w	ren_oy,SL_Y(a2)
@@ -6066,7 +6080,17 @@ ren_overlay:
 	lea	vio+V_TILE,a0
 	move.w	(a0,d0.w),d0
 	and.w	#$3fff,d0
-	move.w	ren_obank,d1
+	tst.b	ren_ofast
+	beq	.bslow
+	asr.w	#4,d3			; (a fast row: the cell's two groups inside the clip groups?)
+	cmp.w	ren_cl,d3
+	blt	.bslow
+	addq.w	#1,d3
+	cmp.w	ren_cr,d3
+	bge	.bslow
+	bsr	ren_ocell_fast
+	bra	.bs
+.bslow:	move.w	ren_obank,d1
 	move.w	d0,ren_gcode
 	move.w	d1,ren_gbank
 	bsr	ren_cell_get
@@ -6079,9 +6103,13 @@ ren_overlay:
 .bn:	addq.w	#1,d6
 	dbf	d0,.bt
 	dbf	d1,.bb
-.bnx:	addq.w	#8,ren_oy
+.bnx:	tst.b	ren_ofast
+	beq	.bnf
+	bsr	ren_odmg		; (the row's last run of fast cells: its damage)
+.bnf:	addq.w	#8,ren_oy
 	addq.w	#1,d5
 	dbf	d4,.br
+	sf	ren_ofast
 	rts
 	endc
 	move.w	#-1,ren_oblank		; (no blank word known)
@@ -6206,6 +6234,257 @@ ren_overlay:
 	blo	.fr
 	rts
 
+	ifd	TILE_FLAG
+; A row of an overlay layer (its top line ren_oy; a2 = the cells' list entry, SL_PRI the layer's priority): ren_ofast
+; set when its cells can be drawn by ren_ocell_fast: all 8 lines in the playfield's lines (not the HUD region, no bar
+; line that hides the layer) and no group layer above its priority (no pixel left out, no cell covered or skipped as
+; ren_ovl_skip would).  Then ren_oline = the row's first line in the buffer, no run of damage yet.  Keeps all.
+ren_orow_fast:
+	movem.l	d0-d3/a1,-(sp)
+	sf	ren_ofast
+	move.w	ren_oy,d2
+	bmi	.no
+	cmp.w	#224-8,d2
+	bgt	.no
+	moveq	#0,d3
+	move.b	SL_PRI(a2),d3
+	tst.b	ren_grp_n
+	beq	.g
+	cmp.b	ren_grp_max,d3
+	blo	.no
+.g:	tst.w	ren_hudn
+	beq	.h
+	cmp.w	ren_htop,d2
+	blt	.no
+	move.w	d2,d0
+	addq.w	#8,d0
+	cmp.w	ren_hbot,d0
+	bgt	.no
+.h:	tst.w	ren_nbar
+	beq	.ok
+	addq.b	#1,d3			; (a bar line hides the layer when its value is above the priority + 1)
+	lea	ren_bar_line,a1
+	add.w	d2,a1
+	moveq	#8-1,d0
+.bl:	cmp.b	(a1)+,d3
+	bcs	.no
+	dbf	d0,.bl
+.ok:	st	ren_ofast
+	move.w	d2,d0
+	add.w	#REN_GUARD,d0
+	ext.l	d0
+	moveq	#9,d1
+	lsl.l	d1,d0
+	add.l	ren_dbuf,d0
+	move.l	d0,ren_oline
+	move.w	#-1,ren_qg0
+	move.w	#-100,ren_qg1
+.no:	movem.l	(sp)+,d0-d3/a1
+	rts
+
+; A cell of a fast row (ren_orow_fast): d0.w = its character, ren_qbx its buffer x (both groups inside the clip
+; groups).  Drawn straight from its converted image: opaque (all 8 mask rows full) in four passes, a plane each with
+; the 8 lines in one (SYI 8: a row's planes are 8 bytes; 8 lines x (a source word + 2 destination words) = 160 bus
+; cycles); otherwise a pass a line as ren_draw_image does.  Adjacent cells make one damage rectangle (ren_qg0 ..
+; ren_qg1, flushed by ren_odmg).  The Blitter's other settings are ren_objects' (SXI 2, DXI 8, HOP / OP); SYI is
+; left at 2.
+ren_ocell_fast:
+	sf	ren_curmap
+	move.w	ren_obank,d1
+	bsr	ren_cell_get
+; (the same with a1 = the cell's image)
+ren_ocell_img:
+	move.l	a4,-(sp)
+	move.w	ren_qbx,d3
+	moveq	#15,d5
+	and.w	d3,d5			; skew
+	asr.w	#4,d3			; the first group
+	cmp.w	ren_qg1,d3
+	ble	.ext
+	bsr	ren_odmg		; (not adjacent: the run before gets its damage)
+	move.w	d3,ren_qg0
+.ext:	move.w	d3,d0
+	addq.w	#2,d0
+	move.w	d0,ren_qg1
+	move.l	ren_oline,a3
+	ext.l	d3
+	lsl.l	#3,d3
+	add.l	d3,a3			; (the first line, the group's plane 0)
+	move.b	d5,d0
+	or.b	#BLT_NFSR,d0
+	move.b	d0,BLT_SKEW.w
+	move.w	#2,BLT_XC.w
+	lea	8(a1),a0		; masks
+	lea	8+8*4(a1),a4		; planes
+	btst	#0,6(a1)
+	beq	.lines
+	move.l	(a0),d1			; opaque: a pass a plane
+	lsr.l	d5,d1
+	move.w	d1,BLT_E3.w
+	swap	d1
+	move.w	d1,BLT_E1.w
+	move.w	#8,BLT_SXI.w		; (a line's one read: with NFSR its increment is SXI)
+	move.w	#REN_LINEB-8,BLT_DYI.w
+	moveq	#4-1,d2
+.pl:	move.l	a4,BLT_SRC.w
+	move.l	a3,BLT_DST.w
+	move.w	#8,BLT_YC.w
+	move.b	#$c0,BLT_CTRL.w
+	addq.l	#2,a4
+	addq.l	#2,a3
+	dbf	d2,.pl
+	move.w	#2,BLT_SXI.w
+	bra	.done
+.lines:	move.w	#-6,BLT_DYI.w		; a pass a line (the four planes); empty rows left out, a row's end masks
+	lea	BLT_DST.w,a1		; kept when its mask is the row before's
+	moveq	#-1,d3			; (the mask before: none)
+	moveq	#8-1,d2
+.ln:	move.l	(a0)+,d1
+	beq	.le
+	cmp.l	d1,d3
+	beq	.lg
+	move.l	d1,d3
+	lsr.l	d5,d1
+	move.w	d1,BLT_E3.w
+	swap	d1
+	move.w	d1,BLT_E1.w
+.lg:	move.l	a4,BLT_SRC.w
+	move.l	a3,(a1)
+	move.w	#4,BLT_YC-BLT_DST(a1)
+	move.b	#$c0,BLT_CTRL-BLT_DST(a1)
+.le:	addq.l	#8,a4
+	lea	REN_LINEB(a3),a3
+	dbf	d2,.ln
+.done:	addq.l	#1,ren_ocells
+	addq.l	#1,ren_ofcells
+	move.l	(sp)+,a4
+	rts
+
+; A fast row (ren_orow_fast): d0.w = its bitmap row (ren_obm), d5.w = the row in the layer, a2 = the cells' list
+; entry.  The cells the generic loop would draw (columns 0-36 from ren_oc0, non-empty, not wholly outside the clip
+; groups), with the cache looked up here: those with both groups inside the clip groups by ren_ocell_img, the others
+; (at a clip group's edge) as the generic loop does.  Keeps d4-d5/a2-a3.
+ren_orow_draw:
+	movem.l	d4-d5/a2-a3/a5-a6,-(sp)
+	move.w	ren_cl,a5
+	move.w	ren_cr,a6
+	moveq	#0,d1			; the cache key without the code: $80000000 | bank << 14 (ren_cell_get's)
+	move.w	ren_obank,d1
+	moveq	#14,d2
+	lsl.l	d2,d1
+	bset	#31,d1
+	move.l	d1,ren_okey
+	lsl.w	#4,d0
+	lea	ren_obm,a0
+	add.w	d0,a0
+	move.w	d5,d0
+	lsl.w	#7,d0
+	add.w	ren_ooff,d0
+	lea	vio+V_TILE,a4
+	add.w	d0,a4			; the row's tile words
+	move.w	ren_oc0,d0
+	move.w	d0,d1
+	lsr.w	#3,d1
+	add.w	d1,a0			; the first column's byte
+	and.w	#7,d0
+	moveq	#0,d6
+	sub.w	d0,d6			; (the byte's first bit: column c0 + d6)
+	add.w	#36,d0
+	lsr.w	#3,d0
+	move.w	d0,d1			; bytes - 1
+.bb:	move.b	(a0)+,d2
+	bne	.bit
+	addq.w	#8,d6
+	dbf	d1,.bb
+	bra	.end
+.bit:	moveq	#8-1,d3
+.bt:	add.b	d2,d2
+	bcc	.bn
+	cmp.w	#37,d6
+	bhs	.bn
+	move.w	d6,d7
+	lsl.w	#3,d7
+	add.w	ren_obx,d7		; the buffer x
+	move.w	d7,d0
+	asr.w	#4,d0			; the first group
+	move.w	d0,d4
+	addq.w	#2,d4
+	cmp.w	a5,d4
+	ble	.bn			; (wholly left of the clip)
+	cmp.w	a6,d0
+	bge	.bn			; (wholly right)
+	move.w	d6,d4			; the character
+	add.w	ren_oc0,d4
+	and.w	#63,d4
+	add.w	d4,d4
+	move.w	(a4,d4.w),d4
+	and.w	#$3fff,d4
+	move.w	d7,ren_qbx
+	cmp.w	a5,d0
+	blt	.gen
+	addq.w	#1,d0
+	cmp.w	a6,d0
+	bge	.gen
+	move.l	ren_okey,d0		; (ren_cache_find inline)
+	or.w	d4,d0
+	move.l	d0,d7
+	swap	d7
+	eor.w	d0,d7
+	rol.w	#5,d7
+	eor.w	d0,d7
+	and.w	#REN_HASH-1,d7
+	lsl.w	#3,d7
+	lea	ren_hash,a1
+	add.w	d7,a1
+	movem.l	d1-d3/d6/a0,-(sp)
+	cmp.l	(a1)+,d0
+	bne	.miss
+	move.l	(a1),a1
+	bsr	ren_ocell_img
+	movem.l	(sp)+,d1-d3/d6/a0
+	bra	.bn
+.miss:	move.w	d4,d0
+	bsr	ren_ocell_fast
+	movem.l	(sp)+,d1-d3/d6/a0
+	bra	.bn
+.gen:	movem.l	d1-d3/d6/a0/a2/a4-a6,-(sp)	; (at a clip group's edge: as the generic loop)
+	lsl.w	#3,d6
+	add.w	ren_ox,d6
+	move.w	d6,SL_X(a2)
+	move.w	ren_oy,SL_Y(a2)
+	move.w	d4,d0
+	move.w	ren_obank,d1
+	move.w	d0,ren_gcode
+	move.w	d1,ren_gbank
+	bsr	ren_cell_get
+	bsr	ren_ovl_skip
+	bne	.gs
+	addq.l	#1,ren_ocells
+	move.l	#ren_cell_getg,ren_getter
+	bsr	ren_draw_obj
+.gs:	movem.l	(sp)+,d1-d3/d6/a0/a2/a4-a6
+.bn:	addq.w	#1,d6
+	dbf	d3,.bt
+	dbf	d1,.bb
+.end:	movem.l	(sp)+,d4-d5/a2-a3/a5-a6
+	rts
+
+; the fast row's run of cells: its damage (groups ren_qg0 .. ren_qg1 - 1, the row's 8 lines).  Keeps all.
+ren_odmg:
+	movem.l	d0-d3/a0-a1,-(sp)
+	move.w	ren_qg0,d0
+	bmi	.no
+	move.w	ren_qg1,d1
+	move.w	ren_oy,d2
+	move.w	d2,d3
+	addq.w	#8,d3
+	bsr	ren_damage
+	move.w	#-1,ren_qg0
+	move.w	#-100,ren_qg1
+.no:	movem.l	(sp)+,d0-d3/a0-a1
+	rts
+	endc
+
 ; d0.w = a bitmap row (layer * 64 + row), d5.w = the row in the layer (ren_ooff: the layer's tile RAM): the row's
 ; bits (bit 7 of byte 0: column 0; a cell is non-empty when its character has opaque pixels) into ren_obm (8 bytes,
 ; then the same again: 37 columns from any first are consecutive), whether any into ren_obr.  Keeps all.
@@ -6246,7 +6525,7 @@ ren_obuild:
 ; a1 = an overlay cell's image, a2 = its list entry: Z clear when it cannot show: an opaque black cell below all the
 ; group's layers (it shows only where the group has nothing: black there anyway), or ren_covered.  Keeps all but d7.
 ren_ovl_skip:
-	tst.w	6(a1)
+	btst	#0,7(a1)
 	beq	ren_covered
 	tst.b	ren_grp_n
 	beq	ren_covered
@@ -6509,11 +6788,12 @@ ren_cell_get:
 	addq.l	#8,a1
 	dbf	d7,.row
 	move.l	(sp)+,a1
-	tst.l	d6			; opaque and black: header word 3 set (ren_ovl_skip)
+	cmp.b	#$ff,d5			; header word 3: bit 8 opaque (ren_overlay's plane passes), bit 0 opaque and
+	bne	.nb			; black (ren_ovl_skip)
+	move.w	#$100,6(a1)
+	tst.l	d6
 	bne	.nb
-	cmp.b	#$ff,d5
-	bne	.nb
-	move.w	#1,6(a1)
+	move.w	#$101,6(a1)
 .nb:
 	movem.l	(sp)+,d2-d7/a2-a6
 .hit:	rts
@@ -6845,6 +7125,14 @@ ren_oy:		ds.w	1
 ren_barcopies:	ds.l	1
 ren_fills:	ds.l	1
 ren_ocells:	ds.l	1
+ren_ofcells:	ds.l	1		; (of them drawn by ren_ocell_fast)
+ren_oline:	ds.l	1
+ren_okey:	ds.l	1
+ren_qbx:	ds.w	1
+ren_qg0:	ds.w	1
+ren_qg1:	ds.w	1
+ren_ofast:	ds.b	1
+	even
 ren_slowclip:	ds.l	1
 ren_dmgs:	ds.l	1
 ren_rowchg:	ds.b	1
