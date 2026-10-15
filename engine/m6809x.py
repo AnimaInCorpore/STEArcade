@@ -394,6 +394,7 @@ class Emitter:
         self.code = code
         self.joins = joins
         self.live_out = live_out
+        self.live_in = {}                       # (set by translate: the flags each instruction reads)
         self.lines = []
         self._a0 = None
         self.tail = []                          # (data after the code: the jump tables)
@@ -1173,6 +1174,7 @@ class Emitter:
             return
         self.stats["jump table"] += 1
         generic = self.new_label()
+        generic = "%s_jx%s" % (self.p.label(v), generic[2:])     # (global: the table's stubs lie between)
         tab = "%s_jt%d" % (self.p.label(v), self.uid)
         if tpage != v >> 13 and not (self.fixed_slot(tslot) and len(self.p.slot_pages.get(tslot, ())) == 1):
             checks.add((tslot, tpage))
@@ -1182,24 +1184,44 @@ class Emitter:
         for ts, pg in sorted(checks):
             self.page_cmp(pg, ts)
             self.e("bne %s" % generic)
-        self.e("moveq #0,d7")
-        self.e("move.b %s,d7" % ("d0" if x.kind == "acc_a" else "d1"))
-        self.e("cmp.w #%d,d7" % (2 * len(entries)))
+        # the table has an entry for every index below its length: the odd ones go to the generic code (a global
+        # label: the table lies after the code); a target that is an RTS returns at once (a JSR's own return: the
+        # pushed address, the page as it is); no CCR restore when no target reads flags
+        gl = "%s_jg%d" % (self.p.label(v), self.uid)
+        reg = "d0" if x.kind == "acc_a" else "d1"
+        self.e("cmp.b #%d,%s" % (2 * len(entries), reg))
         self.e("bcc %s" % generic)
-        self.e("btst #0,d7")
-        self.e("bne %s" % generic)
+        self.e("moveq #0,d7")
+        self.e("move.b %s,d7" % reg)
+        self.e("add.w d7,d7")
         self.e("add.w d7,d7")
         self.e("lea %s,a0" % tab)
         self.e("move.l (a0,d7.w),a0")
         if ret is not None:
             self.e("move.b #$%02X,-(a5)" % (ret & 0xFF))
             self.e("move.b #$%02X,-(a5)" % (ret >> 8))
-        self.e("move.w d5,ccr")
+        rv = (v & ~0x1FFF) | (ret & 0x1FFF) if ret is not None else None
+        stub = None
+        if rv is not None and ret >> 13 == self.p.cpu_pc(v) >> 13 and rv in self.code and \
+                any(self.code[tv].mn == "rts" and tv not in self.p.hooks for tv in entries):
+            stub = "%s_jr%d" % (self.p.label(v), self.uid)
+        if any(self.live_in.get(tv, NZVC) & NZVC for tv in entries if not (stub and self.code[tv].mn == "rts")):
+            self.e("move.w d5,ccr")
+        elif stub and any(self.live_in.get(rv, NZVC) & NZVC for tv in entries):
+            self.e("move.w d5,ccr")
         self.e("jmp (a0)")
+        self.lines.append(gl + ":")
+        self.e("bra %s" % generic)
+        if stub:
+            self.lines.append(stub + ":")
+            self.e("addq.l #2,a5")                          # (the RTS: the address just pushed)
+            self.e("bra %s" % self.lab(rv))
         self.tail.append("\teven")
         self.tail.append("%s:" % tab)
         for tv in entries:
-            self.tail.append("\tdc.l %s" % self.lab(tv))
+            t = stub if stub and self.code[tv].mn == "rts" and tv not in self.p.hooks else self.lab(tv)
+            self.tail.append("\tdc.l %s" % t)
+            self.tail.append("\tdc.l %s" % gl)
         self.lines.append(generic + ":")
 
     def page_cmp(self, page, slot):
@@ -2028,6 +2050,7 @@ def translate(prog):
     rets = function_returns(prog, code)
     live_in, live_out = liveness(prog, code, rets)
     em = Emitter(prog, code, joins, live_out)
+    em.live_in = live_in
     # direct returns: up to four return points compared, else the dispatcher
     em.ret_points = {k: set(sorted(v)[:4]) for k, v in rets.items()}
     em.emit_all()
