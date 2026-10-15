@@ -30,6 +30,7 @@ reference renderer and MAME.
 | <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) |
 |  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 |
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80 (sound CPU omitted) |
+| <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
@@ -37,7 +38,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 **Screenshots and trademarks.** The screenshots and captures show the original games' graphics, which remain the
 copyright of their owners: Donkey Kong © 1981 Nintendo; Galaga © 1981 Namco; Bubble Bobble © 1986 Taito;
 1942 © 1984 Capcom; 1943 © 1987 Capcom; Black Tiger © 1987 Capcom; Commando © 1985 Capcom; Gun.Smoke © 1985 Capcom;
-R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
+R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
 
 ## Download
 

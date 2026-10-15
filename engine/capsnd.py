@@ -39,9 +39,11 @@ class Driver:
     (`ei / jr $`); counter: the IRQ count; last: the last latch value seen; table: the rst 30 table of the commands;
     fx_slots: per chip its effect slots, lowest first; mus_slots: the four music slots, lowest first; kill: the slot
     byte that keeps a lower effect alive ($FF) under a higher one, or None; irq_lines: the lines of a frame with an
-    IRQ (262 lines of `line_cycles`)."""
+    IRQ (262 lines of `line_cycles`); mask: what the dispatch keeps of a command ($3F; Trojan's driver: $7F, then the
+    port defines CS_CMDMASK = $7F for engine/rt/capsnd.s)."""
     def __init__(self, name, rom, ram, latch, ym, idle, counter, last, table, fx_slots, mus_slots, kill=None,
-                 irq_lines=(32, 96, 160, 224), line_cycles=192, lines=262, build=None):
+                 irq_lines=(32, 96, 160, 224), line_cycles=192, lines=262, build=None, mask=0x3F):
+        self.mask = mask
         self.name, self.rom, self.ram, self.latch, self.ym = name, rom, ram, latch, ym
         self.idle, self.counter, self.last, self.table = idle, counter, last, table
         self.fx_slots, self.mus_slots, self.kill = fx_slots, mus_slots, kill
@@ -51,13 +53,13 @@ class Driver:
         self._kinds = None
 
     def handler(self, cmd):
-        return self.rom[self.table + 2 * (cmd & 0x3F)] | self.rom[self.table + 2 * (cmd & 0x3F) + 1] << 8
+        return self.rom[self.table + 2 * (cmd & self.mask)] | self.rom[self.table + 2 * (cmd & self.mask) + 1] << 8
 
     def kinds(self):
         """cmd (0-63) -> ("fx", chip, slot) / ("mus", slot) / ("stop", fx slots cleared [(chip, slot)], music slots
         cleared) / None"""
         if self._kinds is None:
-            self._kinds = {c: classify(self, c) for c in range(64)}
+            self._kinds = {c: classify(self, c) for c in range(self.mask + 1)}
         return self._kinds
 
 
@@ -408,9 +410,9 @@ class FxPlayer:
         if latch != self.last:
             self.last = latch
             if latch != 0xFF:
-                k = self.d.kinds()[latch & 0x3F]
-                if k and k[0] == "fx" and (latch & 0x3F) in self.enc:
-                    self.start(k[1], k[2], latch & 0x3F)
+                k = self.d.kinds()[latch & self.d.mask]
+                if k and k[0] == "fx" and (latch & self.d.mask) in self.enc:
+                    self.start(k[1], k[2], latch & self.d.mask)
                 elif k and k[0] == "stop":
                     for chip, i in k[1]:
                         self.slots[chip][i] = None
@@ -707,9 +709,9 @@ class MusPlayer:
         if latch != self.last:
             self.last = latch
             if latch != 0xFF:
-                k = self.d.kinds()[latch & 0x3F]
-                if k and k[0] == "mus" and (latch & 0x3F) in self.enc:
-                    slot, end, chans = self.enc[latch & 0x3F]
+                k = self.d.kinds()[latch & self.d.mask]
+                if k and k[0] == "mus" and (latch & self.d.mask) in self.enc:
+                    slot, end, chans = self.enc[latch & self.d.mask]
                     self.slots[slot] = {"n": 0, "end": end, "chans": [Channel(dd, l) for dd, l in chans], "tail": False}
                 elif k and k[0] == "stop":
                     for i in k[2]:
@@ -803,7 +805,7 @@ def emit(d, path):
          "CS_FXSLOTS = %d" % len(d.fx_slots[0]), "CS_KILL = %d" % (d.kill is not None), "cs_cmds:"]
     # a command: .b kind (0 none, 1 effect, 2 tune, 3 stop), .b chip/slot, .w the effect slots a stop clears (bit
     # chip * 8 + slot), .b the music slots it clears, .b 0, .l the effect's or the tune's entry
-    for cmd in range(64):
+    for cmd in range(d.mask + 1):
         k = d.kinds()[cmd]
         if k and k[0] == "fx" and cmd in fx:
             L.append("\tdc.b 1,%d\n\tdc.w 0\n\tdc.b 0,0\n\tdc.l cs_fx%02X" % (k[1] * 8 + k[2], cmd))
@@ -818,7 +820,7 @@ def emit(d, path):
     for chip in (0, 1):
         L.append("\tdc.b " + ",".join(str(v) for v in idle[chip]))
     L.append("\teven")
-    size = 64 * 10 + 22
+    size = (d.mask + 1) * 10 + 22
     for cmd in sorted(fx):
         chip, slot, length, loop, runs, exc, total = fx[cmd]
         L.append("cs_fx%02X:\tdc.w %d,%d\n\tdc.l cs_r%02X,cs_e%02X_1,cs_e%02X_2,cs_e%02X_3\n\tdc.w %d" % (

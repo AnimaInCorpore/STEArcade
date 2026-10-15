@@ -39,9 +39,13 @@ ME_END = 0				; .w
 ME_START = 2				; .l x 6
 ME_LOOP = 26				; .l x 6, 0: none
 
-; the command of the latch value d0 (not $FF) -> a1 its cs_cmds entry
+; the command of the latch value d0 (not $FF) -> a1 its cs_cmds entry (CS_CMDMASK: what the driver's dispatch keeps of
+; it, $3F; a port whose driver keeps more defines it before this file: Trojan $7F, engine/capsnd.py Driver(mask=))
+	ifnd	CS_CMDMASK
+CS_CMDMASK = $3F
+	endc
 cs_cmd	macro
-	and.w	#$3F,d0
+	and.w	#CS_CMDMASK,d0
 	mulu	#CC_SIZE,d0
 	lea	cs_cmds,a1
 	add.w	d0,a1

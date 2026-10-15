@@ -19,6 +19,7 @@ the repository** (`.gitignore`): supply the archives below yourself; `port.py pr
 | `rtype.zip` | R-Type (World, MAME `rtype`; without the M72 boards' PROMs and PALs, which the driver never reads) | `extracted/rtype/` (20 verified files); `build/rtype/mame_roms/` for MAME 0.289 (its names, zero-filled stand-ins) | `games/rtype` |
 | `mrheli.zip` + `mh_c-pr-.ic1` | Mr. HELI no Daibouken (Japan, MAME `mrheli`; an older set: the i8751 program `mh_c-pr-.ic1`, crc32 897dc4ee, is a separate file) | `extracted/mrheli/` (19 verified files + the MCU program); `build/mrheli/mame_roms/` as for R-Type | `games/mrheli` |
 | `kungfum.zip` | Kung-Fu Master (World, MAME `kungfum`; MAME's file names) | `extracted/kungfum/` (28 verified files) | `games/kungfum` |
+| `trojanr.zip` | Trojan (Romstar, set 1, MAME `trojanr`; old file names `tb01.bin`-`tb25.bin`, `mb7114e.1e` = `tbb-1.1e`, `tbp24s10.7j` = `tbb-2.7j`) | `extracted/trojan/` (27 verified files); `build/trojan/mame_roms/` with MAME's names | `games/trojan` |
 
 `extracted/` is not in git: `python port.py prepare <game>` (each game's `tools/prepare.py`) verifies the archive
 against `games/<game>/docs/rom_manifest.json` and unpacks it; `port.py build`, `cover`, `test` and `mame` do that first

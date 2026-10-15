@@ -1,0 +1,52 @@
+{
+ "name": "Trojan fixed palette (tools/assets.py)",
+ "origin": "ref/palette_fit.py: weighted k-means in Oklab over the colours of 4000 frames of the attract mode and of each level 1-6 (cover.py seeds 4-9)",
+ "colours": [
+  "#000000",
+  "#111111",
+  "#222233",
+  "#333322",
+  "#333333",
+  "#443311",
+  "#004444",
+  "#444444",
+  "#554422",
+  "#445566",
+  "#665544",
+  "#aa0000",
+  "#666666",
+  "#776655",
+  "#887766",
+  "#779999"
+ ],
+ "error": {
+  "attract": [
+   4.72,
+   0.664
+  ],
+  "level 1": [
+   4.63,
+   0.612
+  ],
+  "level 2": [
+   4.44,
+   0.635
+  ],
+  "level 3": [
+   3.93,
+   0.692
+  ],
+  "level 4": [
+   5.05,
+   0.454
+  ],
+  "level 5": [
+   12.19,
+   0.444
+  ],
+  "level 6": [
+   4.7,
+   0.601
+  ]
+ }
+}
