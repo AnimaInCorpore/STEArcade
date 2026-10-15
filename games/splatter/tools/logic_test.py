@@ -8,7 +8,7 @@ and I/O pages, the CPUs' registers and MMU state, the key custom's random seed).
 vertical blank, the MCU and the sound CPU (machine.run_others) and their memory (TRIRAM, the CUS30 RAM, the latched
 sprite list) is copied into the simulator; then port_frame runs the translated CPUs and the reference runs its main and
 sub CPU.  Compared: the work RAM, TRIRAM, the CUS30 RAM, the tile RAM, the palette pages, the scratch and sprite RAM,
-the CUS123 control and both CPUs' registers.  Seeds above 3 press coin, start and random inputs as ref/cover.py does;
+the CUS123 control and both CPUs' registers.  --play: the recorded play (tools/play_search.py).  Seeds above 3 press coin, start and random inputs as ref/cover.py does;
 seeds 11-17 start stage seed - 10 (the Stage Select DIP switch).
 """
 import argparse
@@ -31,6 +31,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=600)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--play", action="store_true", help="the recorded play's inputs and cheats (tools/play_search.py)")
     ap.add_argument("--trace", type=int, default=-1, help="frame (after the start) whose translated labels are logged")
     ap.add_argument("--steplock", type=int, default=-1, help="frame (after the start) run instruction by instruction "
                     "against the reference interpreter (registers compared at every 6809 instruction)")
@@ -262,9 +263,22 @@ def main():
                 print("probe %04X A %02X B %02X X %04X Y %04X U %04X [51] %02X%02X" % (c1.pc, c1.a, c1.b, c1.x, c1.y, c1.u, m.ram[0x51], m.ram[0x52]))
             return step1()
         c1.step = step_probe
+    play_ticks = None
+    if args.play:
+        import playbot
+        import play_search
+        play_ticks = playbot.load(build_dir("splatter") / "play_inputs.bin")
     for f in range(args.frames):
         probe_on[0] = f == probe_frame
-        if stage and 130 <= f < 430:
+        if play_ticks is not None:
+            if f >= len(play_ticks):
+                break
+            m.coin_in, m.control_in[0] = play_ticks[f]
+            if f >= play_search.Game.PLAY:
+                play_search.cheat(m)
+                vio_put(0x300000 + play_search.LIVES, m.ram[play_search.LIVES:play_search.LIVES + 1])
+                vio_put(0x300000 + play_search.HEALTH, m.ram[play_search.HEALTH:play_search.HEALTH + 1])
+        elif stage and 130 <= f < 430:
             k, phase = (f - 180) // 30, (f - 180) % 30
             if f == 130:
                 m.control_in[0] = 0x7F

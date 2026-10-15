@@ -68,6 +68,9 @@ main_loop:
 	move.b	#MAX_BEHIND,ticks
 	addq.l	#1,cnt_dropped
 .go:	subq.b	#1,ticks
+	ifd	PLAYBACK
+	bsr	pb_inputs
+	endc
 	ifd	BENCH
 	bsr	bench_inputs
 	endc
@@ -104,6 +107,9 @@ main_loop:
 	addq.l	#1,cnt_pictures
 	bra	main_loop
 .quit:	bsr	restore_hardware
+	ifd	BENCH
+	bsr	write_rate
+	endc
 	bsr	write_counters
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -251,13 +257,65 @@ port_crash:
 .name:	dc.b	"CRASH.TXT",0
 	even
 
+    ifd PLAYBACK
+; The recorded play (tools/play_search.py, build/splatter/play_inputs.bin; engine/playbot.py: runs of count, COIN,
+; CONTROL0, a count of 0 at the end): the inputs of the arcade frame about to run, and from frame PB_PLAY on the bot's
+; cheats (lives $014F = 3, health $0139 = 4), as the bot had them.  The program quits at the end of the recording.
+PB_PLAY = 200
+pb_inputs:
+	tst.b	pb_left
+	bne.s	.same
+	move.l	pb_ptr,a0
+	cmp.w	#0,a0
+	bne.s	.next
+	lea	pb_data,a0
+.next:	move.b	(a0)+,pb_left
+	bne.s	.run
+	st	quit_flag		; (the recording is over)
+	rts
+.run:	move.b	(a0)+,pb_coin
+	move.b	(a0)+,pb_p1
+	move.l	a0,pb_ptr
+.same:	subq.b	#1,pb_left
+	move.b	pb_coin,in_coin
+	move.b	pb_p1,in_control0
+	cmp.l	#PB_PLAY,cnt_logic
+	blo.s	.out
+	move.b	#3,vio+$20000+$14F
+	move.b	#4,vio+$20000+$139
+.out:	rts
+    endc
+
     ifd BENCH
 ; BENCH: inputs by the arcade frame (coin at 60, start at 140, then right with an attack every 40 frames), the counters
-; kept at arcade frame BENCH_FROM and the program quit at BENCH_TO: the same play every run (no host key timing)
+; kept at arcade frame BENCH_FROM and the program quit at BENCH_TO: the same play every run (no host key timing).
+; With PLAYBACK the recording's inputs, counted from frame 300 to its end.
+      ifd PLAYBACK
+BENCH_FROM = 300
+BENCH_TO = $7FFFFFFF
+      else
 BENCH_FROM = 600
 BENCH_TO = 1100
+      endc
 bench_inputs:
 	move.l	cnt_logic,d0
+	divu	#100,d0			; (RATE.BIN: VBLs, pictures, render VBLs at every 100th arcade frame)
+	swap	d0
+	tst.w	d0
+	bne.s	.t
+	swap	d0
+	cmp.w	#RATE_N,d0
+	bhs.s	.t
+	mulu	#12,d0
+	lea	rate_tab,a0
+	add.l	d0,a0
+	move.l	cnt_vbls,(a0)+
+	move.l	cnt_pictures,(a0)+
+	move.l	cnt_rvbl,(a0)
+.t:	move.l	cnt_logic,d0
+	ifd	PLAYBACK
+	bra.s	.r
+	endc
 	move.b	#$FF,in_coin
 	move.b	#$FF,in_control0
 	cmp.l	#60,d0
@@ -292,6 +350,31 @@ bench_inputs:
 	blo.s	.q
 	st	quit_flag
 .q:	rts
+    endc
+
+    ifd BENCH
+RATE_N = 100
+write_rate:
+	clr.w	-(sp)
+	pea	.name(pc)
+	move.w	#$3C,-(sp)		; Fcreate
+	trap	#1
+	addq.l	#8,sp
+	tst.w	d0
+	bmi.s	.r
+	move.w	d0,-(sp)
+	pea	rate_tab
+	pea	RATE_N*12.w
+	move.w	d0,-(sp)
+	move.w	#$40,-(sp)		; Fwrite
+	trap	#1
+	lea	12(sp),sp
+	move.w	#$3E,-(sp)		; Fclose
+	trap	#1
+	addq.l	#4,sp
+.r:	rts
+.name:	dc.b	"RATE.BIN",0
+	even
     endc
 
 ; COUNTERS.BIN (longs): VBLs, arcade frames run, pictures drawn, frames dropped, pictures skipped (no free buffer),
@@ -537,6 +620,10 @@ snapshot_vio:
 	incbin	"snapshot_vio.lz"
 	even
 black_pal:	dcb.w	16,0
+      ifd PLAYBACK
+pb_data:	incbin	"play_inputs.bin"
+	even
+      endc
 crash_text:	dc.b	"BADPC "
 crash_cpu:	dc.b	"M PAGE "
 crash_page:	dc.b	"000 PC "
@@ -563,6 +650,9 @@ cnt_newcols:	ds.l	1		; (pictures that chose new colours)
 cnt_lvbl:	ds.l	1		; (VBLs that passed in the logic / in render_frame)
 cnt_rvbl:	ds.l	1
 cnt_from:	ds.l	8		; (BENCH: the counters at VBL BENCH_FROM)
+    ifd BENCH
+rate_tab:	ds.l	3*RATE_N
+    endc
 old_mfp:	ds.b	14
 old_res:	ds.b	1
 old_hz:		ds.b	1
@@ -580,6 +670,13 @@ kbd_coin:	ds.b	1
 joy_control:	ds.b	1
 quit_flag:	ds.b	1
 	even
+    ifd PLAYBACK
+pb_ptr:		ds.l	1
+pb_left:	ds.b	1
+pb_coin:	ds.b	1
+pb_p1:		ds.b	1
+	even
+    endc
     ifnd SIM
 	ikbd_vars
 	even

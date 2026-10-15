@@ -4,7 +4,8 @@ port replays (-D PLAYBACK=1: the same game at any picture rate, so a benchmark r
 mode, and repeats to the digit).
 
 A game supplies an adapter (games/<game>/tools/play_search.py):
-    PLAY                  ticks of attract mode, coin and start before the bot plays (start_system(t) gives SYSTEM)
+    PLAY                  ticks of attract mode, coin and start before the bot plays (start_system(t) gives SYSTEM;
+                          optional: start_p1(t) P1 before PLAY, SYSTEM the system byte while the bot plays, 255)
     machine()             a new reference machine
     tick(m, t, system, p1)  one game tick with these inputs (t: the tick's number; from PLAY on the adapter also
                           applies its infinite-lives cheat, which the port's replay applies the same way)
@@ -29,10 +30,12 @@ def record(game, ticks, seed=1, out=None, log=print):
     rnd = random.Random(seed)
     m = game.machine()
     system, p1 = [], []
+    idle = getattr(game, 'SYSTEM', 255)
     for t in range(game.PLAY):
         s = game.start_system(t)
-        system.append(s); p1.append(255)
-        game.tick(m, t, s, 255)
+        p = game.start_p1(t) if hasattr(game, 'start_p1') else 255
+        system.append(s); p1.append(p)
+        game.tick(m, t, s, p)
     hist = [(game.snapshot(m), 0)]                 # per segment: the state at its start, the progress so far
     segs = []
     best, best_at = 0, 0
@@ -49,7 +52,7 @@ def record(game, ticks, seed=1, out=None, log=print):
         y = game.pos(m); died = False
         t = game.PLAY + n * SEG
         for i, v in enumerate(seg):
-            game.tick(m, t + i, 255, v)
+            game.tick(m, t + i, idle, v)
             died |= game.died(m)
             ny = game.pos(m)
             d = (ny - y) % game.POS_WRAP
@@ -79,7 +82,7 @@ def record(game, ticks, seed=1, out=None, log=print):
                 f'{time.time() - t0:.0f} s')
     for seg in segs:
         p1 += seg
-        system += [255] * SEG
+        system += [idle] * SEG
     data = encode(list(zip(system[:ticks], p1[:ticks])))
     if out:
         out.write_bytes(data)

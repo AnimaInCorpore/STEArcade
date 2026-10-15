@@ -300,7 +300,15 @@ def record(kind, frames, every=1, start=0):
     rng = random.Random(5)
     hold = 0
     out = {}
+    if kind == "rec":
+        import playbot
+        import play_search
+        rec = playbot.load(BUILD / "play_inputs.bin")
     for f in range(frames):
+        if kind == "rec":
+            m.coin_in, m.control_in[0] = rec[f]
+            if f >= play_search.Game.PLAY:
+                play_search.cheat(m)
         if kind == "bench":
             # (splatter.s bench_inputs, by the frame: coin at 60, start at 140, from 400 right, with attack for 4
             # frames of every 40)
@@ -355,6 +363,21 @@ def load_bench():
     print("recording the BENCH game's states (a few minutes, once) ...", flush=True)
     st = record("bench", 1101, 1, 500)
     BENCH_STATES.write_bytes(pickle.dumps(st))
+    for v in st.values():
+        v["fix_written"] = True
+    return st
+
+
+def load_rec(a, b, every):
+    """the recorded play's states (tools/play_search.py: build/splatter/play_inputs.bin), frames a-b, every N-th;
+    kept in render_rec_A_B_N.pkl"""
+    path = BUILD / ("render_rec_%d_%d_%d.pkl" % (a, b, every))
+    if path.exists():
+        st = pickle.loads(path.read_bytes())
+    else:
+        print("recording the recorded play's states %d-%d ..." % (a, b), flush=True)
+        st = record("rec", b + 1, every, a)
+        path.write_bytes(pickle.dumps(st))
     for v in st.values():
         v["fix_written"] = True
     return st
@@ -579,6 +602,7 @@ def main():
     ap.add_argument("--attract", default="300-2200")
     ap.add_argument("--edges", action="store_true")
     ap.add_argument("--bench", default="", help="frames A-B of splatter.s' BENCH game (500-1100), e.g. 500-1100")
+    ap.add_argument("--rec", default="", help="frames A-B of the recorded play (tools/play_search.py), every --every")
     ap.add_argument("--png", default="")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--every", type=int, default=1, help="a picture every N recorded frames (the program: PIC_EVERY)")
@@ -595,7 +619,11 @@ def main():
         h = Harness(args.defines)
     if args.bench:
         states = dict(states, bench=load_bench())
-    for kind in ("bench", "play", "attract"):
+    if args.rec:
+        a, b = (int(x) for x in args.rec.split("-"))
+        states = dict(states, rec=load_rec(a, b, args.every))
+        args.play = args.attract = ""
+    for kind in ("rec", "bench", "play", "attract"):
         spec = getattr(args, kind)
         if not spec:
             continue
