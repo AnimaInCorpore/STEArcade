@@ -67,6 +67,12 @@ JP_COIN2 = $08<<24
 	include	"jagpad.s"
 	include	"ikbd.s"
 
+; The tile cache (render.s) begins in the data section: its first part holds the CPU ROMs and the dispatch entries
+; (gen.py's bb_entries_data), which start reads once (load_roms, init_table) before init_render clears the cache;
+; the rest is the first thing in the BSS, which follows the data directly (start checks it).
+	section bss,bss
+tcache_tail:	ds.b	TC_SIZE*TC_ENTRY-(init_only_end-tcache)
+
 ; The Z80 address space as 68k addresses (see the header).
 
 G_ROM1 = g_block+$10000			; main CPU: a6
@@ -95,15 +101,13 @@ start:
 	move	#1024-1,d0
 .mark:	move.l	#$A5A5A5A5,(a0)+
 	dbf	d0,.mark
+	move.l	#init_only_end,d0	; (the tile cache's two parts must be contiguous: see tcache_tail)
+	cmp.l	#tcache_tail,d0
+	beq.s	.contiguous
+	illegal
+.contiguous:
 
-	bsr	load_roms
-
-	bsr	init_cells
-	bsr	bb_snd_init
-	bsr	init_hardware
-	bsr	init_video
-	bsr	init_render
-
+	bsr	load_roms		; (first: the ROMs and the entries are in the tile cache)
 	lea	g1_dispatch_sw,a1	; the dispatch tables (fixed code + the bank's window code)
 	lea	g1_entries_fixed,a2
 	lea	g1_entries_bank0,a3
@@ -124,6 +128,12 @@ start:
 	lea	g2_entries,a2
 	sub.l	a3,a3
 	bsr	init_table
+
+	bsr	init_cells
+	bsr	bb_snd_init
+	bsr	init_hardware
+	bsr	init_video
+	bsr	init_render		; (its tc_flush: the tile cache's start was the ROMs and the entries)
 
 	; the four ROM banks' windows were loaded into g_win (the program reads the window as
 	; data), a 5th, empty one for the bank values the board decodes to nothing
@@ -1633,11 +1643,6 @@ rom_table:				; source, destination, bytes
 	dc.l	rom_sub,g_block,$8000
 	dc.l	rom_mcu,mcu_rom,$1000
 	dc.l	0
-rom_main:	incbin	"rom_main.rom"
-rom_banks:	incbin	"rom_banks.rom"
-rom_sub:	incbin	"rom_sub.rom"
-rom_mcu:	incbin	"rom_mcu.rom"
-	even
 
 bad_text:
 	dc.b	13,10
@@ -1766,3 +1771,16 @@ g2_dispatch_sw:	ds.l	65536
 
 	cnop	0,256
 screens:	ds.b	SCREEN_SIZE*3+256
+
+; ------------------------------------------------------------------------------
+; Last in the data section: the tile cache's first part, read once at the start (see tcache_tail)
+	section data,data
+	cnop	0,4
+tcache:
+rom_main:	incbin	"rom_main.rom"
+rom_banks:	incbin	"rom_banks.rom"
+rom_sub:	incbin	"rom_sub.rom"
+rom_mcu:	incbin	"rom_mcu.rom"
+	bb_entries_data
+	cnop	0,256			; (the BSS's alignment: it follows directly)
+init_only_end:

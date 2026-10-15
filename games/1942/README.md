@@ -112,6 +112,13 @@ the registers that changed; no interrupt handler of the port touches the YM.
 Room for it: `tile_ptr` holds word numbers of the baked tiles instead of pointers (128 KB less); the program leaves
 about 125 KB free from the desktop (`tools/memfree.sh`).
 
+Memory (2026-10-15): 3,933,862 -> 3,606,364 bytes, 444 KB left from the desktop (4,061,212 on a 4 MB STE with TOS 2.06;
+a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start it).  The tiles are
+kept as the arcade's three bit planes (`tile_planes.bin`, 192 KB instead of 512 KB of pen masks); `tile_get` makes a
+row's eight masks as it bakes (`engine/rt/penmasks.s` `pm_expand`, ~250 cycles a row).  Musashi (`perf_test.py`): tick
+mean 139,461 -> 139,596, 99th percentile 238,852 -> 242,414.  The sprites as planes would save 196 KB more, but their
+bakes made the 99th percentile 266,472 (+12%), so they keep their masks.
+
 Checks: `sound.py check 3000` (the model against the driver run beside the game and with random commands): 273 of 3000
 game ticks differ, 230 of them by a volume step of 1-2 (an effect that resumes in the middle of a tick: the model steps
 whole ticks), the random command runs 15 and 0; `sound_test.py 3000` (in `port.py test`): the 68000 player against the

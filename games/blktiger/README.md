@@ -165,10 +165,15 @@ second; without the sound (`EXTRA="-D NOSOUND=1"`) 52.8 and 22.9 (the renderer w
 made the 65% / 12 frames above out of date).  With the renderer work of 2026-10-11 (see "Speed"): 54.0 ticks
 (90%) and 23.8 frames a second.
 
-Memory: the program leaves about 16 KB from the desktop.  The dispatch entries (115 KB, read once by
-`init_dispatch`) are the first part of the ring buffers: `gen.py` emits them as a macro that `src/blktiger.s` places
-last in the data section under `ring_area`; the rest of the rings is the first thing in the BSS (the start checks
-that the two parts meet, runs `init_dispatch` first and clears the entries afterwards).
+Memory (2026-10-15): the program needs 3,486,482 bytes and leaves 561 KB from the desktop (4,061,212 on a 4 MB STE with
+TOS 2.06; it was 16 KB, and a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to
+start it).  The dispatch has two levels (`gen.py` `dispatch_tables`, `bt_dispatch`): a directory long per 64-byte page
+of the Z80's space (a4 the fixed part's, `g_wdispatch` the bank's window, the `BK` stubs read it directly), the pages a
+long per pc (the targets span 208 KB: a word would not reach), pages without code shared.  197 KB of data instead of
+640 KB of flat tables, for ~48 cycles more a dispatch: Musashi's logic mean 37,414 -> 38,413 cycles a tick
+(`perf_test.py`), 38.8 -> 38.6 ticks a second.  The fixed ROM (32 KB, copied to `G_Z80` once) is the first part of the
+ring buffers: `src/blktiger.s` places it last in the data section under `ring_area`; the rest of the rings is the
+first thing in the BSS (the start checks that the two parts meet, copies the ROM first and clears it afterwards).
 
 Checks: `sound.py check 120` runs the real driver beside the model, a step at a time: the effects 0 of 59,958
 chip-steps differ audibly (random commands and the game's own); the music 794 of 102,068 sounding channel-steps differ

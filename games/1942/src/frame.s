@@ -276,7 +276,7 @@ overlay_rect:
 ; ------------------------------------------------------------------------------
 
 	cnop	0,2
-tile_masks:	incbin "tile_masks.bin"
+tile_planes:	incbin "tile_planes.bin"		; (the arcade pens as planes: assets.py, penmasks.s)
 spr_masks:	incbin "spr_masks.bin"
 spr_opaque:	incbin "spr_opaque.bin"
 spr_plan_offsets:	incbin "spr_plan_offsets.bin"	; (the generic path: shift independent plans per sprite)
@@ -294,6 +294,7 @@ blank_cell:	ds.b	96
 
 ; ------------------------------------------------------------------------------
 	section bss,bss
+	pm_vars
 ; ------------------------------------------------------------------------------
 
 ring_base:	ds.l	3

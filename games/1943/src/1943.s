@@ -11,9 +11,9 @@ TA_DATA = 98
 TA_NOPS = 84
 PIC_LINES = 256
 BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's first line, off after its last)
-; The screen buffer (render.s) begins in the data section: its first part holds the dispatch entries (gen.py's
-; g_entries_data, last in the data section), which init_dispatch reads once before anything uses the screen; the
-; rest is the first thing in the BSS, which follows the data directly (start checks it).
+; The screen buffer (render.s) begins in the data section: its first part holds the fixed ROM, which start copies to
+; G_Z80 once before anything uses the screen; the rest is the first thing in the BSS, which follows the data directly
+; (start checks it).
     section bss,bss
 screen_tail: ds.b 3*RING_SIZE+256-(init_only_end-screen_area)
     section text,code
@@ -68,7 +68,7 @@ start:
     beq.s .contiguous
     illegal
 .contiguous:
-    bsr init_dispatch            ; (first: its entries are in the screen buffer)
+    bsr init_dispatch
     bsr cs_init
     lea fixed_rom,a0
     lea G_Z80,a1
@@ -87,7 +87,7 @@ start:
     bsr g_control_w
     lea G_Z80,a6
     lea G_Z80-1,a5
-    lea g_fixed_dispatch,a4
+    lea g_disp_fixed,a4
     moveq #0,d0
     moveq #0,d1
     moveq #0,d2
@@ -103,76 +103,55 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch: fixed table 128 KB, a 64 KB table per ROM bank with code.
+; Natural-PC dispatch, two levels (tools/gen.py dispatch_tables): a directory long per 64-byte page of the Z80's
+; space (a4: the fixed part's, g_wdispatch: the bank's window, - $200 * 4), biased so that it plus pc * 2 addresses
+; pc's word in the page: (the 68000 target - start) / 2, z80_baddisp where pc has no code.  ~150 cycles against the
+; flat tables' ~95 (a long per pc: 448 KB of BSS; these take 96 KB of data); ~30 dispatches a tick.
 ; (a3 is free for computed jumps: z80x.FAST)
 g_dispatch:
     move.w d7,g_dispatch_pc
     and.l #$ffff,d7
-    lsl.l #2,d7
-    cmp.l #$8000*4,d7
+    move.l d7,a3
+    lsr.w #4,d7
+    and.w #$fffc,d7              ; page * 4
+    cmp.w #$200*4,d7
     bhs.s .window
-    move.l (a4,d7.l),a3
-    jmp (a3)
+    add.l a3,a3                  ; pc * 2
+    add.l (a4,d7.w),a3
+.go:
+    moveq #0,d7
+    move.w (a3),d7
+    add.l d7,d7
+    lea start,a3
+    jmp (a3,d7.l)
 .window:
-    cmp.l #$c000*4,d7
+    cmp.w #$300*4,d7
     bhs.s .bad
-    move.l g_wdispatch,a3        ; (the bank's table - $8000 * 4)
-    move.l (a3,d7.l),a3
-    jmp (a3)
+    add.l a3,a3
+    add.l g_wdispatch,d7         ; the directory entry
+    exg d7,a3
+    add.l (a3),d7
+    move.l d7,a3
+    bra.s .go
 .bad:
-    lsr.l #2,d7
+    moveq #0,d7
+    move.w g_dispatch_pc,d7
+    jmp z80_badpc
+z80_baddisp:                     ; (a dispatch page's word for a pc without code)
+    moveq #0,d7
+    move.w g_dispatch_pc,d7
     jmp z80_badpc
 
 init_dispatch:
-    lea g_fixed_dispatch,a0
-    move.l #z80_badpc,d0
-    move.l #32768/4-1,d1
-    bsr fill_dispatch
-    lea g_invalid_dispatch,a0
-    move.l #(G_WINDOW_TABLES*16384)/4-1,d1
-    bsr fill_dispatch
-    lea g_fixed_dispatch,a0
-    lea g_entries_fixed,a1
-    bsr scatter
-    lea g_entry_banks,a2
-    lea g_dispatch_targets,a3
-    moveq #7,d3
-.bank:
-    move.l (a2)+,a1
-    move.l (a3)+,a0
-    bsr scatter
-    dbf d3,.bank
-    lea bank_tabs,a0             ; per bank: the window's base, its dispatch table - $8000 * 4
+    lea bank_tabs,a0             ; per bank: the window's base, its directory - $200 * 4
     lea g_dispatch_targets,a3
     move.l #bank_rom+$8000,d0
     moveq #7,d3
 .tabs:
     move.l d0,(a0)+
     add.l #$4000,d0
-    move.l (a3)+,d1
-    sub.l #$8000*4,d1
-    move.l d1,32-4(a0)
+    move.l (a3)+,32-4(a0)
     dbf d3,.tabs
-    rts
-fill_dispatch:
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    subq.l #1,d1
-    bpl.s fill_dispatch
-    rts
-scatter:
-    moveq #0,d1
-.next:
-    move.w (a1)+,d1
-    cmp.w #$ffff,d1
-    beq.s .done
-    lsl.l #2,d1
-    move.l (a1)+,(a0,d1.l)
-    moveq #0,d1
-    bra.s .next
-.done:
     rts
 
 ; The scheduler has scanned all sixteen task records with no ready task.
@@ -524,6 +503,7 @@ CS_LATCH = G_Z80-$3800           ; C800: the main CPU's sound latch
     section text,code
     include "capsnd.s"
     include "code_1943.s"
+g_code_end:                      ; (the dispatch pages hold (target - start) / 2: checked at the end)
     include "rtlib.s"
 z80_badpc:
 z80_badjump:
@@ -564,13 +544,12 @@ g_inputs:
     even
 bank_rom:
     incbin "banks.rom"
-fixed_rom:
-    incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
     even
-screen_area:                     ; (the screen buffer's first part: the dispatch entries until init_dispatch has run)
-    g_entries_data
+screen_area:                     ; (the screen buffer's first part: the fixed ROM until start has copied it)
+fixed_rom:
+    incbin "fixed.rom"
 init_only_end:
     section bss,bss
 old_ssp: ds.l 1
@@ -658,4 +637,6 @@ g_fshadow: ds.w 1
 own_stack_top:
 g_block: ds.b $10000
 g_sprites: ds.b 512
-g_fixed_dispatch: ds.l 32768
+    if (g_code_end-start>$1fffe)|(z80_baddisp-start>$1fffe)
+    fail "the dispatch targets lie beyond start + 128 KB (g_dispatch's word pages)"
+    endc

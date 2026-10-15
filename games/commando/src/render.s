@@ -290,8 +290,8 @@ get_object_bake:
  lsl.w #3,d2
  lea cmap,a5
  add.w d2,a5
- lea tile_masks,a4
- lsl.l #8,d0
+ lea tile_planes,a4
+ mulu #16*6,d0
  add.l d0,a4
  move.w #8,obj_pens
  move.w #16,obj_height
@@ -301,8 +301,8 @@ get_object_bake:
  lsl.w #2,d2
  lea cmap+192,a5
  add.w d2,a5
- lea chr_masks,a4
- lsl.l #6,d0
+ lea chr_planes,a4
+ lsl.l #5,d0
  add.l d0,a4
  move.w #4,obj_pens
  move.w #8,obj_height
@@ -319,9 +319,8 @@ get_object_bake:
  lsl.w #4,d2
  lea cmap+128,a5
  add.w d2,a5
- lea spr_masks,a4
- lsl.l #8,d0
- add.l d0,d0
+ lea spr_planes,a4
+ lsl.l #7,d0
  add.l d0,a4
  move.w #16,obj_pens
  move.w #16,obj_height
@@ -351,9 +350,20 @@ get_object_bake:
  sub.w d0,d1
  move.w d1,d0
 .forward:
- mulu obj_pens,d0
- add.w d0,d0
+ move.w obj_pens,d1		; the row's planes (assets.py): 2 / 3 / 4 words (pens 4 / 8 / 16)
+ lsr.w #3,d1
+ addq.w #2,d1
+ add.w d1,d1
+ mulu d1,d0
  lea (a4,d0.w),a0
+ lsr.w #1,d1
+ move.w d1,d0
+ bsr pm_expand			; (penmasks.s: the row's mask a pen)
+ lea pm_masks,a0
+ cmp.w #4,obj_pens		; (characters: 8 pixels, the high byte; pen 0's mask, of inverted planes only, has the
+ bne.s .wide			; low byte set)
+ clr.b 1(a0)
+.wide:
  moveq #0,d3
  moveq #0,d4
  moveq #0,d5
@@ -362,6 +372,7 @@ get_object_bake:
 .pen:
  moveq #0,d7
  move.w (a0)+,d7
+ beq .pen_next			; (a pen without pixels in this row)
  btst #1,obj_flip+1
  beq .normal
  ; Mirror words using a byte reversal table. 8px chars shift back to MSB.
@@ -383,6 +394,7 @@ get_object_bake:
  lea orp_tab,a6
  move.l (a6,d0.w),a6
  jsr (a6)
+.pen_next:
  addq.w #1,d2
  cmp.w obj_pens,d2
  blo .pen
@@ -1637,9 +1649,9 @@ ste_pal: incbin "palette.bin"
 cmap: incbin "palmap.bin"
 black_pal: dcb.w 16,0
 reverse_bits: incbin "reverse.bin"
-tile_masks: incbin "tile_masks.bin"
-spr_masks: incbin "spr_masks.bin"
-chr_masks: incbin "chr_masks.bin"
+tile_planes: incbin "tile_planes.bin"	; (the arcade pens as planes: assets.py, pm_expand)
+spr_planes: incbin "spr_planes.bin"
+chr_planes: incbin "chr_planes.bin"
 chr_blank: incbin "chr_blank.bin"
 spr_order: incbin "spr_order.bin"
 chr_opaque: incbin "chr_opaque.bin"
@@ -1708,6 +1720,7 @@ obj_pcode: ds.w 1
 obj_row: ds.w 1
 obj_height: ds.w 1
 obj_pens: ds.w 1
+	pm_vars
 dest_stride: ds.w 1
 copy_src_y: ds.w 1
 copy_xinc: ds.w 1

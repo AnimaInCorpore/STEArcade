@@ -8,9 +8,8 @@ BD_PALETTE = 1
 ; Border removal and the palette on / off: engine/rt/borders.s.  Its events come early and sync themselves to the
 ; video, so a Blitter pass may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces
 ; (blit_go, there).
-; The ring buffers (render.s) begin in the data section: their first part holds the dispatch entries (gen.py's
-; bt_entries_data, last in the data section), which init_dispatch reads once and start then clears; the rest is the
-; first thing in the BSS, which follows the data directly (start checks it).
+; The ring buffers (render.s) begin in the data section: their first part holds the fixed ROM, which start copies to
+; G_Z80 once and then clears; the rest is the first thing in the BSS, which follows the data directly (start checks it).
     section bss,bss
 ring_tail: ds.b 3*RING_SIZE+256-(init_only_end-ring_area)
     section text,code
@@ -62,19 +61,18 @@ start:
     beq.s .contiguous
     illegal
 .contiguous:
-    bsr init_dispatch            ; (first: its entries are in the ring buffers)
+    lea fixed_rom,a0             ; (first: it is in the ring buffers)
+    lea G_Z80,a1
+    move #$8000/4-1,d0
+.copyrom:
+    move.l (a0)+,(a1)+
+    dbf d0,.copyrom
     lea ring_area,a0             ; then they are the rings' memory: clear
 .clear:
     clr.l (a0)+
     cmp.l #init_only_end,a0
     blo.s .clear
     bsr bt_snd_init
-    lea fixed_rom,a0
-    lea G_Z80,a1
-    move #$8000/4-1,d0
-.copyrom:
-    move.l (a0)+,(a1)+
-    dbf d0,.copyrom
     bsr init_hardware
     bsr init_video
     bsr mcu_init
@@ -85,7 +83,7 @@ start:
     bsr bt_out_01
     lea G_Z80,a6
     lea G_Z80-1,a5
-    lea bt_fixed_dispatch,a4
+    lea bt_disp_fixed,a4
     moveq #0,d0
     moveq #0,d1
     moveq #0,d2
@@ -101,68 +99,32 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch: fixed table 128 KB, sixteen 64 KB window tables.
+; Natural-PC dispatch, two levels (tools/gen.py dispatch_tables): a directory long per 64-byte page of the Z80's
+; space (a4: the fixed part's; g_wdispatch: the bank's window, - $200 * 4), the page a long per pc: the 68000 target
+; (z80_badpc where pc has no code).  (The flat tables, a long per pc, took 640 KB of BSS; these 197 KB.)
 bt_dispatch:                    ; d7.w = the Z80 address (kept for z80_badpc); a0 / d5 are free at a jump
     move.w d7,g_dispatch_pc
-    bmi.s .window
-    moveq #0,d5
     move.w d7,d5
-    lsl.l #2,d5
-    move.l (a4,d5.l),a0
-    jmp (a0)
-.window:
-    cmp.w #$c000,d7
-    bhs.s .bad
-    move.w d7,d5
-    lsl.w #2,d5
-    eor.w #$8000,d5                 ; ((the address - $8000) * 4 - $8000: g_wdispatch is the table's middle)
-    move.l g_wdispatch,a0
+    lsr.w #4,d5
+    and.w #$fffc,d5                 ; page * 4
+    cmp.w #$200*4,d5
+    bhs.s .window
+    move.l (a4,d5.w),a0
+.page:
+    moveq #63,d5
+    and.w d7,d5
+    add.w d5,d5
+    add.w d5,d5
     move.l (a0,d5.w),a0
     jmp (a0)
+.window:
+    cmp.w #$300*4,d5
+    bhs.s .bad
+    move.l g_wdispatch,a0
+    move.l (a0,d5.w),a0
+    bra.s .page
 .bad:
     jmp z80_badpc
-
-init_dispatch:
-    lea bt_fixed_dispatch,a0
-    move.l #z80_badpc,d0
-    move.l #32768/4-1,d1
-    bsr fill_dispatch
-    lea bt_invalid_dispatch,a0
-    move.l #(BT_WINDOW_TABLES*16384)/4-1,d1
-    bsr fill_dispatch
-    lea bt_fixed_dispatch,a0
-    lea bt_entries_fixed,a1
-    bsr scatter
-    lea bt_entry_banks,a2
-    lea bt_dispatch_targets,a3
-    moveq #15,d3
-.bank:
-    move.l (a2)+,a1
-    move.l (a3)+,a0
-    lea -$8000(a0),a0
-    bsr scatter
-    dbf d3,.bank
-    rts
-fill_dispatch:
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    move.l d0,(a0)+
-    subq.l #1,d1
-    bpl.s fill_dispatch
-    rts
-scatter:
-    moveq #0,d1
-.next:
-    move.w (a1)+,d1
-    cmp.w #$ffff,d1
-    beq.s .done
-    lsl.l #2,d1
-    move.l (a1)+,(a0,d1.l)
-    moveq #0,d1
-    bra.s .next
-.done:
-    rts
 
 ; The scheduler has scanned all sixteen task records with no ready task.
 z80_hook:
@@ -287,7 +249,7 @@ bt_out_01:                      ; (d5 / a0: scratch at an instruction's end)
     and.b d0,d5
     move.b d5,g_bank
     lsl.w #2,d5
-    lea bt_dispatch_targets,a0      ; (gen.py: the middles of the banks' tables)
+    lea bt_dispatch_targets,a0      ; (gen.py: the banks' directories - $200 * 4)
     move.l (a0,d5.w),g_wdispatch
     lea bt_winbases,a0
     move.l (a0,d5.w),g_winbase
@@ -694,14 +656,12 @@ N   set N+1
     endr
 bank_rom:
     incbin "banks.rom"
-fixed_rom:
-    incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
     even
-ring_area:                       ; (the rings' first part: the dispatch entries until init_dispatch has run)
-    bt_entries_data
-    even
+ring_area:                       ; (the rings' first part: the fixed ROM until start has copied it)
+fixed_rom:
+    incbin "fixed.rom"
 init_only_end:
     section bss,bss
 old_ssp: ds.l 1
@@ -800,5 +760,4 @@ own_stack_top:
 g_block: ds.b $10000
 g_bg: ds.b $4000
 bt_sprites: ds.b $200
-bt_fixed_dispatch: ds.l 32768
 

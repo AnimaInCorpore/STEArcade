@@ -413,33 +413,55 @@ def generate(extra_roots=()):
     for pc in sorted(em.refs-set(code)):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
-        # (a jump into the window from fixed code: the bank's table directly, g_wdispatch is its middle)
+        # (a jump into the window from fixed code: the bank's directory directly, g_wdispatch is it - $200 * 4)
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tmove.w d7,g_dispatch_pc', '\tmove.l g_wdispatch,a0',
-                f'\tmove.l {(pc - 0x8000) * 4 - 0x8000}(a0),a0', '\tjmp (a0)']
-    # The entries are read once (init_dispatch): a macro the runtime puts last in the data section, where the ring
-    # buffers begin (src/blktiger.s: their memory is the rings' afterwards).
-    out += ['bt_entries_data macro', 'bt_entries_fixed:']
-    for pc in sorted(code):
-        if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
-            out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
-    out += ['\tdc.w $ffff']
-    for bank in range(16):
-        out += [f'bt_entries_bank{bank}:']
-        for pc in sorted(code):
-            if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
-                out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
-        out += ['\tdc.w $ffff']
-    out += ['\tendm', '\tsection data,data', '\teven',
-            'bt_entry_banks:', '\tdc.l '+','.join(f'bt_entries_bank{b}' for b in range(16))]
+                f'\tmove.l {(pc >> 6) * 4}(a0),a0', f'\tmove.l {(pc & 63) * 4}(a0),a0', '\tjmp (a0)']
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'indirect':len(indirect),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
-    banks = report['banks']
-    out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_window_dispatch{b}+$8000' if b in banks else 'bt_invalid_dispatch+$8000' for b in range(16)),
-            f'BT_WINDOW_TABLES = {len(banks)+1}', '\tsection bss,bss', 'bt_invalid_dispatch: ds.l 16384']
-    for bank in banks:
-        out += [f'bt_window_dispatch{bank}: ds.l 16384']
-    out += ['\tsection text,code']
+    out += dispatch_tables(code, em.no_entry, report['banks'])
     return '\n'.join(out)+'\n', report, code
+
+
+DPAGE = 64      # Z80 bytes a dispatch page
+
+
+def dispatch_tables(code, no_entry, banks):
+    """The two-level dispatch (src/blktiger.s bt_dispatch): a directory long per DPAGE-byte page of the Z80's space,
+    the page's address: a long per pc, the 68000 target (z80_badpc where pc has no code; pages without an entry share
+    btp_bad).  bt_disp_fixed: the pages below the window (a4); bt_dispatch_targets: per bank the window's directory
+    - $200 * 4 (g_wdispatch; banks without code: bt_disp_none).  (Were flat tables of a long per pc, 640 KB of BSS:
+    these take 197 KB; the targets span more than the 128 KB a word could reach.)"""
+    entries = {}
+    for pc in code:
+        if pc in no_entry:                          # (merged: z80_badpc)
+            continue
+        if pc < WIN_LO:
+            entries.setdefault(None, {})[pc] = pc
+        elif pc >= VBASE:
+            entries.setdefault((pc-VBASE)//0x4000, {})[real(pc)] = pc
+    out, pages = ['\tsection data,data', '\teven'], []
+
+    def directory(key, first, count):
+        names, tab = [], entries.get(key, {})
+        for p in range(first, first+count):
+            pcs = [tab.get(p*DPAGE+i) for i in range(DPAGE)]
+            if any(pcs):
+                names.append(f'btp{"F" if key is None else key}_{p:03X}')
+                pages.append((names[-1], pcs))
+            else:
+                names.append('btp_bad')
+        return [f'\tdc.l {",".join(names[i:i+8])}' for i in range(0, len(names), 8)]
+    out += ['bt_disp_fixed:', *directory(None, 0, WIN_LO//DPAGE)]
+    for bank in banks:
+        out += [f'bt_disp_bank{bank}:', *directory(bank, WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
+    out += ['bt_disp_none:', *directory('none', WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
+    out += ['bt_dispatch_targets:', '\tdc.l '+','.join(f'bt_disp_bank{b}-$200*4' if b in banks else 'bt_disp_none-$200*4'
+                                                       for b in range(16))]
+    out += ['btp_bad:', f'\tdcb.l {DPAGE},z80_badpc']
+    for name, pcs in pages:
+        out += [f'{name}:'] + [f'\tdc.l {",".join(f"Z{pc:04X}" if pc is not None else "z80_badpc" for pc in pcs[i:i+8])}'
+                               for i in range(0, DPAGE, 8)]
+    return out + ['\tsection text,code']
 
 
 if __name__ == '__main__':

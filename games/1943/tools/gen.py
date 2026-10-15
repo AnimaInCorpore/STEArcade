@@ -284,31 +284,54 @@ def generate(extra_roots=()):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
-    # The entries are read once (init_dispatch): a macro the runtime puts last in the data section, where the screen
-    # buffer begins (src/1943.s: its memory is the screen's afterwards).
-    out += ['g_entries_data macro', 'g_entries_fixed:']
-    for pc in sorted(code):
-        if pc < WIN_LO and pc not in em.no_entry:   # (merged: z80_badpc)
-            out += [f'\tdc.w ${pc:04x}', f'\tdc.l Z{pc:04X}']
-    out += ['\tdc.w $ffff']
-    for bank in range(8):
-        out += [f'g_entries_bank{bank}:']
-        for pc in sorted(code):
-            if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000 and pc not in em.no_entry:
-                out += [f'\tdc.w ${real(pc)-WIN_LO:04x}', f'\tdc.l Z{pc:04X}']
-        out += ['\tdc.w $ffff']
-    out += ['\tendm', '\tsection data,data', '\teven',
-            'g_entry_banks:', '\tdc.l '+','.join(f'g_entries_bank{b}' for b in range(8))]
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
               'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
-    banks = report['banks']
-    out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_window_dispatch{b}' if b in banks else 'g_invalid_dispatch' for b in range(8)),
-            f'G_WINDOW_TABLES = {len(banks)+1}', '\tsection bss,bss', 'g_invalid_dispatch: ds.l 16384']
-    for bank in banks:
-        out += [f'g_window_dispatch{bank}: ds.l 16384']
-    out += ['\tsection text,code']
+    out += dispatch_tables(code, em.no_entry, report['banks'])
     return '\n'.join(out)+'\n', report, code
+
+
+DPAGE = 64      # Z80 bytes a dispatch page
+
+
+def dispatch_tables(code, no_entry, banks):
+    """The two-level dispatch (src/1943.s g_dispatch): a directory long per DPAGE-byte page of the Z80's space,
+    biased by -page * DPAGE * 2 so that it plus pc * 2 addresses pc's word in the page: (the target - start) / 2.
+    Pages without an entry share gdp_bad (z80_baddisp).  g_disp_fixed: the pages below the window (a4);
+    g_dispatch_targets: per bank the window's directory - $200 * 4 (g_wdispatch; banks without code: g_disp_none).
+    (Were flat tables of a long per pc, 448 KB of BSS: these take 96 KB.)"""
+    entries = {}
+    for pc in code:
+        if pc in no_entry:                          # (merged: z80_badpc)
+            continue
+        if pc < WIN_LO:
+            entries.setdefault(None, {})[pc] = pc
+        elif pc >= VBASE:
+            entries.setdefault((pc-VBASE)//0x4000, {})[real(pc)] = pc
+    out, pages = ['\tsection data,data', '\teven'], []
+
+    def directory(key, first, count):
+        lines, tab = [], entries.get(key, {})
+        for p in range(first, first+count):
+            pcs = [tab.get(p*DPAGE+i) for i in range(DPAGE)]
+            if any(pcs):
+                name = f'gdp{"F" if key is None else key}_{p:03X}'
+                pages.append((name, pcs))
+            else:
+                name = 'gdp_bad'
+            lines.append(f'{name}-${p*DPAGE*2:x}')
+        return [f'\tdc.l {",".join(lines[i:i+8])}' for i in range(0, len(lines), 8)]
+    out += ['g_disp_fixed:', *directory(None, 0, WIN_LO//DPAGE)]
+    for bank in banks:
+        out += [f'g_disp_bank{bank}:', *directory(bank, WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
+    out += ['g_disp_none:', *directory('none', WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
+    out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_disp_bank{b}-$200*4' if b in banks else 'g_disp_none-$200*4'
+                                                      for b in range(8))]
+    word = lambda pc: f'(Z{pc:04X}-start)/2' if pc is not None else '(z80_baddisp-start)/2'
+    out += ['gdp_bad:', f'\tdcb.w {DPAGE},(z80_baddisp-start)/2']
+    for name, pcs in pages:
+        out += [f'{name}:'] + [f'\tdc.w {",".join(word(pc) for pc in pcs[i:i+8])}' for i in range(0, DPAGE, 8)]
+    return out + ['\tsection text,code']
 
 
 if __name__ == '__main__':

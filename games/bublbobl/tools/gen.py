@@ -381,8 +381,9 @@ def generate():
             v = virt(pc, e)
             row.append("Z%04X" % v if v in code else "z80_badpc")
         out.append("BKT%04X:\tdc.l %s" % (pc, ",".join(row)))
-    # the dispatch tables are built at start from these lists (pc, label): fixed code, each bank's window code
-    tables_out = ["\tsection data,data", "\tcnop 0,2"]
+    # the dispatch tables are built at start from these lists (pc, label): fixed code, each bank's window code; a
+    # macro src/bublbobl.s puts last in the data section, under the tile cache (read once: its memory afterwards)
+    tables_out = ["bb_entries_data macro", "\tcnop 0,2"]
 
     def entries(name, pcs, prefix, labelof):
         tables_out.append("%s:" % name)
@@ -414,7 +415,7 @@ def generate():
             tables_out.append("\tdc.w $%04X\n\tdc.l Y%04X" % (p, p))
     tables_out.append("\tdc.w $%04X\n\tdc.l %s\n\tdc.w $FFFF" % (TOKEN, cfg_sub.token_sym))
     reports.append({"instructions": len(scode), "unsupported": sem.unsupported})
-    return "\n".join(out + tables_out) + "\n", reports
+    return "\n".join(out + tables_out + ["\tendm"]) + "\n", reports
 
 
 def coverage_all():

@@ -477,6 +477,14 @@ frames exact, no stray pixels around the picture (the check finds 14 at frame 51
 `tools/bench.sh 1500` in Hatari: no late border event, no pass in pieces, no crash file.  Memory: 3,931,904 bytes
 (+4 KB: the epochs and the cells' bank masks).
 
+Memory (2026-10-15): 3,942,912 -> 3,659,008 bytes, 393 KB left from the desktop (4,061,212 on a 4 MB STE with TOS
+2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start it).  What start
+reads once lies under the tile cache: the CPU ROMs (`load_roms` copies them, 132 KB) and the dispatch entries (`gen.py`'s
+`bb_entries_data`, 145 KB, read by `init_table`) are the last thing in the data section, from `tcache` on, and the rest
+of the cache is the first thing in the BSS (`tcache_tail`; the data's end is aligned to the BSS's 256 so that the two
+meet, which the start checks).  The tables are built right after `load_roms`, before `init_render`'s `tc_flush` marks
+every cache entry empty.  The game runs unchanged.
+
 ## Native routines (2026-10-12)
 
 `src/natives.s` holds hand-written 68000 routines that replace Z80 code (`tools/gen.py` `MAIN_NATIVES` /

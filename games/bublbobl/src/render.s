@@ -2882,7 +2882,7 @@ sim_cnt_orows:	ds.l	1
 sim_cnt_leven:	ds.l	1
 sim_cnt_lodd:	ds.l	1
 	endc
-tcache:		ds.b	TC_SIZE*TC_ENTRY
+					; (tcache: TC_SIZE * TC_ENTRY bytes, its first part in the data section: bublbobl.s)
 pal_shadow:	ds.b	512
 snap_vram:	ds.b	$1D00
 objs:		ds.b	192*24

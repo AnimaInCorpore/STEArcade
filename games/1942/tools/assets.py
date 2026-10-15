@@ -1,9 +1,11 @@
 """1942 renderer assets (build/1942/): the arcade graphics in the orientation of the screen (rotated 270 degrees, see machine.py
-render_rgb) as one-hot pen masks (for every pen the 16 bit mask of the pixels of a row that have it), from which the
-runtime bakes STE bitplane data once a palette bank is known (an STE plane is the OR of the masks of the pens whose colour has
-that bit set).
+render_rgb) as one-hot pen masks (for every pen the 16 bit mask of the pixels of a row that have it), from which the runtime bakes
+STE bitplane data once a palette bank is known (an STE plane is the OR of the masks of the pens whose colour has that bit
+set).  The tiles are kept as bit planes (a word a plane a row) and get their masks row by row as they are baked
+(engine/rt/penmasks.s): 320 KB less.  The sprites keep their masks: as planes they would save 196 KB more, but the
+sprite bakes made the 99th percentile tick 12% slower (the tiles' 1.5%).
 
-  tile_masks.bin  512 tiles x 4 flips (bit 0 = flip x, bit 1 = flip y of the tile attribute) x 16 rows x 8 words (pens 0-7);
+  tile_planes.bin 512 tiles x 4 flips (bit 0 = flip x, bit 1 = flip y of the tile attribute) x 16 rows x 3 planes (pens 0-7);
                   row j of a tile is the ring line 15 - x of the tile (the background is drawn into a ring buffer whose lines
                   run down the tilemap's x axis), pixel i = raw y, the leftmost pixel in bit 15
   spr_masks.bin   512 sprites x 16 reordered rows x 16 words (pens 0-15, pen 15 = transparent)
@@ -64,6 +66,15 @@ def one_hot(pens, npens):
     return out
 
 
+def planes(pens, nplanes):
+    """pens [..., 16] -> [..., nplanes] words: bit 15 - i of plane b = bit b of pixel i (penmasks.s makes the masks)"""
+    out = np.zeros(pens.shape[:-1] + (nplanes,), np.uint32)
+    for b in range(nplanes):
+        for i in range(16):
+            out[..., b] |= ((pens[..., i] >> b) & 1).astype(np.uint32) << (15 - i)
+    return out
+
+
 def sprite_orders(opaque):
     """The order in which the rows of every sprite are baked and blitted: equal opaque masks adjacent, transparent rows last"""
     return [sorted(range(16), key=lambda row: (int(opaque[c, row]) == 0, int(opaque[c, row]), row)) for c in range(len(opaque))]
@@ -77,7 +88,7 @@ def build():
     for code in range(512):
         for flip in range(4):
             tiles[code, flip] = tile_screen(g, code, flip)
-    open(os.path.join(b, "tile_masks.bin"), "wb").write(one_hot(tiles, 8).astype(">u2").tobytes())
+    open(os.path.join(b, "tile_planes.bin"), "wb").write(planes(tiles, 3).astype(">u2").tobytes())
     spr = np.zeros((512, 16, 16), np.uint8)
     for code in range(512):
         spr[code] = sprite_screen(g, code)

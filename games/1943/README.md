@@ -172,11 +172,16 @@ Effect $0A (64 seconds of notes) would take 68 KB with its four phases: its phas
 which IRQ a volume step falls on (up to 3 IRQs, 12 ms), so it plays phase 0 in every phase (`capsnd.EXC_LIMIT`: an
 effect whose phase exceptions exceed 8 KB), 50 KB less.
 
-Memory: the program leaves 11 KB from the desktop (`tools/memfree.sh`; 4,049,934 of 4,061,212 bytes).  To make room,
-the dispatch entries (91 KB, read once by `init_dispatch`) are the first part of the screen buffer: `gen.py` emits them
-as a macro that `src/1943.s` places last in the data section under `screen_area`, and the rest of the buffer is the
-first thing in the BSS, which follows the data directly (the start checks that the two parts meet, and runs
-`init_dispatch` before anything uses the screen).
+Memory (2026-10-15): the program needs 3,657,234 bytes and leaves 394 KB from the desktop (`tools/memfree.sh`: 4,061,212
+on a 4 MB STE with TOS 2.06; it was 11 KB, and a tester's Mega STE with a hard disk driver and accessories had 3,831,554:
+TOS refused to start it).  The dispatch has two levels (`gen.py` `dispatch_tables`, `g_dispatch`): a directory long per
+64-byte page of the Z80's space (a4 the fixed part's, `g_wdispatch` the bank's window), the pages a word per pc, (the
+68000 target - `start`) / 2 (the translated code lies within 128 KB of `start`: the build checks it), pages without code
+shared.  96 KB of data instead of 448 KB of flat tables (a long per pc), for ~55 cycles more a dispatch, ~30 a tick:
+Musashi's logic mean 48,133 -> 49,499 cycles a tick (`perf_test.py 1600 1200`), 28.1 -> 27.9 ticks and frames a second.
+The fixed ROM (32 KB, copied to `G_Z80` once at the start) is the first part of the screen buffer: `src/1943.s` places it
+last in the data section under `screen_area`, and the rest of the buffer is the first thing in the BSS, which follows the
+data directly (the start checks that the two parts meet, and copies the ROM before anything uses the screen).
 
 Checks: `sound.py check 6000`: the music streams through the decoder 0 of 445,113 channel ticks differ; the effects
 with random commands 70 of 48,000 chip-IRQs differ audibly (the noise period an effect's first IRQs inherit), with the

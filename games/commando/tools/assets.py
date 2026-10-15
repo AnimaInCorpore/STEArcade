@@ -35,9 +35,14 @@ def build():
     (BUILD/'palette.bin').write_bytes(np.array([pal.ste_word(c) for c in colours],'>u2').tobytes())
     docs=Path(__file__).resolve().parents[1]/'docs'
     (docs/'palette.json').write_text(json.dumps(dict(rgb=colours.astype(int).tolist(),map=mapping.tolist()),indent=2)+'\n')
+    # The arcade pens as bit planes, a word a plane a row (render.s expand_pens makes a mask a pen of them when it
+    # bakes an object: 2.25 x less than the masks themselves; 3, 4 and 2 planes).
     for name,pixels,pens in [('tile',g.tiles,8),('spr',g.sprites,16),('chr',g.chars,4)]:
         oriented=pixels.transpose(0,2,1)[:,::-1]
-        (BUILD/(name+'_masks.bin')).write_bytes(one_hot(oriented,pens).astype('>u2').tobytes())
+        width=oriented.shape[-1]
+        planes=np.stack([sum((((oriented[...,i]>>b)&1).astype(np.uint16)<<(15-i)) for i in range(width))
+                         for b in range(pens.bit_length()-1)],axis=-1)
+        (BUILD/(name+'_planes.bin')).write_bytes(planes.astype('>u2').tobytes())
         (BUILD/(name+'_blank.bin')).write_bytes(bytes(int(np.all(t==(15 if name=='spr' else 3))) for t in oriented))
     oriented=g.sprites.transpose(0,2,1)[:,::-1]
     variants=np.array([t[::-1 if flip&1 else 1, ::-1 if flip&2 else 1]

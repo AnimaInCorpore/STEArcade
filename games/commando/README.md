@@ -210,6 +210,14 @@ on); the loudest music channels take the others (key volume * 2, +1 for a channe
 lowest channel of a tie), each on the YM channel it had if it is free.  About 3.5k cycles a tick (Musashi: the tick
 1.4k, the mix 2.2k).  The program leaves about 34 KB free from the desktop (`tools/memfree.sh`).
 
+Memory (2026-10-15): 4,047,656 -> 3,548,656 bytes, 500 KB left from the desktop (4,061,212 on a 4 MB STE with TOS 2.06;
+a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start it).  The tiles,
+sprites and characters are kept as the arcade's bit planes (`tile_planes.bin` 3, `spr_planes.bin` 4, `chr_planes.bin`
+2 words a row: 224 KB instead of 704 KB of pen masks); `get_object_bake` makes a row's masks as it bakes
+(`engine/rt/penmasks.s` `pm_expand`) and now skips pens without pixels, which more than pays for it: Musashi on the
+recorded play (`PLAY=1 perf_test.py 2000 400 profile`) bake 15,707 -> 8,892 cycles a picture, frame mean 183,154 ->
+177,419, 99th percentile 618,048 -> 472,756.
+
 Checks: `sound_music.py check`: the encoded streams through the decoder against the recording (183,733 channel ticks,
 0 differ).  `music_test.py 20000` (in `port.py test`): the 68000 player (`mus_tick`, `mus_mix`) against the Python
 model, with random tunes, stops and effects (pauses, resumes, tails, loops, effect channels): 0 of 20,000 ticks

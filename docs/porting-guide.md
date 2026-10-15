@@ -436,6 +436,17 @@ Bubble Bobble's own players).  Regenerating Commando's data with it gives Comman
   start: the generator emits them as a macro placed last in the data section, where the screen buffer begins, the rest
   of which is the first thing in the BSS (the program checks that the two parts meet and fills the dispatch tables
   first).  The memory comes back for the sound.
+* **Memory budget** (2026-10-15): a program asks TOS for at most 3,700,000 bytes (text + data + BSS + 256;
+  `tools/release.py` refuses more).  TOS 2.06 alone leaves 4,061,212 on a 4 MB STE (`tools/memfree.sh`), but a
+  tester's Mega STE with a hard disk driver and accessories had 3,831,554, and five ports at 3.93-4.05 MB would not
+  start.  What brought them to 3.49-3.66 MB, without changing what the games do:
+  - flat dispatch tables (a long per Z80 pc) of the ports that dispatch through one routine (1943, Black Tiger) became
+    two levels: a directory long per 64-byte page, pages only where there is code (448 -> 96 KB, 640 -> 197 KB; +2.8%
+    of the logic's cycles).  The ports whose translated `ret` indexes the table inline (`z80x`, a4) keep theirs;
+  - per-pen masks (a word per pen per row) became the arcade's bit planes, from which `engine/rt/penmasks.s` makes a
+    row's masks when it bakes (Commando 487 KB less, faster too: its bake now skips pens without pixels; 1942's tiles
+    320 KB; its sprites kept their masks: their bakes cost the 99th percentile tick 12%);
+  - whatever start reads once (ROM images it copies, entry lists) lies under a buffer that is not used until later.
 * **Pitfalls met**: Musashi does not fault a word access at an odd address (`clr.w` at `bb_ssg+9`; Hatari did), so
   start every BSS block of new code with `even`; a recording of a few seconds says nothing about a game whose attract
   mode is silent for its first 25 s (Black Tiger) — look at the reference's commands before calling Hatari silent; a

@@ -273,8 +273,8 @@ bake_tile:
 	and.w	#3,d3				; flips: bit 0 x, bit 1 y
 	lsl.w	#2,d1
 	or.w	d3,d1
-	lsl.l	#8,d1				; * 256: 16 rows of 8 pen masks
-	lea	tile_masks,a1
+	mulu	#16*3*2,d1			; 16 rows of 3 planes (assets.py)
+	lea	tile_planes,a1
 	add.l	d1,a1
 	and.w	#$1F,d2
 	lsl.w	#3,d2				; colour * 8
@@ -296,7 +296,12 @@ bake_tile:
 	move.l	a2,-(sp)
 	lea	orp_tab,a3
 	moveq	#15,d2
-.row:	moveq	#0,d3
+.row:	move.l	a1,a0				; the row's planes -> its pen masks (penmasks.s)
+	moveq	#3,d0
+	bsr	pm_expand
+	move.l	a0,-(sp)			; (the next row's)
+	lea	pm_masks,a1
+	moveq	#0,d3
 	moveq	#0,d4
 	moveq	#0,d5
 	moveq	#0,d6
@@ -316,6 +321,7 @@ bake_tile:
 	move.w	d4,(a2)+
 	move.w	d5,(a2)+
 	move.w	d6,(a2)+
+	move.l	(sp)+,a1
 	dbf	d2,.row
 	move.l	a2,tile_pool_ptr
 	move.l	(sp)+,a0			; the baked tile
