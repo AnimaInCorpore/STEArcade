@@ -308,12 +308,24 @@ def function_returns(prog, code):
     return out
 
 
-def liveness(prog, code, ret_points=None):
+def liveness(prog, code, ret_points=None, intrinsic=False):
     """live_out[v] = flags read after the instruction at v.  A call's are its callee's (the flags the callee does not
     define reach its returns, whose live sets are what the return points of its callers read: `ret_points`, a
-    fixpoint); a return no call target reaches, computed jumps, RTI and hooks read N Z V C (H only for DAA)."""
+    fixpoint); a return no call target reaches, computed jumps, RTI and hooks read N Z V C (H only for DAA).
+    With indirect_live, a computed call reads what its seen targets read, what follows it (a target the coverage did
+    not see passes the flags it does not define back) and what any computed jump's or call's target reads before it
+    returns (intrinsic: the liveness with returns reading nothing and calls passing everything on: entry_reads)."""
     if ret_points is None:
         ret_points = function_returns(prog, code)
+    entry_reads = None
+    if prog.indirect_live and not intrinsic:
+        li0, _ = liveness(prog, code, ret_points, intrinsic=True)
+        entry_reads = 0
+        for v, ins in code.items():
+            if ins.flow in ("ijmp", "icall"):
+                for t in prog.targets.get(v, ()):
+                    if t in code and (not prog.exec_cover or t in prog.exec_cover):
+                        entry_reads |= li0[t]
     succ = {}
     calls = {}
     for v, ins in code.items():
@@ -332,7 +344,10 @@ def liveness(prog, code, ret_points=None):
     order = sorted(code, reverse=True)
     # the targets of computed jumps and calls the coverage saw (entry_live: the flags any of them reads)
     ijmp_tg = {v: [t for t in prog.targets.get(v, ()) if t in code] for v, ins in code.items() if ins.flow == "ijmp"}
-    entries = {t for v, ins in code.items() if ins.flow in ("ijmp", "icall") for t in prog.targets.get(v, ()) if t in code}
+    # (targets the coverage executed: a table's plausible entries it did not reach may be data read as code)
+    ran = prog.exec_cover if prog.exec_cover else code
+    entries = {t for v, ins in code.items() if ins.flow in ("ijmp", "icall") for t in prog.targets.get(v, ())
+               if t in code and t in ran}
     changed = True
     while changed:
         changed = False
@@ -347,6 +362,8 @@ def liveness(prog, code, ret_points=None):
                     out = live_in.get(prog.hook_next[v], NZVC)
                 else:
                     out = prog.hook_flags
+            elif fl == "ret" and intrinsic:
+                out = 0
             elif fl == "ret":
                 rp = ret_points.get(v)
                 if rp:
@@ -369,10 +386,18 @@ def liveness(prog, code, ret_points=None):
                     out = 0
                     for t in tg:
                         out |= live_in.get(t, NZVC)
+                    nv = next_virtual(prog, v, ins)
+                    if intrinsic and nv is not None:
+                        out |= live_in.get(nv, NZVC)        # (the return: everything passed on)
                     if fl == "icall":
                         # a target the coverage did not see: anything (or, with indirect_live, what any target of a
-                        # computed jump or call reads: they are entry points, which seldom read flags)
-                        out |= entry_live if prog.indirect_live else NZVC
+                        # computed jump or call reads before it returns, and what it passes back to the return point)
+                        if not prog.indirect_live:
+                            out |= NZVC
+                        elif entry_reads is None:
+                            out |= entry_live
+                        else:
+                            out |= entry_reads | (live_in.get(nv, NZVC) if nv is not None else NZVC)
             else:
                 out = 0
                 for t in succ[v]:
