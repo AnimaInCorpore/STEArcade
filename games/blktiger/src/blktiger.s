@@ -8,10 +8,8 @@ BD_PALETTE = 1
 ; Border removal and the palette on / off: engine/rt/borders.s.  Its events come early and sync themselves to the
 ; video, so a Blitter pass may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces
 ; (blit_go, there).
-; The ring buffers (render.s) begin in the data section: their first part holds the fixed ROM, which start copies to
-; G_Z80 once and then clears; the rest is the first thing in the BSS, which follows the data directly (start checks it).
     section bss,bss
-ring_tail: ds.b 3*RING_SIZE+256-(init_only_end-ring_area)
+ring_area: ds.b 3*RING_SIZE+256  ; (the ring buffers: render.s)
     section text,code
     include "borders.s"
 
@@ -56,22 +54,6 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
-    move.l #init_only_end,d0     ; (the rings' two parts must be contiguous: see ring_tail)
-    cmp.l #ring_tail,d0
-    beq.s .contiguous
-    illegal
-.contiguous:
-    lea fixed_rom,a0             ; (first: it is in the ring buffers)
-    lea G_Z80,a1
-    move #$8000/4-1,d0
-.copyrom:
-    move.l (a0)+,(a1)+
-    dbf d0,.copyrom
-    lea ring_area,a0             ; then they are the rings' memory: clear
-.clear:
-    clr.l (a0)+
-    cmp.l #init_only_end,a0
-    blo.s .clear
     bsr bt_snd_init
     bsr init_hardware
     bsr init_video
@@ -83,7 +65,7 @@ start:
     bsr bt_out_01
     lea G_Z80,a6
     lea G_Z80-1,a5
-    lea bt_disp_fixed,a4
+    lea bt_fixed_dispatch,a4
     moveq #0,d0
     moveq #0,d1
     moveq #0,d2
@@ -99,30 +81,38 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch, two levels (tools/gen.py dispatch_tables): a directory long per 64-byte page of the Z80's
-; space (a4: the fixed part's; g_wdispatch: the bank's window, - $200 * 4), the page a long per pc: the 68000 target
-; (z80_badpc where pc has no code).  (The flat tables, a long per pc, took 640 KB of BSS; these 197 KB.)
+; Natural-PC dispatch through word tables (gen.py: a word per Z80 address, (the entry - the region's base) / 2):
+; the fixed code in two regions ($0000-$3FFF, $4000-$7FFF: 64 KB, a4), the window through the bank's table (32 KB,
+; its base the long before it; g_wdispatch 0 for a bank without code).
 bt_dispatch:                    ; d7.w = the Z80 address (kept for z80_badpc); a0 / d5 are free at a jump
     move.w d7,g_dispatch_pc
+    bmi.s .window
+    moveq #0,d5
     move.w d7,d5
-    lsr.w #4,d5
-    and.w #$fffc,d5                 ; page * 4
-    cmp.w #$200*4,d5
-    bhs.s .window
-    move.l (a4,d5.w),a0
-.page:
-    moveq #63,d5
-    and.w d7,d5
-    add.w d5,d5
-    add.w d5,d5
-    move.l (a0,d5.w),a0
-    jmp (a0)
+    add.w d5,d5                     ; (N: from $4000)
+    bmi.s .high
+    move.w (a4,d5.l),d5
+    add.l d5,d5
+    lea bt_base_lo,a0
+    jmp (a0,d5.l)
+.high:
+    move.w (a4,d5.l),d5
+    add.l d5,d5
+    lea bt_base_hi,a0
+    jmp (a0,d5.l)
 .window:
-    cmp.w #$300*4,d5
+    cmp.w #$c000,d7
     bhs.s .bad
-    move.l g_wdispatch,a0
-    move.l (a0,d5.w),a0
-    bra.s .page
+    move.l g_wdispatch,d5
+    beq.s .bad
+    move.l d5,a0
+    moveq #0,d5
+    move.w d7,d5
+    add.w d5,d5                     ; ($8000-$bfff: 0-$7ffe)
+    move.w (a0,d5.l),d5
+    add.l d5,d5
+    move.l -4(a0),a0
+    jmp (a0,d5.l)
 .bad:
     jmp z80_badpc
 
@@ -249,7 +239,7 @@ bt_out_01:                      ; (d5 / a0: scratch at an instruction's end)
     and.b d0,d5
     move.b d5,g_bank
     lsl.w #2,d5
-    lea bt_dispatch_targets,a0      ; (gen.py: the banks' directories - $200 * 4)
+    lea bt_dispatch_targets,a0      ; (gen.py: the banks' tables, 0 without code)
     move.l (a0,d5.w),g_wdispatch
     lea bt_winbases,a0
     move.l (a0,d5.w),g_winbase
@@ -656,13 +646,13 @@ N   set N+1
     endr
 bank_rom:
     incbin "banks.rom"
+    cnop 0,4
+g_block:                         ; the Z80 image (G_Z80 its middle): $8000-$ffff, then the fixed ROM in place
+    ds.b $8000
+    incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
     even
-ring_area:                       ; (the rings' first part: the fixed ROM until start has copied it)
-fixed_rom:
-    incbin "fixed.rom"
-init_only_end:
     section bss,bss
 old_ssp: ds.l 1
 old_screen: ds.l 1
@@ -757,7 +747,6 @@ g_iy: ds.w 1
 g_fshadow: ds.w 1
     ds.b 16384
 own_stack_top:
-g_block: ds.b $10000
 g_bg: ds.b $4000
 bt_sprites: ds.b $200
 

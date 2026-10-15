@@ -125,7 +125,7 @@ ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
 
 ## Tests
 
-`port.py test 1943` builds the simulator version and runs `tools/logic_test.py`: the translated program on Musashi
+`port.py test 1943` builds the simulator version and runs `tools/logic_test.py`: the dispatch tables as loaded (see "Memory"), then the translated program on Musashi
 against the reference's port schedule, RAM, video latches, sprite buffer, latches, MCU reply and MCU RAM compared at
 every tick, and that every change of the character RAM came with its block's mark; with `--render` each picture the
 renderer finished is compared with the reference renderer through the palette map (the margins must be black),
@@ -141,7 +141,7 @@ of 2000 pictures, a few pixels each).
 | a tick's logic, Musashi (`tools/perf_test.py 1400 1300`, play) | 110k (MCU interpreter 62k) | 46k (translated MCU 8k) |
 | a frame, open sea and a carrier | 340k | 222k |
 | a frame, a cloud bank (`--cheat 9`, ticks 2600-2650) | 562k | 246k |
-| Hatari, DEBUG + AUTOPLAY, 4000 VBLs | 31.9 ticks/s (53%), 6.4 frames/s | 55.7 ticks/s (93%), 11.2 frames/s |
+| Hatari, DEBUG + AUTOPLAY, 4000 VBLs (`tools/bench.sh`) | 31.9 ticks/s (53%), 6.4 frames/s | 55.7 ticks/s (93%), 11.4 frames/s |
 
 The logic gains: the i8751 firmware translated (`tools/mcux.py`), the window guard only at the sites the
 coverage saw reading the banked window (and sites it never ran; since 2026-10-11 block instructions on the same
@@ -172,22 +172,60 @@ Effect $0A (64 seconds of notes) would take 68 KB with its four phases: its phas
 which IRQ a volume step falls on (up to 3 IRQs, 12 ms), so it plays phase 0 in every phase (`capsnd.EXC_LIMIT`: an
 effect whose phase exceptions exceed 8 KB), 50 KB less.
 
-Memory (2026-10-15): the program needs 3,657,234 bytes and leaves 394 KB from the desktop (`tools/memfree.sh`: 4,061,212
-on a 4 MB STE with TOS 2.06; it was 11 KB, and a tester's Mega STE with a hard disk driver and accessories had 3,831,554:
-TOS refused to start it).  The dispatch has two levels (`gen.py` `dispatch_tables`, `g_dispatch`): a directory long per
-64-byte page of the Z80's space (a4 the fixed part's, `g_wdispatch` the bank's window), the pages a word per pc, (the
-68000 target - `start`) / 2 (the translated code lies within 128 KB of `start`: the build checks it), pages without code
-shared.  96 KB of data instead of 448 KB of flat tables (a long per pc), for ~55 cycles more a dispatch, ~30 a tick:
-Musashi's logic mean 48,133 -> 49,499 cycles a tick (`perf_test.py 1600 1200`), 28.1 -> 27.9 ticks and frames a second.
-The fixed ROM (32 KB, copied to `G_Z80` once at the start) is the first part of the screen buffer: `src/1943.s` places it
-last in the data section under `screen_area`, and the rest of the buffer is the first thing in the BSS, which follows the
-data directly (the start checks that the two parts meet, and copies the ROM before anything uses the screen).
-
 Checks: `sound.py check 6000`: the music streams through the decoder 0 of 445,113 channel ticks differ; the effects
 with random commands 70 of 48,000 chip-IRQs differ audibly (the noise period an effect's first IRQs inherit), with the
 game's commands (`logic_test.py`'s play) 0.  `sound_test.py` (in `port.py test`): the 68000 player against the model,
 0 of 20,000 ticks differ; ~7,900 cycles a tick.  Hatari (DEBUG + AUTOPLAY, 4000 VBLs): 53.6 game ticks (90%) and 9.4 drawn
 frames a second; without the sound (`-D NOSOUND=1`) 55.7 and 11.3 (the frames get what the ticks leave).  Hatari: sound in the attract mode and play.
+Memory (2026-10-15): the program needs 3,668,442 bytes and leaves 384 KB from the desktop (`tools/memfree.sh`:
+4,061,212 on a 4 MB STE with TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554, and
+the 4,051,070 bytes of 0.3 did not start).  Most of it is the memory work of 2026-10-10 below, whose branch was only
+merged on 2026-10-15 (0.3 was built without it).  A bank's dispatch table, flat over its code's span (104 KB for
+banks 0, 1, 4, 6), became a directory long per 64 window addresses and pages of words, (the entry - the page) / 2,
+pages without an entry shared (50 KB): ~3 window dispatches a tick, ~50 cycles more each.  The fixed code's table stays
+flat (80 cycles a dispatch).  Musashi (`perf_test.py 1600 1200`): logic 48,133 -> 48,062 cycles a tick, frames
+unchanged (236.8k), 28.1 ticks and frames a second.  The tests' fixed buffers (`front_test.py`, `sprite_test.py`)
+moved above the program, which now reached them.
+
+## Memory (2026-10-10)
+
+text + data + BSS from `build/1943/1943.map`: **3,587,774 bytes** (was 4,003,336: more than GEMDOS leaves on a real
+4 MB STE with a hard disk driver and accessories, Pexec failed).  The program allocates nothing at run time (no
+`Malloc`).  Nothing changed in the logic or the pictures, and nothing got slower:
+
+| what | before | after |
+|---|---|---|
+| natural-PC dispatch tables | 448 KB BSS (a long per Z80 address: fixed 128 KB, banks 0, 1, 4, 6 and an "invalid bank" 64 KB each) + 85 KB of entry lists to fill them at start | 168 KB of data built by `gen.py dispatch_tables`: a word per Z80 address, the fixed code 64 KB, a bank only its code's span (15-31 KB) |
+| fixed ROM | 32 KB data, copied into the 64 KB BSS Z80 image at start | assembled in place in the image (`g_block` in the data section) |
+| 68000 stack | 16 KB | 8 KB (under 200 bytes used in the simulator; the rest for the TOS calls at the exit and on a crash) |
+
+* **Dispatch tables**: an entry is (the label - the table) / 2, unsigned, and each table stands in the text section
+  right before its region's code (the fixed code, each bank's code), so `g_dispatch` jumps relative to the table
+  (`move.w (a4,d7.l),d7; add.l d7,d7; jmp (a4,d7.l)`: 80 cycles for the fixed code, was 92).  (2026-10-15: a bank's table is
+  a directory long per 64 window addresses and pages of words relative to the page, see "Memory (2026-10-15)";
+  $C000 and up is rejected, a bank without code points to `g_wd_none`, every page bad.)  vasm rejects an entry beyond
+  128 KB; gen.py checks that the regions are in address order and that the line before each table ends its flow.
+  Addresses without an entry (no code, merged labels) go to the region's `g_bad_<region>` stub (z80_badpc).
+  `logic_test.py` first checks every table word and span as loaded against the map (`build/1943/dispatch.json`: each
+  Z80 entry on its label, everything else on the stub).
+* **Measured and kept**: the sprite / character caches (4096 slots, 32 KB each) are not larger than their working set:
+  with 2048 slots the conflict misses use up the 96 KB pool faster, it rolls over once more in 6000-10000 ticks and
+  the bakes rise 10-30% (`--cheat 9`: 1245 -> 1639 sprite bakes in 6000 ticks).  The damage lists (700 rectangles a
+  ring, at most 172 used a frame in 6000 ticks of the default schedule, random inputs and stages 3, 9, 13, 14) have no
+  overflow check and stay.  `front_map` as words (the tile's number, a table of the tiles' addresses: 30 KB less)
+  was as fast in Musashi but drew 1.5-3% fewer frames in Hatari's cloud bank bench: dropped.
+* **Speed**, 28fe0cb -> now, the same inputs.  Musashi `perf_test.py` (400 ticks): play (1700 1300) logic 47,991 ->
+  47,719 cycles a tick, frame 206,404 -> 206,465; a cloud bank (3000 2600 --cheat 9) logic 82,141 -> 81,613, frame
+  365,990 -> 365,888.  Hatari (`tools/bench.sh`, DEBUG + AUTOPLAY, ticks / frames
+  drawn; the frames move by a few % with the screen's place in memory alone, so each case was run with the rings at
+  more than one place, `-D PAD=n` before `screen_area` in a scratch copy):
+
+  | | 28fe0cb | now |
+  |---|---|---|
+  | 4000 VBLs | 4460 / 924, 4446 / 910 | 4458 / 911 (55.7 ticks/s, 93%) |
+  | 8000 VBLs | 8782 / 1899, 8768 / 1940 | 8787 / 1934 |
+  | `EXTRA="-D STAGE=3"`, 6000 VBLs | 6631 / 4017, 6566 / 3873 | 6637 / 4105, 6626 / 3963 |
+  | `EXTRA="-D STAGE=9"` (cloud banks), 8000 VBLs | 8469-8473 / 8625-8726 (6 places) | 8481 / 8591-8742 (3 places) |
 
 ## Not done
 

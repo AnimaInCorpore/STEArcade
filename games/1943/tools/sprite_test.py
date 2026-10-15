@@ -23,7 +23,7 @@ def main():
     cpu, mem = s.cpu, s.mem
     mem.w32(sym['pool_ptr'], sym['pool'])
     mem.w16(sym['pool_epoch'], 1)
-    ret, lst, dmg = 0x2F0000, 0x2F0100, 0x300000
+    ret, lst, dmg = 0x6F0000, 0x6F0100, 0x700000   # (above the program: ram_kib 16384)
     mem.w16(ret, 0x4E71)
 
     def draw(ring, code, colour, x):
@@ -34,7 +34,7 @@ def main():
         for i, v in enumerate((code, colour, 4, x)):
             mem.w16(lst + 2 * i, v & 0xFFFF)
         cpu.w_reg(R.A0, lst); cpu.w_reg(R.A1, lst + 8)
-        cpu.w_reg(R.A7, 0x2EFF00); mem.w32(0x2EFF00, ret)
+        cpu.w_reg(R.A7, 0x6EFF00); mem.w32(0x6EFF00, ret)
         cpu.w_sr(0x2700); cpu.w_pc(sym['draw_sprites'])
         n = 0
         while cpu.r_pc() != ret:
@@ -46,19 +46,19 @@ def main():
         bits = (words[..., None] >> np.arange(15, -1, -1)) & 1
         return (bits * (1 << np.arange(4))[None, None, :, None]).sum(2).reshape(LINES, 512)   # x 48 = window x 0
 
-    bg = draw(0x380000, 0, 0, 300)                 # (culled: the background alone)
+    bg = draw(0x780000, 0, 0, 300)                 # (culled: the background alone)
     assert (bg == 5).all()
     # sprite codes with transparent holes and opaque pixels
     codes = []
     for code in range(1, 2048):
-        p = draw(0x380000, code, 1, 96)
+        p = draw(0x780000, code, 1, 96)
         o = (p[4:20, 144:160] != 5).sum()
         if 32 < o < 200:
             codes.append(code)
         if len(codes) == 4:
             break
     cases = clipped = 0
-    for ring in (0x380000, 0x3F0000 - 10 * 256):          # (the second: lines 6 on lie above a 64 KB boundary)
+    for ring in (0x780000, 0x7F0000 - 10 * 256):          # (the second: lines 6 on lie above a 64 KB boundary)
         for code in codes:
             for sh in range(16):
                 whole = draw(ring, code, 1, 96 + sh)[:, 144 + sh:160 + sh]

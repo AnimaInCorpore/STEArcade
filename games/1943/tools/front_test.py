@@ -24,7 +24,8 @@ def main():
     s = Sim(str(run / '1943.PRG'), ram_kib=16384, run_dir=run)
     sym = {k: v + s.base for k, v in s.symbols(build_dir('1943') / '1943_sim.map').items()}
     cpu, mem = s.cpu, s.mem
-    dmg = 0x300000
+    dmg = 0x700000                       # (the damage list and the rings above the program: ram_kib 16384)
+    assert s.base + (ROOT / 'run' / '1943_sim' / '1943.PRG').stat().st_size < dmg
     fmap = np.frombuffer((build_dir('1943') / 'front_map.bin').read_bytes(), '>u4')
     entries = []
     for e in fmap:
@@ -69,7 +70,7 @@ def main():
         return pix, rects
 
     cases = clipped = 0
-    for ring in (0x380000, 0x3F0000 - 20 * STRIDE):           # (the second: lines 20 on lie above a 64 KB boundary)
+    for ring in (0x780000, 0x7F0000 - 20 * STRIDE):           # (the second: lines 20 on lie above a 64 KB boundary)
         for entry in entries:
             for sh in range(16):
                 whole, _ = draw(ring, entry, 96 + sh)

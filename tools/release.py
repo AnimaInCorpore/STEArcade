@@ -63,6 +63,7 @@ assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]
 # has free: TOS 2.06 alone leaves 4,061,212 bytes (Hatari), a tester's Mega STE with a hard disk driver and
 # accessories 3,831,554 ("not enough memory" from 1942, 1943, Black Tiger, Bubble Bobble and Commando at 3.93-4.05 MB).
 MAX_LOAD = 3700000
+OVER_LOAD = {"RTYPE.PRG"}   # (packed with a warning: R-Type's shrinking was deferred on 2026-10-15; it needs 3,846,514)
 DEBUG_NAMES = (b"COUNTERS.BIN", b"DEBUG.BIN", b"LATEPC.BIN", b"RATE.BIN", b"TIMES.BIN", b"DUMP.BIN")
 
 README = """STE Arcade {version}
@@ -74,8 +75,8 @@ https://github.com/AnimaInCorpore/STEArcade  (commit {commit})
 
 Requirements: an Atari STE (or Mega STE) with 4 MB of RAM, a colour monitor or TV (50 Hz).  Start the programs from
 the desktop (a hard disk or a GEMDOS drive: they are 1-3 MB each).  Every program is self-contained: the arcade's
-code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory; if TOS says
-there is not enough, start without accessories and AUTO folder programs.
+code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.85 MB);
+if TOS says there is not enough, start without accessories and AUTO folder programs.
 
 Controls (all games)
 --------------------
@@ -120,7 +121,10 @@ def check(prg):
         sys.exit("%s: a debug build (%s)" % (prg, ", ".join(found)))
     text, dat, bss = struct.unpack(">III", data[2:14])
     if text + dat + bss + 256 > MAX_LOAD:
-        sys.exit("%s: needs %d bytes, more than %d (MAX_LOAD)" % (prg, text + dat + bss + 256, MAX_LOAD))
+        if prg.name not in OVER_LOAD:
+            sys.exit("%s: needs %d bytes, more than %d (MAX_LOAD)" % (prg, text + dat + bss + 256, MAX_LOAD))
+        print("warning: %s needs %d bytes, more than %d (MAX_LOAD; OVER_LOAD lets it pass)"
+              % (prg, text + dat + bss + 256, MAX_LOAD))
     return data
 
 

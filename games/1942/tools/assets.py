@@ -2,12 +2,13 @@
 render_rgb) as one-hot pen masks (for every pen the 16 bit mask of the pixels of a row that have it), from which the runtime bakes
 STE bitplane data once a palette bank is known (an STE plane is the OR of the masks of the pens whose colour has that bit
 set).  The tiles are kept as bit planes (a word a plane a row) and get their masks row by row as they are baked
-(engine/rt/penmasks.s): 320 KB less.  The sprites keep their masks: as planes they would save 196 KB more, but the
+(engine/rt/penmasks.s): 96 KB instead of 256 KB.  The sprites keep their masks: as planes they would save 196 KB, but the
 sprite bakes made the 99th percentile tick 12% slower (the tiles' 1.5%).
 
-  tile_planes.bin 512 tiles x 4 flips (bit 0 = flip x, bit 1 = flip y of the tile attribute) x 16 rows x 3 planes (pens 0-7);
+  tile_planes.bin 512 tiles x 2 (flip y of the tile attribute) x 16 rows x 3 planes (pens 0-7);
                   row j of a tile is the ring line 15 - x of the tile (the background is drawn into a ring buffer whose lines
-                  run down the tilemap's x axis), pixel i = raw y, the leftmost pixel in bit 15
+                  run down the tilemap's x axis), pixel i = raw y, the leftmost pixel in bit 15.  Flip x is the row order
+                  (row j of the flipped tile is row 15 - j): bake_tile writes the rows from the end
   spr_masks.bin   512 sprites x 16 reordered rows x 16 words (pens 0-15, pen 15 = transparent)
   spr_opaque.bin  512 sprites x 16 words: the mask of the opaque pixels of a row (pen != 15)
   chr_masks.bin   512 characters x 8 rows x 4 bytes: M1 M2 M3 (pens 1-3, 8 pixels, leftmost in bit 7) and the opaque mask M1|M2|M3
@@ -84,10 +85,10 @@ def build():
     g = Gfx()
     b = str(build_dir("1942"))
     os.makedirs(b, exist_ok=True)
-    tiles = np.zeros((512, 4, 16, 16), np.uint8)
+    tiles = np.zeros((512, 2, 16, 16), np.uint8)       # (flip x is the row order: the runtime reverses it as it bakes)
     for code in range(512):
-        for flip in range(4):
-            tiles[code, flip] = tile_screen(g, code, flip)
+        for fy in range(2):
+            tiles[code, fy] = tile_screen(g, code, fy << 1)
     open(os.path.join(b, "tile_planes.bin"), "wb").write(planes(tiles, 3).astype(">u2").tobytes())
     spr = np.zeros((512, 16, 16), np.uint8)
     for code in range(512):

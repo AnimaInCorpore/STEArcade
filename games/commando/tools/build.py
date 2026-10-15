@@ -14,7 +14,8 @@ def main():
     ap.add_argument('--sound',action='store_true',help='regenerate the sound effects and the music (sfx_data.s, music_data.s, from the sound driver)')
     ap.add_argument('--frames',type=int,default=0);ap.add_argument('-D',dest='defines',action='append',default=[])
     a=ap.parse_args();prepare()
-    if a.assets or not (build_dir("commando")/"spr_code.s").exists(): assets.build()
+    # (spr_planes.bin: the pen planes and shared sprite orders of 2026-10-10; an older build directory has neither)
+    if a.assets or not all((build_dir("commando")/f).exists() for f in ("spr_code.s","spr_planes.bin")): assets.build()
     if not (build_dir("commando")/"spr_vrange.bin").exists(): assets.vranges()
     if a.sound or not (build_dir('commando')/'sfx_data.s').exists():
         import sound_sfx;print('sfx_data.s: %d bytes'%sound_sfx.emit(build_dir('commando')/'sfx_data.s'))

@@ -11,11 +11,8 @@ TA_DATA = 98
 TA_NOPS = 84
 PIC_LINES = 256
 BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's first line, off after its last)
-; The screen buffer (render.s) begins in the data section: its first part holds the fixed ROM, which start copies to
-; G_Z80 once before anything uses the screen; the rest is the first thing in the BSS, which follows the data directly
-; (start checks it).
     section bss,bss
-screen_tail: ds.b 3*RING_SIZE+256-(init_only_end-screen_area)
+screen_area: ds.b 3*RING_SIZE+256    ; (the screen buffer: render.s)
     section text,code
     include "borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
 
@@ -63,19 +60,7 @@ start:
     addq #6,sp
     move.l d0,old_ssp
     lea own_stack_top,sp
-    move.l #init_only_end,d0     ; (the screen's two parts must be contiguous: see screen_tail)
-    cmp.l #screen_tail,d0
-    beq.s .contiguous
-    illegal
-.contiguous:
-    bsr init_dispatch
     bsr cs_init
-    lea fixed_rom,a0
-    lea G_Z80,a1
-    move #$8000/4-1,d0
-.copyrom:
-    move.l (a0)+,(a1)+
-    dbf d0,.copyrom
     bsr init_hardware
     bsr init_video
     bsr mcu_init
@@ -87,7 +72,7 @@ start:
     bsr g_control_w
     lea G_Z80,a6
     lea G_Z80-1,a5
-    lea g_disp_fixed,a4
+    lea g_wd_fx,a4
     moveq #0,d0
     moveq #0,d1
     moveq #0,d2
@@ -103,56 +88,35 @@ start:
     move #$2300,sr
     jmp Z0000
 
-; Natural-PC dispatch, two levels (tools/gen.py dispatch_tables): a directory long per 64-byte page of the Z80's
-; space (a4: the fixed part's, g_wdispatch: the bank's window, - $200 * 4), biased so that it plus pc * 2 addresses
-; pc's word in the page: (the 68000 target - start) / 2, z80_baddisp where pc has no code.  ~150 cycles against the
-; flat tables' ~95 (a long per pc: 448 KB of BSS; these take 96 KB of data); ~30 dispatches a tick.
-; (a3 is free for computed jumps: z80x.FAST)
+; Natural-PC dispatch (gen.py dispatch_tables, in the text section right before each region's code): the fixed code's
+; table in a4 ($0000-$7FFF), a word per address, (the entry - the table) / 2; the window's in g_wdispatch, a directory
+; long per 64-byte page (the page's address; g_wd_none: a bank without code), a page a word per address, (the entry -
+; the page) / 2 (the bank tables are 50 KB instead of 104 flat; ~3 window dispatches a tick, ~50 cycles more each).
+; d7.w = the Z80 address; a3 is free for computed jumps (z80x.FAST).
 g_dispatch:
     move.w d7,g_dispatch_pc
     and.l #$ffff,d7
-    move.l d7,a3
-    lsr.w #4,d7
-    and.w #$fffc,d7              ; page * 4
-    cmp.w #$200*4,d7
-    bhs.s .window
-    add.l a3,a3                  ; pc * 2
-    add.l (a4,d7.w),a3
-.go:
-    moveq #0,d7
-    move.w (a3),d7
+    add.w d7,d7                  ; (C: from $8000)
+    bcs.s .window
+    move.w (a4,d7.l),d7
     add.l d7,d7
-    lea start,a3
-    jmp (a3,d7.l)
+    jmp (a4,d7.l)
 .window:
-    cmp.w #$300*4,d7
+    cmp.w #$8000,d7              ; ((the address - $8000) * 2: $C000 and up is not the window)
     bhs.s .bad
-    add.l a3,a3
-    add.l g_wdispatch,d7         ; the directory entry
-    exg d7,a3
-    add.l (a3),d7
-    move.l d7,a3
-    bra.s .go
+    lsr.w #5,d7
+    and.w #$fffc,d7              ; the page * 4
+    move.l g_wdispatch,a3
+    move.l (a3,d7.w),a3
+    move.w g_dispatch_pc,d7
+    add.w d7,d7
+    and.w #$7e,d7                ; the address in the page * 2
+    move.w (a3,d7.w),d7
+    add.l d7,d7
+    jmp (a3,d7.l)
 .bad:
-    moveq #0,d7
-    move.w g_dispatch_pc,d7
+    moveq #-1,d7                 ; (z80_badpc reports g_dispatch_pc)
     jmp z80_badpc
-z80_baddisp:                     ; (a dispatch page's word for a pc without code)
-    moveq #0,d7
-    move.w g_dispatch_pc,d7
-    jmp z80_badpc
-
-init_dispatch:
-    lea bank_tabs,a0             ; per bank: the window's base, its directory - $200 * 4
-    lea g_dispatch_targets,a3
-    move.l #bank_rom+$8000,d0
-    moveq #7,d3
-.tabs:
-    move.l d0,(a0)+
-    add.l #$4000,d0
-    move.l (a3)+,32-4(a0)
-    dbf d3,.tabs
-    rts
 
 ; The scheduler has scanned all sixteen task records with no ready task.
 z80_hook:
@@ -503,7 +467,6 @@ CS_LATCH = G_Z80-$3800           ; C800: the main CPU's sound latch
     section text,code
     include "capsnd.s"
     include "code_1943.s"
-g_code_end:                      ; (the dispatch pages hold (target - start) / 2: checked at the end)
     include "rtlib.s"
 z80_badpc:
 z80_badjump:
@@ -544,13 +507,13 @@ g_inputs:
     even
 bank_rom:
     incbin "banks.rom"
+    cnop 0,4
+g_block:                         ; the Z80 image (G_Z80 its middle): $8000-$ffff, then the fixed ROM in place
+    ds.b $8000
+    incbin "fixed.rom"
 mcu_rom:
     incbin "mcu.rom"
     even
-screen_area:                     ; (the screen buffer's first part: the fixed ROM until start has copied it)
-fixed_rom:
-    incbin "fixed.rom"
-init_only_end:
     section bss,bss
 old_ssp: ds.l 1
 old_screen: ds.l 1
@@ -612,7 +575,6 @@ crash_text: ds.b 512
 frame_counter: ds.l 1
 g_winbase: ds.l 1
 g_wdispatch: ds.l 1
-bank_tabs: ds.l 16
 g_dispatch_pc: ds.w 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
@@ -633,10 +595,6 @@ dma_count: ds.w 1
 dbg_buf: ds.w 8
 g_iy: ds.w 1
 g_fshadow: ds.w 1
-    ds.b 16384
+    ds.b 8192                    ; (the 68000 stack: under 200 bytes used in the simulator; TOS calls at the exit)
 own_stack_top:
-g_block: ds.b $10000
 g_sprites: ds.b 512
-    if (g_code_end-start>$1fffe)|(z80_baddisp-start>$1fffe)
-    fail "the dispatch targets lie beyond start + 128 KB (g_dispatch's word pages)"
-    endc

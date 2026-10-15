@@ -52,6 +52,11 @@ is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|ru
 * **Palette**: 16 STE colours against 22-26 on screen.  Keep the colours in order of appearance while they fit;
   otherwise the background, "volatile" entries (changed >= 4 times: flashing, they own a slot), and the heaviest by
   weight capped per bank.  Re-mapping must only rewrite the STE palette when the mapping is unchanged.
+* **Memory budget (4 MB)**: text + data + BSS from the map must stay well below what GEMDOS leaves (see "Memory
+  budget" below: at most 3,700,000 bytes, `tools/release.py` checks it).
+* **Fixed palette, fitted per stage**: when the game's stages look different, fit the fixed colours to frames of
+  every stage (cheats to reach them, as `games/blktiger/ref/palette_fit.py`), each set's histogram normalised;
+  square-rooting the weights (Bubble Bobble) let a stage's sky lose its colour there.
 * **Throttle the logic when it cannot keep up** so the renderer still runs; never let a pending VBL nest.
 * **Reference renderers can be wrong in ways "port equals reference" cannot see** (plane order, palette weights,
   a sprite row off by one): the MAME check below is not optional.
@@ -437,16 +442,24 @@ Bubble Bobble's own players).  Regenerating Commando's data with it gives Comman
   of which is the first thing in the BSS (the program checks that the two parts meet and fills the dispatch tables
   first).  The memory comes back for the sound.
 * **Memory budget** (2026-10-15): a program asks TOS for at most 3,700,000 bytes (text + data + BSS + 256;
-  `tools/release.py` refuses more).  TOS 2.06 alone leaves 4,061,212 on a 4 MB STE (`tools/memfree.sh`), but a
-  tester's Mega STE with a hard disk driver and accessories had 3,831,554, and five ports at 3.93-4.05 MB would not
-  start.  What brought them to 3.49-3.66 MB, without changing what the games do:
-  - flat dispatch tables (a long per Z80 pc) of the ports that dispatch through one routine (1943, Black Tiger) became
-    two levels: a directory long per 64-byte page, pages only where there is code (448 -> 96 KB, 640 -> 197 KB; +2.8%
-    of the logic's cycles).  The ports whose translated `ret` indexes the table inline (`z80x`, a4) keep theirs;
-  - per-pen masks (a word per pen per row) became the arcade's bit planes, from which `engine/rt/penmasks.s` makes a
-    row's masks when it bakes (Commando 487 KB less, faster too: its bake now skips pens without pixels; 1942's tiles
-    320 KB; its sprites kept their masks: their bakes cost the 99th percentile tick 12%);
-  - whatever start reads once (ROM images it copies, entry lists) lies under a buffer that is not used until later.
+  `tools/release.py` refuses more).  TOS 2.06 alone leaves 4,061,212 from the desktop on a 4 MB STE
+  (`tools/memfree.sh`; 4,145,998 before the desktop), but a tester's Mega STE with a hard disk driver and accessories
+  had 3,831,554, and five ports at 3.93-4.05 MB would not start (Pexec fails, TOS says there is not enough memory).
+  What brought them to 2.94-3.67 MB (the work of 2026-10-10 and 2026-10-15), without changing what the games do:
+  - dispatch tables built as data at assembly time, not BSS filled from entry lists at the start: a word per Z80
+    address, (the entry - the table or a region's base) / 2, the table in the text before its code so the jump is
+    relative (1943, Black Tiger: 448 / 640 KB of long tables; 1943's banks as pages, a directory long per 64
+    addresses, 104 -> 50 KB).  The ports whose translated `ret` indexes a long table inline (`z80x`, a4) keep it, as
+    data;
+  - ROMs assembled where the translated code reads them instead of copied there; what start reads once anyway (ROM
+    images, entry lists: Bubble Bobble) under a buffer that is not used until later, the data's end aligned to the
+    BSS's alignment so that the two meet (the start checks it);
+  - per-pen masks (a word per pen per row) became the arcade's bit planes: Commando bakes a row through a routine per
+    colour generated from the colour map (the products of the plane pairs), a quarter of the time; 1942's tiles get
+    their masks from `engine/rt/penmasks.s` (its sprites keep theirs: their bakes cost the 99th percentile tick 12%);
+  - shared row orders and Blitter routines of an image and its mirror image, equal plans stored once, the caches of
+    baked graphics sized to their measured use (1942), the 68000 stack to what it uses (1943: 8 KB).
+
 * **Pitfalls met**: Musashi does not fault a word access at an odd address (`clr.w` at `bb_ssg+9`; Hatari did), so
   start every BSS block of new code with `even`; a recording of a few seconds says nothing about a game whose attract
   mode is silent for its first 25 s (Black Tiger) — look at the reference's commands before calling Hatari silent; a

@@ -1,7 +1,7 @@
 ; Pen masks from bit planes: a port that bakes STE planes from per-pen masks (an STE plane is the OR of the masks of
 ; the pens whose colour has that bit set) keeps its graphics as the arcade's bit planes instead, a word a plane a row,
-; and makes the row's masks when it bakes: 16 pens take 4 words a row instead of 16 (Commando 487 KB less, 1942's
-; tiles 320 KB).
+; and makes the row's masks when it bakes: 16 pens take 4 words a row instead of 16 (1942's tiles: 96 KB instead of
+; 256 KB).  Commando goes further: a row routine per colour, generated from the colour map (its assets.bake_rows).
 ;
 ; pm_expand: a0 = the row's planes (plane 0 first), d0.w = how many (2-4)  ->  pm_masks: 1 << d0 words, pen p's mask
 ;            the pixels whose value is p (pen 0's: of inverted planes only, so set wherever the row has no pixel:

@@ -77,6 +77,8 @@ TESTS = {
                  ("tools/sound_test.py", ["20000"], None)],        # the STE's sound player against the model
     "commando": [("tools/reference_test.py", [], None),
                  ("tools/build.py", ["--sim"], None),
+                 ("tools/dispatch_test.py", [], None),
+                 ("tools/bake_test.py", [], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/render_test.py", ["20", "scroll"], None),
                  ("tools/render_test.py", ["4", "edges"], None),

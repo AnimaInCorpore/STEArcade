@@ -26,7 +26,7 @@
 ; the video RAM and RAM at $C000-$EFFF).  The ROM bank window $8000-$BFFF of the block is unused: the
 ; translated code reads the window through g_winbase (the current bank's copy + $8000, see gen.py).
 ;
-; The CPU ROMs srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7 are embedded (rom_table).
+; The CPU ROMs srb-03.m3 srb-04.m4 srb-05.m5 srb-06.m6 srb-07.m7 are embedded in place (g_block, g_win).
 ;
 ; ------------------------------------------------------------------------------
 
@@ -129,8 +129,6 @@ start:
 .mark:	move.l	#$A5A5A5A5,(a0)+
 	dbf	d0,.mark
 
-	stage	$f00
-	bsr	load_roms
 	stage	$ff0
 
 	bsr	init_hardware
@@ -142,10 +140,6 @@ start:
 	ifd DEBUG
 	bsr	dbg_dump
 	endc
-
-	lea	z80_dispatch_sw,a1	; the dispatch table: every translated pc, and the token
-	lea	z80_entries,a2
-	bsr	init_table
 
 	move.b	#$FF,Z_SYSTEM
 	move.b	#$FF,Z_SYSTEM+1
@@ -175,57 +169,6 @@ start:
 	sub.l	a3,a3
 	move	#$2300,sr
 	jmp	Z0000
-
-; ------------------------------------------------------------------------------
-; The arcade ROMs are part of the program (incbin, rom_table): copied to where the
-; translated code reads them
-; ------------------------------------------------------------------------------
-
-load_roms:
-	lea	g_win,a0		; the banks: 3 ROMs, padded with $FF (the board reads FF there)
-	move.l	#$10000/4-1,d0
-	moveq	#-1,d1
-.fill:	move.l	d1,(a0)+
-	dbf	d0,.fill
-	lea	rom_table,a2
-.next:	move.l	(a2)+,d0		; source, 0 = the end
-	beq.s	.done
-	move.l	d0,a0
-	move.l	(a2)+,a1		; destination
-	move.l	(a2)+,d0		; bytes, a multiple of 4
-	lsr.l	#2,d0
-	subq.l	#1,d0
-.copy:	move.l	(a0)+,(a1)+
-	subq.l	#1,d0
-	bpl.s	.copy
-	bra.s	.next
-.done:
-	rts
-
-; The dispatch table (byte swapped pc order, 65536 longs): a1 = the table, a2 = the list of
-; (pc.w, label.l) ending with $FFFF
-
-init_table:
-	move.l	a1,a4
-	move.l	#z80_badpc,d1
-	move	#65536/8-1,d2
-.fill:
-	rept 8
-	move.l	d1,(a4)+
-	endr
-	dbf	d2,.fill
-.next:
-	moveq	#0,d2
-	move.w	(a2)+,d2
-	cmp.w	#$ffff,d2
-	beq.s	.done
-	move.l	(a2)+,d3
-	ror.w	#8,d2
-	lsl.l	#2,d2
-	move.l	d3,(a1,d2.l)
-	bra.s	.next
-.done:
-	rts
 
 ; ------------------------------------------------------------------------------
 ; Hardware
@@ -962,7 +905,7 @@ z80_unsupported:
 	include "sound.s"
 
 ; ------------------------------------------------------------------------------
-; The translated program (and its dispatch list in the data section).
+; The translated program (and its dispatch table in the data section, built by gen.py).
 
 	include "code_1942.s"
 
@@ -973,14 +916,12 @@ z80_unsupported:
 	section data,data
 ; ------------------------------------------------------------------------------
 
-rom_table:				; source, destination, bytes
-	dc.l	rom_fixed,G_Z80,$8000
-	dc.l	rom_banks,g_win,$C000
-	dc.l	0
-rom_fixed:	incbin	"rom_fixed.rom"
-rom_banks:	incbin	"rom_banks.rom"
-	even
-	even
+; The arcade ROMs are part of the program, where the translated code reads them (nothing is copied at the start):
+	cnop	0,4
+g_block:	ds.b	$8000		; the Z80's 64 KB (G_Z80 = a6 its middle): $8000-$FFFF (RAM, video RAM, latches; zero) ...
+		incbin	"rom_fixed.rom"	; ... and the fixed ROM at $0000-$7FFF
+g_win:		incbin	"rom_banks.rom"	; the ROM banks' copies: 3 (padded with $FF, the board reads FF there) ...
+		dcb.b	$4000,$FF	; ... + the empty one
 
 ; ------------------------------------------------------------------------------
 	section bss,bss
@@ -1056,6 +997,3 @@ dbg_idle_f:	ds.l	1
 	ds.l	1024
 own_stack_top:
 
-g_block:	ds.b	$10000		; the Z80's 64 KB
-g_win:		ds.b	$10000		; the ROM banks' copies: 3 + the empty one
-z80_dispatch_sw:	ds.l	65536

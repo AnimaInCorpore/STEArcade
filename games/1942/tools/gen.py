@@ -250,11 +250,24 @@ def generate(hooks=(), extra_roots=()):
     out.append("; --- targets that are not code")
     for p in missing:
         out.append("Z%04X:\tmove.w #$%04X,d7\n\tjmp z80_badpc" % (p, p & 0xFFFF))
-    out += ["\tsection data,data", "\tcnop 0,2", "z80_entries:"]
-    for p in sorted(code):
-        if p not in em.no_entry:                 # (merged with the instruction before: z80_badpc)
-            out.append("\tdc.w $%04X\n\tdc.l Z%04X" % (p, p))
-    out.append("\tdc.w $%04X\n\tdc.l z80_irq_ret\n\tdc.w $FFFF" % TOKEN)
+    # The dispatch table, built here as data (it was filled at the start from a list of (pc, label), 86 KB): a long per
+    # Z80 address in byte swapped order (the index is a return address read from the Z80 stack as a word), the entries
+    # and the interrupt token at their label, everything else (merged instructions included) at z80_badpc.
+    labels = {p: "Z%04X" % p for p in code if p not in em.no_entry}      # (merged with the instruction before: z80_badpc)
+    labels[TOKEN] = "z80_irq_ret"
+    out += ["\tsection data,data", "\tcnop 0,4", "z80_dispatch_sw:"]
+    run = 0
+    for i in range(0x10000):
+        lab = labels.get(swap16(i))
+        if lab is None:
+            run += 1
+            continue
+        if run:
+            out.append("\tdcb.l %d,z80_badpc" % run)
+            run = 0
+        out.append("\tdc.l %s" % lab)
+    if run:
+        out.append("\tdcb.l %d,z80_badpc" % run)
     rep = {"instructions": len(code), "unsupported": em.unsupported, "window_sites": len(wsites),
            "missing_targets": ["%04X" % p for p in missing], "bank_size": len(banks)}
     return "\n".join(out) + "\n", rep, em, code

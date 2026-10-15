@@ -16,6 +16,7 @@ python port.py cover blktiger 1       # optional additional bank-aware coverage
 games/blktiger/tools/perf_test.py     # Musashi: a tick's and a frame's cycles (profile, logic, frames)
 games/blktiger/tools/bench.sh         # Hatari: DEBUG + AUTOPLAY build, ticks and frames a second
 games/blktiger/tools/sprite_test.py   # edge sprites: the whole hardware window, side bands included
+python games/blktiger/ref/palette_fit.py   # refit the fixed palette (docs/palette.json), its error against the one before
 ```
 
 Supply `assets/roms/blktiger.zip`. Preparation checks all 20 ROMs against the
@@ -81,17 +82,40 @@ cached). Background split priority and viewport-anchored text follow
 MAME. A fixed 16-colour STE palette approximates the arcade palette; renderer
 comparisons use that same colour mapping.
 
+**The palette** is fixed: black and 15 colours fitted by a weighted k-means in
+Oklab (`ref/palette_fit.py`, Bubble Bobble's method) to the reference's
+pictures of the logic test's script and of each stage 0-7 (cover.py's cheats),
+each set's colour histogram normalised, the colours snapped to ones that occur
+(4 bits a channel, exact on the STE). Every palette word maps to the nearest of
+them in Oklab (`tools/assets.py`: a 4096-entry table at build time). A palette
+change remaps the pens of the colours it touched; their tiles and sprites are
+baked again unless one of the colour's last eight mappings returns (flashes and
+cycles find their bakes in the caches). Renderer comparisons use that same
+colour mapping.
+
+| palette | error per channel (0-255), mean of the 9 sets | exact pixels | worst set |
+|---|---|---|---|
+| before: median cut of the script's colours, RGB-weighted map | 17.2 | 27.7% | 38.8 (stage 5) |
+| now | 11.6 | 42.7% | 17.9 (stage 7) |
+| square-rooted weights (as Bubble Bobble) | 15.5 | 35.4% | 40.4 |
+| 13 colours + 2 lent to flashing entries | 12.4 | 40.3% | 21.1 |
+
+Only the script set (the old fit's own data) is a little worse (9.9 -> 10.8).
+
+Lending colours does not pay here: the frequent changes are the fades and a
+four-entry ramp of the player's colours (every few hundred frames). The
+palette's choice costs nothing at run time.
+
 The cooperative task scheduler yields at the game's idle loop. Native VBLs
 queue six game ticks per five 50 Hz fields; drawing is skipped while ticks are
 pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frames.
 
-## Speed (2026-10-09)
+## Memory (2026-10-10)
 
-| | before | now |
-|---|---|---|
-| a frame, Musashi cycles (`tools/perf_test.py 1500 1000`, play) | 2.15 M | 231 k |
-| a game tick (logic) | 54 k | 47 k |
-| Hatari (`tools/bench.sh`, 6000 VBLs of play) | | 38.9 ticks/s (65% of the arcade), 12.3 frames/s |
+text + data + BSS = 3,484,734 bytes (`build/blktiger/blktiger.map`: text 297,744,
+data 2,089,628, BSS 1,097,362); there is no Malloc, the screens are BSS.  It was
+4,023,518, more than GEMDOS leaves on a 4 MB STE with a hard disk driver,
+accessories and TOS 1.62 (TOS 2.06 without AUTO programs: 4,145,998).
 
 `MAX_SKIPS=2` gave 33.5 ticks/s and 14.0 frames/s. The logic is the larger
 part: the bank switches of the background RAM (4 KB copied out and in, the game
@@ -119,6 +143,26 @@ A scrolling play frame (`PERF_EVERY=3 perf_test.py 1600 1430`): 552k -> 437k
 Musashi cycles (320k CPU + 118k Blitter bus); a frame of the start screen
 251k -> 210k. The Blitter's bus time and the half-line pieces are now a quarter
 of a frame: the restores and the text's eight passes a run are bus bound.
+
+### Memory work of 2026-10-10 (merged 2026-10-15)
+
+* **Dispatch tables** (`gen.py`, `bt_dispatch`): a word per Z80 address,
+  (the entry - the region's base) / 2, built as data: the fixed code in two
+  regions (below and from $4000, 64 KB, a4) and each bank's code (32 KB, its
+  base in the long before the table; `g_wdispatch` 0 for a bank without code).
+  Before: 640 KB of long tables in BSS (an invalid bank's too), filled at start
+  from 113 KB of entry lists.  A region's base is a label before its first
+  line, its `z80_badpc` stub follows an unconditional jump inside it; vasm
+  rejects an entry out of range.  About 24 cycles more a dispatch (16 a tick).
+* **The fixed ROM** is assembled into the Z80 image (`g_block`, data) instead
+  of copied there (32 KB).
+* **Sprite row orders**: a sprite and its mirror image share theirs (32 KB).
+
+The largest items then: the three 768 by 544 screens (612 KB), the graphics
+(tiles, sprites 256 KB each, characters 64 KB), the ROM banks (256 KB), the
+shifted sprite masks (250 KB), the caches (tiles 96 KB, sprites 64 KB, byte
+tables 64 KB; `perf_test.py 4000 300 frames` bakes the same with half the
+tile or sprite entries, but later stages were not measured).
 
 ## Validation and limitations
 
@@ -165,15 +209,12 @@ second; without the sound (`EXTRA="-D NOSOUND=1"`) 52.8 and 22.9 (the renderer w
 made the 65% / 12 frames above out of date).  With the renderer work of 2026-10-11 (see "Speed"): 54.0 ticks
 (90%) and 23.8 frames a second.
 
-Memory (2026-10-15): the program needs 3,486,482 bytes and leaves 561 KB from the desktop (4,061,212 on a 4 MB STE with
-TOS 2.06; it was 16 KB, and a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to
-start it).  The dispatch has two levels (`gen.py` `dispatch_tables`, `bt_dispatch`): a directory long per 64-byte page
-of the Z80's space (a4 the fixed part's, `g_wdispatch` the bank's window, the `BK` stubs read it directly), the pages a
-long per pc (the targets span 208 KB: a word would not reach), pages without code shared.  197 KB of data instead of
-640 KB of flat tables, for ~48 cycles more a dispatch: Musashi's logic mean 37,414 -> 38,413 cycles a tick
-(`perf_test.py`), 38.8 -> 38.6 ticks a second.  The fixed ROM (32 KB, copied to `G_Z80` once) is the first part of the
-ring buffers: `src/blktiger.s` places it last in the data section under `ring_area`; the rest of the rings is the
-first thing in the BSS (the start checks that the two parts meet, copies the ROM first and clears it afterwards).
+Memory (2026-10-15): 3,972,764 bytes in 0.3 -> 3,546,696, 504 KB left from the desktop (4,061,212 on a 4 MB STE with
+TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start 0.3).  The
+memory work of 2026-10-10 ("Memory work of 2026-10-10" above: word dispatch tables built as data, the fixed ROM in
+place, shared sprite row orders; its fixed palette fit came with it) was only merged on 2026-10-15 (0.3 was built
+without it).  Musashi (`perf_test.py`): logic 37,414 -> 37,805 cycles a tick, frames unchanged (168.6k ->
+168.7k), 38.8 -> 38.7 ticks a second.
 
 Checks: `sound.py check 120` runs the real driver beside the model, a step at a time: the effects 0 of 59,958
 chip-steps differ audibly (random commands and the game's own); the music 794 of 102,068 sounding channel-steps differ

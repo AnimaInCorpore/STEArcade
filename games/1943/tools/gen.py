@@ -279,59 +279,98 @@ def generate(extra_roots=()):
     # its copy only then; logic_test.py checks that no change of the RAM comes without it).
     em = compile_code(code, joins, cfg, {IDLE}, emitter=GameEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites,
                       text_writers=twrites)
-    out = ['; Generated 1943 main Z80, fixed and eight ROM banks', '\tsection text,code', *em.lines]
+    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
+              'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
+              'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
+    banks = report['banks']
+    lines, regions = dispatch_tables(em, code, banks)
+    out = ['; Generated 1943 main Z80, fixed and eight ROM banks', '\tsection text,code', *lines]
     for pc in sorted(em.refs-set(code)):
         out += [f'Z{pc:04X}:', f'\tmove.w #${real(pc):04x},d7', '\tjmp z80_badpc']
     for pc in sorted(em.stubs):
         out += [f'BK{pc:04X}:', f'\tmove.w #${pc:04x},d7', '\tjmp g_dispatch']
-    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
-              'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
-              'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
-    out += dispatch_tables(code, em.no_entry, report['banks'])
+    # per bank: the window's base (g_winbase), its dispatch table (g_wdispatch; g_wd_none: a bank without code)
+    out += ['\tsection data,data', '\teven', 'bank_tabs:']
+    out += [f'\tdc.l bank_rom+${0x8000 + bank*0x4000:x}' for bank in range(8)]
+    out += [f'\tdc.l {"g_wd_b%d" % bank if bank in banks else "g_wd_none"}' for bank in range(8)]
+    out += ['\tsection text,code', 'g_wd_none:                          ; (a bank without code: every page bad)',
+            f'\tdcb.l {0x4000 // WPAGE},g_wbad_none', 'g_wbad_none:', f'\tdcb.w {WPAGE},(g_bad_none-g_wbad_none)/2',
+            'g_bad_none:', '\tmoveq #-1,d7', '\tjmp z80_badpc']
+    (BUILD / 'dispatch.json').write_text(json.dumps(regions) + '\n')   # (logic_test.py checks the tables against the map)
     return '\n'.join(out)+'\n', report, code
 
 
-DPAGE = 64      # Z80 bytes a dispatch page
+WPAGE = 64      # window addresses a dispatch page (a bank's table)
 
 
-def dispatch_tables(code, no_entry, banks):
-    """The two-level dispatch (src/1943.s g_dispatch): a directory long per DPAGE-byte page of the Z80's space,
-    biased by -page * DPAGE * 2 so that it plus pc * 2 addresses pc's word in the page: (the target - start) / 2.
-    Pages without an entry share gdp_bad (z80_baddisp).  g_disp_fixed: the pages below the window (a4);
-    g_dispatch_targets: per bank the window's directory - $200 * 4 (g_wdispatch; banks without code: g_disp_none).
-    (Were flat tables of a long per pc, 448 KB of BSS: these take 96 KB.)"""
-    entries = {}
-    for pc in code:
-        if pc in no_entry:                          # (merged: z80_badpc)
-            continue
-        if pc < WIN_LO:
-            entries.setdefault(None, {})[pc] = pc
-        elif pc >= VBASE:
-            entries.setdefault((pc-VBASE)//0x4000, {})[real(pc)] = pc
-    out, pages = ['\tsection data,data', '\teven'], []
-
-    def directory(key, first, count):
-        lines, tab = [], entries.get(key, {})
-        for p in range(first, first+count):
-            pcs = [tab.get(p*DPAGE+i) for i in range(DPAGE)]
-            if any(pcs):
-                name = f'gdp{"F" if key is None else key}_{p:03X}'
-                pages.append((name, pcs))
-            else:
-                name = 'gdp_bad'
-            lines.append(f'{name}-${p*DPAGE*2:x}')
-        return [f'\tdc.l {",".join(lines[i:i+8])}' for i in range(0, len(lines), 8)]
-    out += ['g_disp_fixed:', *directory(None, 0, WIN_LO//DPAGE)]
-    for bank in banks:
-        out += [f'g_disp_bank{bank}:', *directory(bank, WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
-    out += ['g_disp_none:', *directory('none', WIN_LO//DPAGE, (WIN_HI-WIN_LO)//DPAGE)]
-    out += ['g_dispatch_targets:', '\tdc.l '+','.join(f'g_disp_bank{b}-$200*4' if b in banks else 'g_disp_none-$200*4'
-                                                      for b in range(8))]
-    word = lambda pc: f'(Z{pc:04X}-start)/2' if pc is not None else '(z80_baddisp-start)/2'
-    out += ['gdp_bad:', f'\tdcb.w {DPAGE},(z80_baddisp-start)/2']
-    for name, pcs in pages:
-        out += [f'{name}:'] + [f'\tdc.w {",".join(word(pc) for pc in pcs[i:i+8])}' for i in range(0, DPAGE, 8)]
-    return out + ['\tsection text,code']
+def dispatch_tables(em, code, banks):
+    """The natural-PC dispatch tables (g_dispatch), built as data at assembly time: for the fixed code a word per Z80
+    address, (the entry - the table) / 2, unsigned; for a bank a directory long per WPAGE addresses and pages of words,
+    (the entry - the page) / 2.  A table is in the text section right before its region's code (the fixed code, each bank's
+    code), so the entries are offsets from the table itself (g_dispatch: jmp (a4,d7.l)); vasm rejects an entry beyond
+    128 KB.  Every address that is not an entry (no code, or a merged label: em.no_entry) goes to the region's stub
+    g_bad_<region> after the table.  The line before a table must end its flow (a jump), so nothing falls into it.
+    Returns the lines and {region: [the first index, the table's words, its Z80 entries (by index)]} for logic_test.py."""
+    entries = sorted(pc for pc in code if pc not in em.no_entry)
+    regions = [('fx', 0x8000, {pc: pc for pc in entries if pc < WIN_LO})]
+    regions += [(f'b{bank}', 0x4000, {pc: pc - VBASE - bank*0x4000 for pc in entries
+                                      if VBASE+bank*0x4000 <= pc < VBASE+(bank+1)*0x4000}) for bank in banks]
+    lines = list(em.lines)
+    where = {}
+    for i, line in enumerate(lines):
+        m = re.match(r'Z([0-9A-F]+):', line)
+        if m:
+            where[int(m.group(1), 16)] = i
+    starts = [min(where[pc] for pc in pcs) for _, _, pcs in regions]
+    for n, (name, size, pcs) in enumerate(regions):
+        end = starts[n+1] if n+1 < len(regions) else len(lines)
+        if not all(starts[n] <= where[pc] < end for pc in pcs):
+            raise RuntimeError(f'dispatch region {name}: the code is not in address order')
+        if n:
+            prev = next(lines[i] for i in range(starts[n]-1, -1, -1) if lines[i].strip() and not lines[i].lstrip().startswith(';'))
+            if not re.match(r'\t(bra|jmp|rts)\b', prev):
+                raise RuntimeError(f'dispatch region {name}: the code before its table may fall through ({prev!r})')
+    spans = {}
+    for n in reversed(range(len(regions))):
+        name, size, pcs = regions[n]
+        at = {i: pc for pc, i in pcs.items()}
+        bad = f'g_bad_{name}'
+        if name == 'fx':
+            # the fixed code's table: a word per address $0000-$7FFF, (the entry - the table) / 2
+            spans[name] = 0, size
+            rows, run = [f'g_wd_{name}:'], 0
+            for i in range(size):
+                if i not in at:
+                    run += 1
+                    continue
+                if run:
+                    rows.append(f'\tdcb.w {run},({bad}-g_wd_{name})/2')
+                    run = 0
+                rows.append(f'\tdc.w (Z{at[i]:04X}-g_wd_{name})/2')
+            if run:
+                rows.append(f'\tdcb.w {run},({bad}-g_wd_{name})/2')
+        else:
+            # a bank's: a directory long per WPAGE-byte page of the window (g_wd_<bank>, g_wdispatch), the page's
+            # address; a page a word per address, (the entry - the page) / 2; pages without an entry share the
+            # region's g_wbad_<bank> (rare: ~3 window dispatches a tick; 104 KB of flat bank tables -> ~50 KB)
+            spans[name] = 0, size
+            pages, dirs = [], []
+            for pg in range(size // WPAGE):
+                idx = [at.get(pg * WPAGE + j) for j in range(WPAGE)]
+                if any(idx):
+                    pages.append((f'g_wp_{name}_{pg:03X}', idx))
+                    dirs.append(pages[-1][0])
+                else:
+                    dirs.append(f'g_wbad_{name}')
+            rows = [f'g_wd_{name}:'] + [f'\tdc.l {",".join(dirs[i:i+8])}' for i in range(0, len(dirs), 8)]
+            rows += [f'g_wbad_{name}:', f'\tdcb.w {WPAGE},({bad}-g_wbad_{name})/2']
+            for label, idx in pages:
+                rows.append(f'{label}:')
+                rows += [f'\tdc.w {",".join(f"(Z{pc:04X}-{label})/2" if pc is not None else f"({bad}-{label})/2" for pc in idx[j:j+8])}'
+                         for j in range(0, WPAGE, 8)]
+        rows += [f'{bad}:', '\tmoveq #-1,d7', '\tjmp z80_badpc']   # (z80_badpc reports g_dispatch_pc)
+        lines[starts[n]:starts[n]] = rows
+    return lines, {name: [*spans[name], sorted(pcs.values())] for name, size, pcs in regions}
 
 
 if __name__ == '__main__':

@@ -112,12 +112,14 @@ the registers that changed; no interrupt handler of the port touches the YM.
 Room for it: `tile_ptr` holds word numbers of the baked tiles instead of pointers (128 KB less); the program leaves
 about 125 KB free from the desktop (`tools/memfree.sh`).
 
-Memory (2026-10-15): 3,933,862 -> 3,606,364 bytes, 444 KB left from the desktop (4,061,212 on a 4 MB STE with TOS 2.06;
-a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start it).  The tiles are
-kept as the arcade's three bit planes (`tile_planes.bin`, 192 KB instead of 512 KB of pen masks); `tile_get` makes a
-row's eight masks as it bakes (`engine/rt/penmasks.s` `pm_expand`, ~250 cycles a row).  Musashi (`perf_test.py`): tick
-mean 139,461 -> 139,596, 99th percentile 238,852 -> 242,414.  The sprites as planes would save 196 KB more, but their
-bakes made the 99th percentile 266,472 (+12%), so they keep their masks.
+Memory (2026-10-15): 3,933,862 bytes in 0.3 -> 2,940,232, 1,094 KB left from the desktop (4,061,212 on a 4 MB STE with
+TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start 0.3).  The
+memory work of 2026-10-10 below (its branch merged on 2026-10-15), and the tiles as the arcade's three bit planes
+(`tile_planes.bin`, two flip y variants: 96 KB instead of 256 KB of pen masks); `bake_tile` makes a row's eight masks
+as it bakes (`engine/rt/penmasks.s` `pm_expand`, ~250 cycles a row).  Musashi (`perf_test.py`, the simulator's
+default 4 MB: with 16 MB the same build counts ~1.4% more): a tick 139,461 -> 139,528, the 99th percentile 238,852 ->
+242,414.  The sprites as planes would save 196 KB more, but their bakes made the 99th percentile 266,472 (+12%), so
+they keep their masks.
 
 Checks: `sound.py check 3000` (the model against the driver run beside the game and with random commands): 273 of 3000
 game ticks differ, 230 of them by a volume step of 1-2 (an effect that resumes in the middle of a tick: the model steps
@@ -201,7 +203,30 @@ cycles: the palette bank changes and every cached picture is baked again) and a 
 
 Ideas for speed: sprite entries kept in registers (`sprite_entry` / `draw_part` are 15% of the frames of busy scenes), fewer rectangles
 (one restore per sprite part), a faster bake of tiles at a stage change, native replacements for the kernel's timer loop (`$0055`) and the
-task switch; a 4th ring is not possible (the program uses 3.85 of the 4 MB).
+task switch; a 4th ring (200 KB) would fit now (see "Memory").
+
+## Memory (2026-10-10)
+
+A plain 4 MB STE has at most about 4.1 MB free in GEMDOS before the desktop, a hard disk driver and accessories take
+theirs: the program needed text + data + BSS = **4,015,620 bytes** (`build/1942/1942.map`) and did not start on real
+machines.  Now **3,192,326 bytes** (text 86,044, data 1,336,460, BSS 1,769,822), with nothing traded for it:
+
+| | before | now | why it costs nothing |
+|---|---|---|---|
+| dispatch table | 256 KB BSS + 86 KB list (pc, label) in data, filled at the start | 256 KB data | `gen.py` emits the table itself (`dc.l` labels, `dcb.l` runs of `z80_badpc`): the same 65536 longs in byte swapped order, the dispatch code is unchanged; checked entry by entry against the old build, and `logic_test.py` checks at its start that every entry is its address's label, the token's `z80_irq_ret` or `z80_badpc` |
+| fixed ROM, ROM banks | 32 + 48 KB data copied into 64 + 64 KB BSS | `g_block` (32 KB zeros + the ROM) and `g_win` (the banks + the empty `$FF` one) in data | assembled where the translated code reads them, nothing copied at the start |
+| `tile_masks` | 512 KB: 512 tiles x 4 flips | 256 KB: the flip y variants | flip x is the row order of the baked tile (the ring's lines run down the tilemap's x axis): `bake_tile` writes the rows of an x flipped tile from its end (`-(a2)`, the same cycles); 36864 tile, 32768 character and 8192 sprite bakes are byte for byte those of the old build |
+| `tile_pool` / `spr_pool` / `chr_pool` | 384 / 256 / 192 KB | 128 / 192 / 128 KB | measured over `perf_test.py` runs of 11-19k ticks (attract mode, play, level skips every 600 and 2000 frames): at most 20 / 70 / 33 KB baked between two flushes (a palette bank change flushes them), at most 15 / 1.3 / 28 KB in one frame; the room kept for a frame (`*_POOL_ROOM`: every one of the 512 background cells, 256 sprite parts, 48 KB of characters) leaves 64 / 160 / 80 KB before a "full" flush, which none of the runs reached before or after |
+
+The program does not allocate at run time (GEMDOS calls: `Super`, the `COUNTERS.BIN` / `DEBUG.BIN` / `CRASH.TXT` files, `Pterm`).
+Speed: Musashi `perf_test.py 3000` 126,694 -> 126,483 cycles a tick (cpu), `perf_test.py 4000 600` 107,011 -> 106,794,
+the logic alone 39,922 both; Hatari (`bench.sh`, 6000 VBLs) 58.2 ticks / 36.2 frames a second before and after, with level
+skips every 600 frames 58.1 / 43.9 -> 58.1 / 44.0.  `logic_test.py 6000` and `9000 --cheat`, `sprite_test.py`, `render_test.py`
+(seq 200 from 1200, `SCROLLRND=1`, `ATTRACT=1`, every 25th frame from 3000) pass with 0 differences.
+
+Left as they are: the word dispatch table of Black Tiger (128 KB less, but about 22 cycles more per `ret` / `jp (hl)`, 19 of
+them a tick), `tile_ptr` / `chr_ptr` as word indexes (192 KB, a few cycles per lookup), the unused 96 bytes of every ring line
+(the Shifter skips them: 294 KB in pieces, sprites reach into the first of them).
 
 ## Later stages (the coverage and the cheats)
 
