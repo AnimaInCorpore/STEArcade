@@ -6262,6 +6262,12 @@ ren_orow_fast:
 	bgt	.no
 .h:	tst.w	ren_nbar
 	beq	.ok
+	lea	ren_bar_cum,a1		; (no bar line among the 8: ok)
+	move.w	d2,d0
+	add.w	d0,d0
+	move.w	16(a1,d0.w),d1
+	cmp.w	(a1,d0.w),d1
+	beq	.ok
 	addq.b	#1,d3			; (a bar line hides the layer when its value is above the priority + 1)
 	lea	ren_bar_line,a1
 	add.w	d2,a1
