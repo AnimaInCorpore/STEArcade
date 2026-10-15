@@ -28,7 +28,8 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 
 # the ports, in the order of the README, and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
-         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG"}
+         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
+         "kungfum": "KUNGFUM.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -45,9 +46,16 @@ COVER = {
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
+    "kungfum": [("ref/cover.py", list(range(1, 14)), 20000)],     # floors and bosses by MAME's cheat, high score, ending, DIPs
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "kungfum": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),
+                ("tools/logic_test.py", ["6000", "--seed", "7"], None),     # play
+                ("tools/render_test.py", ["6000", "--seed", "9"], None),
+                ("tools/sprite_test.py", [], None)],                # edges, 16 shifts, holes, 64 KB crossings
     "rtype": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),                    # attract

@@ -56,6 +56,10 @@ GAMES = [
      "playable, but slow: about 30% of the arcade's speed and 6 pictures a second in play (Hatari); exact logic,\n"
      "  the centred 320 of the 384 pixels; no sound yet",
      "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
+    ("kungfum", "KUNGFUM.PRG", "Kung-Fu Master (Irem 1984)",
+     "93% of the arcade's speed, 24-39 pictures a second in play (Hatari); exact logic, all 256 x 256 pixels;\n"
+     "  no sound yet",
+     "punch: Space, Control, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  up jumps, down crouches."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"
