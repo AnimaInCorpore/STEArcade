@@ -1,6 +1,6 @@
 """The state the STE port starts from: the reference board at machine.START (both CPUs idle), as data for the runtime.
 
-    from snapshot import write; write(build_dir)     -> build/splatter/snapshot.bin + snapshot.s (the layout)
+    from snapshot import write; write(build_dir)     -> build/splatter/snapshot.bin, snapshot_vio.lz
 
 The boot (RAM tests, the MCU handshake, the sub CPU's resets) is not translated; the port starts where the reference is
 after it.  snapshot.bin holds, in this order:
@@ -8,7 +8,9 @@ after it.  snapshot.bin holds, in this order:
     per CPU (main, sub): 8 words the virtual page in each slot, A B X Y U S (words), CC (word)
     key      8 bytes the key custom's registers, 4 bytes MAME's rand() seed
     mcu      src/mcu.s's mcu_state (tools/mcu.py MCUNative.state_image: the MCU's RAM, its channels, port 1)
-The runtime copies vio to its image and fills the contexts (src/splatter.s, snapshot_load).
+The runtime copies vio to its image and fills the contexts (src/splatter.s, snapshot_load).  The program includes vio
+packed (snapshot_vio.lz: engine/lz.py, ~6 KB instead of 160 KB; unpacked by engine/rt/lz.s) and the rest as it is
+(snapshot_rest.bin).
 """
 import struct
 import sys
@@ -49,6 +51,11 @@ def write(build=None):
     build = build or build_dir("splatter")
     data, m = capture()
     (build / "snapshot.bin").write_bytes(data)
+    import lz
+    packed = lz.compress(data[:VIO_SIZE])
+    assert lz.decompress(packed) == data[:VIO_SIZE]
+    (build / "snapshot_vio.lz").write_bytes(packed)
+    (build / "snapshot_rest.bin").write_bytes(data[VIO_SIZE:])
     return m
 
 

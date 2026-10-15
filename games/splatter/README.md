@@ -243,7 +243,10 @@ of the gain (38% of the rows).
 Memory (the harness without vio): text 16 KB, data 1.59 MB (characters 768 KB, masks 128 KB, sprite boxes 595 KB,
 tables), bss 0.84 MB (2 buffers 295 KB, cache 128 KB, the pair tables 128 KB (`REN_PTS` 32 x 4 KB), priority planes
 57 KB, bar image 38 KB, tile copy 32 KB, ...): 2.45 MB.  With the program's ~1.2 MB (code, 512 KB ROM image, vio, the
-snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).
+snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).  2026-10-15: the program (text + data + BSS,
+`build/splatter/splatter.map`) had grown to 4.17 MB, more than a 4 MB STE gives a program started from the desktop
+(4,061,212 bytes, `tools/memfree.sh`; Hatari: "Program too large").  The start snapshot's 160 KB of vio is now packed
+(`snapshot_vio.lz`, engine/lz.py: ~6 KB, unpacked by `lz_unpack` at the start): 4.01 MB, 51 KB free.
 
 ### Open problems
 
@@ -258,4 +261,7 @@ snapshot) about 3.65 MB of 4 MB (`REN_PTS` 16 would give 64 KB back).
   fade); colours appearing after the choice (stage 4's purple lightning, sprites of a new colour) map to the nearest
   existing colour until the next choice; stage 5's red scene leaves no teal for Rick.
 * Memory: ~250 KB more could come from 4-bit characters with a palette per character (+50% conversion time).
-* Not run in Hatari: the main program (splatter.s) is not written yet.
+* Hatari benchmark: `games/splatter/tools/bench.sh [TAG]` (splatter.s' BENCH game, arcade frames 600-1100, in
+  `run/splatter_TAG` with Hatari started there: no pkill; `PHASES=1` adds render.s' phase VBLs, `EXTRA="-D
+  BENCH_NOPIC=1"` the logic alone).  `render_test.py --bench 560-1100 --every 2 --profile` sums CPU + Blitter cycles
+  by routine (`PROF_FOCUS=label`: that routine's instructions).

@@ -616,39 +616,45 @@ sl_core:
 	move.w	(sp)+,d6
 	lsl.w	#4,d6
 	add.w	d6,d4			; U at the end
-	lsr.w	#4,d6
-	subq.w	#1,d6
-.part:	move.b	$60(a3),4(a4)
-	move.b	$61(a3),8(a4)
-	move.b	1(a0),d1
-	move.b	(a0),d0
-	add.b	$5F(a3),d1
-	move.b	$5E(a3),d5
-	addx.b	d5,d0
-	addq.l	#2,a0
+	move.l	a2,-(sp)
+	lea	(a4,d6.w),a2		; (the end)
+	move.w	d4,-(sp)
+	move.b	$5F(a3),d2		; the part's constants in registers
+	move.b	$5E(a3),d4
+	move.b	$60(a3),d5
+	move.b	$61(a3),d6
+	move.b	$5D(a3),d7
+	move.b	$57(a3),-(sp)
+	move.w	(sp)+,d3
+	move.b	$58(a3),d3		; [$57]
+.part:	move.b	(a0)+,d0		; U[4] U[5] = $60 | [$5E] + [X]
+	move.b	(a0)+,d1
+	add.b	d2,d1
+	addx.b	d4,d0
 	move.b	d1,5(a4)
-	or.b	4(a4),d0
+	or.b	d5,d0
 	move.b	d0,4(a4)
-	move.b	1(a0),d1
-	addq.l	#2,a0
-	add.b	$5D(a3),d1
-	move.b	d1,6(a4)
-	move.b	(a1)+,d1
-	move.b	d1,d0
+	move.b	d6,8(a4)		; U[8] = [$61]
+	addq.l	#1,a0			; U[6] = (low of [X + 2]) + [$5D] | bit 8 of (sext [Y] + [$57]); U[7] = low of that
+	move.b	(a0)+,d1
+	add.b	d7,d1
+	move.b	(a1)+,d0
 	ext.w	d0
-	lsr.w	#8,d0
-	add.b	$58(a3),d1
-	move.b	$57(a3),d5
-	addx.b	d5,d0
-	move.b	d1,7(a4)
+	add.w	d3,d0
+	move.b	d0,7(a4)
+	move.w	d0,-(sp)
+	move.b	(sp)+,d0
 	and.b	#1,d0
-	or.b	6(a4),d0
-	move.b	d0,6(a4)
-	move.b	(a1)+,d1
+	or.b	d0,d1
+	move.b	d1,6(a4)
+	move.b	(a1)+,d1		; U[9] = [Y + 1] + [$59]
 	add.b	$59(a3),d1
 	move.b	d1,9(a4)
 	lea	16(a4),a4
-	dbf	d6,.part
+	cmpa.l	a2,a4
+	bne.s	.part
+	move.w	(sp)+,d4
+	move.l	(sp)+,a2
 	move.l	(sp)+,a4
 	bra	.end
 .slow:	subq.w	#1,d6			; a part at a time: X d2, Y d3, U d4

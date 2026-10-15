@@ -139,11 +139,10 @@ mcu_call:
 
 ; ---- the snapshot (tools/snapshot.py) ----
 snapshot_load:
-	lea	snapshot,a0
+	lea	snapshot_vio,a0		; (vio packed: tools/snapshot.py)
 	lea	vio,a1
-	move.w	#$28000/4-1,d0
-.vio:	move.l	(a0)+,(a1)+
-	dbf	d0,.vio
+	bsr	lz_unpack
+	lea	snapshot_rest,a0
 	lea	ctx_main,a6
 	bsr.s	load_ctx
 	lea	ctx_sub,a6
@@ -524,13 +523,18 @@ key_table:
 	include	"core.s"
     ifnd SIM
 	include	"mcu.s"
+	section text,code
+	include	"lz.s"
 	include	"render.s"
     endc
 
 	section data,data
     ifnd SIM
-snapshot:
-	incbin	"snapshot.bin"
+snapshot_rest:
+	incbin	"snapshot_rest.bin"
+	even
+snapshot_vio:
+	incbin	"snapshot_vio.lz"
 	even
 black_pal:	dcb.w	16,0
 crash_text:	dc.b	"BADPC "

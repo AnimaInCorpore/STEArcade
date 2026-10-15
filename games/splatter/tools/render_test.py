@@ -19,6 +19,7 @@ picture's pixels, against the arcade's RGB), and the cycles of each picture (Mus
 cycles).  --png writes STE | reference pictures into build/splatter/render_*.png.
 """
 import argparse
+import os
 import pickle
 import random
 import subprocess
@@ -87,6 +88,7 @@ def build_harness(defines=()):
 
 class Harness:
     def __init__(self, defines=()):
+        self.by_pc = {}
         prg = build_harness(defines)
         self.s = Sim(str(prg), ram_kib=16384, run_dir=BUILD)
         self.s.mem.set_trace_mode(True)        # (the trace function is the Blitter and the I/O registers)
@@ -139,15 +141,34 @@ class Harness:
         self.cpu.w_pc(self.sym[name])
         out = {}
         stop = self.sym["h_wait"]
+        bl = self.s.blitter
         while True:
             pc = self.cpu.r_pc()
             if pc == stop:
                 break
             i = bisect.bisect_right(addrs, pc) - 1
+            b0 = bl.cycles
             c = self.cpu.execute(step).cycles
+            b = bl.cycles - b0
             k = labels[i][1]
-            out[k] = out.get(k, 0) + c
+            out[k] = out.get(k, 0) + c + b
+            if k == PROF_FOCUS:
+                e = self.by_pc.setdefault(pc, [0, 0, 0])
+                e[0] += c; e[1] += b; e[2] += 1
         return out
+
+    def profile_frame(self, out):
+        """frame() with render_frame profiled: CPU + Blitter cycles by label added to out; None when no buffer was
+        free, else the picture's cycles"""
+        before = self.r32("ren_pictures")
+        p = self.profile("render_frame")
+        if self.r32("ren_pictures") == before:
+            return None
+        for k, v in p.items():
+            out[k] = out.get(k, 0) + v
+        self.call("render_vbl")
+        self.call("render_vbl")
+        return sum(p.values())
 
     def r8(self, name, off=0):
         return self.mem.r8(self.sym[name] + off)
@@ -406,12 +427,19 @@ def check(h, st, name, png=False):
     return int(np.count_nonzero(diff)), False, err
 
 
-def run_sequence(h, states, frames, label, png_at=(), verbose=True):
+PROF_FOCUS = os.environ.get("PROF_FOCUS")      # (--profile: that routine's instructions: CPU, Blitter cycles, runs)
+
+
+def run_sequence(h, states, frames, label, png_at=(), verbose=True, prof=None):
     costs = []
     fails = 0
-    for f in frames:
+    for i, f in enumerate(frames):
         h.put_state(states[f])
-        r = h.frame()
+        if prof is not None and i >= 20:
+            c = h.profile_frame(prof)
+            r = None if c is None else (c, 0)
+        else:
+            r = h.frame()
         if r is None:
             print("%s %d: no buffer free" % (label, f))
             continue
@@ -555,6 +583,8 @@ def main():
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--every", type=int, default=1, help="a picture every N recorded frames (the program: PIC_EVERY)")
     ap.add_argument("--phase", type=int, default=0, help="with --every: the frames whose number %% N is this")
+    ap.add_argument("--profile", action="store_true", help="render_frame instruction by instruction: CPU + Blitter "
+                    "cycles by routine label, summed over the pictures after the range's first 20 (the new scene)")
     args = ap.parse_args()
     states = load_states()
     h = Harness(args.defines)
@@ -573,8 +603,21 @@ def main():
         fr = [f for f in sorted(states[kind]) if a <= f <= b]
         if kind in ("play", "bench") and args.every > 1:       # (attract states are recorded every 4th frame already)
             fr = [f for f in fr if f % args.every == args.phase]
-        n, costs = run_sequence(h, states[kind], fr, kind, pngs)
+        prof = {} if args.profile else None
+        n, costs = run_sequence(h, states[kind], fr, kind, pngs, prof=prof)
         fails += n
+        if prof:
+            tot = sum(prof.values())
+            n = len(costs) - 20
+            print("%s profile: %d pictures, %d cycles a picture (CPU + Blitter)" % (kind, n, tot / max(1, n)))
+            for k, v in sorted(prof.items(), key=lambda kv: -kv[1])[:45]:
+                print("  %-28s %8d a picture  %5.1f%%" % (k, v / n, 100 * v / tot))
+            if PROF_FOCUS:
+                base = h.sym[PROF_FOCUS]
+                for pc in sorted(h.by_pc):
+                    c, b, r = h.by_pc[pc]
+                    print("  %s+%-5d CPU %7d  Blitter %7d  runs %6d  %s" % (
+                        PROF_FOCUS, pc - base, c / n, b / n, r / n, h.cpu.disassemble(pc)[1]))
         if costs:
             print("%s: %d pictures, median %d, 10%% %d, 90%% %d, max %d cycles" % (
                 kind, len(costs), np.median(costs), np.percentile(costs, 10), np.percentile(costs, 90), max(costs)))
