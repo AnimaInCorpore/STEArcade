@@ -12,8 +12,9 @@
 ; keeps per cell the key of what it shows (cell_key: the bg1 entry, its colour's epoch, the backdrop): a frame redraws
 ; only the cells whose key changed.  The backdrop of a cell whose tile has pen 0 pixels: one colour when the bg2
 ; pixels behind it are one colour (bg2_uniform), else bg2 itself at the frame's position (the key then holds bg2_gen:
-; such cells are redrawn when bg2 moves against bg1).  Sprites and text drawn over a cell invalidate its key (it is
-; redrawn when this ring is drawn next).
+; such cells are redrawn when bg2 moves against bg1).  Text drawn over a cell invalidates its key when the text
+; changes (it is redrawn when this ring is drawn next); the words under a sprite are saved (sv_save) and put back
+; before the ring's next picture (sv_restore), a text cell under a sprite redrawn.
 ;
 ; bg2 (b2_base): 33 word columns by 288 lines (bg2's lines -16 .. 271: its 16 tile rows and a wrapped one at each
 ; end), world column wc (bg2's x / 16: image * 16 + its tilemap column) at word wc & 31, column 0 also at 32.
@@ -69,6 +70,11 @@ init_video:
 .m:	move.w #1,(a0)+			; (1: unknown, never a desired mask)
 	dbf d0,.m
 	move.w #-1,ring_e
+	move.w #-1,u_vphase
+	lea pair_keys,a0
+	move.w #31*16-1,d0
+.pk:	move.l #-1,(a0)+
+	dbf d0,.pk
 	move.w #-1,ring_e+2
 	lea b2_keys,a0
 	moveq #31,d0
@@ -140,6 +146,13 @@ render_frame:
 	lea colmask1,a1
 .r0:	move.l a0,cur_keys
 	move.l a1,cur_colmask
+	lea sv0,a0
+	tst.w d0
+	beq.s .r2
+	lea sv1,a0
+.r2:	move.l a0,cur_sv
+	bsr sv_restore
+	move.w ring_index,d0
 	lea dmg0,a0
 	lea txtmap0,a1
 	lea txtl0,a2
@@ -206,6 +219,25 @@ render_frame:
 .inv:	move.l d1,(a0)+
 	dbf d0,.inv
 .same_e:
+	; the slots' first lines: in the ring (slot_addr), in bg2's buffer (slot_b2: its line 16 k - e + 8, + 16)
+	moveq #0,d0
+	move.w #GUARD_T,d0
+	sub.w vphase,d0
+	mulu #STRIDE,d0
+	add.l work_base,d0
+	moveq #0,d1
+	move.w #24,d1
+	sub.w vphase,d1
+	mulu #B2_STRIDE,d1
+	add.l b2_base,d1
+	lea slot_addr,a0
+	lea slot_b2,a1
+	moveq #SLOTS-1,d2
+.sl:	move.l d0,(a0)+
+	move.l d1,(a1)+
+	add.l #16*STRIDE,d0
+	add.l #16*B2_STRIDE,d1
+	dbf d2,.sl
 	bsr columns_update
 	bsr text_build
 	bsr text_prepare
@@ -351,9 +383,8 @@ cache_flush:
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; b2_update: bg2's world columns the frame can show ((X2 - 48) / 16 .. (X2 + 304) / 16) drawn into b2 where their
-; key (the world column, bg2_epoch) differs; then u_cells: per such column (relative to the first) and slot row, the
-; colour of its bg2 pixels behind the slot when they are one colour, else $FF.  bg2_gen changes when bg2 moves
-; against bg1 or is drawn again.
+; key (the world column, bg2_epoch) differs, with its u_cells (u_column); all u_cells again for a new vertical phase.
+; bg2_gen changes when bg2 moves against bg1 or is drawn again.
 b2_update:
 	move.w bg2_x,d0
 	sub.w #48,d0
@@ -377,19 +408,18 @@ b2_update:
 	movem.l d5-d6,-(sp)
 	move.w d5,d0
 	bsr b2_column
+	move.l (sp),d0
+	and.w #31,d0
+	bsr u_column
 	movem.l (sp)+,d5-d6
 	moveq #1,d7
 .ok:	addq.w #1,d5
 	dbf d6,.col
-	; bg2_gen: a new number when X2 against sx changed or a column was drawn
+	; bg2_gen: a new number when X2 against sx (a ring cell's bg2 pixels: at 16 (b - 2) + X2 - sx) or the vertical
+	; phase changed or a column was drawn
 	move.w bg2_x,d0
-	cmp.w last_bg2_x,d0
-	beq.s .x_same
-	move.w d0,last_bg2_x
-	moveq #1,d7
-.x_same:
-	move.w scroll_x,d0
-	cmp.w last_sx,d0
+	sub.w scroll_x,d0
+	cmp.w last_sx,d0		; (X2 - sx)
 	beq.s .sx_same
 	move.w d0,last_sx
 	moveq #1,d7
@@ -405,20 +435,33 @@ b2_update:
 	addq.b #1,bg2_gen
 	cmp.b #$80,bg2_gen
 	blo.s .gen_same
-	move.b #1,bg2_gen		; (a wrap: every key with an old number goes)
-	bsr cache_flush
+	move.b #1,bg2_gen		; (a wrap: every ring key goes, one with an old number could match)
+	lea keys0,a0
+	moveq #-1,d0
+	move.w #2*KEYS-1,d1
+.wk:	move.l d0,(a0)+
+	dbf d1,.wk
 .gen_same:
-	tst.w d7
-	beq .u_done			; (nothing moved: u_cells holds)
-	; u_cells[i][k] for the 23 columns from b2_first and the 16 slot rows: slot k's bg2 lines are its arcade lines
-	; 16 k - e + 8 .. + 15 (tile rows t0 = that / 16, t1 = (that + 15) / 16, mod 16)
+	; u_cells: all again for a new vertical phase (a drawn column's own: b2_column)
+	move.w vphase,d0
+	cmp.w u_vphase,d0
+	beq.s .u_done
+	move.w d0,u_vphase
+	moveq #31,d6
+.ucol:	move.w d6,d0
+	bsr u_column
+	dbf d6,.ucol
+.u_done:
+	rts
+
+; u_column: u_cells of b2 column d0.w (0-31; 0 at 32 too): per slot row k the colour of the bg2 pixels behind it when
+; they are one colour, else $FF; slot k's bg2 lines are its arcade lines 16 k - e + 8 .. + 15 (tile rows t0 = that /
+; 16, t1 = (that + 15) / 16, mod 16).  Uses d0-d4/a0-a1.
+u_column:
 	lea u_cells,a1
-	move.w b2_first,d5
-	moveq #23-1,d6
-.ucol:	move.w d5,d0
-	and.w #31,d0
-	lsl.w #4,d0
 	lea b2_uni,a0
+	lsl.w #4,d0
+	add.w d0,a1
 	add.w d0,a0			; the column's 16 tile rows
 	moveq #8,d4
 	sub.w vphase,d4			; the arcade line of slot 0 (-7 .. 8)
@@ -437,10 +480,14 @@ b2_update:
 .u1:	move.b d2,(a1)+
 	add.w #16,d4
 	dbf d3,.urow
-	addq.w #1,d5
-	dbf d6,.ucol
-.u_done:
-	rts
+	lea u_cells+16,a0
+	cmp.l a0,a1
+	bne.s .done
+	move.l -16(a1),32*16-16(a1)	; (column 0 also at 32)
+	move.l -12(a1),32*16-12(a1)
+	move.l -8(a1),32*16-8(a1)
+	move.l -4(a1),32*16-4(a1)
+.done:	rts
 
 ; b2_column: world column d0.w (its tiles from the map ROM: tile row tr's entry at (tr * $800 + wc * 2) & $7FFF) into
 ; b2's column wc & 31 (and 32 for 0), lines 16 + 16 tr; tile row 15 again at lines 0-15, row 0 at 272-287.  b2_uni:
@@ -588,6 +635,8 @@ columns_update:
 ; col_invalidate: column d0.w's keys invalid in this ring (keeps d0-d7)
 col_invalidate:
 	movem.l d0-d1/a0,-(sp)
+	lea colinv,a0
+	move.b frame_tag,(a0,d0.w)	; (cells_pass: a column pass scans it)
 	move.l cur_keys,a0
 	add.w d0,d0
 	add.w d0,d0
@@ -667,34 +716,53 @@ mapkey_update:
 	move.w d7,d5
 	add.w #64,d5
 .flag:	clr.b bg_written
+	; the codes (E800), then the attributes (EC00), against the copy: 4 entries a long (cmpm)
+	moveq #0,d6			; (a change)
+	sub.w d7,d5
+	lsr.w #2,d5
+	subq.w #1,d5			; (the longs - 1)
 	move.w d5,mk_end
 	lea Z_RAM+$E800,a0
 	lea bg1_shadow,a1
 	add.w d7,a0
 	add.w d7,a1
-	moveq #0,d6			; (a change)
-.cmp:	move.l (a0),d0
-	cmp.l (a1),d0
-	bne.s .chg
-	move.l $400(a0),d0
-	cmp.l $400(a1),d0
-	beq.s .nx
-.chg:	move.l (a0),(a1)
-	move.l $400(a0),$400(a1)
+	move.w d5,d4
+.c1:	cmpm.l (a1)+,(a0)+
+	dbne d4,.c1
+	beq.s .c1d			; (the last compared equal: the end)
+	bsr.s .group
+	dbf d4,.c1
+.c1d:	lea Z_RAM+$EC00,a0
+	lea bg1_shadow+$400,a1
+	add.w d7,a0
+	add.w d7,a1
+	move.w mk_end,d4
+.c2:	cmpm.l (a1)+,(a0)+
+	dbne d4,.c2
+	beq.s .c2d
+	lea -$400(a0),a0		; (.group: from the codes' address)
+	lea -$400(a1),a1
+	bsr.s .group
+	lea $400(a0),a0
+	lea $400(a1),a1
+	dbf d4,.c2
+.c2d:	tst.w d6
+	beq.s .done
+	addq.w #1,map_version
+	bra.s .done
+; the 4 entries before a0 (the codes; a1 their copy) changed: copied, their keys made (keeps d4/a0-a1)
+.group:	move.l -4(a0),-4(a1)
+	move.l $400-4(a0),$400-4(a1)
 	moveq #1,d6
+	movem.l d4/d7,-(sp)
+	move.l a0,d7
+	sub.l #Z_RAM+$E800+4,d7		; the first entry
 	moveq #3,d5
 .e:	bsr mk_entry
 	addq.w #1,d7
 	dbf d5,.e
-	subq.w #4,d7
-.nx:	addq.l #4,a0
-	addq.l #4,a1
-	addq.w #4,d7
-	cmp.w mk_end,d7
-	blo.s .cmp
-	tst.w d6
-	beq.s .done
-	addq.w #1,map_version
+	movem.l (sp)+,d4/d7
+	rts
 .done:	rts
 .all:	move.l (a0),(a1)
 	move.l 4(a0),4(a1)
@@ -758,9 +826,10 @@ mk_entry:
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; cells_pass: a full pass (every slot of the window's non-black columns against its key) when anything a key holds
-; may have changed since this ring's last frame (the window, the map, bg2 against bg1, a column's mask, a damage list
-; that overflowed), else only the cells on this ring's damage list (what sprites and text covered, the text's old
-; cells).  The list is empty afterwards (this frame's sprites and text fill it again).
+; may have changed since this ring's last frame (the map, bg2 against bg1, the vertical scroll, a damage list that
+; overflowed); a column pass (the same for the columns not in this ring's last window and those col_invalidate
+; marked) when only the window moved or a column's mask changed; then the cells on this ring's damage list (the text's
+; old cells, text cells sprites covered).  The list is empty afterwards (this frame's sprites and text fill it again).
 cells_pass:
 	move.w ring_index,d4
 	lsr.w #1,d4			; (0 / 2: a word per ring)
@@ -770,8 +839,6 @@ cells_pass:
 	add.w d4,d4
 	add.w d4,a0			; (8 words a ring)
 	moveq #0,d7			; full
-	tst.b cols_changed
-	bne.s .f
 	move.l cur_dmg,a1
 	tst.w 2(a1)			; (the list overflowed)
 	bne.s .f
@@ -782,12 +849,20 @@ cells_pass:
 	move.b bg2_gen,d0
 	cmp.w 2(a0),d0
 	bne.s .f
-	move.w scroll_x,d0
-	cmp.w 4(a0),d0
-	bne.s .f
 	move.w scroll_y,d0
 	cmp.w 6(a0),d0
+	bne.s .f
+	; (the map, bg2 against bg1 and the vertical phase as before: only the columns new in the window or invalidated)
+	move.w 4(a0),d0
+	lsr.w #4,d0
+	move.w d0,old_w0
+	move.w scroll_x,d0
+	cmp.w 4(a0),d0
+	bne.s .p
+	tst.b cols_changed
 	beq.s .nf
+.p:	moveq #2,d7
+	bra.s .nf
 .f:	moveq #1,d7
 .nf:	move.w map_version,(a0)
 	moveq #0,d0
@@ -795,8 +870,14 @@ cells_pass:
 	move.w d0,2(a0)
 	move.w scroll_x,4(a0)
 	move.w scroll_y,6(a0)
+	sf part_pass
+	cmp.w #1,d7
+	beq cells_full
 	tst.w d7
-	bne cells_full
+	beq.s .dl
+	st part_pass
+	bsr cells_full
+.dl:
 ; the damage list: (k << 8 | b) words
 	move.l cur_dmg,a4
 	move.w (a4),d7			; the count
@@ -819,8 +900,20 @@ cells_pass:
 	rts
 
 cells_full:
+	tst.b part_pass
+	bne.s .part
+	ifd SIM
+	addq.l #1,cnt_full
+	endc
 	move.l cur_dmg,a4
 	clr.l (a4)			; (every cell is checked: the list is done, the overflow too)
+	ifd SIM
+	bra.s .rows
+.part:	addq.l #1,cnt_part
+.rows:
+	else
+.part:
+	endc
 	; the slot rows the picture shows: 16 k - e < 240
 	moveq #0,d0
 	move.w vphase,d0
@@ -836,7 +929,18 @@ cells_full:
 	cmp.w #$ffff,(a0,d0.w)
 	beq .next
 	lsr.w #1,d0
-	move.w d0,cell_b
+	tst.b part_pass
+	beq.s .scan
+	; (a column pass: the columns not in this ring's last window, or invalidated now)
+	lea colinv,a0
+	move.b frame_tag,d1
+	cmp.b (a0,d0.w),d1
+	beq.s .scan
+	move.w d0,d1
+	sub.w old_w0,d1
+	cmp.w #21,d1
+	blo .next			; (unsigned: b < the old w0 too)
+.scan:	move.w d0,cell_b
 	bsr cell_setup
 	; the column's pointers: a3 its map keys, a2 its ring keys, a4 its backdrop colours (u_cells, 16 a column)
 	lea bg1_mapkey,a3
@@ -852,19 +956,20 @@ cells_full:
 	lea u_cells,a4
 	move.w cell_bx2,d0
 	asr.w #4,d0
-	sub.w b2_first,d0
+	and.w #31,d0			; (its b2 column)
 	lsl.w #4,d0
 	add.w d0,a4
 	moveq #15,d4
 	and.w cell_bx2,d4		; (not on a word: two bg2 columns)
 	moveq #0,d5			; k
-	move.w row0,d3
-.slot:	move.w d3,d0
-	add.w d5,d0
-	and.w #31,d0
-	add.w d0,d0
-	add.w d0,d0
-	move.l (a3,d0.w),d0
+	move.w full_rows,d3		; (the rows left - 1)
+	move.w row0,d2
+	add.w d2,d2
+	add.w d2,d2			; (the map row's offset: 4 ((r0 + k) & 31))
+	subq.w #4,d2
+.slot:	addq.w #4,d2
+	and.w #31*4,d2
+	move.l (a3,d2.w),d0
 	bpl.s .key			; (opaque: the map's key)
 	move.b (a4,d5.w),d1
 	tst.w d4
@@ -884,17 +989,38 @@ cells_full:
 	or.l d1,d0
 .key:	cmp.l (a2),d0
 	beq.s .same
+	ifd SIM
+	cmp.l #-1,(a2)
+	bne.s .nb
+	addq.l #1,cnt_cells_bad
+.nb:
+	endc
 	move.l d0,(a2)
 	move.l d0,cell_curkey
 	move.w d5,cell_k
-	movem.l d3-d7/a2-a4,-(sp)
-	bsr cell_key			; (cell_entry, cell_backdrop, cell_idx4)
+	; (cell_key's results from the key: cell_entry, cell_idx4, cell_backdrop)
+	move.w d0,cell_entry
+	move.w cell_c32,d1
+	add.w d1,d1
+	add.w d1,d1
+	add.w d2,d1
+	move.w d1,cell_idx4
+	tst.l (a3,d2.w)
+	bpl.s .op
+	rol.l #8,d0
+	moveq #-1,d1			; (bg2_gen: bg2 itself)
+	tst.b d0
+	bpl.s .bd
+	move.b d0,d1			; ($80 | the colour)
+.bd:	move.b d1,cell_backdrop
+	bra.s .dr
+.op:	move.b #$fe,cell_backdrop
+.dr:	movem.l d2-d7/a2-a4,-(sp)
 	bsr cell_draw
-	movem.l (sp)+,d3-d7/a2-a4
+	movem.l (sp)+,d2-d7/a2-a4
 .same:	lea RING_COLS*4(a2),a2
 	addq.w #1,d5
-	cmp.w full_rows,d5
-	bls.s .slot
+	dbf d3,.slot
 .next:	addq.w #1,d6
 	cmp.w #21,d6
 	blo .col
@@ -926,6 +1052,12 @@ cell_check:
 	add.w d3,d2
 	cmp.l (a0,d2.w),d0
 	beq.s .same
+	ifd SIM
+	cmp.l #-1,(a0,d2.w)
+	bne.s .nb
+	addq.l #1,cnt_cells_bad
+.nb:
+	endc
 	move.l d0,(a0,d2.w)
 	move.l d0,cell_curkey
 	bra cell_draw
@@ -951,7 +1083,7 @@ cell_key:
 .back:	; the backdrop: the bg2 columns (cell_bx2 >> 4, and the next unless on a word) in u_cells
 	move.w cell_bx2,d1
 	asr.w #4,d1
-	sub.w b2_first,d1
+	and.w #31,d1			; (its b2 column)
 	lsl.w #4,d1			; (16 slot rows a column)
 	add.w cell_k,d1
 	lea u_cells,a0
@@ -988,23 +1120,21 @@ cell_draw:
 	move.b d0,d1
 	move.w d1,cell_tile
 	move.w cell_k,d0
-	mulu #RING_COLS,d0
-	add.w cell_b,d0
+	add.w d0,d0
+	move.w cell_b,d1
+	lea kmul52,a0
+	move.w (a0,d0.w),d2
+	add.w d1,d2
 	move.l cur_txtmap,a0
-	tst.b (a0,d0.w)
+	tst.b (a0,d2.w)
 	beq.s .nt
 	st txt_dirty			; (a cell under the text: the text again)
-.nt:	moveq #0,d0
-	move.w cell_k,d0
-	lsl.w #4,d0
-	add.w #GUARD_T,d0
-	sub.w vphase,d0
-	mulu #STRIDE,d0
-	moveq #0,d1
-	move.w cell_b,d1
+.nt:	add.w d0,d0
+	lea slot_addr,a0
+	move.l (a0,d0.w),d0
 	lsl.w #3,d1
+	ext.l d1
 	add.l d1,d0
-	add.l work_base,d0
 	move.l d0,cell_addr
 	move.w cell_tile,d0
 	lea bg1_class,a0
@@ -1099,14 +1229,10 @@ cell_draw:
 	and.w d0,d3			; s
 	lsr.w #4,d0
 	lsl.w #3,d0			; the word's offset
-	moveq #0,d1
 	move.w cell_k,d1
-	lsl.w #4,d1
-	add.w #24,d1
-	sub.w vphase,d1
-	mulu #B2_STRIDE,d1
-	add.l d1,d0
-	add.l b2_base,d0
+	lsl.w #2,d1
+	lea slot_b2,a0
+	add.l (a0,d1.w),d0
 	move.l cell_addr,a1
 	move.w #-1,$ffff8a28.w
 	move.w #-1,$ffff8a2a.w
@@ -1208,15 +1334,19 @@ draw_runs:
 	move.w d0,$ffff8a2a.w
 	move.w d0,$ffff8a2c.w
 	move.w (a0)+,d2
-	addq.w #1,d2
-	move.w d2,$ffff8a38.w
+	addq.w #1,d2			; the rows
 	moveq #4,d1			; (lines a piece: the destination is read when the mask is not whole)
 	cmp.w #-1,d0
 	bne.s .go
 	moveq #8,d1
-.go:	movem.l a0-a3,-(sp)
-	bsr blit_go_lines
-	movem.l (sp)+,a0-a3
+.go:	cmp.w d1,d2
+	bls.s .last
+	move.w d1,$ffff8a38.w		; (HOG passes of at most 64 bus accesses)
+	move.b #$c0,$ffff8a3c.w
+	sub.w d1,d2
+	bra.s .go
+.last:	move.w d2,$ffff8a38.w
+	move.b #$c0,$ffff8a3c.w
 	bra.s .run
 .done:	rts
 
@@ -1236,8 +1366,9 @@ band_clear:
 	bra blit_go_lines
 
 ; ---------------------------------------------------------------------------------------------------------------------
-; Sprites (the buffer the DMA copied): from the last to the first, the first on top.  Their cells' keys go (redrawn
-; when this ring is drawn next); the cells with front pens are drawn again after them (front_pass).
+; Sprites (the buffer the DMA copied): from the last to the first, the first on top.  The words under each are saved
+; (sv_save) and put back before this ring's next picture (sv_restore); the cells with front pens are drawn again
+; after them (front_pass).
 sprite_pass:
 	clr.w front_count
 	move.w #2,$ffff8a20.w		; (the registers every sprite shares)
@@ -1310,7 +1441,7 @@ sprite_pass:
 	movem.l (sp)+,d7/a3
 .skip:	subq.l #4,a3
 	dbf d7,.next
-	bra touch_process
+	rts
 
 ; sprite_one: object_code (+2048 mirrored), object_colour at object_x, object_y (ring coordinates): culled in the
 ; black words, clipped at their boundary (only the inner word), else whole; its cells marked.
@@ -1348,30 +1479,33 @@ sprite_one:
 .draw:	bsr sprite_get			; -> a1 the baked rows
 	move.l a1,object_source
 	bsr sprite_cells
+	move.w object_y,d0
+	add.w d0,d0
+	add.w d0,d0
+	lea line_stride,a0
+	move.l (a0,d0.w),d0		; (y * STRIDE)
+	moveq #0,d1
+	move.w object_x,d1
+	lsr.w #4,d1
+	lsl.w #3,d1
+	add.l d1,d0
+	add.l work_base,d0
+	move.l d0,object_addr		; (the first word of its first line)
+	bsr sv_save
 	tst.b clip_mode
 	bne sprite_clipped
 	bra.s .blit
 .cull:	rts
 .blit:
 ; sprite_blit: the whole sprite (one word a row when on a word, else two)
-	moveq #0,d0
-	move.w object_y,d0
-	mulu #STRIDE,d0
-	moveq #0,d1
-	move.w object_x,d1
-	and.w #$fff0,d1
-	lsr.w #1,d1
-	add.l d1,d0
-	add.l work_base,d0
-	move.l d0,BLT_DST_ADDR.w
+	move.l object_addr,BLT_DST_ADDR.w
 	move.l object_source,BLT_SRC_ADDR.w
-	moveq #0,d6
-	move.w object_x,d6
-	and.w #15,d6
+	moveq #15,d6
+	and.w object_x,d6
 	move.w d6,d1
-	mulu #TR_MASK_STRIDE,d1
-	lea tr_sprite_masks,a1
-	add.l d1,a1
+	lsl.w #2,d1
+	lea mask_bases,a1
+	move.l (a1,d1.w),a1
 	tst.w d6
 	beq.s .narrow
 	or.w #$c040,d6			; (BUSY, HOG; NFSR, the skew)
@@ -1402,22 +1536,13 @@ sprite_stream:
 ; second word (+8), FXSR with source Y increment 0 (each row's word read again as the next one's first), END1 = the
 ; second word's mask (the stream's low word: END1 / END3 swapped).  (Black Tiger's clip_sprite.)
 sprite_clipped:
-	moveq #0,d0
-	move.w object_y,d0
-	mulu #STRIDE,d0
-	moveq #0,d1
-	move.w object_x,d1
-	and.w #$fff0,d1
-	lsr.w #1,d1
-	add.l d1,d0
-	add.l work_base,d0
-	moveq #0,d6
-	move.w object_x,d6
-	and.w #15,d6
+	move.l object_addr,d0
+	moveq #15,d6
+	and.w object_x,d6
 	move.w d6,d1
-	mulu #TR_MASK_STRIDE,d1
-	lea tr_sprite_masks,a1
-	add.l d1,a1
+	lsl.w #2,d1
+	lea mask_bases,a1
+	move.l (a1,d1.w),a1
 	move.w #2,$ffff8a30.w
 	move.w #1,$ffff8a36.w
 	move.l object_source,BLT_SRC_ADDR.w
@@ -1438,28 +1563,16 @@ sprite_clipped:
 	move.w #2,$ffff8a22.w
 	rts
 
-; sprite_cells: the cells under the sprite (object_x, object_y; two word columns unless on a word, 16 lines) lose
-; their keys; those with front pens (a group 1 entry whose tile has pens 7-11) go to front_list.  Uses d0-d5/a0.
+; sprite_cells: the cells under the sprite (object_x, object_y: two word columns unless on a word, 16 lines), once a
+; frame each (fmark): the text over one is drawn again and its key goes (the ring's damage list: the saved words under
+; a sprite lack the text drawn after it), those with front pens (a group 1 entry whose tile has pens 7-11) go to
+; front_list.  Uses d0-d7/a0-a2/a4.
 sprite_cells:
-	move.w object_x,d4
-	lsr.w #4,d4			; the first column
-	moveq #1,d5			; columns
-	moveq #15,d0
-	and.w object_x,d0
-	beq.s .c
-	moveq #2,d5
-.c:	move.w object_y,d2
-	moveq #16,d3
-	; (area_cells follows)
-; area_cells: the cells of columns d4 .. d4 + d5 - 1, lines d2 .. d2 + d3 - 1 (ring lines) lose their keys, and go
-; to front_list when they have front pens.  Uses d0-d5/a0.
-area_cells:
-	movem.l d6-d7/a1-a2,-(sp)
+	move.w object_y,d2
 	sub.w #GUARD_T,d2
 	add.w vphase,d2			; (the slot rows: (line - GUARD_T + e) / 16)
 	move.w d2,d6
-	add.w d3,d6
-	subq.w #1,d6
+	add.w #15,d6
 	asr.w #4,d2
 	asr.w #4,d6
 	tst.w d2
@@ -1468,89 +1581,96 @@ area_cells:
 .t:	cmp.w #SLOTS-1,d6
 	ble.s .b
 	moveq #SLOTS-1,d6
-.b:	cmp.w d2,d6
-	blt .done
-	move.l cur_colmask,a2
+.b:	sub.w d2,d6			; (the rows - 1)
+	bmi .done
+	move.w object_x,d4
+	moveq #15,d5
+	and.w d4,d5
+	lsr.w #4,d4			; the first column
+	tst.w d5
+	sne d5				; (two columns unless on a word: -1 / 0)
 	lea fmark,a1
-	move.b frame_tag,d3
-.col:	move.w d4,d0
-	cmp.w #RING_COLS,d0
-	bhs.s .ncol
+	move.l cur_txtmap,a4
+.col:	cmp.w #RING_COLS,d4
+	bhs .ncol
+	move.w d4,d0
 	add.w d0,d0
-	cmp.w #$ffff,(a2,d0.w)		; (a black column: no cells)
-	beq.s .ncol
-	lsr.w #1,d0
-	move.w d2,d1			; k
-.row:	move.w d1,d7
-	add.w d7,d7
+	move.l cur_colmask,a0
+	cmp.w #$ffff,(a0,d0.w)		; (a black column: no cells)
+	beq .ncol
+	; mk_front of the column's entries: bg1 column (b - 2) & 31, row (r0 + k) & 31
+	move.w d4,d0
+	subq.w #2,d0
+	and.w #31,d0
+	lsl.w #5,d0
+	lea mk_front,a2
+	add.w d0,a2
+	move.w row0,d3
+	add.w d2,d3			; r0 + k
+	move.w d2,d0
+	add.w d0,d0
 	lea kmul52,a0
-	move.w (a0,d7.w),d7
-	add.w d0,d7			; the cell's number
-	cmp.b (a1,d7.w),d3
+	move.w (a0,d0.w),d1
+	add.w d4,d1			; the cell's number
+	move.w d6,d0
+.row:	and.w #31,d3
+	move.b frame_tag,d7
+	cmp.b (a1,d1.w),d7
 	beq.s .nrow			; (touched already this frame)
-	move.b d3,(a1,d7.w)
-	move.w touch_n,d7
-	cmp.w #TOUCHES,d7
-	bhs.s .nrow
-	addq.w #1,touch_n
-	add.w d7,d7
-	lea touch_list,a0
-	move.b d1,(a0,d7.w)		; k
-	move.b d0,1(a0,d7.w)		; b
-.nrow:	addq.w #1,d1
-	cmp.w d6,d1
-	ble.s .row
+	move.b d7,(a1,d1.w)
+	tst.b (a4,d1.w)
+	bne.s .text
+.nt:	tst.b (a2,d3.w)
+	bne.s .front
+.nrow:	add.w #RING_COLS,d1
+	addq.w #1,d3
+	dbf d0,.row
 .ncol:	addq.w #1,d4
-	subq.w #1,d5
-	bne.s .col
-.done:	movem.l (sp)+,d6-d7/a1-a2
-	rts
-TOUCHES = 400
-
-; touch_process: the cells the sprites touched (touch_list): their keys go (the ring's damage list), the text over one
-; is drawn again, those with front pens go to front_list.
-touch_process:
-	move.w touch_n,d6
-	beq .done
-	clr.w touch_n
-	subq.w #1,d6
-	lea touch_list,a4
-.c:	moveq #0,d1
-	move.b (a4)+,d1			; k
-	moveq #0,d0
-	move.b (a4)+,d0			; b
-	move.w d1,d7
-	add.w d7,d7
-	lea kmul52,a0
-	move.w (a0,d7.w),d7
-	add.w d0,d7			; the number
-	move.l cur_txtmap,a0
-	tst.b (a0,d7.w)
-	beq.s .nt
-	st txt_dirty
-.nt:	bsr cell_damage
-	; front pens?  mk_front of the entry: bg1 column (b - 2) & 31, row (r0 + k) & 31
-	move.w d0,d3
-	subq.w #2,d3
-	and.w #31,d3
-	lsl.w #5,d3
-	move.w row0,d2
-	add.w d1,d2
-	and.w #31,d2
-	add.w d2,d3
-	lea mk_front,a0
-	tst.b (a0,d3.w)
-	beq.s .n
-	move.w front_count,d3
-	cmp.w #FRONTS,d3
-	bhs.s .n
-	addq.w #1,front_count
-	lsl.w #2,d3
-	lea front_list,a0
-	move.w d0,(a0,d3.w)
-	move.w d1,2(a0,d3.w)
-.n:	dbf d6,.c
+	not.b d5
+	beq .col			; (the second column)
 .done:	rts
+.text:	st txt_dirty
+	movem.l d0-d1/d7,-(sp)
+	move.w d1,d7			; the number
+	move.w d2,d1
+	add.w d6,d1
+	sub.w d0,d1			; k: k0 + the rows - 1 - the rows left
+	move.w d4,d0			; b
+	bsr cell_damage			; (a text cell: redrawn next time, the text over it)
+	movem.l (sp)+,d0-d1/d7
+	bra.s .nt
+.front:	move.w front_count,d7
+	cmp.w #FRONTS,d7
+	bhs.s .nrow
+	addq.w #1,front_count
+	lsl.w #2,d7
+	lea front_list,a0
+	add.w d7,a0
+	move.w d4,(a0)+			; b
+	move.w d2,d7
+	add.w d6,d7
+	sub.w d0,d7
+	move.w d7,(a0)			; k
+	bra.s .nrow
+
+mask_bases:				; (the masks of each shift)
+N	set 0
+	rept 16
+	dc.l tr_sprite_masks+N*TR_MASK_STRIDE
+N	set N+1
+	endr
+line_stride:				; (a ring line's offset)
+N	set 0
+	rept RING_LINES
+	dc.l N*STRIDE
+N	set N+1
+	endr
+line_offsets:				; (a sprite's first drawn line)
+N	set 0
+	rept 16
+	dc.w N*STRIDE
+N	set N+1
+	endr
 
 kmul52:
 N	set 0
@@ -1558,6 +1678,120 @@ N	set 0
 	dc.w N*RING_COLS
 N	set N+1
 	endr
+
+; sv_save: the ring's words under the sprite (object_x, object_y, clip_mode: the words it writes; the lines its stream
+; draws, sprite_rows) into this ring's save list (sv_restore puts them back before the ring's next picture: the cells
+; under sprites keep their keys).  The registers sprite_pass shares are set again.  Uses d0-d4/a0-a3.
+SV_MAX = 96
+SV_ENT = 16				; the destination, the saved words, the words a line, the Y increment, the lines, a pass
+SV_SIZE = 8+SV_MAX*SV_ENT+SV_MAX*128*2
+sv_save:
+	move.l cur_sv,a1
+	move.w (a1),d0
+	cmp.w #SV_MAX,d0
+	bhs .out
+	addq.w #1,(a1)
+	lsl.w #4,d0
+	lea 8(a1,d0.w),a0		; the entry
+	move.l a0,a3
+	move.w object_code,d1
+	and.w #2047,d1
+	add.w d1,d1
+	lea sprite_rows,a2
+	add.w d1,a2
+	moveq #0,d0
+	move.b (a2)+,d0			; the first line
+	add.w d0,d0
+	lea line_offsets,a0
+	move.w (a0,d0.w),d0
+	add.l object_addr,d0
+	moveq #15,d3
+	and.w object_x,d3		; s
+	moveq #4,d2			; the words a line
+	moveq #8,d4			; the lines a pass (32 words)
+	tst.b clip_mode
+	bmi.s .left
+	bne.s .w
+	tst.w d3
+	beq.s .w
+	moveq #8,d2
+	moveq #4,d4
+	bra.s .w
+.left:	addq.l #8,d0
+.w:	move.l a3,a0
+	move.l d0,(a0)+
+	move.l d0,BLT_SRC_ADDR.w
+	move.l 4(a1),d0			; the buffer
+	move.l d0,(a0)+
+	move.l d0,BLT_DST_ADDR.w
+	move.w d2,(a0)+
+	move.w d2,$ffff8a36.w
+	move.w #STRIDE+2,d3
+	sub.w d2,d3
+	sub.w d2,d3
+	move.w d3,(a0)+			; (the ring's Y increment)
+	move.w d3,$ffff8a22.w
+	moveq #0,d3
+	move.b (a2),d3			; the lines
+	move.w d3,(a0)+
+	move.w d4,(a0)
+	move.w d3,d1
+	mulu d2,d1
+	add.l d1,d1
+	add.l d1,4(a1)
+	move.w #2,$ffff8a2e.w
+	move.w #2,$ffff8a30.w
+	move.w #-1,$ffff8a28.w
+	move.w #-1,$ffff8a2c.w
+	clr.b $ffff8a3d.w
+.p:	cmp.w d4,d3			; (HOG passes of at most 32 words: 64 bus accesses)
+	bhs.s .n
+	move.w d3,d4
+.n:	move.w d4,$ffff8a38.w
+	move.b #$c0,$ffff8a3c.w
+	sub.w d4,d3
+	bne.s .p
+	move.w #2,$ffff8a22.w		; (sprite_pass's shared registers)
+	move.w #8,$ffff8a2e.w
+.out:	rts
+
+; sv_restore: this ring's save list (cur_sv) back into the ring, the last saved first; the list emptied.  Uses d0-d2/
+; d7/a0-a1.
+sv_restore:
+	move.l cur_sv,a0
+	lea 8+SV_MAX*SV_ENT(a0),a1
+	move.l a1,4(a0)			; (the buffer: from its start again)
+	move.w (a0),d7
+	beq.s .done
+	clr.w (a0)
+	move.w d7,d0
+	lsl.w #4,d0
+	lea 8(a0,d0.w),a1
+	move.w #2,$ffff8a20.w
+	move.w #2,$ffff8a22.w
+	move.w #2,$ffff8a2e.w
+	move.w #-1,$ffff8a28.w
+	move.w #-1,$ffff8a2a.w
+	move.w #-1,$ffff8a2c.w
+	move.w #$0203,$ffff8a3a.w
+	clr.b $ffff8a3d.w
+	subq.w #1,d7
+.e:	lea -SV_ENT(a1),a1
+	move.l (a1),BLT_DST_ADDR.w
+	move.l 4(a1),BLT_SRC_ADDR.w
+	move.w 8(a1),$ffff8a36.w
+	move.w 10(a1),$ffff8a30.w
+	move.w 12(a1),d1		; the lines
+	move.w 14(a1),d2		; a pass
+.p:	cmp.w d2,d1
+	bhs.s .n
+	move.w d1,d2
+.n:	move.w d2,$ffff8a38.w
+	move.b #$c0,$ffff8a3c.w
+	sub.w d2,d1
+	bne.s .p
+	dbf d7,.e
+.done:	rts
 
 ; cell_damage: the cell d0 = b, d1 = k (d7 = its number) loses its key in this ring; it goes to the ring's damage list
 ; (redrawn when the ring is drawn next).  Keeps d0-d7; uses a0.
@@ -1609,17 +1843,14 @@ front_pass:
 	and.w #$700,d1
 	move.b d0,d1
 	move.w d1,cell_tile
-	moveq #0,d0
 	move.w cell_k,d0
-	lsl.w #4,d0
-	add.w #GUARD_T,d0
-	sub.w vphase,d0
-	mulu #STRIDE,d0
+	lsl.w #2,d0
+	lea slot_addr,a0
+	move.l (a0,d0.w),d0
 	moveq #0,d1
 	move.w cell_b,d1
 	lsl.w #3,d1
 	add.l d1,d0
-	add.l work_base,d0
 	move.l d0,a2
 	move.w cell_tile,d0
 	move.w cell_entry,d1
@@ -1679,13 +1910,175 @@ draw_front:
 .done:	rts
 
 ; ---------------------------------------------------------------------------------------------------------------------
-; The text layer (rows 1-30: the picture's lines 0-239): per row a list of its characters (text_rows: x, ring line,
-; code, attribute), made again for the rows whose RAM changed (the writers set fg_written: the rows against a copy) or
-; all of them for a new epoch of a text colour set; text_version: a new number when one changed.  A ring keeps its
+; The text layer (rows 1-30: the picture's lines 0-239): per row its characters in pairs (columns 2 j, 2 j + 1: one
+; word of 16 pixels, row_compose), a list of the pairs with a pixel (text_rows: x, ring line, the pixels' first and
+; last x, the image), made again for the rows whose RAM changed (the writers set fg_written: the rows against a copy)
+; or all of them for a new epoch of a text colour set; text_version: a new number when one changed.  A ring keeps its
 ; text while its version, the scroll and the vertical phase stay and none of the cells under it was redrawn or drawn
 ; over (txt_dirty); else the old text's cells are redrawn (text_prepare) and the text drawn again (text_pass), shifted
-; to the ring's x (32 + sx + 8 col), pen 3 transparent.
-TEXT_ROW = 32*8
+; to the ring's x (32 + sx + 16 j), pen 3 transparent.
+TEXT_PAIR = 12				; x, ring line, first x, last x (0 / 8, 7 / 15), the image
+TEXT_ROW = 16*TEXT_PAIR
+PAIR_IMG = 80				; 8 rows of four plane words, 8 masks
+
+; row_compose: text row d7 (fg_shadow) into its pairs' images (pair_img: from char_get's baked characters, the right
+; one shifted by 8) and its list.  Uses d0-d7/a0-a6.
+row_compose:
+	lea text_rows,a5
+	move.w d7,d0
+	mulu #TEXT_ROW+2,d0
+	add.l d0,a5
+	move.l a5,rc_count
+	clr.w (a5)+
+	move.l a5,rc_next
+	move.w d7,d0
+	mulu #16*PAIR_IMG,d0
+	add.l #pair_img,d0
+	move.l d0,rc_img
+	move.w d7,rc_row
+	moveq #0,d0
+	move.w d7,d0
+	lsl.w #6,d0
+	add.l #pair_keys,d0
+	move.l d0,rc_pk			; (per pair: its characters when its image was made)
+	move.b d6,rc_force		; (all rows: a new epoch, every image again)
+	move.w d7,d0
+	mulu #2+16*4,d0
+	add.l #text_runs,d0
+	move.l d0,a0
+	clr.w (a0)			; (no run)
+	move.l d0,rc_runs
+	move.w #-2,rc_lastx		; (the last pair's x; -2: none)
+	moveq #0,d6			; the column
+.pair:	; A: the column d6, B: d6 + 1
+	bsr .code
+	move.w d2,rc_a
+	move.w d1,rc_aa
+	move.b d3,rc_ab
+	addq.w #1,d6
+	bsr .code
+	move.b d3,d4
+	and.b rc_ab,d4
+	bne .blank			; (both blank)
+	move.w d2,rc_b
+	move.w d1,rc_ba
+	move.b d3,rc_bb
+	; the pair's characters (attribute and code bytes) against its image's
+	move.b rc_aa+1,d0
+	lsl.w #8,d0
+	move.b rc_a+1,d0
+	swap d0
+	move.b d1,d0
+	lsl.w #8,d0
+	move.b d2,d0
+	move.l rc_pk,a4
+	tst.b rc_force
+	bne.s .make
+	cmp.l (a4),d0
+	beq .list			; (its image holds)
+.make:	move.l d0,(a4)
+	move.l rc_img,a4
+	tst.b rc_ab
+	bne.s .ablank
+	move.w rc_a,d0
+	move.w rc_aa,d1
+	move.w d6,-(sp)
+	bsr char_get
+	move.w (sp)+,d6
+	move.l rc_img,a4
+	moveq #PAIR_IMG/4-1,d0
+.ca:	move.l (a1)+,(a4)+
+	dbf d0,.ca
+	bra.s .b
+.ablank:
+	moveq #PAIR_IMG/4-1,d0
+.za:	clr.l (a4)+
+	dbf d0,.za
+.b:	tst.b rc_bb
+	bne.s .list
+	move.w rc_b,d0
+	move.w rc_ba,d1
+	move.w d6,-(sp)
+	bsr char_get
+	move.w (sp)+,d6
+	move.l rc_img,a4
+	moveq #PAIR_IMG/2-1,d0
+.cb:	move.w (a1)+,d1
+	lsr.w #8,d1
+	or.w d1,(a4)+
+	dbf d0,.cb
+.list:	move.l rc_next,a5
+	move.w d6,d3
+	subq.w #1,d3
+	lsl.w #3,d3			; x (16 j)
+	move.w d3,(a5)+
+	move.w rc_row,d0
+	lsl.w #3,d0
+	add.w #GUARD_T-8,d0
+	move.w d0,(a5)+			; the ring line
+	moveq #0,d4
+	tst.b rc_ab
+	beq.s .lo
+	moveq #8,d4
+.lo:	move.w d4,(a5)+			; the pixels' first x
+	moveq #15,d5
+	tst.b rc_bb
+	beq.s .hi
+	moveq #7,d5
+.hi:	move.w d5,(a5)+			; and their last
+	move.l rc_img,(a5)+
+	move.l a5,rc_next
+	move.l rc_count,a5
+	addq.w #1,(a5)
+	; its run (text_runs: the pixels' first and last x): on from the previous pair's when no blank character is
+	; between them, else a new one
+	move.l rc_runs,a0
+	add.w d3,d4
+	add.w d3,d5
+	move.w rc_lastx,d0
+	addq.w #1,d0
+	cmp.w d4,d0
+	bne.s .new
+	move.w (a0),d0			; (the last run's end moves)
+	lsl.w #2,d0
+	move.w d5,(a0,d0.w)
+	bra.s .run
+.new:	move.w (a0),d0
+	addq.w #1,(a0)
+	lsl.w #2,d0
+	move.w d4,2(a0,d0.w)
+	move.w d5,4(a0,d0.w)
+.run:	move.w d5,rc_lastx
+.next:	add.l #PAIR_IMG,rc_img
+	addq.l #4,rc_pk
+	addq.w #1,d6
+	cmp.w #32,d6
+	blo .pair
+	rts
+.blank:	move.l rc_pk,a4
+	move.l #-1,(a4)			; (no image)
+	bra.s .next
+; column d6 of row rc_row -> d2 the code, d1 the attribute, d3 $FF when blank
+.code:	move.w rc_row,d0
+	lsl.w #5,d0
+	add.w d6,d0
+	lea fg_shadow+$400,a0
+	moveq #0,d1
+	move.b (a0,d0.w),d1		; the attribute
+	lea fg_shadow,a0
+	moveq #0,d2
+	move.b (a0,d0.w),d2
+	move.w d1,d3
+	and.w #$c0,d3
+	add.w d3,d3
+	add.w d3,d3
+	or.w d3,d2			; the code
+	lea char_blank,a0
+	move.b (a0,d2.w),d3
+	beq.s .cr
+	moveq #-1,d3
+.cr:	rts
+
 text_build:
 	lea pal_epoch+48,a0
 	move.l (a0),d0
@@ -1743,39 +2136,9 @@ text_build:
 	move.l $400-4(a0),$400-4(a1)
 	dbf d1,.cp
 	sub.w #32,a0
-	; the row's list
-	lea text_rows,a2
-	move.w d7,d0
-	mulu #TEXT_ROW+2,d0
-	add.l d0,a2
-	move.l a2,a3			; (its count)
-	clr.w (a2)+
-	moveq #0,d4			; the column
-.ch:	moveq #0,d1
-	move.b $400(a0),d1		; the attribute
-	moveq #0,d2
-	move.b (a0)+,d2
-	move.w d1,d3
-	and.w #$c0,d3
-	add.w d3,d3
-	add.w d3,d3
-	or.w d3,d2			; the code
-	lea char_blank,a1
-	tst.b (a1,d2.w)
-	bne.s .bl
-	move.w d4,d0
-	lsl.w #3,d0
-	move.w d0,(a2)+			; x
-	move.w d7,d0
-	lsl.w #3,d0
-	add.w #GUARD_T-8,d0
-	move.w d0,(a2)+			; the ring line
-	move.w d2,(a2)+
-	move.w d1,(a2)+
-	addq.w #1,(a3)
-.bl:	addq.w #1,d4
-	cmp.w #32,d4
-	blo.s .ch
+	movem.l d4-d7,-(sp)
+	bsr row_compose
+	movem.l (sp)+,d4-d7
 .nrow:	addq.w #1,d7
 	cmp.w tx_end,d7
 	blo .row
@@ -1788,6 +2151,7 @@ text_build:
 ; keys (cell_damage) and the text is drawn again.
 text_prepare:
 	sf txt_dirty
+	sf tx_new
 	move.w ring_index,d0
 	lsl.w #1,d0			; (8 bytes a ring)
 	lea tx_state,a0
@@ -1803,12 +2167,16 @@ text_prepare:
 	bne.s .new
 	rts
 .new:	st txt_dirty
+	st tx_new
 	move.w text_version,(a0)
 	move.w scroll_x,2(a0)
 	move.w scroll_y,4(a0)
 	move.l cur_txtl,a2
 	move.w (a2)+,d6			; the old text's cells
-	beq.s .none
+	beq .none
+	ifd SIM
+	add.l d6,cnt_tdmg
+	endc
 	subq.w #1,d6
 	move.l cur_txtmap,a3
 .c:	move.w (a2)+,d7			; its number
@@ -1827,6 +2195,9 @@ text_prepare:
 text_pass:
 	tst.b txt_dirty
 	beq .done
+	ifd SIM
+	addq.l #1,cnt_tpass
+	endc
 	move.w #2,$ffff8a20.w
 	move.w #2,$ffff8a22.w
 	move.w #8,$ffff8a2e.w
@@ -1845,32 +2216,50 @@ text_pass:
 	add.w scroll_x,d0
 	move.w d0,object_x
 	move.w (a4)+,object_y
-	move.w (a4)+,d0
-	move.w (a4)+,d1
+	addq.l #4,a4			; (the pixels' x: the runs)
+	move.l (a4)+,a1
 	movem.l d6-d7/a4,-(sp)
-	bsr char_get			; d0 code, d1 attribute -> a1 the baked rows (8 x 4 plane words)
-	bsr char_draw
-	; its cells (one or two columns, the slot rows of its 8 lines) into the ring's text map
-	move.w object_x,d4
-	lsr.w #4,d4
-	moveq #1,d5
-	moveq #15,d0
-	and.w object_x,d0
-	cmp.w #8,d0
-	bls.s .one
-	moveq #2,d5
-.one:	move.w object_y,d2
-	sub.w #GUARD_T,d2
+	ifd SIM
+	addq.l #1,cnt_chars
+	endc
+	bsr pair_draw
+	movem.l (sp)+,d6-d7/a4
+	dbf d6,.ch
+	tst.b tx_new
+	beq .nrow			; (the ring's text map holds: the same cells)
+	; the cells of the row's runs (the columns of their pixels' x, the slot rows of its 8 lines) into the text map
+	lea text_runs,a4
+	move.w d7,d0
+	mulu #2+16*4,d0
+	add.l d0,a4
+	move.w (a4)+,d6
+	subq.w #1,d6
+	move.w d7,d2
+	lsl.w #3,d2
+	sub.w #8,d2
 	add.w vphase,d2
 	move.w d2,d3
 	addq.w #7,d3
 	asr.w #4,d2			; k: the slot rows of its first and last line
 	asr.w #4,d3
+	move.w d3,tx_k1
 	move.l cur_txtmap,a0
 	move.l cur_txtl,a1
+.run:	movem.w (a4)+,d4-d5
+	add.w #32,d4
+	add.w scroll_x,d4
+	add.w #32,d5
+	add.w scroll_x,d5
+	lsr.w #4,d4
+	lsr.w #4,d5
+	sub.w d4,d5
+	addq.w #1,d5			; (the columns)
+	movem.w d2/d6,-(sp)
 .mk:	movem.w d4-d5,-(sp)
 .m:	move.w d2,d0
-	mulu #RING_COLS,d0
+	add.w d0,d0
+	lea kmul52,a2
+	move.w (a2,d0.w),d0
 	add.w d4,d0
 	tst.b (a0,d0.w)
 	bne.s .nm
@@ -1879,15 +2268,30 @@ text_pass:
 	addq.w #1,(a1)
 	add.w d1,d1
 	move.w d0,2(a1,d1.w)
+	lea fmark,a2
+	move.b frame_tag,d1
+	cmp.b (a2,d0.w),d1
+	bne.s .nm
+	; (a sprite drew over it this frame, before the text: its saved words lack the text, so its key goes)
+	movem.l d0-d1/d7/a0,-(sp)
+	moveq #0,d7
+	move.w d0,d7
+	moveq #0,d1
+	move.w d0,d1
+	divu #RING_COLS,d1
+	move.l d1,d0
+	swap d0				; b
+	bsr cell_damage			; (d1 = k)
+	movem.l (sp)+,d0-d1/d7/a0
 .nm:	addq.w #1,d4
 	subq.w #1,d5
 	bne.s .m
 	movem.w (sp)+,d4-d5
 	addq.w #1,d2
-	cmp.w d3,d2
+	cmp.w tx_k1,d2
 	ble.s .mk
-	movem.l (sp)+,d6-d7/a4
-	dbf d6,.ch
+	movem.w (sp)+,d2/d6
+	dbf d6,.run
 .nrow:	addq.w #1,d7
 	cmp.w #31,d7
 	blo .row
@@ -1895,7 +2299,12 @@ text_pass:
 
 ; char_draw: the baked character a1 (8 rows: four plane words, the pixels in the high byte; at 64(a1) the rows'
 ; masks) at object_x, object_y: a pass a row, one word when it fits in it, else two (NFSR).
+pair_draw:
+	moveq #0,d7			; (16 pixels: one word only on a word)
+	bra.s char_go
 char_draw:
+	moveq #8,d7			; (8 pixels in the high byte: one word up to s = 8)
+char_go:
 	moveq #0,d0
 	move.w object_y,d0
 	mulu #STRIDE,d0
@@ -1911,7 +2320,7 @@ char_draw:
 	and.w object_x,d4		; s
 	lea 64(a1),a3			; the masks
 	moveq #7,d5
-	cmp.w #8,d4
+	cmp.w d7,d4
 	bhi.s .two
 	move.w #2,$ffff8a30.w
 	move.w #1,$ffff8a36.w
@@ -2513,6 +2922,7 @@ bg1_class: incbin "bg1_class.bin"
 bg2_uniform: incbin "bg2_uniform.bin"
 bg2_map: incbin "bg2_map.bin"
 sprite_blank: incbin "sprite_blank.bin"
+sprite_rows: incbin "sprite_rows.bin"
 char_blank: incbin "char_blank.bin"
 sprite_order: incbin "sprite_order.bin"
 	even
@@ -2541,8 +2951,8 @@ vphase: ds.w 1
 row0: ds.w 1
 bg2_x: ds.w 1
 b2_first: ds.w 1
-last_bg2_x: ds.w 1
-last_sx: ds.w 1
+u_vphase: ds.w 1
+last_sx: ds.w 1				; (X2 - sx)
 last_vphase: ds.w 1
 cell_b: ds.w 1
 cell_k: ds.w 1
@@ -2560,6 +2970,8 @@ front_count: ds.w 1
 front_keep: ds.w 1
 front_list: ds.l FRONTS
 frame_ready: ds.b 1
+tx_new: ds.b 1
+part_pass: ds.b 1
 flip_fine: ds.b 1
 cols_changed: ds.b 1
 txt_dirty: ds.b 1
@@ -2580,13 +2992,18 @@ pal_shadow: ds.b $800
 colmask0: ds.w RING_COLS
 colmask1: ds.w RING_COLS
 cur_dmg: ds.l 1
+cur_sv: ds.l 1
+object_addr: ds.l 1
+slot_addr: ds.l SLOTS
+slot_b2: ds.l SLOTS
 cell_curkey: ds.l 1
 last_tag: ds.l 1
 last_tkey: ds.l 1
 cell_idx4: ds.w 1
-touch_n: ds.w 1
-touch_list: ds.w TOUCHES
 full_rows: ds.w 1
+old_w0: ds.w 1
+colinv: ds.b RING_COLS
+	even
 mk_roll: ds.w 1
 mk_end: ds.w 1
 tx_roll: ds.w 1
@@ -2597,6 +3014,12 @@ bake_comp: ds.w 1
 cnt_cells: ds.l 1
 cnt_cells_bg2: ds.l 1
 cnt_sprites: ds.l 1
+cnt_cells_bad: ds.l 1
+cnt_full: ds.l 1
+cnt_part: ds.l 1
+cnt_tpass: ds.l 1
+cnt_chars: ds.l 1
+cnt_tdmg: ds.l 1
 cur_txtmap: ds.l 1
 cur_txtl: ds.l 1
 map_version: ds.w 1
@@ -2605,6 +3028,8 @@ rs_state: ds.w 16			; per ring: map_version, bg2_gen, sx, sy of its last frame
 tx_state: ds.w 8			; per ring: text_version, sx, sy of its text
 tx_epochs: ds.l 1
 mk_epochs: ds.l 2
+sv0: ds.b SV_SIZE			; per ring: the sprites' saved words (sv_save)
+sv1: ds.b SV_SIZE
 dmg0: ds.w 2+DMG_MAX			; per ring: the count, the overflow, (k, b) bytes
 dmg1: ds.w 2+DMG_MAX
 txtl0: ds.w 1+KEYS			; per ring: the text's cells (count, numbers)
@@ -2623,11 +3048,32 @@ memo_tkey: ds.l 1024
 memo_ptr: ds.l 1024
 text_rows: ds.b 31*(TEXT_ROW+2)
 	even
+pair_img: ds.b 31*16*PAIR_IMG
+rc_count: ds.l 1
+rc_runs: ds.l 1
+rc_pk: ds.l 1
+pair_keys: ds.l 31*16
+rc_force: ds.b 1
+	even
+rc_lastx: ds.w 1
+tx_k1: ds.w 1
+text_runs: ds.b 31*(2+16*4)
+	even
+rc_next: ds.l 1
+rc_img: ds.l 1
+rc_row: ds.w 1
+rc_a: ds.w 1
+rc_aa: ds.w 1
+rc_b: ds.w 1
+rc_ba: ds.w 1
+rc_ab: ds.b 1
+rc_bb: ds.b 1
+	even
 keys0: ds.l KEYS
 keys1: ds.l KEYS
 b2_keys: ds.l 32
 b2_uni: ds.b 32*16
-u_cells: ds.b 23*16
+u_cells: ds.b 33*16			; per b2 column (0 at 32 too) and slot row
 cache_victim: ds.b (CT_CHARS+CHAR_ENTRIES)/4
 	even
 cache_tags: ds.l CT_CHARS+CHAR_ENTRIES

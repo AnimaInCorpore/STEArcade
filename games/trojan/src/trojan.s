@@ -12,10 +12,11 @@ BD_PALETTE = 1
 FRAMES = 0
 	endc
 	ifnd MAX_SKIPS
-MAX_SKIPS = 4				; arcade frames not drawn in a row while frames are pending (the game first)
+MAX_SKIPS = 8				; arcade frames not drawn in a row while frames are pending (the game first;
+					; the recorded play in Hatari: 4 / 3: 40.4 frames/s, 11.2 pictures; 8 / 5: 49.9, 10.4)
 	endc
 	ifnd MAX_PENDING
-MAX_PENDING = 3				; arcade frames that may wait (a game behind by more runs slower)
+MAX_PENDING = 5				; arcade frames that may wait (a game behind by more runs slower)
 	endc
 
 ; Border removal and the palette on / off: engine/rt/borders.s (its events come early and sync themselves; every
@@ -461,6 +462,7 @@ dbg_name3:
 	include "render.s"
 	include "sound.s"
 	include "code_trojan.s"
+	include "natives.s"
 	include "rtlib.s"
 z80_badpc:
 z80_badjump:

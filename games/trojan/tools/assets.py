@@ -11,6 +11,7 @@ tiles' opacity runs, the sprites' row streams (stefastbobs2's preparation, as Bl
     sprite_pixels.bin 2048 x 128; sprite_code.s: the masks for the 16 shifts, the row streams, tr_sprite_draw
     sprite_order.bin 2048 x 16: the rows of a sprite in drawing order (its mirror image draws in the same order)
     sprite_blank.bin 2048 bytes: 1 when every pixel is pen 15
+    sprite_rows.bin 2048 x 2: the first drawn line (flipped in y) with a pixel, the lines from it to the last
     char_pixels.bin  1024 x 32 (8 rows of 8 pixels, two a byte); char_blank.bin: 1 when every pixel is pen 3
 """
 from pathlib import Path
@@ -186,6 +187,11 @@ def build():
     (dest / 'sprite_code.s').write_text(text)
     (dest / 'sprite_order.bin').write_bytes(order)
     (dest / 'sprite_blank.bin').write_bytes(blank)
+    rows = []                                   # the drawn rows (flipped in y) a sprite's stream covers: first, count
+    for pixels in spr:
+        drawn = [15 - y for y in range(16) if (pixels[y] != 15).any()]
+        rows += [min(drawn), max(drawn) - min(drawn) + 1] if drawn else [0, 1]
+    (dest / 'sprite_rows.bin').write_bytes(bytes(rows))
     (dest / 'sprite_pixels.bin').write_bytes(packed(spr))
     (dest / 'char_pixels.bin').write_bytes(packed(v.chars))
     (dest / 'nz2.bin').write_bytes(bytes(((b >> 4 != 0) << 1) | (b & 15 != 0) for b in range(256)) +

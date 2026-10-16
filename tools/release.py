@@ -61,8 +61,8 @@ GAMES = [
      "  no sound yet",
      "punch: Space, Control, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  up jumps, down crouches."),
     ("trojan", "TROJAN.PRG", "Trojan (Capcom 1986)",
-     "playable, but slow: about 60% of the arcade's speed and 9-13 pictures a second (Hatari); exact logic, all\n"
-     "  256 x 240 pixels; music and effects on the YM, no ADPCM voices",
+     "90% of the arcade's speed, 10-18 pictures a second (Hatari); exact logic, all 256 x 240 pixels; music and\n"
+     "  effects on the YM, no ADPCM voices",
      "attack: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \

@@ -77,6 +77,12 @@ def inside(pc):
     return pc < WIN_LO or pc >= VBASE
 
 
+# hand-written 68000 routines for hot Z80 code (src/natives.s; tools/native_test.py checks them; TR_NO_NATIVES=1: none)
+NATIVES = {0x1E95: 'nat_1e95'}      # B bytes from DE on to HL on, 4 apart (~10% of level 3's logic)
+
+RST30 = {}                                  # rst $30 site -> the table's targets (find_code)
+
+
 def find_code(rom, roots, known, tables):
     """recursive descent (banked decode); `rst $30` pops its return address and jumps through the word table behind
     it (indexed by A): its entries are code (tables: the set of their targets, entered by a computed jump)"""
@@ -91,6 +97,7 @@ def find_code(rom, roots, known, tables):
             if i.flow in ('jmp', 'jcc', 'call', 'ccall', 'rst') and i.target is not None:
                 work.append(i.target)
             if i.flow == 'rst' and i.target == 0x30:
+                RST30[pc] = site = []
                 bank = (pc - VBASE) // 0x4000 if pc >= VBASE else -1
                 a, end = nxt, (VBASE + (bank + 1) * 0x4000) if bank >= 0 else WIN_LO
                 while a + 1 < end and a not in known:
@@ -103,6 +110,7 @@ def find_code(rom, roots, known, tables):
                         break
                     work.append(t)
                     tables.add(t)
+                    site.append(t)
                     if t >= nxt:
                         end = min(end, t)
                     a += 2
@@ -246,6 +254,59 @@ class TrEmitter(Emitter):
         self.e('ror.w #8,d7')
         self.e('jmp tr_dispatch')
 
+    # The table helpers (rst $18: HL += A; $20: A = (HL + A); $28: DE = the word at HL + 2A; $30: a jump through the
+    # word table behind it, indexed by A) emitted in place when the flags they leave are dead after them (at the
+    # return point; for $30 at every entry of its table): no return address, no dispatch at their ret.  The registers
+    # and memory as the Z80 code leaves them (the stack word below SP is dead).  tools/native_test.py checks them.
+    def x_rst(self, ins):
+        t = ins.ops[0][1]
+        nxt = ins.pc + ins.length
+        F = z80x.ALLF | z80x.PV
+        only = os.environ.get('TR_NATIVE_RSTS')
+        if os.environ.get('TR_NO_NATIVE_RST') or t not in (0x18, 0x20, 0x28, 0x30) or only and '%X' % t not in only.split(','):
+            return Emitter.x_rst(self, ins)
+        if t == 0x30:
+            targets = RST30.get(ins.pc)
+            if not targets or any(self.live_in.get(x, F) & F for x in targets):
+                return Emitter.x_rst(self, ins)
+        elif self.live_in.get(nxt, F) & F:
+            return Emitter.x_rst(self, ins)
+        if t == 0x30:
+            self.e('move.w #$%04X,d3' % real(nxt))          # (pop hl: the table)
+        if t in (0x28, 0x30):
+            self.e('add.b d0,d0')
+        skip = self.new_label()
+        self.e('add.b d3,d0')                                # (rst $18: add a,l / ld l,a / inc h on a carry)
+        self.e('bcc.s %s' % skip)
+        self.e('add.w #$100,d3')
+        self.lines.append(skip + ':')
+        self.e('move.b d0,d3')
+        if t == 0x20:
+            self.e('move.b %s,d0' % self.rst_src(0x25))
+        elif t in (0x28, 0x30):
+            self.e('move.b %s,d2' % self.rst_src(0x2A))      # ld e,(hl)
+            self.e('addq.w #1,d3')
+            src = self.rst_src(0x2C)
+            self.e('move.w d2,-(a7)')                        # ld d,(hl)
+            self.e('move.b %s,(a7)' % src)
+            self.e('move.w (a7)+,d2')
+            self.e('addq.w #1,d3')
+        if t == 0x30:
+            self.e('exg d2,d3')                              # ex de,hl / jp (hl)
+            self.e('moveq #0,d7')
+            self.e('move.w d3,d7')
+            self.e('jmp tr_dispatch')
+            return
+        self.jmp_to(nxt)
+
+    def rst_src(self, site):
+        """the source of the helper's read at `site` ((hl)): the window's base when the coverage saw it reading there"""
+        if site not in self.window_sites:
+            return '(a6,d3.w)'
+        for line in self.win_check('d3'):
+            self.lines.append(line) if line.endswith(':') else self.e(line)
+        return '(aW,d3.w)'
+
     def _incdec(self, ins, op):
         """inc / dec a whose H is read (a daa after it: the timer at $05D8): H from the low nibble (Commando's gen)"""
         if self.lo & z80x.H and ins.ops[0] == ('r8', 'a'):
@@ -305,7 +366,7 @@ def generate(extra_roots=()):
     dirty = {pc: f for pc, f in dirty.items() if f}
     joins = set(roots) | tables
     em = compile_code(code, joins, cfg, {IDLE}, emitter=TrEmitter, ijmp_flags=True, flags_at={IDLE},
-                      window_sites=sites, dirty=dirty)
+                      window_sites=sites, dirty=dirty, natives={} if os.environ.get('TR_NO_NATIVES') else NATIVES)
     banks = sorted({(pc - VBASE) // 0x4000 for pc in code if pc >= VBASE})
     report = {'instructions': len(code), 'unsupported': [u for u in em.unsupported if u[0] in pcs],
               'unsupported_uncovered': len([u for u in em.unsupported if u[0] not in pcs]), 'window_sites': len(sites),
