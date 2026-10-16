@@ -38,6 +38,9 @@ SPRITE_ENTRIES = 768			; baked sprites (row stream order)
 	ifnd CHAR_ENTRIES
 CHAR_ENTRIES = 256			; baked characters (8 rows of 4 plane words)
 	endc
+	ifnd PAIR_ENTRIES
+PAIR_ENTRIES = 128			; baked pairs of neighbouring characters (the same, 16 pixels wide)
+	endc
 
 ; ---------------------------------------------------------------------------------------------------------------------
 init_video:
@@ -750,11 +753,13 @@ cell_draw:
 	move.l cell_addr,a0
 	moveq #15,d1
 	cmp.l #-1,d0
-	bne.s .cpm
-.cp:	move.l (a1)+,(a0)+
-	move.l (a1)+,(a0)
-	lea STRIDE-4(a0),a0
-	dbf d1,.cp
+	bne .cpm
+N	set 0				; (16 rows unrolled: the row's offset as the displacement)
+	rept 16
+	move.l (a1)+,N*STRIDE(a0)
+	move.l (a1)+,N*STRIDE+4(a0)
+N	set N+1
+	endr
 	rts
 .cpm:	move.l (a1)+,d2			; (a masked column: its band bits left out)
 	and.l d0,d2
@@ -1200,10 +1205,9 @@ text_build:
 	tst.w d6
 	bne.s .make
 	moveq #15,d1
-.c:	move.l (a0)+,d0
-	cmp.l (a1)+,d0
+.c:	cmpm.l (a0)+,(a1)+
+	dbne d1,.c
 	bne.s .chg
-	dbf d1,.c
 	bra .nrow
 .chg:	move.w d7,d0
 	lsl.w #6,d0
@@ -1256,12 +1260,14 @@ text_build:
 .nx:	addq.w #1,d4
 	cmp.w #32,d4
 	blo.s .ch
+	bsr text_pairs
 .nrow:	addq.w #1,d7
 	cmp.w tx_end,d7
 	blo .row
 	tst.w d5
 	beq.s .done
 	addq.w #1,text_version
+	bsr text_columns
 .done:	move.l (sp)+,a4
 	rts
 ; (an entry: x, the ring line, the code d2, the colour d1; the row's count up)
@@ -1275,6 +1281,81 @@ text_build:
 	move.w d2,(a2)+
 	move.w d1,(a2)+			; the colour (a solid run: its length in the high byte)
 	addq.w #1,(a3)
+	rts
+
+; text_columns (the text changed): each solid run's line word: 0 when the row above has the same run (x, code,
+; colour: drawn with it), else its height in lines (8 a row it covers, down through the rows that have it too).
+; Uses d0-d7/a0-a2.
+text_columns:
+	moveq #1,d7			; the row
+.row:	lea text_rows,a2
+	move.w d7,d0
+	mulu #TEXT_ROW+2,d0
+	add.l d0,a2
+	move.w (a2)+,d1
+	beq.s .nrow
+	subq.w #1,d1
+.e:	cmp.w #$100,6(a2)
+	blo.s .ne			; (not a run)
+	move.l a2,a0
+	move.w d7,d3
+	subq.w #1,d3
+	bsr tx_same
+	beq.s .above
+	moveq #8,d5
+	move.w d7,d3
+.dn:	addq.w #1,d3
+	cmp.w #31,d3
+	bhs.s .h
+	bsr tx_same
+	bne.s .h
+	addq.w #8,d5
+	bra.s .dn
+.h:	move.w d5,2(a2)
+	bra.s .ne
+.above:	clr.w 2(a2)
+.ne:	addq.l #8,a2
+	dbf d1,.e
+.nrow:	addq.w #1,d7
+	cmp.w #31,d7
+	blo.s .row
+	rts
+
+; text_pairs: the row's list at a3 (its count, then the entries): two neighbouring ordinary characters of one colour
+; become one entry (x, the second's code, the first's, the colour | $80; drawn as one 16-pixel image).  Uses d0-d3/a1/a2.
+text_pairs:
+	lea 2(a3),a1			; (read)
+	move.l a1,a2			; (write)
+	move.w (a3),d3
+	moveq #0,d2
+.l:	tst.w d3
+	beq.s .done
+	move.w 6(a1),d0
+	cmp.w #8,d0
+	bhs.s .copy			; (a solid run)
+	cmp.w #2,d3
+	blo.s .copy
+	cmp.w 14(a1),d0
+	bne.s .copy
+	move.w (a1),d1
+	addq.w #8,d1
+	cmp.w 8(a1),d1
+	bne.s .copy
+	move.w (a1),(a2)+
+	move.w 12(a1),(a2)+
+	move.w 4(a1),(a2)+
+	or.w #$80,d0
+	move.w d0,(a2)+
+	lea 16(a1),a1
+	subq.w #2,d3
+	addq.w #1,d2
+	bra.s .l
+.copy:	move.l (a1)+,(a2)+
+	move.l (a1)+,(a2)+
+	subq.w #1,d3
+	addq.w #1,d2
+	bra.s .l
+.done:	move.w d2,(a3)
 	rts
 
 ; text_prepare (before the cells): this ring's text state against now; when it differs the old text's cells lose their
@@ -1345,35 +1426,36 @@ text_pass:
 	move.w d3,tx_nk
 	mulu #RING_COLS,d2
 	move.w d2,tx_k0
+	move.w d7,d0			; the row's ring line
+	lsl.w #3,d0
+	add.w #GUARD_T-8,d0
+	move.w d0,object_y
 .ch:	move.w (a4)+,d0
 	add.w #32,d0
 	add.w scroll_x,d0
 	move.w d0,object_x
-	move.w (a4)+,object_y
+	move.w (a4)+,d2			; (a pair: the second's code)
 	move.w (a4)+,d0
 	move.w (a4)+,d1
 	movem.l d6-d7/a4,-(sp)
 	cmp.w #$100,d1
 	bhs.s .run
+	tst.b d1
+	bmi.s .pair
 	bsr char_get			; d0 code, d1 colour -> a1 the baked rows (8 x 4 plane words)
+	moveq #8,d2
 	bsr char_draw
 	moveq #8,d4
 	bra.s .cells
-.run:	lea -8(a4),a0			; a solid run: drawn with the row above when that has the same one
-	move.w d7,d3
-	subq.w #1,d3
-	bsr tx_same
+.pair:	and.w #7,d1
+	bsr pair_get
+	moveq #0,d2
+	bsr char_draw
+	moveq #16,d4
+	bra.s .cells
+.run:	move.w d2,d5			; a solid run: its height (text_columns), 0: drawn with the row above
 	beq.s .above
-	moveq #8,d5			; else as tall as the rows below with the same one
-	move.w d7,d3
-.dn:	addq.w #1,d3
-	cmp.w #31,d3
-	bhs.s .fill
-	bsr tx_same
-	bne.s .fill
-	addq.w #8,d5
-	bra.s .dn
-.fill:	bsr solid_fill			; -> d4 its width
+	bsr solid_fill			; -> d4 its width
 	bra.s .cells
 .above:	moveq #0,d4
 	move.w d1,d4
@@ -1512,8 +1594,76 @@ solid_fill:
 	move.w #$0203,$ffff8a3a.w
 	rts
 
+; pair_get: the pair d0 (the first's code), d2 (the second's), colour d1 (0-7) -> a1: as char_get's images, the
+; first's pixels in the high bytes, the second's in the low ones (made from the two characters' images).
+pair_get:
+	move.w d2,d7
+	moveq #7,d6
+	and.w d1,d6			; the set
+	lea pal_epoch,a0
+	moveq #0,d5
+	move.b (a0,d6.w),d5
+	moveq #23,d4
+	lsl.l d4,d5			; key: epoch << 23 | colour << 20 | first << 10 | second
+	moveq #0,d4
+	move.w d6,d4
+	swap d4
+	lsl.l #4,d4
+	or.l d4,d5
+	moveq #0,d4
+	move.w d0,d4
+	and.w #$3FF,d4
+	lsl.l #8,d4
+	lsl.l #2,d4
+	or.l d4,d5
+	move.w d7,d4
+	and.w #$3FF,d4
+	or.w d4,d5
+	move.w d0,d3			; the set: first ^ second << 3 ^ colour << 5
+	move.w d7,d4
+	lsl.w #3,d4
+	eor.w d4,d3
+	move.w d6,d4
+	lsl.w #5,d4
+	eor.w d4,d3
+	and.w #PAIR_ENTRIES/4-1,d3
+	move.l d5,d2
+	lea cache_tags,a0
+	moveq #0,d4
+	move.w #CT_PAIRS,d4
+	bsr cache_find
+	beq.s .hit
+	bsr entry_addr
+	move.l a1,-(sp)
+	move.w d7,-(sp)
+	move.w d1,-(sp)
+	bsr char_get			; the first -> the pair as it is
+	move.l 4(sp),a2
+	moveq #80/4-1,d6
+.c1:	move.l (a1)+,(a2)+
+	dbf d6,.c1
+	move.w (sp)+,d1
+	move.w (sp)+,d0
+	bsr char_get			; the second -> the low bytes, its masks the low byte
+	move.l (sp)+,a2
+	move.l a2,a0
+	moveq #32-1,d6
+.c2:	move.b (a1),1(a0)
+	addq.l #2,a1
+	addq.l #2,a0
+	dbf d6,.c2
+	moveq #8-1,d6
+.c3:	move.w (a1)+,d5
+	lsr.w #8,d5
+	or.w d5,(a0)+
+	dbf d6,.c3
+	move.l a2,a1
+	rts
+.hit:	bra entry_addr
+
 ; char_draw: the baked character a1 (8 rows: four plane words, the pixels in the high byte; at 64(a1) the rows'
-; masks) at object_x, object_y: a pass a row, one word when it fits in it, else two (NFSR).
+; masks) at object_x, object_y: a pass a row, one word when it fits in it (the shift at most d2: 8 a character, 0 a
+; pair, its second character in the low bytes), else two (NFSR).
 char_draw:
 	moveq #0,d0
 	move.w object_y,d0
@@ -1530,7 +1680,7 @@ char_draw:
 	and.w object_x,d4		; s
 	lea 64(a1),a3			; the masks
 	moveq #7,d5
-	cmp.w #8,d4
+	cmp.w d2,d4
 	bhi.s .two
 	move.w #2,$ffff8a30.w
 	move.w #1,$ffff8a36.w
@@ -1680,7 +1830,7 @@ bg_get:
 	addq.l #2,sp
 	rts
 
-; entry_addr: entry d3 -> a1 (CT_TILES, CT_SPRITES: 128 bytes; CT_CHARS: 80 bytes).  Keeps the rest.
+; entry_addr: entry d3 -> a1 (CT_TILES, CT_SPRITES: 128 bytes; CT_CHARS, CT_PAIRS: 80 bytes).  Keeps the rest.
 entry_addr:
 	movem.l d3,-(sp)
 	cmp.w #CT_CHARS,d3
@@ -1956,6 +2106,7 @@ N	set N+1
 CT_TILES = 0
 CT_SPRITES = TILE_ENTRIES
 CT_CHARS = CT_SPRITES+SPRITE_ENTRIES
+CT_PAIRS = CT_CHARS+CHAR_ENTRIES
 
 	include "sprite_code.s"
 
@@ -2065,12 +2216,12 @@ text_rows: ds.b 31*(TEXT_ROW+2)
 	even
 keys0: ds.l KEYS
 keys1: ds.l KEYS
-cache_victim: ds.b (CT_CHARS+CHAR_ENTRIES)/4
+cache_victim: ds.b (CT_PAIRS+PAIR_ENTRIES)/4
 	even
-cache_tags: ds.l CT_CHARS+CHAR_ENTRIES
+cache_tags: ds.l CT_PAIRS+PAIR_ENTRIES
 cache_tags_end:
 bake_scratch: ds.b 128
 cache_data: ds.b 128*CT_CHARS
-char_data: ds.b 80*CHAR_ENTRIES
+char_data: ds.b 80*(CHAR_ENTRIES+PAIR_ENTRIES)	; (the pairs after the characters)
 lut_tables: ds.b 2048*PAL_SETS
 	section text,code

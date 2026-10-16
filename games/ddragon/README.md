@@ -5,7 +5,7 @@
 STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`): the main CPU's 6809
 program translated whole (bank-aware), the sprite MCU's job as a native routine, the background, the sprites and the
 text on the STE's 16 colours, the YM2151's music and effects on the YM2149, the ADPCM voices and hits on the DMA
-sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: 19-22 frames a second in play (about 35% of the arcade).
+sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: 20-24 frames a second in play (about 38% of the arcade).
 
 ```sh
 python games/ddragon/tools/prepare.py       # verify assets/roms/ddragon.zip, unpack to assets/roms/extracted/ddragon/
@@ -133,8 +133,9 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
   epoch) into a 768-entry cache, the masks for the 16 shifts prepared; a HOG pass a row run.  Clipped at the black
   side words (the inner word only), culled beyond, whole into the guard rows at the top and bottom.
 * **Text**: solid characters (every pixel one pen: the frame of the picture, rows 1 and 30 and columns 0 and 31) are
-  Blitter fills, a run of them one fill and a column of them one tall fill; the others are baked (256 entries) and
-  drawn a row a pass.
+  Blitter fills, a run of them one fill and a column of them one tall fill (the heights worked out when the text
+  changes); two neighbouring others of one colour are one 16-pixel image (128 pairs), single ones baked (256
+  entries); a row a pass.
 * Every Blitter pass HOG and at most 256 cycles (`BLIT_STATS=256`: none longer).
 * `tools/render_test.py`: the picture equals the reference picture through the palette, pixel for pixel (the
   attract mode, the plays through missions 1-4); `tools/sprite_test.py`: both rings x 16 fine scrolls, sprites at
@@ -160,13 +161,13 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
 |---|---|---|
 | attract mode | 57 (100%) | 47-50 |
 | AUTOPLAY (coin, start, walk and punch) | mostly 17-22 (22.7 overall) | mostly 3-4 (7.6 overall) |
-| the recorded play (`PLAY=1`, missions 1-2) | 10-46, mostly 19-22 (24.6 overall) | 3-10, mostly 4 (7.9 overall) |
+| the recorded play (`PLAY=1`, missions 1-2) | 15-48, mostly 20-24 (26.0 overall) | 3-11, mostly 4 (8.2 overall) |
 
 The logic comes first (a picture after at most 4 frames not drawn).  Musashi, mission 1 in play (`profile.py 3000
 3200 --seed -1`): the logic 193k cycles a frame (the MCU job 15k, the bank switches 10k, the collision natives 15k,
 the sprite copy 6k, the translated code ~127k: a third of it calls and returns, ~300 a frame; 217k on average over
-the play through mission 4), the sound ~10-20k, a picture 674k with the Blitter (cells 92k, the text 283k, the
-sprites 142k).
+the play through mission 4), the sound ~10-20k, a picture 578k with the Blitter (cells 84k, the text ~190k, the
+sprites 142k; `render_test.py 3400 --seed -1 --first 3000 --every 2 --profile`).
 
 Taken so far (logic in mission 1 / over missions 1-4):
 
@@ -178,17 +179,21 @@ Taken so far (logic in mission 1 / over missions 1-4):
 | `main_bank_w` from a table of contexts | 198k |
 | the MCU's parts in registers, its sort an insertion sort (67k -> 48k, 15k -> 6k at a mission's start) | 193k / 217k |
 
+The picture: 674k -> 619k with pairs of text characters (two neighbours of one colour baked into one 16-pixel
+image, 128 entries), 587k with the solid runs' column heights made once when the text changes (not per picture) and
+a tighter row compare, 578k with the cell copy unrolled.
+
 Before that: the ADPCM decoded at build time (sound 98k / 163k -> 13k / 19k a frame with one / two voices), a
 context per bank (bank switches 27k -> 15k), solid text fills (the text's CPU cycles 391k -> 237k a picture).  What
 is left is flat: after the collision no routine of the game takes more than 2.5% of the main CPU's time
 (`ref/routines.py`), and the calls cost ~40 cycles each way already.
 
-The program asks TOS for 3,654,106 bytes (text, data and BSS; the release limit is 3,700,000): the tile cache is 512
+The program asks TOS for 3,665,354 bytes (text, data and BSS; the release limit is 3,700,000): the tile cache is 512
 entries, the character cache 256, the sprites' row orders two a byte.
 
 ## What is missing
 
-* Speed: about 35% of the arcade in play; the logic would have to get 2 times cheaper (spread over the game's
-  routines now), and a picture costs as much as 3-4 frames of logic (its text alone 283k).
+* Speed: about 38% of the arcade in play; the logic would have to get 2 times cheaper (spread over the game's
+  routines now), and a picture costs as much as 3 frames of logic.
 * The flip screen (cocktail) is not modelled; play against MAME itself (not the reference board) not compared.
 * The music is the YM2151 reduced to three square-wave voices.
