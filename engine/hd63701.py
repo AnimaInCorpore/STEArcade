@@ -907,3 +907,62 @@ class HD63701:
         d = self.imm8()
         self.pushw(self.pc)
         self.pc = (self.pc + (d - 256 if d & 0x80 else d)) & 0xFFFF
+
+
+class HD63701Y0(HD63701):
+    """Hitachi HD63701Y0 (Double Dragon's sprite MCU), MAME's hd63701y0_cpu_device (hd6301y_mem): the 16 KB ROM at
+    $C000, RAM $40-$13F, the 6301Y's registers $00-$27 of which this models the 6301 set above plus port 6 ($16 DDR,
+    $17 data; out_p6(value, ddr) as MAME's out_p6_cb: value = data & ddr | ~ddr, called on every data write and on a
+    DDR change; the data register keeps its value over a reset, the DDR is cleared without an output).  The other
+    6301X/Y additions (ports 5 and 7, timer 2, the SCI's second register) read $FF and ignore writes: the sprite
+    program never touches them.  Everything else goes to the external bus."""
+
+    def __init__(self, rom, rd=None, wr=None, out_p6=None):
+        assert len(rom) == 0x4000
+        self.rom16 = bytes(rom)
+        self.ram256 = bytearray(0x100)
+        self.out_p6 = out_p6
+        self.p6_ddr = self.p6_data = 0
+        super().__init__(rom[0x3000:], rd, wr)
+
+    def reset(self):
+        self.p6_ddr = 0
+        super().reset()
+        self.ram_ctrl = (self.ram_ctrl & 0x80) | 0x78
+
+    def rd(self, a):
+        a &= 0xFFFF
+        if a >= 0xC000:
+            return self.rom16[a - 0xC000]
+        if 0x40 <= a < 0x140:
+            return self.ram256[a - 0x40]
+        if a < 0x28:
+            if a < 0x15 and a not in (0x00, 0x04, 0x05, 0x13):
+                return self.rd_reg(a)
+            if a == 0x17:
+                return (self.p6_data & self.p6_ddr) | (0xFF & ~self.p6_ddr)
+            return 0xFF
+        return self.ext_rd(a) & 0xFF
+
+    def wr(self, a, v):
+        a &= 0xFFFF
+        v &= 0xFF
+        if 0x40 <= a < 0x140:
+            self.ram256[a - 0x40] = v
+        elif a < 0x28:
+            if a == 0x16:
+                if self.p6_ddr != v:
+                    self.p6_ddr = v
+                    self._p6()
+            elif a == 0x17:
+                self.p6_data = v
+                self._p6()
+            elif a < 0x15:
+                self.wr_reg(a, v)
+        elif a < 0xC000:
+            self.ext_wr(a, v)
+
+    def _p6(self):
+        if self.out_p6:
+            d = self.p6_ddr
+            self.out_p6((self.p6_data & d) | (d ^ 0xFF), d)
