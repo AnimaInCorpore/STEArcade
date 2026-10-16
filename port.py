@@ -62,7 +62,8 @@ TESTS = {
                 ("tools/logic_test.py", ["{n}"], 3000),
                 ("tools/logic_test.py", ["6000", "--seed", "7"], None),     # play
                 ("tools/render_test.py", ["6000", "--seed", "9"], None),
-                ("tools/sprite_test.py", [], None)],                # edges, 16 shifts, holes, 64 KB crossings
+                ("tools/sprite_test.py", [], None),                 # edges, 16 shifts, holes, 64 KB crossings
+                ("tools/sound_test.py", ["6000", "--random"], None)],   # the translated driver, YM, voices
     "rtype": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),                    # attract

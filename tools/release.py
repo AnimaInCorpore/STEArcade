@@ -57,8 +57,9 @@ GAMES = [
      "  the centred 320 of the 384 pixels; no sound yet",
      "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
     ("kungfum", "KUNGFUM.PRG", "Kung-Fu Master (Irem 1984)",
-     "93% of the arcade's speed, 24-39 pictures a second in play (Hatari); exact logic, all 256 x 256 pixels;\n"
-     "  no sound yet",
+     "92% of the arcade's speed, 20-34 pictures a second in play (Hatari); exact logic, all 256 x 256 pixels;\n"
+     "  the sound board's driver translated: music and effects on the YM (three of the six AY channels), the voices\n"
+     "  on the DMA sound",
      "punch: Space, Control, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  up jumps, down crouches."),
     ("trojan", "TROJAN.PRG", "Trojan (Capcom 1986)",
      "90% of the arcade's speed, 10-18 pictures a second (Hatari); exact logic, all 256 x 240 pixels; music and\n"

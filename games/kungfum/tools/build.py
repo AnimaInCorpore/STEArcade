@@ -31,6 +31,12 @@ def main():
         assets = None
     if assets and (args.assets or not (build / 'kf_assets.s').exists()):
         assets.build()
+    import sndgen
+    (build / 'snd_rom.bin').write_bytes((EXTRACTED / 'kungfum' / 'a-3h-.bin').read_bytes())
+    stext, sem, scode = sndgen.generate()
+    if args.assets or not (build / 'snd_voices.s').exists():
+        sndgen.sound.build_voices(build)
+    (build / 'snd_code.s').write_text(stext)
     text, report, _ = gen.generate()
     (build / 'code_kungfum.s').write_text(text)
     (build / 'translation.json').write_text(json.dumps(report, indent=1) + '\n')

@@ -76,6 +76,9 @@ start:
 
 	bsr	init_hardware
 	bsr	init_render
+	ifnd NOSOUND
+	bsr	snd_init
+	endc
 
 	ifnd SIM			; (the test harness sets the ports, the DIP switches of its seed)
 	move.b	#$FF,io_ports		; SYSTEM, P1, P2: nothing pressed
@@ -178,6 +181,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	clr.b	$ffff8901.w		; (the DMA sound off)
 	moveq	#8,d0			; the YM2149 silent
 .silence:
 	move.b	d0,$ffff8800.w
@@ -424,6 +428,9 @@ z80_hook:
 .deliver:
 	ifd PLAYBACK
 	bsr	pb_inputs
+	endc
+	ifnd NOSOUND
+	bsr	snd_frame		; (the sound board: the commands of the frame before, its ticks; sound.s)
 	endc
 	movem.l	(sp)+,d0-d7/a0-a6
 	move.l	(sp)+,hook_resume	; (the continuation: after the IRQ)
@@ -826,6 +833,9 @@ z80_unsupported:
 	bra	crash_common
 
 	include	"render.s"
+	ifnd NOSOUND
+	include	"sound.s"
+	endc
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch table in the data section)

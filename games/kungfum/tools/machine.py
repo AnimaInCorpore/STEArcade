@@ -163,6 +163,7 @@ class KungFuMaster:
         self.system = self.p1 = self.p2 = 0xFF
         self.dsw1, self.dsw2 = dsw1, dsw2
         self.sound_log = []                    # (frame, command)
+        self.sound_times = None                # (a list: (attoseconds, command) of each command, sound.py)
         self.video_log = []                    # this frame's (line, what, value): scroll and sprite RAM writes
         self.frame = 0
         self.cpu = Z80Mame(self.rd, self.wr, self.io_rd, self.io_wr, self.irq_ack)
@@ -202,6 +203,8 @@ class KungFuMaster:
         p &= 0xFF
         if p == 0:
             self.sound_log.append((self.frame, v))
+            if self.sound_times is not None:
+                self.sound_times.append((self.now(), v))      # (MAME-exact: the write's time, attoseconds)
         elif p == 1:
             self.flip = (v ^ (~self.dsw2 & 1)) & 1
 

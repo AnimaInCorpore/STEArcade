@@ -4,8 +4,9 @@
 
 MAME set `kungfum` (Irem M62).  The main Z80 program (32 KB, flat) is statically translated to 68000 code; the
 picture (all 256 x 256 arcade pixels, centred in the 320-pixel screen, top and bottom borders open) is drawn by
-`src/render.s` with a hardware-scrolled playfield and Blitter sprites.  For a 4 MB STE (it asks TOS for 1.5 MB).  No sound
-yet: the sound commands are kept in a ring.
+`src/render.s` with a hardware-scrolled playfield and Blitter sprites.  The sound board's M6803 driver is translated
+too and plays its two AY-3-8910s on the YM2149 (three of the six channels), the ADPCM voices through the DMA sound.
+For a 4 MB STE (it asks TOS for 1.6 MB).
 
 ```sh
 python games/kungfum/tools/prepare.py      # verify assets/roms/kungfum.zip, unpack to assets/roms/extracted/kungfum/
@@ -14,6 +15,8 @@ python games/kungfum/tools/build.py        # -> run/kungfum/KUNGFUM.PRG (--sim: 
 python games/kungfum/tools/logic_test.py 20000 --seed 4     # the translation in lock-step with the reference
 python games/kungfum/tools/render_test.py 20000 --seed 4    # the STE picture against the reference, every frame
 python games/kungfum/tools/sprite_test.py                   # sprites at the edges, all shifts, holes, 64 KB crossings
+python games/kungfum/tools/sound_test.py 20000 --random     # the STE's sound against its model (--seed N: the game's)
+python games/kungfum/ref/mame_sound_kungfum.py 6000 --play  # the sound board's model against MAME 0.289
 python games/kungfum/tools/play_search.py 9000              # the recorded play (build/kungfum/play_inputs.bin)
 games/kungfum/tools/bench.sh 6000          # Hatari speed (PLAY=1: the recorded play): logic and pictures a second
 games/kungfum/tools/shots.sh tap:5@26 tap:1@29 shot@40      # its own Hatari: keys, screenshots
@@ -47,9 +50,10 @@ start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.  For scripted Ha
   overhang is allowed (all at windows inside a word: at group-aligned windows the clipping is exact).
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): attract, coin, start, play by keyboard and by the recorded play;
   no crash, no late border event (DEBUG counters, 6000 VBLs).
-* Not done: sound (the M6803 board with two AY-3-8910s, the MSM5205 voices and the netlist drums: a recorded-driver
-  player as `engine/capsnd.py` does for the Capcom boards would be the way), the flip screen (cocktail), the service
-  mode (its code at $7666 is not translated: DSW2 bit 7 is off).
+* **Sound**: the model of the sound board equals MAME instruction for instruction (`ref/mame_sound_kungfum.py`: all
+  2,066,844 writes of the M6803 to its ports, the IRQ acknowledges and the ADPCM nibbles, in order, over 6,000 frames of
+  attract and play); the STE's player equals the model in the STE's schedule (`tools/sound_test.py`, below).
+* Not done: the flip screen (cocktail), the service mode (its code at $7666 is not translated: DSW2 bit 7 is off).
 
 ## Speed
 
@@ -58,18 +62,20 @@ and the pictures a second, separately; per 100 VBLs in RATE.BIN.
 
 | run | logic | pictures |
 |---|---|---|
-| recorded play (`PLAY=1`), the whole run | 52.4 /s (93%) | 29.5 /s |
-| recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 24-39 /s |
-| AUTOPLAY script (attract, coin, random play) | 48.8 /s (87%) | 31.1 /s |
+| recorded play (`PLAY=1`), the whole run | 51.9 /s (92%) | 27.1 /s |
+| recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 20-34 /s |
+| AUTOPLAY script (attract, coin, random play) | 48.0 /s (85%) | 27.6 /s |
+| recorded play without the sound (`EXTRA="-D NOSOUND=1"`) | 52.4 /s (93%) | 29.5 /s |
 
-Musashi (`render_test.py`, a picture's render_frame; `logic_test.py`, a frame's logic): the logic 37-47k cycles a
-frame in play (21-27k in the level selection screens); a picture 125-160k CPU cycles and 15-36k Blitter bus cycles
+Musashi (`render_test.py`, a picture's render_frame; `logic_test.py`, a frame's logic, now with the sound's ~10k): the
+logic 37-47k cycles a frame in play (21-27k in the level selection screens) without the sound; a picture 125-160k CPU cycles and 15-36k Blitter bus cycles
 (13 seeds' averages).  Where a picture's time goes (`render_test.py --prof`, seed 4): the sprite rows 25%, the front
 tiles over the sprites 13%, bringing the ring to the window 11%, the sprite list 10%, cell copies 9%, the tile RAM
 compare 7%.  The dips in the timeline are the scene changes (a new floor: the caches flushed, everything baked and
 drawn again) and the window's jumps at the 512-pixel wrap (the ring's whole window copied).  The program needs
-1,504,648 bytes (text 68 KB, data 454 KB: the dispatch table, the ROM and the graphics; BSS 982 KB: the four
-playfield buffers, the caches).
+1,504,648 bytes without the sound (text 68 KB, data 454 KB: the dispatch table, the ROM and the graphics; BSS 982 KB:
+the four playfield buffers, the caches); the sound adds 127 KB (the voices 46 KB, the driver's translation, its 64 KB
+memory image): 1,631,532 bytes.
 
 ## The schedule (src/kungfum.s)
 
@@ -114,6 +120,51 @@ the 5th floor boss's table (`gen.py TABLES`); the other `jp (hl)` tables run who
   of 255 (the playfield shows 30-51 colours a scene, 88 in all).  The panel: 15 fitted to its 36 pens (5.4).  A change
   of scene flushes the caches and draws everything again.
 
+## Sound (src/sound.s, tools/sound.py, tools/sndgen.py)
+
+The board (MAME irem/audio/irem.cpp, m62): an M6803 (3.579545 MHz / 4) writes two AY-3-8910s through its ports (port 1
+the bus, port 2 the strobe, address / data and chip select), feeds two MSM5205 ADPCM voices from its NMI (the MSM5205's
+VCK, 4 kHz) and gets the commands by IRQ, reading them from the first AY's port A.  The driver (a-3h): the NMI counts
+($BD each, $C0 each 16th: the sequencers' 250 Hz tick) and feeds the voices; the main loop, once an NMI (each AY write
+waits for one), handles a command (0 stop, 1-7 a voice, $10-$24 a sequence into one of four slots; $20-$23 the tunes
+reset everything first), steps the slots whose timer ran out (scripts of AY register writes, loops, calls,
+envelopes), and the volume decays.  The 45L's port A (the netlist drums of other M62 games) is never written: Kung-Fu
+Master has no drums.
+
+* **The model** (`tools/sound.py Board`, engine/m6801.py's core in expanded mode): MAME's 6803 cycle table, its E
+  clock rounded up (894,887 Hz), the NMIs fitted to MAME's debugger traces (the first at E cycle 1156.86, every
+  223.72), interrupts seen only where MAME's core looks (a timeslice's start, CLI after one more instruction, RTI),
+  the DDRs reading $FF, the command latch visible from the start of the main CPU's timeslice that wrote it, the IRQ
+  acknowledged only once the latch has bit 7.  Against MAME (`ref/mame_sound_kungfum.py 6000 --play`, the commands
+  at the reference main board's exact times): all 2,066,844 port, acknowledge and ADPCM writes equal, in order; the AY
+  register writes equal in every one of the 5,998 frames.
+* **The STE's schedule** (`TickBoard`): no NMIs; the busy waits (an AY write's wait for $BD, a voice start's five
+  NMIs) and the loop's port B write (the MSM5205 resets) are left out, and the main loop runs once per command (`$BC`
+  set) and once per tick (`$C0` = 1; 4.4375 ticks an arcade frame).  The driver writes the same values; within a tick
+  the arcade spreads them over the tick's NMIs and does the volume steps an iteration later, so the AY registers at
+  the end of an arcade frame equal the exact board's in 55% of the frames (3,000 frames of play), the others differ by
+  that sub-tick order (the tones' and volumes' steps, a few ms).
+* **Translated, not recorded**: the commands share state (the slots write any AY register, the mixer masks and the
+  volume envelopes are per channel), so recording each command alone would miss what an effect does to a tune; the
+  driver is small (580 instructions, `tools/sndgen.py`: engine/m6801x.py's emitter, the ROM at $E000, words at odd and
+  indexed addresses as byte pairs: the driver keeps words at odd RAM addresses, which Musashi accepts and the 68000
+  does not).  Its iterations cost ~6k cycles an arcade frame (Musashi), a tune's start up to 55k.
+* **YM2149** (`snd_ym`, `sound.py YM`): each arcade frame the three loudest audible AY channels (volume or envelope
+  mode, tone or noise on) go to the YM, a channel keeping its YM channel while it stays chosen; periods x 2000000 /
+  894886, noise and envelope from the chip of the first chosen channel that uses them, only changed registers written
+  (none in a frame without AY writes).  ~2k cycles.
+* **Voices** (`snd_voice`, `snd_mix`, `sound.py VoiceMix`): the seven voice samples (the shouts and screams) are the
+  MSM5205's output decoded offline with MAME's algorithm (the exact board playing each command alone), resampled to the
+  DMA sound's 6258 Hz, 46 KB.  Voice 1 (commands 1-2) and voice 2 (3-7) restart with their commands and end with 0 and
+  the tunes (checked on the exact board); `snd_mix` adds the two into a 2 KB ring the DMA plays in a loop, four bytes
+  at a time (biased bytes: no carry between them), 700 bytes ahead of the DMA's counter, from the main flow once an
+  arcade frame (no interrupt).  ~1.6k cycles an arcade frame.
+* **Checks**: `tools/sound_test.py` runs snd_frame and snd_mix on Musashi beside STEBoard and VoiceMix: the AY register
+  files, the YM's registers and channel choice, the DMA ring, every frame: equal in 20,000 frames of random commands
+  (all of the driver's commands) and 20,000 each of the game's commands (seeds 1 and 9).  Hatari (recorded play, 6000
+  VBLs, DEBUG): no late border event; the music's pitch classes over the first tune match MAME's audio (`-wavwrite`)
+  best unshifted.  Cost: logic 52.4 -> 51.9 arcade frames and 29.5 -> 27.1 pictures a second.
+
 ## The board (MAME irem/m62.cpp, m62_v.cpp)
 
 * **Main CPU**: Z80 at 18.432 MHz / 6 = 3.072 MHz.  Map: $0000-$7FFF ROM, $A000 / $B000 write the scroll register's
@@ -122,9 +173,10 @@ the 5th floor boss's table (`gen.py TABLES`); the other `jp (hl)` tables run who
   1 flip screen + coin counters.  IM 1; IRQ once a frame at the VBLANK (irq0_line_hold: held until acknowledged).
   The IRQ handler ($0038) copies the sprite list from RAM ($EB25.., 24 entries from $C020) and writes the scroll
   register right at the VBLANK, so the picture never changes mid-frame.
-* **Sound board** (M6803 + 2 AY-3-8910 + 2 MSM5205): it only receives the command byte (bit 7 0 raises the M6803's
-  IRQ); nothing comes back to the main CPU, so it is not emulated: `sound_log` keeps (frame, command).  In the attract
-  sequence the game sends commands only at boot and around frame 2986 (no demo sounds).
+* **Sound board** (M6803 + 2 AY-3-8910 + 2 MSM5205, see "Sound"): it only receives the command byte (bit 7 0 raises the
+  M6803's IRQ); nothing comes back to the main CPU: `sound_log` keeps (frame, command), `sound_times` the exact
+  times for `ref/mame_sound_kungfum.py`.  In the attract sequence the game sends commands only at boot and around frame
+  2986 (no demo sounds).
 * **Screen**: 6.144 MHz pixel clock, 384 x 284 total, 256 x 256 visible (x 128-383, lines 0-255), 56.34 Hz: 192 CPU
   cycles a line, 54528 a frame.
 * **Tiles**: a 64 x 32 tilemap (512 x 256 pixels) of 8x8 3bpp tiles (1024, `g-4c/4d/4e`): code = $D000 byte + attr
@@ -163,5 +215,5 @@ RAM, scroll, I/O ports 0 and 1); a second short run takes the sprite palette's p
   differs from MAME's in 0 pixels.
 
 Not covered: the flip screen (cocktail; the renderer raises), play with coins and inputs (the comparison runs the
-attract sequence only), the sound board.
+attract sequence only).
 
