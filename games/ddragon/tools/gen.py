@@ -1,0 +1,223 @@
+"""Double Dragon's main program translated to 68000 code (engine/m6809x.py).
+
+    from gen import generate; report = generate()     -> build/ddragon/code_main.s, tables_main.s, gen_info.s
+
+Virtual pages (8 KB, ref/cover.py): 0-7 the CPU's own slots (0-1 RAM, palette, video RAM, the shared RAM and the
+I/O; 4-7 the fixed ROM), 8 + 2 * bank and 9 + 2 * bank the ROM bank in slots 2 and 3 ($4000-$7FFF).  The 68000 side
+(src/core.s): g_mem is the CPU's 64 KB image ($0000-$3FFF RAM and I/O, $8000-$FFFF the fixed ROM), g_banks the six
+16 KB banks; a3 = a4 = g_mem (VB of slots 0 and 1: the direct page, the stack and the video RAM without a load).
+The accesses to $3800-$380F (inputs, bank, scroll, interrupt acknowledges, the sound latch, the MCU's NMI) and to the
+shared RAM's mirrors ($2200-$27FF: the clear loop at $420C runs down from $2300) go through the runtime (main_io_r /
+main_io_w); every store into the palette, the fg, the sprite RAM or the bg sets the
+renderer's flag (pal_written, fg_written, spr_written, bg_written).
+"""
+import collections
+import glob
+import pickle
+import sys
+from pathlib import Path
+
+sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / "engine")]
+import m6809x
+from machine import DDragonPort, load
+from paths import build_dir
+
+RESET, NMI, FIRQ = 0x8000, 0x8068, 0x80A4
+# the port's hooks (machine.DDragonPort): pc -> (68000 label, the instruction after it)
+# (no hook_next: a hook reads N Z V C, the code before it keeps them exact: an interrupt there pushes CC, and the FIRQ
+# that restarts the foreground leaves that byte in the live stack)
+HOOKS = {0x83E9: "hook_83E9", 0x8541: "hook_8541", 0xB7AD: "hook_B7AD", 0xEEB0: "hook_EEB0",
+         DDragonPort.VBLANK_END: "hook_B7A5", DDragonPort.COIN_WAIT: "hook_89C7"}
+NEXT = {0x83E9: 0x83EB, 0x8541: 0x8543, 0xB7AD: 0xB7B0, 0xEEB0: 0xEEB3, 0xB7A5: 0xB7A8, 0x89C7: 0x89CA}
+assert set(DDragonPort.HOOKS) | {DDragonPort.VBLANK_END, DDragonPort.COIN_WAIT} == set(HOOKS)
+# hand-written 68000 routines (src/core.s) in place of translated code: virtual pc -> label
+NATIVES = {0x10205: "native_clear_sprites",     # bank 0 $4205: PSHU zeros down from $2081 + 5 * n, through the mirrors
+           0x10231: "native_copy_sprites"}      # bank 0 $4231: the MCU's sprite entries to the sprite RAM
+STATIC_WRITE = {0x3808: "main_bank_w"}          # the bank register: straight to its routine
+AREAS = {"pal": "pal_written", "fg": "fg_written", "spr": "spr_written", "bg": "bg_written"}
+
+
+def rom_image():
+    rom = bytearray(0x30000)
+    rom[0x08000:0x10000] = load("21j-1-5.26")
+    rom[0x10000:0x18000] = load("21j-2-3.25")
+    rom[0x18000:0x20000] = load("21j-3.24")
+    rom[0x20000:0x28000] = load("21j-4-1.23")
+    return rom
+
+
+def page_offset(p):
+    """(image, offset) of virtual page p"""
+    if p < 8:
+        return "g_mem", p * 0x2000
+    b, half = divmod(p - 8, 2)
+    return "g_banks", b * 0x4000 + half * 0x2000
+
+
+def page_addr(p):
+    img, off = page_offset(p)
+    return "%s+$%X" % (img, off)
+
+
+def load_cover():
+    files = sorted(glob.glob(str(build_dir("ddragon") / "cover_*.pkl")))
+    if not files:
+        sys.exit("error: no coverage in build/ddragon: python games/ddragon/ref/cover.py SEED FRAMES")
+    exec_ = collections.Counter()
+    acc = collections.defaultdict(set)
+    ioacc = collections.defaultdict(set)
+    tg = collections.defaultdict(set)
+    wr = collections.defaultdict(set)
+    mirror = set()
+    dps = collections.defaultdict(set)
+    wraps = set()
+    for f in files:
+        d = pickle.load(open(f, "rb"))
+        exec_.update(d["exec"])
+        for (v, slot), s in d["acc"].items():
+            acc[v] |= s
+        for (v, slot), s in d["ioacc"].items():
+            ioacc[v] |= s
+        for (v, slot), s in d["targets"].items():
+            tg[v] |= s
+        for (v, slot), s in d["wr_sites"].items():
+            wr[v] |= s
+        mirror |= {v for v, slot in d.get("mirror", ())}
+        for (v, slot), s in d.get("dp", {}).items():
+            dps[v] |= s
+        wraps |= {v for v, slot in d.get("wrap", ())}
+        # (older coverage: at most 64 addresses a site; a shared RAM site that reached the cap may have used a mirror)
+        if "mirror" not in d:
+            mirror |= {v for (v, slot), s in d["ioacc"].items() if len(s) >= 64 and
+                       any(0x2000 <= a < 0x2800 for rw, a in s)}
+    return exec_, acc, ioacc, tg, wr, len(files), mirror, dps, wraps
+
+
+def writer_marks(acc, wr):
+    """(v, ins) -> the flag stores after a store into the video RAM or the palette (gen.AREAS); a store site the
+    coverage never saw sets all four"""
+    def after(v, ins):
+        if v in wr:
+            return ["st %s" % AREAS[a] for a in sorted(wr[v])]
+        mn = m6809x.base_mn(ins.mn)
+        if v not in acc and ins.mode in ("ext", "idx", "dir") and (mn.startswith("st") or mn in (
+                "clr", "neg", "com", "inc", "dec", "asl", "lsl", "lsr", "asr", "rol", "ror")):
+            return ["st %s" % f for f in AREAS.values()]
+        return None
+    return after
+
+
+class DDProgram(m6809x.Program):
+    """m6809x.Program whose instructions across the bank's two slots read on in the same bank: a bank's slot 2 page
+    (8 + 2 * bank) is followed by its slot 3 page (bank 5's $5FFF: PSHS, its postbyte at $6000)"""
+
+    def reader(self, v):
+        page = v >> 13
+        if page >= 8 and not page & 1:
+            slot = self.slot_of[page]
+            data, nxt = self.page(page), self.page(page + 1)
+
+            def rd(a):
+                a &= 0xFFFF
+                if a >> 13 == slot:
+                    return data[a & 0x1FFF]
+                if a >> 13 == slot + 1:
+                    return nxt[a & 0x1FFF]
+                return 0
+            return rd, slot
+        return super().reader(v)
+
+
+def program(cover):
+    exec_, acc, ioacc, tg, wr, nfiles, mirror, dps, wraps = cover
+    for v, s in dps.items():
+        if len(s) > 1:
+            raise RuntimeError("%06X runs with DP %s" % (v, sorted(s)))
+    rom = rom_image()
+    slot_of = {}
+    for (v, slot) in exec_:
+        p = v >> 13
+        if slot_of.setdefault(p, slot) != slot:
+            raise RuntimeError("page %X runs from slots %d and %d" % (p, slot_of[p], slot))
+
+    def page_bytes(p):
+        if p < 8:
+            return bytes(rom[p * 0x2000:(p + 1) * 0x2000]) if p >= 4 else bytes(0x2000)
+        b, half = divmod(p - 8, 2)
+        o = 0x10000 + b * 0x4000 + half * 0x2000
+        return bytes(rom[o:o + 0x2000])
+    io = {v for v, s in ioacc.items() if any(0x3800 <= a < 0x3810 or 0x2200 <= a < 0x2800 for rw, a in s)} | mirror
+    hooks = {v: lab for v, lab in HOOKS.items()}
+    prog = DDProgram("main", "M", page_bytes, slot_of, roots=[RESET, NMI, FIRQ] + sorted(HOOKS),
+                          exec_cover={v for v, s in exec_}, acc_cover=acc, targets=tg, hooks=hooks,
+                          page_addr=page_addr, io_sites=io,
+                          after=writer_marks(acc, wr), natives=NATIVES, static_write=STATIC_WRITE, nf_dispatch=True,
+                          dp_sites={v: next(iter(s)) for v, s in dps.items()}, wrap_sites=wraps, pid_checks=True, dp=0, a3_slot=0, a4_slot=1)
+    prog.fixed_slots = (4, 5, 6, 7)
+    return prog
+
+
+def dispatch_tables(prog, code):
+    """per code page a table of 8192 words, (the label - the page's base) / 2, its base the long before it: the stub
+    main_pb_XX (jmp main_badpc) put before the page's first label (gen.page_bases), so 0 is a bad pc; the page list (32
+    longs, bad_table where no code runs)"""
+    lines = ["\tsection data,data", "\teven", "main_page_tables:"]
+    for p in range(32):
+        lines.append("\tdc.l %s" % ("main_pt_%02X" % p if p in prog.slot_of else "bad_table"))
+    for p in sorted(prog.slot_of):
+        lines.append("\tdc.l main_pb_%02X" % p)
+        lines.append("main_pt_%02X:" % p)
+        row = []
+        for off in range(0x2000):
+            v = (p << 13) | off
+            row.append("(%s-main_pb_%02X)/2" % (prog.label(v), p) if v in code else "0")
+            if len(row) == 16:
+                lines.append("\tdc.w " + ",".join(row))
+                row = []
+    return lines
+
+
+def page_bases(lines, prog, code):
+    """the stub main_pb_XX (jmp main_badpc) before each code page's first label (the last instruction of a page never
+    falls through into the next: the translation dispatches there)"""
+    first = {}
+    for v in sorted(code):
+        first.setdefault(v >> 13, prog.label(v))
+    starts = {lab + ":": p for p, lab in first.items()}
+    out = []
+    for line in lines:
+        head = line.split("\t", 1)[0]
+        if head in starts:
+            out.append("main_pb_%02X:\tjmp main_badpc" % starts[head])
+        out.append(line)
+    return out
+
+
+def generate():
+    build = build_dir("ddragon")
+    cover = load_cover()
+    rom = rom_image()
+    (build / "fixed.rom").write_bytes(bytes(rom[0x8000:0x10000]))
+    (build / "banks.rom").write_bytes(bytes(rom[0x10000:0x28000]))
+    prog = program(cover)
+    lines, rep, em, code = m6809x.translate(prog)
+    lines = page_bases(lines, prog, code)
+    head = ["; generated by games/ddragon/tools/gen.py (engine/m6809x.py): the main CPU", "\tsection text,code"]
+    (build / "code_main.s").write_text("\n".join(head + lines) + "\n")
+    (build / "tables_main.s").write_text("\n".join(dispatch_tables(prog, code)) + "\n")
+    info = ["MAIN_RESET equ %s" % prog.label(RESET), "MAIN_NMI equ %s" % prog.label(NMI),
+            "MAIN_FIRQ equ %s" % prog.label(FIRQ)]
+    info += ["NEXT_%04X equ %s" % (pc, prog.label(nx)) for pc, nx in sorted(NEXT.items())]
+    info += ["CLEAR_SPRITES_END equ %s" % prog.label(0x10211), "COPY_SPRITES_END equ %s" % prog.label(0x10241)]
+    (build / "gen_info.s").write_text("\n".join(info) + "\n")
+    rep["pages"] = sorted("%X:%d" % (p, s) for p, s in prog.slot_of.items())
+    rep["coverage files"] = cover[5]
+    return rep
+
+
+if __name__ == "__main__":
+    r = generate()
+    print("instructions", r["instructions"], "unsupported", len(r["unsupported"]), "missing", len(r["missing"]),
+          r["stats"], r["pages"])
+    for u in r["unsupported"][:20]:
+        print("   ", u)

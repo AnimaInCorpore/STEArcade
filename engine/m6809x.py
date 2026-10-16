@@ -143,14 +143,20 @@ class Program:
     targets         {virtual pc: set of virtual targets} where computed jumps / returns / cross-slot jumps went
     io_pages        pages whose accesses go through the runtime (the key custom ...)
     hooks           {virtual pc: 68000 label} a pc where the runtime takes over (the idle loop)
+    wrap_sites      virtual pcs whose indexed operand (register + constant offset) crossed $FFFF / $0000 (the coverage):
+                    the 16 bit sum, its slot and base computed at run time (a1 the index), as the 6809 wraps
+    static_write    {6809 address: 68000 label}: a store with that static address calls the label (d5 = the byte;
+                    every register but d5-d7 / a0 kept) instead of the generic <cpu>_io_w (a bank register)
     natives         {virtual pc: 68000 label} hand-written replacements
     """
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
                  hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False, pid_checks=False,
-                 dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False):
+                 dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False, static_write=None, wrap_sites=()):
         self.name, self.prefix = name, prefix
+        self.static_write = dict(static_write or {})
+        self.wrap_sites = set(wrap_sites)
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -521,8 +527,17 @@ class Emitter:
             disp = {"off5": x.offset, "off8": x.offset, "off16": x.offset, "zero": 0}.get(x.kind)
             if disp is not None:
                 return "%d(a5)" % (disp + off) if disp + off else "(a5)"
-            if x.kind in ("inc1", "inc2", "dec1", "dec2"):
-                raise Unsupported("auto inc/dec on S: " + ins.text)
+            if x.kind in ("inc1", "inc2"):
+                # ,S+ / ,S++ (an operand popped: CMPD ,S++): a5 first (addq to an address register keeps the CCR),
+                # the operand at -n, as for X
+                if not getattr(self, "_inc_done", False):
+                    self.e("addq.l #%d,a5" % x.inc)
+                d = off - x.inc
+                return "%d(a5)" % d
+            if x.kind in ("dec1", "dec2"):
+                if not getattr(self, "_inc_done", False):
+                    self.e("subq.l #%d,a5" % -x.inc)
+                return "%d(a5)" % off if off else "(a5)"
             # accumulator offsets on S: the address as a value
             self.e("move.l a5,d7")
             self.e("sub.l %s,d7" % self.s_base())
@@ -532,6 +547,19 @@ class Emitter:
         dr = REG16[r]
         slots = self.site_slots(v)
         self._base = "a0"
+        if x.kind in ("off5", "off8", "off16") and v in self.p.wrap_sites:
+            # (X = $FFFF and 2,X reads $0001: the sum wrapped to 16 bits, its slot, a1 the index)
+            self.stats["wrapping index"] += 1
+            self.e("moveq #0,d6")
+            self.e("move.w %s,d6" % dr)
+            self.e("add.w #%d,d6" % x.offset)
+            self.e("move.l d6,a1")
+            self.e("rol.w #3,d6")
+            self.e("and.w #7,d6")
+            self.e("add.w d6,d6")
+            self.e("add.w d6,d6")
+            self.e("move.l %d(a6,d6.w),a0" % VB_OFF)
+            return "%d(a0,a1.l)" % off if off else "(a0,a1.l)"
         if x.kind in ("off5", "off8", "zero", "off16"):
             self.slot_base(v, slots, dr, x.offset)
             b = self._base
@@ -792,6 +820,12 @@ class Emitter:
     def store8(self, v, ins, src, off=0):
         """the byte in register src to the operand (a move: N Z right, V C cleared)"""
         a = self.static_addr(ins)
+        if a is not None and (a + off) & 0xFFFF in self.p.static_write:
+            self.stats["static write"] += 1
+            self.e("move.b %s,d5" % src)
+            self.e("bsr %s" % self.p.static_write[(a + off) & 0xFFFF])
+            self.e("tst.b %s" % src)
+            return
         if a is not None and (a + off) & 0xFFFF >= 0xE000:
             self.mmu_static((a + off) & 0xFFFF, src)
             return
@@ -833,10 +867,22 @@ class Emitter:
             self.e("move.w #$%04X,%s" % (ins.arg, dst))
             return
         if self.io_site(v, ins):
-            self.io_read(v, ins, 0)
-            self.e("move.b d7,d5")
-            self.e("lsl.w #8,d5")
-            self.io_read(v, ins, 1)
+            if self.static_addr(ins) is not None:
+                self.io_read(v, ins, 0)
+                self.e("move.b d7,d5")
+                self.e("lsl.w #8,d5")
+                self.io_read(v, ins, 1)
+            else:
+                # the address once (LDD ,X++ increments X once), the second byte at + 1
+                self.stats["io read"] += 2
+                self.ea_to_d7(v, ins)
+                self.e("move.w d7,-(sp)")
+                self.e("bsr %s_io_r" % self.p.name)
+                self.e("move.b d7,d5")
+                self.e("lsl.w #8,d5")
+                self.e("move.w (sp)+,d7")
+                self.e("addq.w #1,d7")
+                self.e("bsr %s_io_r" % self.p.name)
             self.e("move.b d7,d5")
             self.e("move.w d5,%s" % dst)
             return

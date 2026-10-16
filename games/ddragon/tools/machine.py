@@ -603,3 +603,162 @@ class DDragon:
             else:
                 out[y:y1] = raw[y:y1]
         return Video.pens(self.mem)[out]
+
+
+class DDragonPort(DDragon):
+    """The STE runtime's schedule (src/ddragon.s), which the translated main program follows too (tools/logic_test.py
+    compares the two frame by frame).  No CPU interleaves; one call of run_frame_port is one arcade frame:
+
+      1. the NMI (the vertical blank) at the foreground's idle point: its handler runs to its RTI
+      2. the FIRQ once, unless the foreground masks it (the coin and service inputs, debounced; the board runs it
+         17 times a frame)
+      3. the foreground from the idle point on (at least one instruction) until an idle hook says it waits
+
+    Idle hooks (HOOKS): $83E9 / $8541 wait for the NMI's update (DP $22 bit 1), $B7AD / $EEB0 for the vertical
+    blank (the frame's end).  The vertical blank bit (EXTRA bit 3) reads 1 from the frame's start until the
+    foreground reaches $B7A5 (the wait for the blank's end).
+    A coin (or service: `coin(bits)`) stays pressed until the FIRQ has taken it: the FIRQ debounces it inside the
+    handler and then waits for its release ($89C7), where the port releases it.  On the first coin of the attract mode the FIRQ restarts the
+    foreground itself (LDS #$0FFF ... JMP $8156): an interrupt also ends at an idle hook that waits.
+    The sprite MCU runs at once: a write to $380F runs its NMI handler to completion (the HD63701Y0 interpreter
+    here, src/mcu.s on the STE) and sets $0E3E as the main CPU's IRQ handler would (the IRQ itself is not taken).
+    The shared RAM is always reachable (the MCU never runs while the main CPU works); EXTRA bit 4 (bus free) follows
+    the bank register's halt and reset bits."""
+    HOOKS = {
+        0x83E9: lambda m: not m.mem[0x22] & 2,
+        0x8541: lambda m: not m.mem[0x22] & 2,
+        0xB7AD: lambda m: True,
+        0xEEB0: lambda m: True,
+    }
+    VBLANK_END = 0xB7A5
+    COIN_WAIT = 0x89C7                    # the FIRQ's wait for the coins' release: the port's coin is released there
+
+    def __init__(self, dsw0=DSW0, dsw1=DSW1):
+        super().__init__(dsw0, dsw1)
+        self.main = M6809(self.port_rd, self.port_wr)
+        self.main.reset()
+        self.mcu = HD63701Y0(load("21jm-0.ic55"), self.sub_rd, self.sub_wr)
+        self.port_vblank = 1
+        self.coins = 0                           # pressed: bit 6 coin 1, bit 7 coin 2 ($3801), bit 0 service ($3802)
+        self.booted = False
+        self.idle_pc = None
+        self.mcu_jobs = 0
+
+    # ---- memory: as the board's, without the sub CPU's timing ---------------------
+    def port_rd(self, a):
+        if a < 0x2000:
+            return self.mem[a]
+        if a < 0x2800:
+            return self.comram[a & 0x1FF]
+        if a < 0x3800:
+            return self.mem[a]
+        if a < 0x4000:
+            if a == 0x3802:
+                free = self.bankreg & 0x10 or not self.bankreg & 0x08
+                return (self.inputs[2] & ~(self.coins & 1)) | (self.port_vblank << 3) | (0 if free else 0x10)
+            if a == 0x3801:
+                return self.inputs[1] & ~(self.coins & 0xC0)
+            if a <= 0x3804:
+                return self.inputs[a - 0x3800]
+            return 0xFF
+        if a < 0x8000:
+            return self.rom[0x10000 + self.bank * 0x4000 + a - 0x4000]
+        return self.rom[a]
+
+    def port_wr(self, a, v):
+        if a < 0x1800:
+            if a < 0x1400:
+                self.mem[a] = v
+        elif a < 0x2000:
+            self.mem[a] = v
+        elif a < 0x2800:
+            self.comram[a & 0x1FF] = v
+        elif a < 0x3800:
+            self.mem[a] = v
+        elif a == 0x3808:
+            self.bankreg = v
+            self.bank = v >> 5
+        elif a == 0x3809 or a == 0x380A:
+            self.scroll_lo[a - 0x3809] = v
+        elif a == 0x380E:
+            self.sound_log.append((self.frame, v))
+        elif a == 0x380F:
+            self.mcu_job()
+
+    def coin(self, bits):
+        """press coin 1 ($40), coin 2 ($80) or service ($01) until the FIRQ took it"""
+        self.coins |= bits
+
+    def mcu_job(self):
+        """the MCU's NMI handler to its RTI (back in its idle loop at $C02B), then $0E3E = 1"""
+        c = self.mcu
+        if not self.mcu_jobs:
+            for _ in range(32):                      # (its reset code up to the idle loop)
+                if c.pc == 0xC02B:
+                    break
+                c.step()
+        c.set_nmi(True)
+        c.set_nmi(False)
+        c.check_irq_lines()
+        for _ in range(2000000):
+            if c.pc == 0xC02B:
+                break
+            c.step()
+        else:
+            raise RuntimeError("the MCU did not finish (pc %04X)" % c.pc)
+        self.mcu_jobs += 1
+        self.mem[0x0E3E] = 1
+
+    # ---- the schedule -------------------------------------------------------------
+    def run_to_idle(self, first=True, limit=5000000):
+        c = self.main
+        hooks = self.HOOKS
+        for _ in range(limit):
+            if not first:
+                pc = c.pc
+                if pc == self.VBLANK_END:
+                    self.port_vblank = 0
+                elif pc == self.COIN_WAIT:
+                    self.coins = 0
+                h = hooks.get(pc)
+                if h is not None and h(self):
+                    self.idle_pc = pc
+                    return
+            first = False
+            c.step()
+        raise RuntimeError("the foreground did not wait (pc %04X, frame %d)" % (c.pc, self.frame))
+
+    def interrupt(self, vec, mask, set_bits):
+        """the 6809's interrupt entry at the idle point, its handler up to the RTI back there"""
+        c = self.main
+        c.cc = (c.cc | 0x80) if mask == 0xFF else (c.cc & 0x7F)
+        c.push_regs(mask)
+        c.cc |= set_bits
+        c.vector(vec)
+        s0 = c.s
+        hooks = self.HOOKS
+        for _ in range(3000000):
+            c.step()
+            pc = c.pc
+            if c.s == (s0 + (12 if mask == 0xFF else 3)) & 0xFFFF and pc == self.idle_pc:
+                return True
+            if pc == self.COIN_WAIT:
+                self.coins = 0
+            h = hooks.get(pc)
+            if h is not None and h(self):         # (the handler restarted the foreground, which waits now)
+                self.idle_pc = pc
+                return False
+        raise RuntimeError("the interrupt %04X did not return (frame %d)" % (vec, self.frame))
+
+    def run_frame_port(self):
+        if not self.booted:
+            self.run_to_idle(first=False)
+            self.booted = True
+        self.port_vblank = 1
+        if self.interrupt(0xFFFC, 0xFF, 0x50):        # NMI: E, I and F set
+            if not self.main.cc & 0x40:
+                if not self.interrupt(0xFFF6, 0x81, 0x50):     # FIRQ: PC and CC (E clear), I and F set
+                    self.frame += 1
+                    return
+            self.run_to_idle()
+        self.frame += 1
