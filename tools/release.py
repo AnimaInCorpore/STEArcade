@@ -65,6 +65,10 @@ GAMES = [
      "90% of the arcade's speed, 10-18 pictures a second (Hatari); exact logic, all 256 x 240 pixels; music and\n"
      "  effects on the YM, no ADPCM voices",
      "attack: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
+    ("ddragon", "DDRAGON.PRG", "Double Dragon (Technos 1987)",
+     "playable, but slow: about 30% of the arcade's speed and 3-4 pictures a second in play (Hatari); exact logic,\n"
+     "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
+     "punch: Space, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  jump: Control, C, pad C."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

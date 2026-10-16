@@ -122,6 +122,9 @@ main_loop:
 	ifd AUTOPLAY
 	bsr ap_inputs
 	endc
+	ifd PLAYBACK
+	bsr pb_inputs
+	endc
 	bsr put_inputs
 	bsr port_frame
 	bsr snd_frame
@@ -158,11 +161,28 @@ vbl:
 	endc
 	movem.l d0-d7/a0,-(sp)
 	addq.l #1,frame_counter
+	ifd DEBUG
+	subq.w #1,dbg_tl_n		; every 100 VBLs: the arcade frames and the pictures so far (RATE.BIN, bench.sh)
+	bgt.s .tl
+	move.w #100,dbg_tl_n
+	move.l dbg_tl_p,a0
+	cmp.w #0,a0
+	bne.s .tl1
+	lea dbg_tl,a0
+.tl1:	cmp.l #dbg_tl_end,a0
+	bhs.s .tl
+	move.w cnt_ticks,(a0)+
+	move.w cnt_renders,(a0)+
+	move.l a0,dbg_tl_p
+.tl:
+	endc
 	ifnd AUTOPLAY
+	ifnd PLAYBACK
 	bsr jagpad_poll			; (the pads merged)
 	jp_merge in_p1,m_p1,0
 	jp_merge in_p2,m_p2,1
 	jp_merge in_ex,m_ex,2
+	endc
 	endc
 	; a coin or service key pressed now (it was not before): the port's pending press
 	move.b m_p2,d0
@@ -234,6 +254,106 @@ ap_inputs:
 	rts
 	endc
 
+	ifd PLAYBACK
+; The recorded play (tools/play_search.py, build/ddragon/play_inputs.bin; engine/playbot.py: runs of count, SYSTEM,
+; P1, a count of 0 at the end) as its adapter applies it (ref/cover.py play_schedule): SYSTEM bit 6 low a coin, P1 the
+; player's byte, from frame PB_PLAY on its bit 6 the jump (EXTRA bit 1); infinite lives (dd_dsw).
+PB_PLAY = 1000
+pb_inputs:
+	movem.l d0/a0,-(sp)
+	tst.b pb_left
+	bne.s .same
+	move.l pb_ptr,a0
+	cmp.w #0,a0
+	bne.s .next
+	lea pb_data,a0
+.next:	move.b (a0)+,pb_left
+	bne.s .run
+	st quit_flag			; (the recording is over)
+	bra.s .out
+.run:	move.b (a0)+,pb_sys
+	move.b (a0)+,pb_p1
+	move.l a0,pb_ptr
+.same:	subq.b #1,pb_left
+	btst #6,pb_sys
+	bne.s .nc
+	or.b #$40,port_coins
+.nc:	move.b pb_p1,d0
+	move.b #$ff,m_ex
+	cmp.w #PB_PLAY,cnt_ticks
+	bls.s .p1			; (cnt_ticks: this frame's number + 1)
+	btst #6,d0
+	bne.s .nj
+	and.b #~$02,m_ex
+.nj:	or.b #$40,d0
+.p1:	move.b d0,m_p1
+	move.b #$ff,m_p2
+.out:	movem.l (sp)+,d0/a0
+	rts
+	endc
+
+	ifd DEBUG
+; COUNTERS.BIN (words): VBLs, pictures drawn, arcade frames, 0, the frames whose top border the VBL armed, the top
+; border / palette on / bottom border / palette off events that started too late (engine/rt/borders.s), 0; then a
+; long: blit_go's passes run in pieces.  RATE.BIN: every 100 VBLs the arcade frames and the pictures so far.
+dbg_counters:
+	clr -(sp)
+	pea dbg_name3
+	move #$3c,-(sp)
+	trap #1
+	addq #8,sp
+	move d0,d6
+	pea dbg_tl
+	move.l dbg_tl_p,d0
+	sub.l #dbg_tl,d0
+	bpl.s .tl_len
+	moveq #0,d0
+.tl_len:
+	move.l d0,-(sp)
+	move d6,-(sp)
+	move #$40,-(sp)
+	trap #1
+	lea 12(sp),sp
+	move d6,-(sp)
+	move #$3e,-(sp)
+	trap #1
+	addq #4,sp
+	lea dbg_buf,a0
+	move.w frame_counter+2,(a0)+
+	move.w cnt_renders,(a0)+
+	move.w cnt_ticks,(a0)+
+	clr.w (a0)+
+	move.w bd_fallbacks,(a0)+
+	move.w bd_late_top,(a0)+
+	move.w bd_late_on,(a0)+
+	move.w bd_late_low,(a0)+
+	move.w bd_late_off,(a0)+
+	clr.w (a0)+
+	move.l bd_pieced,(a0)+
+	clr -(sp)
+	pea dbg_name
+	move #$3c,-(sp)
+	trap #1
+	addq #8,sp
+	move d0,d6
+	pea dbg_buf
+	move.l #24,-(sp)
+	move d6,-(sp)
+	move #$40,-(sp)
+	trap #1
+	lea 12(sp),sp
+	move d6,-(sp)
+	move #$3e,-(sp)
+	trap #1
+	addq #4,sp
+	rts
+dbg_name:
+	dc.b "COUNTERS.BIN",0
+dbg_name3:
+	dc.b "RATE.BIN",0
+	even
+	endc
+
 	borders_handlers
 	jagpad_text
 	jagpad_maps
@@ -257,7 +377,14 @@ port_crash:				; (core.s: a 6809 pc the translation does not have: CRASH.TXT nam
 	include "core.s"
 
 	section data,data
+	ifd PLAYBACK
+pb_data:
+	incbin "play_inputs.bin"
+	even
+dd_dsw:	dc.b $ff,$3f			; (the recorded play: infinite lives)
+	else
 dd_dsw:	dc.b $ff,$ff			; DSW0: 1 coin 1 credit, upright, no flip; DSW1: medium, demo sounds, 2 lives
+	endc
 	even
 
 	section bss,bss
@@ -315,5 +442,19 @@ crash_text: ds.b 512
 frame_counter: ds.l 1
 cnt_renders: ds.w 1
 cnt_ticks: ds.w 1
+	ifd DEBUG
+dbg_tl_n: ds.w 1
+dbg_tl_p: ds.l 1
+dbg_tl: ds.l 200			; (20000 VBLs)
+dbg_tl_end:
+	endc
+	ifd PLAYBACK
+pb_ptr: ds.l 1
+pb_left: ds.b 1
+pb_sys: ds.b 1
+pb_p1: ds.b 1
+	even
+	endc
+dbg_buf: ds.w 18
 	ds.b 8192
 own_stack_top:

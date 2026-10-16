@@ -39,7 +39,7 @@ def main():
     stops = {sym[n]: n for n in ["sim_wait", "sim_frame_done", "sim_badpc"]}
     mem, cpu = sim.mem, sim.cpu
     g = sym["g_mem"]
-    ctx = sym["ctx_main"]
+    cur_ctx = sym["cur_ctx"]
     dsw1, inputs = cover.schedule(args.seed)
     ref = DDragonPort(DSW0, dsw1)
     mem.w8(sym["dd_dsw"] + 1, dsw1)          # (the start code copies it into in_bytes)
@@ -105,6 +105,7 @@ def main():
         if regs != (ref.bankreg, ref.scroll_lo[0], ref.scroll_lo[1]):
             raise RuntimeError("frame %d: bank / scroll %s, reference %s" % (f, regs, (ref.bankreg, ref.scroll_lo)))
         c = ref.main
+        ctx = mem.r32(cur_ctx)                  # (the selected bank's context)
         r = [mem.r32(ctx + CTX_R_D0 + 4 * k) for k in range(5)]
         a5 = mem.r32(ctx + CTX_R_A5) - g
         cc = (mem.r8(ctx + CTX_CCHI) & 0xF0) | (mem.r16(ctx + CTX_R_SR) & 0x0F)

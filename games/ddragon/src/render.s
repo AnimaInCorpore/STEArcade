@@ -30,13 +30,13 @@ BLT_SRC_ADDR = $ffff8a24
 BLT_DST_ADDR = $ffff8a32
 PAL_SETS = 24
 	ifnd TILE_ENTRIES
-TILE_ENTRIES = 1024			; baked bg tiles (128 bytes)
+TILE_ENTRIES = 512			; baked bg tiles (128 bytes)
 	endc
 	ifnd SPRITE_ENTRIES
 SPRITE_ENTRIES = 768			; baked sprites (row stream order)
 	endc
 	ifnd CHAR_ENTRIES
-CHAR_ENTRIES = 512			; baked characters (8 rows of 4 plane words)
+CHAR_ENTRIES = 256			; baked characters (8 rows of 4 plane words)
 	endc
 
 ; ---------------------------------------------------------------------------------------------------------------------
@@ -1159,6 +1159,7 @@ DMG_MAX = 500
 ; transparent.
 TEXT_ROW = 32*8
 text_build:
+	move.l a4,-(sp)
 	lea pal_epoch,a0
 	move.l (a0),d0
 	move.l 4(a0),d1
@@ -1222,6 +1223,7 @@ text_build:
 	add.l d0,a2
 	move.l a2,a3			; (its count)
 	clr.w (a2)+
+	sub.l a4,a4			; (no run)
 	moveq #0,d4			; the column
 .ch:	moveq #0,d1
 	move.b (a0)+,d1			; the attribute: colour 5-7, code bits 8-10 in 0-2
@@ -1232,20 +1234,26 @@ text_build:
 	lsl.w #8,d3
 	or.w d3,d2			; the code
 	lea char_blank,a1
-	tst.b (a1,d2.w)
-	bne.s .bl
-	move.w d4,d0
-	lsl.w #3,d0
-	move.w d0,(a2)+			; x
-	move.w d7,d0
-	lsl.w #3,d0
-	add.w #GUARD_T-8,d0
-	move.w d0,(a2)+			; the ring line
-	move.w d2,(a2)+
-	lsr.b #5,d1
-	move.w d1,(a2)+			; the colour
-	addq.w #1,(a3)
-.bl:	addq.w #1,d4
+	move.b (a1,d2.w),d0
+	beq.s .nrm
+	bpl.s .bl			; (1: blank)
+	lsr.b #5,d1			; a solid character: it joins the run before it (the same code and colour)
+	move.l a4,d3
+	beq.s .run
+	cmp.w 4(a4),d2
+	bne.s .run
+	cmp.b 7(a4),d1
+	bne.s .run
+	addq.b #1,6(a4)			; (the run's length)
+	bra.s .nx
+.run:	move.l a2,a4
+	bsr.s .ent
+	or.w #$100,-2(a2)		; (a run of one)
+	bra.s .nx
+.nrm:	lsr.b #5,d1
+	bsr.s .ent
+.bl:	sub.l a4,a4
+.nx:	addq.w #1,d4
 	cmp.w #32,d4
 	blo.s .ch
 .nrow:	addq.w #1,d7
@@ -1254,7 +1262,20 @@ text_build:
 	tst.w d5
 	beq.s .done
 	addq.w #1,text_version
-.done:	rts
+.done:	move.l (sp)+,a4
+	rts
+; (an entry: x, the ring line, the code d2, the colour d1; the row's count up)
+.ent:	move.w d4,d0
+	lsl.w #3,d0
+	move.w d0,(a2)+			; x
+	move.w d7,d0
+	lsl.w #3,d0
+	add.w #GUARD_T-8,d0
+	move.w d0,(a2)+			; the ring line
+	move.w d2,(a2)+
+	move.w d1,(a2)+			; the colour (a solid run: its length in the high byte)
+	addq.w #1,(a3)
+	rts
 
 ; text_prepare (before the cells): this ring's text state against now; when it differs the old text's cells lose their
 ; keys (cell_damage) and the text is drawn again.
@@ -1312,6 +1333,18 @@ text_pass:
 	move.w (a4)+,d6
 	beq .nrow
 	subq.w #1,d6
+	move.w d7,d2			; the row's slot rows (k of its first and last line): the text map's first index
+	lsl.w #3,d2			; (k0 * RING_COLS), how many more (0 / 1)
+	add.w #-8,d2
+	add.w vphase,d2
+	move.w d2,d3
+	addq.w #7,d3
+	asr.w #4,d2
+	asr.w #4,d3
+	sub.w d2,d3
+	move.w d3,tx_nk
+	mulu #RING_COLS,d2
+	move.w d2,tx_k0
 .ch:	move.w (a4)+,d0
 	add.w #32,d0
 	add.w scroll_x,d0
@@ -1320,50 +1353,164 @@ text_pass:
 	move.w (a4)+,d0
 	move.w (a4)+,d1
 	movem.l d6-d7/a4,-(sp)
+	cmp.w #$100,d1
+	bhs.s .run
 	bsr char_get			; d0 code, d1 colour -> a1 the baked rows (8 x 4 plane words)
 	bsr char_draw
-	; its cells (one or two columns, the slot rows of its 8 lines) into the ring's text map
+	moveq #8,d4
+	bra.s .cells
+.run:	lea -8(a4),a0			; a solid run: drawn with the row above when that has the same one
+	move.w d7,d3
+	subq.w #1,d3
+	bsr tx_same
+	beq.s .above
+	moveq #8,d5			; else as tall as the rows below with the same one
+	move.w d7,d3
+.dn:	addq.w #1,d3
+	cmp.w #31,d3
+	bhs.s .fill
+	bsr tx_same
+	bne.s .fill
+	addq.w #8,d5
+	bra.s .dn
+.fill:	bsr solid_fill			; -> d4 its width
+	bra.s .cells
+.above:	moveq #0,d4
+	move.w d1,d4
+	lsr.w #8,d4
+	lsl.w #3,d4
+	; its cells (the columns of its width, the row's slot rows) into the ring's text map
+.cells:	move.w object_x,d5
+	add.w d4,d5
+	subq.w #1,d5
+	lsr.w #4,d5
 	move.w object_x,d4
 	lsr.w #4,d4
-	moveq #1,d5
-	moveq #15,d0
-	and.w object_x,d0
-	cmp.w #8,d0
-	bls.s .one
-	moveq #2,d5
-.one:	move.w object_y,d2
-	sub.w #GUARD_T,d2
-	add.w vphase,d2
-	move.w d2,d3
-	addq.w #7,d3
-	asr.w #4,d2			; k: the slot rows of its first and last line
-	asr.w #4,d3
+	sub.w d4,d5			; (columns - 1)
 	move.l cur_txtmap,a0
 	move.l cur_txtl,a1
-.mk:	movem.w d4-d5,-(sp)
-.m:	move.w d2,d0
-	mulu #RING_COLS,d0
-	add.w d4,d0
-	tst.b (a0,d0.w)
+	move.w tx_k0,d2
+	add.w d4,d2
+	move.w tx_nk,d3
+.mk:	move.w d2,d0
+	move.w d5,d6
+.m:	tst.b (a0,d0.w)
 	bne.s .nm
 	st (a0,d0.w)
 	move.w (a1),d1
 	addq.w #1,(a1)
 	add.w d1,d1
 	move.w d0,2(a1,d1.w)
-.nm:	addq.w #1,d4
-	subq.w #1,d5
-	bne.s .m
-	movem.w (sp)+,d4-d5
-	addq.w #1,d2
-	cmp.w d3,d2
-	ble.s .mk
+.nm:	addq.w #1,d0
+	dbf d6,.m
+	add.w #RING_COLS,d2
+	dbf d3,.mk
 	movem.l (sp)+,d6-d7/a4
 	dbf d6,.ch
 .nrow:	addq.w #1,d7
 	cmp.w #31,d7
 	blo .row
 .done:	rts
+
+; tx_same: Z when text row d3's list has the entry a0 (its x, code and colour: a solid run in the same place).
+; Uses d2/d4/d6/a1.
+tx_same:
+	lea text_rows,a1
+	move.w d3,d2
+	mulu #TEXT_ROW+2,d2
+	add.l d2,a1
+	move.w (a1)+,d6
+	beq.s .no
+	subq.w #1,d6
+	move.w (a0),d2
+	move.l 4(a0),d4
+.l:	cmp.w (a1),d2
+	bne.s .n
+	cmp.l 4(a1),d4
+	beq.s .yes
+.n:	addq.l #8,a1
+	dbf d6,.l
+.no:	moveq #1,d2			; (Z clear)
+.yes:	rts
+
+; solid_fill: a run of solid characters (d0 the code: char_blank's $80 + its pen; d1 the colour, the run's length in
+; the high byte) at object_x, object_y, d5 lines tall (8 a text row): its STE colour filled in, plane by plane (HOP all
+; ones, the operation 0 or 15), in passes of at most 256 cycles (64 accesses: lines of the words plus two end reads)
+; -> d4.l its width.  Uses d0-d7/a0.
+solid_fill:
+	move.w d5,-(sp)			; (the lines)
+	moveq #0,d4
+	move.w d1,d4
+	lsr.w #8,d4
+	lsl.w #3,d4			; the width
+	and.w #7,d1
+	lsl.w #4,d1
+	lea char_blank,a0
+	moveq #15,d3
+	and.b (a0,d0.w),d3
+	add.w d3,d1
+	lea pen_map,a0
+	move.b (a0,d1.w),d7		; the STE colour
+	moveq #0,d0
+	move.w object_y,d0
+	mulu #STRIDE,d0
+	moveq #0,d1
+	move.w object_x,d1
+	move.w d1,d3
+	lsr.w #4,d1			; its first word
+	move.w d3,d2
+	add.w d4,d2
+	subq.w #1,d2			; its last pixel
+	move.w d2,d5
+	lsr.w #4,d5
+	sub.w d1,d5			; (words - 1)
+	lsl.w #3,d1
+	add.l d1,d0
+	add.l work_base,d0
+	move.l d0,a0
+	and.w #15,d3
+	moveq #-1,d0
+	lsr.w d3,d0			; END1
+	not.w d2
+	and.w #15,d2
+	moveq #-1,d1
+	lsl.w d2,d1			; END3
+	tst.w d5
+	bne.s .m
+	and.w d1,d0			; (one word: END1 both)
+.m:	move.w d0,$ffff8a28.w
+	move.w d1,$ffff8a2c.w
+	move.w d5,d0
+	lsl.w #3,d0
+	move.w #STRIDE,d1
+	sub.w d0,d1
+	move.w d1,$ffff8a30.w		; (the next line's first word)
+	addq.w #1,d5
+	move.w d5,$ffff8a36.w
+	addq.w #2,d5
+	moveq #64,d2
+	divu d5,d2			; the lines a pass (64 accesses: 256 cycles)
+	move.w (sp)+,d3
+	moveq #3,d6
+.p:	move.l a0,BLT_DST_ADDR.w
+	moveq #0,d0
+	lsr.b #1,d7
+	bcc.s .z
+	moveq #15,d0
+.z:	move.w d0,$ffff8a3a.w
+	move.w d3,d1			; (the lines to go)
+.c:	move.w d2,d0
+	cmp.w d1,d0
+	bls.s .n
+	move.w d1,d0
+.n:	move.w d0,$ffff8a38.w
+	move.w #$c000,$ffff8a3c.w	; (on from where the last pass ended)
+	sub.w d0,d1
+	bne.s .c
+	addq.l #2,a0
+	dbf d6,.p
+	move.w #$0203,$ffff8a3a.w
+	rts
 
 ; char_draw: the baked character a1 (8 rows: four plane words, the pixels in the high byte; at 64(a1) the rows'
 ; masks) at object_x, object_y: a pass a row, one word when it fits in it, else two (NFSR).
@@ -1605,17 +1752,23 @@ sprite_get:
 	bsr entry_addr
 	move.w object_code,d0
 	and.l #4095,d0			; (the mirror image: the sprite's own order)
-	lsl.l #4,d0
+	lsl.l #3,d0
 	lea sprite_order,a0
 	add.l d0,a0
 	lea bake_scratch,a2
 	move.l a1,a3
-	moveq #15,d0
-.ro:	moveq #0,d1
+	moveq #7,d0
+.ro:	moveq #0,d1			; (two rows a byte, the first in the high nibble)
 	move.b (a0)+,d1
+	move.w d1,d2
+	lsr.w #4,d1
 	lsl.w #3,d1
 	move.l (a2,d1.w),(a3)+
 	move.l 4(a2,d1.w),(a3)+
+	and.w #15,d2
+	lsl.w #3,d2
+	move.l (a2,d2.w),(a3)+
+	move.l 4(a2,d2.w),(a3)+
 	dbf d0,.ro
 	rts
 .hit:	bra entry_addr
@@ -1879,6 +2032,8 @@ mk_roll: ds.w 1
 mk_end: ds.w 1
 tx_roll: ds.w 1
 tx_end: ds.w 1
+tx_k0: ds.w 1				; (text_pass: the row's first text map index, its slot rows - 1)
+tx_nk: ds.w 1
 pal_roll: ds.w 1
 pal_end: ds.w 1
 cnt_cells: ds.l 1

@@ -1,21 +1,40 @@
 {
- "name": "provisional",
+ "name": "Double Dragon fixed palette (tools/assets.py)",
+ "origin": "ref/palette_fit.py: weighted k-means in Oklab over the colours of 6000 frames of the attract mode and of the play seeds [11, -1, -2]",
  "colours": [
   "#000000",
-  "#111111",
-  "#222222",
-  "#333333",
-  "#444444",
-  "#555555",
+  "#331111",
+  "#334444",
+  "#663322",
+  "#555544",
+  "#884433",
+  "#337722",
   "#666666",
-  "#777777",
-  "#888888",
+  "#4455ee",
+  "#997755",
   "#999999",
-  "#aaaaaa",
-  "#bbbbbb",
-  "#cccccc",
-  "#dddddd",
-  "#eeeeee",
-  "#ffffff"
- ]
+  "#22bb00",
+  "#cc9966",
+  "#bbdd55",
+  "#eecc88",
+  "#eeffff"
+ ],
+ "error": {
+  "attract": [
+   7.75,
+   0.558
+  ],
+  "seed 11": [
+   9.88,
+   0.393
+  ],
+  "seed -1": [
+   9.1,
+   0.394
+  ],
+  "seed -2": [
+   10.14,
+   0.348
+  ]
+ }
 }

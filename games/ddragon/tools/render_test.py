@@ -47,6 +47,7 @@ def main():
     ap.add_argument("--first", type=int, default=30)
     ap.add_argument("--every", type=int, default=5)
     ap.add_argument("--save", default=None)
+    ap.add_argument("--profile", action="store_true", help="68000 + Blitter cycles per renderer routine (the pictures drawn)")
     args = ap.parse_args()
     run = ROOT / "run" / "ddragon_sim"
     sim = Sim(str(run / "DDRAGON.PRG"), ram_kib=16384, run_dir=run)     # (the trace on: the Blitter's registers)
@@ -62,11 +63,24 @@ def main():
     if save:
         save.mkdir(parents=True, exist_ok=True)
 
+    import bisect
+    import collections
+    prof = collections.Counter()
+    plabs = sorted((v, k) for k, v in sym.items() if not k.startswith((".", "M0", "M1", "M2")) and "$" not in k)
+    paddr = [a for a, k in plabs]
+    profiling = [False]
+
     def run_to_stop():
         used = 0
         while used < 3_000_000_000:
-            r = cpu.execute(4000)
-            used += r.cycles
+            if profiling[0]:
+                pc = cpu.r_pc()
+                r = cpu.execute(1)
+                prof[plabs[bisect.bisect_right(paddr, pc) - 1][1]] += r.cycles + sim.blitter.cycles
+            else:
+                r = cpu.execute(4000)
+            used += r.cycles + sim.blitter.cycles        # (a HOG pass holds the CPU for its bus cycles)
+            sim.blitter.cycles = 0
             pc = cpu.r_pc()
             if pc in stops:
                 return stops[pc], used
@@ -102,10 +116,18 @@ def main():
             raise RuntimeError("frame %d: stopped at %s" % (f, stop))
         resume()
         if draw:
+            profiling[0] = args.profile
             stop, used = run_to_stop()
+            profiling[0] = False
             if stop != "sim_render_ret":
                 raise RuntimeError("frame %d: the picture stopped at %s" % (f, stop))
             cyc.append(used)
+            if args.profile:
+                ep = bytes(mem.r_block(sym["pal_epoch"], 24))
+                if getattr(main, "_ep", None) is not None:
+                    print("frame %d: epochs changed %s, cells %d, sprites %d" % (f, [k for k in range(24) if ep[k] != main._ep[k]],
+                          mem.r32(sym["cnt_cells"]) - main._cc, mem.r32(sym["cnt_sprites"]) - main._cs))
+                main._ep, main._cc, main._cs = ep, mem.r32(sym["cnt_cells"]), mem.r32(sym["cnt_sprites"])
             got = picture(mem, sym)
             want = oracle.frame(ref)
             checked += 1
@@ -126,7 +148,11 @@ def main():
             resume()
         if run_to_stop()[0] != "sim_wait":
             raise RuntimeError("frame %d: not back at sim_wait" % f)
-    print("%d pictures compared, %d differ; 68000 cycles a picture (Musashi): mean %.0f, max %d" % (
+    if args.profile and checked:
+        tot = sum(prof.values())
+        for k, c in prof.most_common(25):
+            print("  %-24s %8.0f a picture %5.1f%%" % (k, c / checked, 100 * c / tot))
+    print("%d pictures compared, %d differ; 68000 + Blitter cycles a picture (Musashi): mean %.0f, max %d" % (
         checked, bad, np.mean(cyc) if cyc else 0, max(cyc) if cyc else 0))
     return int(bad != 0)
 

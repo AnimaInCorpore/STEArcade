@@ -8,9 +8,11 @@ sprites' row streams (stefastbobs2's preparation, as Trojan's and Black Tiger's 
     bg_slot.bin       1024 words: the bg RAM's entry i (MAME's background_scan) -> its cell col * 32 + row
     sprite_pixels.bin 4096 x 128; sprite_code.s: the masks for the 16 shifts, the row streams of every sprite in its
                       four orientations (code + 4096 flip x + 8192 flip y), dd_sprite_draw
-    sprite_order.bin  4096 x 16: the rows of a sprite in drawing order (its mirror and flipped images in the same)
+    sprite_order.bin  4096 x 8: the rows of a sprite in drawing order, two a byte (the first in the high nibble; its
+                      mirror and flipped images in the same)
     sprite_blank.bin  4096 bytes: 1 when every pixel is pen 0
-    char_pixels.bin   1024 x 32 (8 rows of 8 pixels, two a byte); char_blank.bin: 1 when every pixel is pen 0
+    char_pixels.bin   1024 x 32 (8 rows of 8 pixels, two a byte); char_blank.bin: 1 when every pixel is pen 0,
+                      $80 + the pen when every pixel is that pen (a solid character: render.s fills it)
     nz2.bin           per byte: (the first pixel not 0) << 1 | (the second not 0)
 """
 from pathlib import Path
@@ -158,11 +160,12 @@ def build():
     spr = v.sprites.astype(np.uint8)
     text, order, blank, nstreams = sprite_programs(spr)
     (dest / "sprite_code.s").write_text(text)
-    (dest / "sprite_order.bin").write_bytes(order)
+    (dest / "sprite_order.bin").write_bytes(bytes(order[i] << 4 | order[i + 1] for i in range(0, len(order), 2)))
     (dest / "sprite_blank.bin").write_bytes(blank)
     (dest / "sprite_pixels.bin").write_bytes(packed(spr))
     (dest / "char_pixels.bin").write_bytes(packed(v.chars))
-    (dest / "char_blank.bin").write_bytes(bytes(int(not c.any()) for c in v.chars))
+    (dest / "char_blank.bin").write_bytes(bytes(1 if not c.any() else 0x80 | int(c.flat[0]) if (c == c.flat[0]).all()
+                                                else 0 for c in v.chars))
     (dest / "nz2.bin").write_bytes(bytes(((b >> 4 != 0) << 1) | (b & 15 != 0) for b in range(256)))
     print("renderer assets: %s (%d sprite streams)" % (dest, nstreams), flush=True)
 

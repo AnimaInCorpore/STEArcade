@@ -614,7 +614,7 @@ class DDragonPort(DDragon):
          17 times a frame)
       3. the foreground from the idle point on (at least one instruction) until an idle hook says it waits
 
-    Idle hooks (HOOKS): $83E9 / $8541 wait for the NMI's update (DP $22 bit 1), $B7AD / $EEB0 for the vertical
+    Idle hooks (HOOKS): $83E9 / $8541 / $864C wait for the NMI's update (DP $22 bit 1), $B7AD / $EEB0 for the vertical
     blank (the frame's end).  The vertical blank bit (EXTRA bit 3) reads 1 from the frame's start until the
     foreground reaches $B7A5 (the wait for the blank's end).
     A coin (or service: `coin(bits)`) stays pressed until the FIRQ has taken it: the FIRQ debounces it inside the
@@ -627,6 +627,7 @@ class DDragonPort(DDragon):
     HOOKS = {
         0x83E9: lambda m: not m.mem[0x22] & 2,
         0x8541: lambda m: not m.mem[0x22] & 2,
+        0x864C: lambda m: not m.mem[0x22] & 2,
         0xB7AD: lambda m: True,
         0xEEB0: lambda m: True,
     }

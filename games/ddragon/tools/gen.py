@@ -26,13 +26,16 @@ RESET, NMI, FIRQ = 0x8000, 0x8068, 0x80A4
 # the port's hooks (machine.DDragonPort): pc -> (68000 label, the instruction after it)
 # (no hook_next: a hook reads N Z V C, the code before it keeps them exact: an interrupt there pushes CC, and the FIRQ
 # that restarts the foreground leaves that byte in the live stack)
-HOOKS = {0x83E9: "hook_83E9", 0x8541: "hook_8541", 0xB7AD: "hook_B7AD", 0xEEB0: "hook_EEB0",
+HOOKS = {0x83E9: "hook_83E9", 0x8541: "hook_8541", 0x864C: "hook_864C", 0xB7AD: "hook_B7AD", 0xEEB0: "hook_EEB0",
          DDragonPort.VBLANK_END: "hook_B7A5", DDragonPort.COIN_WAIT: "hook_89C7"}
-NEXT = {0x83E9: 0x83EB, 0x8541: 0x8543, 0xB7AD: 0xB7B0, 0xEEB0: 0xEEB3, 0xB7A5: 0xB7A8, 0x89C7: 0x89CA}
+NEXT = {0x83E9: 0x83EB, 0x8541: 0x8543, 0x864C: 0x864E, 0xB7AD: 0xB7B0, 0xEEB0: 0xEEB3, 0xB7A5: 0xB7A8, 0x89C7: 0x89CA}
 assert set(DDragonPort.HOOKS) | {DDragonPort.VBLANK_END, DDragonPort.COIN_WAIT} == set(HOOKS)
 # hand-written 68000 routines (src/core.s) in place of translated code: virtual pc -> label
 NATIVES = {0x10205: "native_clear_sprites",     # bank 0 $4205: PSHU zeros down from $2081 + 5 * n, through the mirrors
-           0x10231: "native_copy_sprites"}      # bank 0 $4231: the MCU's sprite entries to the sprite RAM
+           0x10231: "native_copy_sprites",      # bank 0 $4231: the MCU's sprite entries to the sprite RAM
+           # the bank selectors (PSHS A; LDA <$3A; ORA / ANDA #n; STA <$3A; STA $3808; PULS A,PC): two a banked call
+           0xBB40: "native_bank_BB40", 0xFC82: "native_bank_FC82", 0xFC8F: "native_bank_FC8F",
+           0xFF80: "native_bank_FF80"}
 STATIC_WRITE = {0x3808: "main_bank_w"}          # the bank register: straight to its routine
 AREAS = {"pal": "pal_written", "fg": "fg_written", "spr": "spr_written", "bg": "bg_written"}
 

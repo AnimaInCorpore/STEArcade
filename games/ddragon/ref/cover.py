@@ -7,7 +7,7 @@ ROM at $8000), the ROM bank at $4000-$7FFF in pages 8 + 2 * bank (slot 2) and 9 
 
 Seeds: 0 the attract mode only; 1-9 random play (coin, start, then the controls changing every few frames; a coin and
 start again after a game over); 10-19 the same with infinite lives (DSW1 bits 6-7 = 0) so that random play goes on;
-20-29 two players.  Records:
+20-29 two players; -1, -2, -3 the recorded plays (tools/play_search.py: missions 2-4).  Records:
   exec     Counter of (virtual pc, slot) executed
   acc      {(virtual pc, slot): set of (r|w, address slot, virtual page, odd word start?)} data accesses
   ioacc    {(virtual pc, slot): set of (r|w, address)} accesses to $2000-$27FF (shared RAM) and $3800-$380F (I/O)
@@ -42,7 +42,7 @@ def area(a):
     return None
 
 
-PALETTE_SEEDS = [11, 12, 13, 21]          # (ref/palette_fit.py: the play it fits the colours to)
+PALETTE_SEEDS = [11, -1, -2]              # (ref/palette_fit.py: the play it fits the colours to; -1 to mission 2, -2 to 4)
 CHEATS = {}                               # seed -> [(frame, address, value)]: RAM pokes (cheats(), the tests too)
 
 
@@ -56,8 +56,36 @@ def cheats(m, seed, f):
     return out
 
 
+def play_name(seed):
+    return "play_inputs.bin" if seed == -1 else "play_inputs_%d.bin" % -seed
+
+
+def play_length(seed):
+    import playbot
+    return len(playbot.load(build_dir("ddragon") / play_name(seed)))
+
+
+def play_schedule(seed):
+    """seeds -1, -2, -3: the recorded plays of tools/play_search.py (seed 1, 2, 3), as its adapter applies them"""
+    import playbot
+    import play_search
+    ticks = playbot.load(build_dir("ddragon") / play_name(seed))
+
+    def inputs(f):
+        system, p1 = ticks[f] if f < len(ticks) else (255, 255)
+        extra = 0x07
+        if f >= play_search.Game.PLAY:
+            if not p1 & 0x40:
+                extra &= ~0x02
+            p1 |= 0x40
+        return p1, 0xFF, extra, 0 if system & 0x40 else 0x40
+    return play_search.DSW1, inputs
+
+
 def schedule(seed):
     """-> (DSW1, inputs(f) -> (P1, P2, EXTRA, coins to press)): the seed's inputs frame by frame"""
+    if seed < 0:
+        return play_schedule(seed)
     dsw1 = DSW1 & 0x3F if 10 <= seed < 20 else DSW1
     rng = random.Random(seed)
     play = seed > 0

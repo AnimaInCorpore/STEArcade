@@ -29,7 +29,7 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 # the ports, in the order of the README, and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
          "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
-         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG"}
+         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -48,9 +48,19 @@ COVER = {
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
     "kungfum": [("ref/cover.py", list(range(1, 14)), 20000)],     # floors and bosses by MAME's cheat, high score, ending, DIPs
     "trojan": [("ref/cover.py", list(range(0, 52)), 20000)],      # 0 AUTOPLAY, coins/play, levels 1-6 by DIP + cheats
+    "ddragon": [("ref/cover.py", [0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 20, 21], 20000),   # attract, play, lives, 2 players
+                ("ref/cover.py", [-1, -3], 40000), ("ref/cover.py", [-2], 90000)],     # the recorded plays (missions 2-4)
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "ddragon": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),
+                ("tools/logic_test.py", ["6000", "--seed", "-1"], None),    # the recorded play
+                ("tools/render_test.py", ["4000", "--seed", "-1", "--first", "1000", "--every", "10"], None),
+                ("tools/sprite_test.py", [], None),                # edges, 16 shifts, holes, a 64 KB crossing
+                ("tools/mcu_test.py", [], None),                   # the native MCU job against the HD63701Y0
+                ("tools/sound_test.py", [], None)],                # the ADPCM and YM players
     "trojan": [("tools/prepare.py", [], None),
                ("tools/build.py", ["--sim"], None),
                ("tools/logic_test.py", ["{n}"], 3000),

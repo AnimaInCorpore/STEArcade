@@ -31,7 +31,7 @@ reference renderer and MAME.
 |  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 |
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |
 | <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
-|  | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code) + HD63701Y0 sprite MCU + MC6809 sound |
+| <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) |
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).

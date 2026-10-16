@@ -2,7 +2,7 @@
 ; one arcade frame (port_frame, as tools/machine.py DDragonPort), the hooks, the dispatcher, the ROM bank, the I/O.
 ;
 ; Registers in translated code (engine/m6809x.py): d0 A, d1 B, d2 X, d3 Y, d4 U, a5 = S as a pointer (g_mem + S),
-; a6 = ctx_main, a3 = a4 = g_mem (VB of slots 0 and 1), a2 = PB[7]; d5 d6 d7 a0 a1 scratch.
+; a6 = cur_ctx (the context of the bank selected), a3 = a4 = g_mem (VB of slots 0 and 1), a2 = PB[7]; d5 d6 d7 a0 a1 scratch.
 
 ; ---- the context block (engine/m6809x.py's offsets) ----
 PB = 0				; 8 longs: the 68000 address of the page in each slot
@@ -13,8 +13,10 @@ CCHI = 112			; the CC byte's E F H I bits (6809 positions)
 R_D0 = 116			; the registers while the program waits: d0-d4 (5 longs)
 R_A5 = 136
 R_SR = 140
+BANKNO = 144			; the context's bank (ctx_banks)
 TABLES = 152			; the page tables of the dispatcher
 CTXSIZE = 160
+CTX_STRIDE = 256		; (ctx_banks: a context per ROM bank, its slots 2 and 3 the bank's pages)
 
 PH_FG = 0			; port_phase: the foreground
 PH_NMI = 1			; in the NMI handler
@@ -27,7 +29,11 @@ PH_FIRST = 3			; the foreground's first instruction after the interrupts (no hoo
 	section text,code
 init_context:
 	move.l #main_badpc,bad_table_base
-	lea ctx_main,a6
+	moveq #7,d0			; a context per bank (main_bank_w switches a6), bank 0's last
+.bk:	move.w d0,d1
+	lsl.w #8,d1			; (CTX_STRIDE)
+	lea ctx_banks,a6
+	add.w d1,a6
 	move.l #main_page_tables,TABLES(a6)
 	lea g_mem,a0
 	moveq #0,d6			; the fixed slots 0, 1, 4-7: page = slot
@@ -47,26 +53,17 @@ init_context:
 	addq.w #1,d6
 	cmp.w #8,d6
 	bne.s .s
-	moveq #7,d0			; (bank_ctx: each bank's slot 2 / 3 fields, from bank_set)
-	lea bank_ctx+7*32,a2
-.bk:	bsr bank_set
-	move.l PB+8(a6),(a2)+
-	move.l PB+12(a6),(a2)+
-	move.l VB+8(a6),(a2)+
-	move.l VB+12(a6),(a2)+
-	move.l TBL+8(a6),(a2)+
-	move.l TBL+12(a6),(a2)+
-	move.l PID+4(a6),(a2)+
-	lea -60(a2),a2
-	dbf d0,.bk
-	clr.b cur_bank			; (bank 0 set last)
+	bsr bank_set			; (slots 2 and 3: the bank's pages)
+	move.b d0,BANKNO(a6)
 	move.b #$50,CCHI(a6)		; (reset: I and F)
 	clr.w R_SR(a6)
 	lea R_D0(a6),a0
-	moveq #5-1,d0
+	moveq #5-1,d1
 .c:	clr.l (a0)+
-	dbf d0,.c
+	dbf d1,.c
 	move.l #g_mem,R_A5(a6)
+	dbf d0,.bk
+	move.l a6,cur_ctx
 	rts
 
 ; d0.b = the bank (0-7): slots 2 and 3 get pages 8 + 2 * bank and 9 + 2 * bank (d5-d7 a0 a1 used)
@@ -102,7 +99,7 @@ bank_set:
 ; ---- the schedule: one arcade frame (tools/machine.py DDragonPort.run_frame_port) ----
 port_frame:
 	movem.l d0-d7/a0-a6,-(sp)
-	lea ctx_main,a6
+	move.l cur_ctx,a6
 	tst.b port_booted
 	bne.s .booted
 	st port_booted
@@ -266,6 +263,15 @@ go_8541:	move.b $22(a3),d0
 	LDFLAGS d0
 	jmp NEXT_8541
 
+hook_864C:				; the same at $864C
+	HOOK_ENTRY $864C,go_864C
+	btst #1,$22(a3)
+	bne.s go_864C
+	HOOK_IDLE $864C
+go_864C:	move.b $22(a3),d0
+	LDFLAGS d0
+	jmp NEXT_864C
+
 hook_B7AD:				; LDB $3802; ANDB #$08; BEQ $B7AD (wait for the vertical blank: always)
 	HOOK_ENTRY $B7AD,go_B7AD
 	HOOK_IDLE $B7AD
@@ -340,6 +346,41 @@ native_copy_sprites:
 	move #$04,ccr
 	jmp COPY_SPRITES_END
 
+; The bank selectors $BB40 (ORA #$20), $FC82 (ORA #$A0), $FC8F (ANDA #$1F), $FF80 (ORA #$80): PSHS A; LDA <$3A;
+; ORA / ANDA #n; STA <$3A; STA $3808; PULS A,PC.  The bank register's copy $3A changed and written, A kept, the flags
+; of the value (N Z, V clear, C kept); the byte PSHS left below S written too; back through the return address.
+BANK_NATIVE macro
+	move.w sr,-(sp)
+	move.b d0,-1(a5)		; (PSHS A's byte, below S once pulled)
+	move.b $3A(a3),d5
+	\1.b #\2,d5
+	move.b d5,$3A(a3)
+	move.b d5,-(sp)
+	bsr main_bank_w
+	move.b (sp)+,d5
+	move.w (sp)+,d6
+	and.w #1,d6			; (C kept)
+	tst.b d5
+	move.w sr,d7
+	and.w #$FE,d7
+	or.w d6,d7
+	move.w d7,-(sp)
+	moveq #0,d7
+	move.b (a5)+,d7			; PC
+	lsl.w #8,d7
+	move.b (a5)+,d7
+	move.w (sp)+,ccr
+	jmp main_dispatch
+	endm
+native_bank_BB40:
+	BANK_NATIVE or,$20
+native_bank_FC82:
+	BANK_NATIVE or,$A0
+native_bank_FC8F:
+	BANK_NATIVE and,$1F
+native_bank_FF80:
+	BANK_NATIVE or,$80
+
 ; ---- the dispatcher: d7.w = a 6809 pc, through the table of the page in its slot (TBL); the CCR kept ----
 main_dispatch:
 	move.w sr,d5
@@ -398,8 +439,24 @@ main_io_r:
 	beq.s .d0
 	cmp.w #$3804,d7
 	beq.s .d1
+	cmp.w #$4000,d7
+	bcc.s .rom
 	moveq #-1,d7
 	and.l #$FF,d7
+	rts
+.rom:	move.l a0,-(sp)			; $4000-$FFFF (a site that also reads I/O): the ROM through the slot's page
+	move.l d6,-(sp)
+	and.l #$FFFF,d7
+	move.w d7,d6
+	rol.w #3,d6
+	and.w #7,d6
+	add.w d6,d6
+	add.w d6,d6
+	move.l 32(a6,d6.w),a0
+	move.l (sp)+,d6
+	move.b (a0,d7.l),d7
+	and.l #$FF,d7
+	move.l (sp)+,a0
 	rts
 .p1:	moveq #0,d7
 	move.b in_bytes+0,d7
@@ -459,25 +516,21 @@ extra_byte:
 .free:	move.l (sp)+,d6
 	rts
 
-; main_bank_w: a static store to $3808 (gen.STATIC_WRITE; d5 = the value): the bank register, slots 2 and 3 from
-; bank_ctx (PB, VB, TBL, PID of the bank) when the bank changes.  Keeps every register but d5-d7 / a0.
+; main_bank_w: a static store to $3808 (gen.STATIC_WRITE; d5 = the value): the bank register; when the bank changes,
+; a6 becomes that bank's context (ctx_banks: its slots 2 and 3 the bank's pages).  Keeps every register but d5-d7 / a0
+; (and a6).
 main_bank_w:
 	move.b d5,g_bankreg
 	lsr.b #5,d5
-	cmp.b cur_bank,d5
+	cmp.b BANKNO(a6),d5
 	beq.s .same
-	move.b d5,cur_bank
 	and.w #7,d5
-	lsl.w #5,d5
-	lea bank_ctx,a0
+	lsl.w #8,d5			; (CTX_STRIDE)
+	lea ctx_banks,a0
 	add.w d5,a0
-	move.l (a0)+,PB+8(a6)
-	move.l (a0)+,PB+12(a6)
-	move.l (a0)+,VB+8(a6)
-	move.l (a0)+,VB+12(a6)
-	move.l (a0)+,TBL+8(a6)
-	move.l (a0)+,TBL+12(a6)
-	move.l (a0)+,PID+4(a6)
+	move.b CCHI(a6),CCHI(a0)	; (the CC's E F H I go on; the saved registers are only read where saved)
+	move.l a0,a6
+	move.l a0,cur_ctx
 .same:	rts
 
 main_io_w:
@@ -539,13 +592,12 @@ g_mem:					; the CPU's image: $0000-$3FFF RAM, video and I/O, $8000-$FFFF the fi
 	incbin "fixed.rom"
 g_banks:
 	incbin "banks.rom"		; the six 16 KB banks (6 and 7, never selected, would read what follows)
-mcu_rom64:				; the MCU's 64 KB: $FF below $C000, its ROM above
-	dcb.b $C000,$FF
+mcu_rom:				; the MCU's 16 KB ROM ($C000-$FFFF: its job reads its tables only there)
 	incbin "mcu.rom"
 
 	section bss,bss
-ctx_main:	ds.b CTXSIZE
-bank_ctx:	ds.l 8*8		; per bank: PB, VB, TBL of slots 2 and 3, their PIDs
+ctx_banks:	ds.b 8*CTX_STRIDE	; the contexts of banks 0-7 (init_context)
+cur_ctx:	ds.l 1			; the one of the bank selected (a6 in translated code)
 bad_table_base:	ds.l 1			; (main_badpc: init_context)
 bad_table:	ds.w $2000		; (all 0: the base itself)
 port_expect:	ds.l 1
@@ -558,7 +610,6 @@ port_returned:	ds.b 1
 port_vblank:	ds.b 1
 port_coins:	ds.b 1			; pressed until the FIRQ took them: bit 6 coin 1, bit 7 coin 2, bit 0 service
 g_bankreg:	ds.b 1
-cur_bank:	ds.b 1
 g_scroll_lo:	ds.b 2
 pal_written:	ds.b 1			; (set by the translated writers: gen.py)
 fg_written:	ds.b 1

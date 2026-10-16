@@ -5,8 +5,8 @@ Tiger's method).
     python games/ddragon/ref/palette_fit.py [frames]       -> docs/palette.json
 
 The colours: every pixel of the reference picture (tools/machine.py, the port schedule) of the attract mode (frames
-300.., every 15th) and of play (ref/cover.py's schedules, frames 600.. every 15th; MISSIONS: missions 2-4 started by
-the poke of ref/cover.py when it has one).  Each set's 12-bit colour histogram is normalised (every set weighs the
+300.., every 15th) and of play (ref/cover.py's schedules, frames 600.. every 15th; the recorded plays, seeds -1.., through missions 2-4: all
+their frames from 1000 on).  Each set's 12-bit colour histogram is normalised (every set weighs the
 same), then a weighted k-means in Oklab picks 15 colours, each snapped to the nearest colour that occurs (4 bits a
 channel: the STE shows it exactly); the best of 30 seeded starts.  Every colour maps to the nearest of the 16 in
 Oklab.  Reported per set: the mean absolute error per channel (0-255) and the share of exact pixels.
@@ -100,7 +100,8 @@ def hexes(pal):
 def main():
     frames = int(sys.argv[1]) if len(sys.argv) > 1 else 6000
     from multiprocessing import Pool
-    jobs = [(0, frames, 300)] + [(s, frames, 600) for s in cover.PALETTE_SEEDS]
+    jobs = [(0, frames, 300)] + [(s, frames, 600) if s >= 0 else (s, cover.play_length(s), 1000)
+                                 for s in cover.PALETTE_SEEDS]
     names = ["attract"] + ["seed %d" % s for s in cover.PALETTE_SEEDS]
     with Pool(len(jobs)) as p:
         hs = p.starmap(histogram, jobs)

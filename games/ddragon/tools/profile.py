@@ -2,7 +2,9 @@
 instruction, grouped by the 6809 pc's nearest JSR / BSR target the coverage saw) and per 6809 instruction, over frames
 F0 .. F1 of a seed's port schedule.
 
-    python games/ddragon/tools/profile.py F0 F1 [--seed N] [--top 30]
+    python games/ddragon/tools/profile.py F0 F1 [--seed N] [--top 30] [--callers LABEL]
+
+--callers: also the calls of a runtime routine (main_bank_w, main_dispatch, ...) per calling 6809 instruction.
 """
 from pathlib import Path
 import argparse
@@ -24,6 +26,7 @@ def main():
     ap.add_argument("f1", type=int)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--top", type=int, default=30)
+    ap.add_argument("--callers", default=None)
     args = ap.parse_args()
     run = ROOT / "run" / "ddragon_sim"
     sim = Sim(str(run / "DDRAGON.PRG"), run_dir=run)
@@ -40,12 +43,18 @@ def main():
     dsw1, inputs = cover.schedule(args.seed)
     mem.w8(sym["dd_dsw"] + 1, dsw1)
 
+    target = sym[args.callers] if args.callers else None
+    callers = collections.Counter()
+
     def run_to_stop(prof=None):
         while True:
             if prof is None:
                 cpu.execute(4000)
             else:
                 pc = cpu.r_pc()
+                if pc == target:
+                    i = bisect.bisect_right(addrs, mem.r32(cpu.r_reg(R.A7)) - 2) - 1
+                    callers[labs[i][1] if i >= 0 else "?"] += 1
                 c = cpu.execute(1).cycles
                 i = bisect.bisect_right(addrs, pc) - 1
                 prof[labs[i][1] if i >= 0 else "?"] += c
@@ -85,6 +94,10 @@ def main():
             blocks["M%05X" % (int(k[1:], 16) & ~0x3F)] += c
         else:
             blocks[k] += c
+    if target:
+        print("calls of %s a frame (%.0f), by caller:" % (args.callers, sum(callers.values()) / n))
+        for k, c in callers.most_common(args.top):
+            print("  %-24s %8.1f a frame" % (k, c / n))
     print("by 64-byte block:")
     for k, c in blocks.most_common(args.top):
         print("  %-24s %8.0f a frame %5.1f%%" % (k, c / n, 100 * c / total))

@@ -16,22 +16,30 @@ def prepare():
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "prepare.py")], check=True)
 
 
+# the YM2151 commands the game sends (tools/sound.py records them on the reference board's sound part)
+TUNES = [0x01, 0x03, 0x07, 0x09, 0x0A, 0x0C, 0x0E]
+EFFECTS = [0x02, 0x04, 0x0F, 0x10, 0x11, 0x12]
+
+
 def write_sound(build):
-    """the ADPCM player's data (src/sound.s): both sample ROMs, the driver's command table ($8966 of 21j-0-1: 27 x 3
-    bytes), MAME's msm5205 diff_lookup (49 steps x 16 nibbles, words)"""
-    import math
+    """the ADPCM player's data (src/sound.s): each sample command's stream decoded here (tools/sound.py: MAME's
+    MSM5205 at 6258 Hz, a signed byte a sample) in adpcm_pcm.bin (equal ranges once), and adpcm_index.bin: per command
+    $80-$9A its chip (word), its stream's offset and length (longs)"""
     import struct
-    (build / "adpcm.bin").write_bytes(load("21j-6") + load("21j-7"))
-    snd = load("21j-0-1")
-    (build / "adpcm_table.bin").write_bytes(snd[0x0966:0x0966 + 27 * 3] + b"\0")
-    nbl = [[1 - 2 * (n >> 3), (n >> 2) & 1, (n >> 1) & 1, n & 1] for n in range(16)]
-    diff = []
-    for step in range(49):
-        sv = math.floor(16.0 * pow(11.0 / 10.0, step))
-        for n in range(16):
-            sign, b2, b1, b0 = nbl[n]
-            diff.append(sign * (sv * b2 + sv // 2 * b1 + sv // 4 * b0 + sv // 8))
-    (build / "msm_diff.bin").write_bytes(struct.pack(">784h", *diff))
+    import sound
+    rom = load("21j-6") + load("21j-7")
+    diff = sound.msm_diff()
+    pcm, where, index = bytearray(), {}, bytearray()
+    for chip, a, b in sound.adpcm_commands():
+        if (a, b) not in where:
+            data = bytes(v & 0xFF for v in sound.adpcm_stream(chip, a, b, rom, diff))
+            where[(a, b)] = (len(pcm), len(data))
+            pcm += data
+        off, n = where[(a, b)]
+        index += struct.pack(">HLL", chip, off, n)
+    (build / "adpcm_pcm.bin").write_bytes(bytes(pcm) + b"\0" * (len(pcm) & 1))
+    (build / "adpcm_index.bin").write_bytes(bytes(index))
+    return len(pcm)
 
 
 def main():
@@ -39,6 +47,7 @@ def main():
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--frames", type=int, default=0)
+    ap.add_argument("--sound", action="store_true", help="record the tunes and effects again")
     ap.add_argument("-D", dest="defines", action="append", default=[])
     args = ap.parse_args()
     prepare()
@@ -48,7 +57,9 @@ def main():
     (build / "mcu_info.s").write_text("MCU_SUM equ $%02X\t\t; the MCU ROM's byte sum (its first job)\n" % (sum(mcu) & 0xFF))
     import assets
     assets.build()
-    write_sound(build)
+    print("ADPCM: %d bytes of decoded samples" % write_sound(build))
+    import sound
+    print("music_data.s: %d bytes of streams" % sound.build_music(build, TUNES, EFFECTS, again=args.sound))
     report = gen.generate()
     print("translation: %d instructions, %d unsupported, %d missing, %s" % (
         report["instructions"], len(report["unsupported"]), len(report["missing"]), report["stats"]))

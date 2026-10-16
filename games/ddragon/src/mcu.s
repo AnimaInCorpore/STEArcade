@@ -3,7 +3,7 @@
 ;
 ; mcu_job: called by main_io_w at a write to $380F; every register kept.  The shared RAM is g_mem+$2000 (the MCU's
 ; $8000-$81FF), the MCU's own RAM mcu_ram ($40-$13F, a1 = mcu_ram-$40 so that $nn(a1) is its byte $nn), its ROM
-; mcu_rom64 (a 64 KB image, $FF below $C000: a2 + an MCU address).  Then $0E3E = 1, as the main CPU's IRQ handler
+; mcu_rom (16 KB: a2 = mcu_rom - $C000, so a2 + an MCU address; the job reads only $C000-$FFFF).  Then $0E3E = 1, as the main CPU's IRQ handler
 ; would set it (the port takes no IRQ).
 
 	section text,code
@@ -11,7 +11,7 @@ mcu_job:
 	movem.l d0-d7/a0-a2,-(sp)
 	lea g_mem+$2000,a0
 	lea mcu_ram-$40,a1
-	lea mcu_rom64,a2
+	lea mcu_rom-$C000,a2
 	tst.b mcu_done_first
 	bne.s .later
 	st mcu_done_first		; the first job: the ROM's sum into $8000
