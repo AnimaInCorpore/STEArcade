@@ -13,7 +13,6 @@ CCHI = 112			; the CC byte's E F H I bits (6809 positions)
 R_D0 = 116			; the registers while the program waits: d0-d4 (5 longs)
 R_A5 = 136
 R_SR = 140
-BANKNO = 144			; the context's bank (ctx_banks)
 TABLES = 152			; the page tables of the dispatcher
 CTXSIZE = 160
 CTX_STRIDE = 256		; (ctx_banks: a context per ROM bank, its slots 2 and 3 the bank's pages)
@@ -54,7 +53,6 @@ init_context:
 	cmp.w #8,d6
 	bne.s .s
 	bsr bank_set			; (slots 2 and 3: the bank's pages)
-	move.b d0,BANKNO(a6)
 	move.b #$50,CCHI(a6)		; (reset: I and F)
 	clr.w R_SR(a6)
 	lea R_D0(a6),a0
@@ -117,7 +115,8 @@ port_frame:
 	beq.s .done
 .fg:	move.b #PH_FIRST,port_phase
 	bsr enter_idle
-.done:	movem.l (sp)+,d0-d7/a0-a6
+.done:	move.l a6,cur_ctx		; (the bank selected now: main_bank_w only switches a6)
+	movem.l (sp)+,d0-d7/a0-a6
 	rts
 
 ; The translated code from a 6809 pc (the dispatch); back here (rts) when a hook says the program waits or an
@@ -521,17 +520,20 @@ extra_byte:
 ; (and a6).
 main_bank_w:
 	move.b d5,g_bankreg
-	lsr.b #5,d5
-	cmp.b BANKNO(a6),d5
+	lsr.b #3,d5
+	and.w #$1C,d5			; (the bank * 4)
+	move.l ctx_ptrs(pc,d5.w),a0
+	cmp.l a0,a6
 	beq.s .same
-	and.w #7,d5
-	lsl.w #8,d5			; (CTX_STRIDE)
-	lea ctx_banks,a0
-	add.w d5,a0
 	move.b CCHI(a6),CCHI(a0)	; (the CC's E F H I go on; the saved registers are only read where saved)
 	move.l a0,a6
-	move.l a0,cur_ctx
 .same:	rts
+ctx_ptrs:
+N	set 0
+	rept 8
+	dc.l ctx_banks+N*CTX_STRIDE
+N	set N+1
+	endr
 
 main_io_w:
 	cmp.w #$3800,d7
@@ -582,6 +584,8 @@ main_io_w:
 
 	include	"m6809rt.s"
 	include	"mcu.s"
+	include	"natives.s"
+	include	"selectors.s"
 	include	"code_main.s"
 	include	"tables_main.s"
 
@@ -597,7 +601,7 @@ mcu_rom:				; the MCU's 16 KB ROM ($C000-$FFFF: its job reads its tables only th
 
 	section bss,bss
 ctx_banks:	ds.b 8*CTX_STRIDE	; the contexts of banks 0-7 (init_context)
-cur_ctx:	ds.l 1			; the one of the bank selected (a6 in translated code)
+cur_ctx:	ds.l 1			; the one of the bank selected (a6 in translated code; port_frame's end)
 bad_table_base:	ds.l 1			; (main_badpc: init_context)
 bad_table:	ds.w $2000		; (all 0: the base itself)
 port_expect:	ds.l 1

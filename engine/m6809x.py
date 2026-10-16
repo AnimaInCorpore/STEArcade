@@ -148,13 +148,18 @@ class Program:
     static_write    {6809 address: 68000 label}: a store with that static address calls the label (d5 = the byte;
                     every register but d5-d7 / a0 kept) instead of the generic <cpu>_io_w (a bank register)
     natives         {virtual pc: 68000 label} hand-written replacements
+    inline_calls    {virtual target: (68000 label, DP)}: a direct JSR / BSR to it (with that DP at the call) becomes
+                    `jsr label` (label_nf when no flag is read after the return) and runs on into the next
+                    instruction: the routine does the callee's work and its flags, no 6809 return address pushed
     """
 
     def __init__(self, name, prefix, page_bytes, slot_of, roots, exec_cover=(), acc_cover=None, targets=None,
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
                  hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False, pid_checks=False,
-                 dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False, static_write=None, wrap_sites=()):
+                 dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False, static_write=None, wrap_sites=(),
+                 inline_calls=None):
         self.name, self.prefix = name, prefix
+        self.inline_calls = dict(inline_calls or {})
         self.static_write = dict(static_write or {})
         self.wrap_sites = set(wrap_sites)
         self.dp = dp                              # the direct page register's usual value
@@ -1103,6 +1108,15 @@ class Emitter:
                 self.ea_to_d7(v, ins)
                 self.dispatch(v, saved=True)
             return
+        if bm in ("bsr", "jsr") and fl == "call":
+            tg = branch_targets(self.p, v, ins)
+            inl = self.p.inline_calls.get(tg[0]) if len(tg) == 1 else None
+            nv = next_virtual(self.p, v, ins)
+            if inl is not None and inl[1] == self.p.dp_sites.get(v, self.p.dp) and nv is not None:
+                self.stats["inline call"] += 1
+                self.e("jsr %s%s" % (inl[0], "" if self.live_in.get(nv, NZVC) & NZVC else "_nf"))
+                self.fallthrough(v, ins)
+                return
         if bm in ("bsr", "jsr"):
             ret = (self.p.cpu_pc(v) + ins.length) & 0xFFFF
             live = self.live_out.get(v, NZVC) & NZVC

@@ -27,6 +27,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--callers", default=None)
+    ap.add_argument("--mnemonics", action="store_true", help="the translated code's cycles per 6809 mnemonic and mode")
     args = ap.parse_args()
     run = ROOT / "run" / "ddragon_sim"
     sim = Sim(str(run / "DDRAGON.PRG"), run_dir=run)
@@ -38,7 +39,7 @@ def main():
     labs = sorted((v, k) for k, v in sym.items() if k[:1] == "M" and len(k) == 7 or k in (
         "main_dispatch", "main_dispatch_nf", "main_io_r", "main_io_w", "mcu_job", "m6809_daa", "m6809_mul",
         "port_frame", "bank_set", "native_clear_sprites", "native_copy_sprites", "main_bank_w", "p2_byte",
-        "extra_byte", "enter_nmi", "enter_firq", "enter_idle", "port_save") or k.startswith("hook_"))
+        "extra_byte", "enter_nmi", "enter_firq", "enter_idle", "port_save") or k.startswith(("hook_", "native_", "coll_", "sel_", "mcu_")))
     addrs = [a for a, k in labs]
     dsw1, inputs = cover.schedule(args.seed)
     mem.w8(sym["dd_dsw"] + 1, dsw1)
@@ -98,6 +99,25 @@ def main():
         print("calls of %s a frame (%.0f), by caller:" % (args.callers, sum(callers.values()) / n))
         for k, c in callers.most_common(args.top):
             print("  %-24s %8.1f a frame" % (k, c / n))
+    if args.mnemonics:
+        import re
+        text = {}
+        for line in (build_dir("ddragon") / "code_main.s").read_text().splitlines():
+            m = re.match(r"(M[0-9A-F]{6}):\t\t; [0-9A-F]{4} (\S+)\s*(\S*)", line)
+            if m:
+                arg = m.group(3)
+                mode = ("imm" if arg.startswith("#") else "dir" if arg.startswith("<") else
+                        "ind" if arg.startswith("[") else "idx" if "," in arg else "ext" if arg.startswith("$") else "")
+                text[m.group(1)] = (m.group(2) + " " + mode).strip()
+        by = collections.Counter()
+        cnt = collections.Counter()
+        for k, c in prof.items():
+            if k in text:
+                by[text[k]] += c
+        tr = sum(by.values())
+        print("translated code: %.0f a frame; per mnemonic:" % (tr / n))
+        for k, c in by.most_common(args.top):
+            print("  %-14s %8.0f a frame %5.1f%%" % (k, c / n, 100 * c / tr))
     print("by 64-byte block:")
     for k, c in blocks.most_common(args.top):
         print("  %-24s %8.0f a frame %5.1f%%" % (k, c / n, 100 * c / total))

@@ -5,7 +5,7 @@
 STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`): the main CPU's 6809
 program translated whole (bank-aware), the sprite MCU's job as a native routine, the background, the sprites and the
 text on the STE's 16 colours, the YM2151's music and effects on the YM2149, the ADPCM voices and hits on the DMA
-sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: about 30% of the arcade's speed in play.
+sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: 19-22 frames a second in play (about 35% of the arcade).
 
 ```sh
 python games/ddragon/tools/prepare.py       # verify assets/roms/ddragon.zip, unpack to assets/roms/extracted/ddragon/
@@ -17,7 +17,8 @@ python games/ddragon/tools/mcu_test.py      # the native MCU job against the HD6
 python games/ddragon/tools/sound_test.py    # the ADPCM and YM players against their models
 games/ddragon/tools/bench.sh 8000           # Hatari (pinned F030Arcade build, its own instance): AUTOPLAY, logic and picture rates
 PLAY=1 games/ddragon/tools/bench.sh 8000    # the same with the recorded play (build/ddragon/play_inputs.bin)
-python games/ddragon/tools/profile.py 3000 3200 --seed -1 [--callers main_bank_w]   # where the logic's cycles go (Musashi)
+python games/ddragon/tools/profile.py 3000 3200 --seed -1 [--callers main_bank_w] [--mnemonics]   # the logic's 68000 cycles
+python games/ddragon/ref/routines.py 3000 3200 --seed -1 [--tree 6]     # the main CPU's time per routine (6809 cycles)
 python games/ddragon/tools/play_search.py 90000 2      # a recorded play (engine/playbot.py) -> build/ddragon/play_inputs_2.bin
 python games/ddragon/ref/mame_cmp_ddragon.py [frame ...] [--keep DIR]    # the reference board against MAME 0.289
 python games/ddragon/ref/trace_cmp.py main|sub|sound F0 F1    # one CPU against MAME's trace, instruction for instruction
@@ -98,12 +99,23 @@ RAM, video RAM, palette, MCU RAM, the registers and every sound command equal af
   -2 through missions 3 and 4 in 90000).  Per site: the DP ($0B), the shared RAM's mirror use, I/O reads and
   writes, an index that wraps past $FFFF.
 * **Banks**: 16 KB at $4000 as two virtual pages (8 + 2 b, 9 + 2 b); a context per bank (`ctx_banks`: the slots'
-  page bases, the dispatch tables, the page numbers), so a write to $3808 only switches a6.  The four bank selector
-  routines ($BB40, $FC82, $FC8F, $FF80) are natives.
+  page bases, the dispatch tables, the page numbers), so a write to $3808 only switches a6 (`main_bank_w`: a
+  table of the contexts, about 100 cycles).  The 16 bank selector routines (`PSHS A; LDA <$3A; ... STA $3808;
+  PULS A,PC`, `tools/gen.py` SELECTORS) run inline at their 205 direct calls (`engine/m6809x.py` `inline_calls`:
+  a 68000 `jsr` to a generated routine, no 6809 return address, no dispatch; a flagless variant where nothing
+  reads the flags after it).
+* **Natives at the level of the game** (`src/natives.s`; `ref/routines.py` finds them: a shadow call stack on the
+  reference, inclusive and exclusive 6809 cycles per routine): the background and object collision of bank 4 (a
+  quarter of the main CPU's time in play): the map boxes' scan ($40B3 / $40BC, with $40E6 $4154 $41A7 $41E0 inlined),
+  an object's own box ($454A, with $4565), the 16 objects' scan ($450E).  Each runs its loop natively and continues
+  the translation where the 6809 does something rare: a hit at the translated `JSR $4251` with the registers as the
+  6809 has them there, the scan's end or abort at the translated RTS.
 * **Dispatch**: a word table per code page (the label's offset from the page's base stub), for returns and jumps
   the coverage could not pin down.
 * **The MCU** (HD63701Y0): its job on the main CPU's NMI (sort the object list, write the sprite entries back) is a
-  native routine (`src/mcu.s`, from `tools/mcu.py`'s model), equal to the interpreter (`tools/mcu_test.py`).
+  native routine (`src/mcu.s`, from `tools/mcu.py`'s model, equal to the interpreter: `tools/mcu_test.py`): the
+  ROM's bubble sort as an insertion sort (the same stable order), the parts of a record in registers, the MCU's RAM
+  left as the MCU leaves it.
 
 Lock-step: the three plays (40000, 90000 and 40000 frames, missions 1-4) and seeds 0-4, 10-14, 20-21 (20000) identical.
 
@@ -147,22 +159,36 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
 | | arcade frames a second | pictures a second |
 |---|---|---|
 | attract mode | 57 (100%) | 47-50 |
-| AUTOPLAY (coin, start, walk and punch) | 6-42, mostly 13-20 (20.7 overall) | 1-9, mostly 3 (7.2 overall) |
-| the recorded play (`PLAY=1`, missions 1-2) | 10-49, mostly 15-20 (22.4 overall) | 2-9, mostly 3-4 (7.4 overall) |
+| AUTOPLAY (coin, start, walk and punch) | mostly 17-22 (22.7 overall) | mostly 3-4 (7.6 overall) |
+| the recorded play (`PLAY=1`, missions 1-2) | 10-46, mostly 19-22 (24.6 overall) | 3-10, mostly 4 (7.9 overall) |
 
 The logic comes first (a picture after at most 4 frames not drawn).  Musashi, mission 1 in play (`profile.py 3000
-3200 --seed -1`): the logic 251k cycles a frame (the MCU job 24k, the bank switches 15k, the sprite copy and the bank
-natives 15k, the dispatcher 11k, the rest the translated code; 279k on average over the play through mission 4), the sound ~10-20k, a picture 674k with the Blitter
-(cells 92k, the text 283k, the sprites 142k).  Taken here: the ADPCM decoded at build time (sound 98k / 163k -> 13k /
-19k a frame with one / two voices), a context per bank (bank switches 27k -> 15k), solid text fills (the text's CPU
-cycles 391k -> 237k a picture).
+3200 --seed -1`): the logic 193k cycles a frame (the MCU job 15k, the bank switches 10k, the collision natives 15k,
+the sprite copy 6k, the translated code ~127k: a third of it calls and returns, ~300 a frame; 217k on average over
+the play through mission 4), the sound ~10-20k, a picture 674k with the Blitter (cells 92k, the text 283k, the
+sprites 142k).
 
-The program asks TOS for 3,654,036 bytes (text, data and BSS; the release limit is 3,700,000): the tile cache is 512
+Taken so far (logic in mission 1 / over missions 1-4):
+
+| | cycles a frame |
+|---|---|
+| the start | 251k / 279k |
+| the collision natives | 234k |
+| the bank selectors inline | 203k |
+| `main_bank_w` from a table of contexts | 198k |
+| the MCU's parts in registers, its sort an insertion sort (67k -> 48k, 15k -> 6k at a mission's start) | 193k / 217k |
+
+Before that: the ADPCM decoded at build time (sound 98k / 163k -> 13k / 19k a frame with one / two voices), a
+context per bank (bank switches 27k -> 15k), solid text fills (the text's CPU cycles 391k -> 237k a picture).  What
+is left is flat: after the collision no routine of the game takes more than 2.5% of the main CPU's time
+(`ref/routines.py`), and the calls cost ~40 cycles each way already.
+
+The program asks TOS for 3,654,106 bytes (text, data and BSS; the release limit is 3,700,000): the tile cache is 512
 entries, the character cache 256, the sprites' row orders two a byte.
 
 ## What is missing
 
-* Speed: about 30% of the arcade in play; the logic would have to get 2-3 times cheaper (the translated code's own
-  cost, not one routine).
+* Speed: about 35% of the arcade in play; the logic would have to get 2 times cheaper (spread over the game's
+  routines now), and a picture costs as much as 3-4 frames of logic (its text alone 283k).
 * The flip screen (cocktail) is not modelled; play against MAME itself (not the reference board) not compared.
 * The music is the YM2151 reduced to three square-wave voices.
