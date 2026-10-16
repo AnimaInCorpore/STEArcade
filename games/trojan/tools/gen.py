@@ -292,9 +292,10 @@ class TrEmitter(Emitter):
             self.e('move.w (a7)+,d2')
             self.e('addq.w #1,d3')
         if t == 0x30:
-            self.e('exg d2,d3')                              # ex de,hl / jp (hl)
-            self.e('moveq #0,d7')
-            self.e('move.w d3,d7')
+            self.e('moveq #0,d7')                            # ex de,hl (the low words: DE', HL' above) / jp (hl)
+            self.e('move.w d2,d7')
+            self.e('move.w d3,d2')
+            self.e('move.w d7,d3')
             self.e('jmp tr_dispatch')
             return
         self.jmp_to(nxt)
@@ -421,6 +422,8 @@ def generate(extra_roots=()):
     out += ['tr_dispatch_targets:                ; (0: a bank without code)',
             '\tdc.l ' + ','.join('tr_window_dispatch%d' % b if b in banks else '0' for b in range(4))]
     out += ['\tsection text,code']
+    # the rst $30 tables (site -> its targets): tools/native_test.py indexes them only as far as they go
+    (BUILD / 'rst30.json').write_text(json.dumps({'%X' % k: v for k, v in sorted(RST30.items())}) + '\n')
     return '\n'.join(out) + '\n', report, code
 
 

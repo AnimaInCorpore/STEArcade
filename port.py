@@ -56,7 +56,8 @@ TESTS = {
                ("tools/logic_test.py", ["{n}"], 3000),
                ("tools/logic_test.py", ["6000", "--seed", "5"], None),     # level 2 by DIP + cheats
                ("tools/render_test.py", ["3000", "--seed", "7", "--first", "1000", "--every", "5"], None),
-               ("tools/sprite_test.py", [], None)],               # edges, 16 shifts, holes, a 64 KB crossing
+               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, holes, a 64 KB crossing
+               ("tools/native_test.py", [], None)],               # the rst helpers in place, the natives
     "kungfum": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),

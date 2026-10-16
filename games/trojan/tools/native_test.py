@@ -10,6 +10,7 @@ to the dispatch of its target); A, DE, HL and the RAM must equal the Z80's after
 return (rst $30: to the jump), the flags not compared (dead there by construction).
 """
 from pathlib import Path
+import json
 import random
 import re
 import sys
@@ -51,6 +52,7 @@ def main():
     dispatch = sym['tr_dispatch']
     rnd = random.Random(1)
     found = sites()
+    rst30 = {int(k, 16): v for k, v in json.loads((build_dir('trojan') / 'rst30.json').read_text()).items()}
     tested = {0x18: 0, 0x20: 0, 0x28: 0, 0x30: 0}
     for pc, helper in sorted(found.items()):
         bank = (pc - gen.VBASE) // 0x4000 if pc >= gen.VBASE else 0
@@ -61,9 +63,18 @@ def main():
             m.bank = bank
             ram = bytes(rnd.randrange(256) for _ in range(0x2000))
             m.mem[0xC000:0xE000] = ram
-            a = rnd.randrange(256)
-            hl = rnd.choice([0xC000 + rnd.randrange(0x1F00), 0xC0F0 + rnd.randrange(16), 0x8000 + rnd.randrange(0x3F00)
-                             if helper in (0x20, 0x28) else 0xD000 + rnd.randrange(0x100)])
+            # (rst $30: an index into the site's table, as far as it goes: past its end lie the code's next bytes,
+            # an index the game never computes)
+            a = rnd.randrange(len(rst30[pc])) if helper == 0x30 else rnd.randrange(256)
+            upper = [rnd.randrange(0x10000) for _ in range(3)]          # (BC' DE' HL': kept)
+            while True:
+                hl = rnd.choice([0xC000 + rnd.randrange(0x1F00), 0xC0F0 + rnd.randrange(16),
+                                 0x8000 + rnd.randrange(0x3F00) if helper in (0x20, 0x28) else 0xD000 + rnd.randrange(0x100)])
+                # (not a table in the return addresses the Z80's rsts push below SP, $CFEC-$CFEF here (rst $28 calls
+                # rst $18), which the code in place does not push: the game's tables are never in the stack)
+                at = hl + (a if helper == 0x20 else 2 * a & 255 if helper in (0x28, 0x30) else 0)
+                if helper == 0x18 or not {at & 0xFFFF, (at + (helper != 0x20)) & 0xFFFF} & set(range(0xCFEC, 0xCFF0)):
+                    break
             de = rnd.randrange(0x10000)
             c = m.cpu
             c.a, c.h, c.l, c.d, c.e = a, hl >> 8, hl & 255, de >> 8, de & 255
@@ -85,8 +96,9 @@ def main():
             mem.w32(sym['g_winbase'], mem.r32(sym['tr_winbases'] + 4 * bank))
             mem.w32(sym['g_wdispatch'], mem.r32(sym['tr_dispatch_targets'] + 4 * bank))
             cpu.w_reg(R.D0, a)
-            cpu.w_reg(R.D2, de)
-            cpu.w_reg(R.D3, hl)
+            cpu.w_reg(R.D1, upper[0] << 16 | rnd.randrange(0x10000))
+            cpu.w_reg(R.D2, upper[1] << 16 | de)
+            cpu.w_reg(R.D3, upper[2] << 16 | hl)
             cpu.w_reg(R.A5, z(0xCFF0))
             cpu.w_reg(R.A6, block + 0x8000)
             cpu.w_reg(R.A4, sym['tr_fixed_dispatch'])
@@ -99,8 +111,9 @@ def main():
                     break
             else:
                 raise RuntimeError('%05X: the 68000 code did not reach its end' % pc)
-            got = (cpu.r_reg(R.D0) & 255, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D3) & 0xFFFF)
-            want = (c.a, c.d << 8 | c.e, c.h << 8 | c.l)
+            got = (cpu.r_reg(R.D0) & 255, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D3) & 0xFFFF,
+                   *(cpu.r_reg(r) >> 16 for r in (R.D1, R.D2, R.D3)))
+            want = (c.a, c.d << 8 | c.e, c.h << 8 | c.l, *upper)
             if helper == 0x30:
                 got += (cpu.r_reg(R.D7) & 0xFFFF,)
                 want += (target,)
@@ -133,10 +146,11 @@ def main():
             mem.w8(sym['g_bank'], bank * 4)
             mem.w32(sym['g_winbase'], mem.r32(sym['tr_winbases'] + 4 * bank))
             mem.w32(sym['g_wdispatch'], mem.r32(sym['tr_dispatch_targets'] + 4 * bank))
+            upper = [rnd.randrange(0x10000) for _ in range(3)]          # (BC' DE' HL': kept)
             cpu.w_reg(R.D0, a)
-            cpu.w_reg(R.D1, (bc & 255) << 8 | bc >> 8)
-            cpu.w_reg(R.D2, de)
-            cpu.w_reg(R.D3, hl)
+            cpu.w_reg(R.D1, upper[0] << 16 | (bc & 255) << 8 | bc >> 8)
+            cpu.w_reg(R.D2, upper[1] << 16 | de)
+            cpu.w_reg(R.D3, upper[2] << 16 | hl)
             cpu.w_reg(R.A5, z(0xCFF0))
             cpu.w_reg(R.A6, block + 0x8000)
             cpu.w_reg(R.A4, sym['tr_fixed_dispatch'])
@@ -149,8 +163,9 @@ def main():
             else:
                 raise RuntimeError('%04X: the 68000 code did not get to %04X' % (start, stop))
             d1 = cpu.r_reg(R.D1) & 0xFFFF
-            got = (cpu.r_reg(R.D0) & 255, (d1 & 255) << 8 | d1 >> 8, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D3) & 0xFFFF)
-            want = (c.a, c.b << 8 | c.c, c.d << 8 | c.e, c.h << 8 | c.l)
+            got = (cpu.r_reg(R.D0) & 255, (d1 & 255) << 8 | d1 >> 8, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D3) & 0xFFFF,
+                   *(cpu.r_reg(r) >> 16 for r in (R.D1, R.D2, R.D3)))
+            want = (c.a, c.b << 8 | c.c, c.d << 8 | c.e, c.h << 8 | c.l, *upper)
             g, w = bytearray(mem.r_block(z(0xC000), 0x2000)), bytearray(m.mem[0xC000:0xE000])
             g[0xF80:0xFF0] = w[0xF80:0xFF0] = bytes(0x70)
             if got != want or g != w:
