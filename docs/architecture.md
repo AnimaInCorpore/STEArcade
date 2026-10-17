@@ -4,7 +4,8 @@ The project ports Z80, 6809-family and NEC V30 arcade games to the Atari STE (8 
 has three parts, and the first two are checked against each other with a lock-step test:
 
 1. **A reference machine** (`games/<game>/tools/machine.py`, on `engine/z80.py`, `engine/m6809.py` (KONAMI-1 too),
-   `engine/m6801.py` / `engine/hd63701.py` for the MCUs, `engine/v30.py` for NEC V30; shared boards:
+   `engine/m6801.py` / `engine/hd63701.py` for the MCUs, `engine/v30.py` for NEC V30, `engine/mcs48.py` for the
+   i8039 (Gyruss's effects, rendered offline); shared boards:
    `engine/namcos1.py` and `engine/m72board.py`): a
    Python model of the arcade board from the MAME driver.  It is the ground truth for the logic
    (RAM compared every frame) and for the picture (`render_raw`, itself compared with MAME's own screenshot, see

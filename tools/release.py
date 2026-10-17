@@ -76,6 +76,11 @@ GAMES = [
      "  Needs the whole 4 MB: Esc resets the STE",
      "fire: Space, Control, Z, joystick fire, pad A.  magic (and the start): Alternate, X, pad B / C.  coins 1-4:\n"
      "  5-8 (players 1-4; pads: Option).  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
+    ("gyruss", "GYRUSS.PRG", "Gyruss (Konami 1983)",
+     "playable, but slower than the arcade: about half its speed and 7-12 pictures a second in play (Hatari);\n"
+     "  exact logic of both CPUs, the turned 224 x 256 picture; music and effects on the YM (three of the fifteen\n"
+     "  AY channels), the sampled effects on the DMA sound",
+     "fire: Space, Control, Z, joystick fire, pad A.  The joystick moves the ship around the circle."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

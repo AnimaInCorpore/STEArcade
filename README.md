@@ -26,7 +26,7 @@ reference renderer and MAME.
 |  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
 |  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 |
 |  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 |
-|  | [Gyruss](games/gyruss/) | Z80 + KONAMI-1 (encrypted 6809) + Z80 + i8039 |
+| <a href="games/gyruss/README.md"><img src="games/gyruss/docs/screenshot.png" width="160" alt="Gyruss"></a> | [Gyruss](games/gyruss/README.md) | Z80 + KONAMI-1 (encrypted 6809, both translated) + Z80 sound (translated; YM) + i8039 (effects rendered offline; DMA sound) |
 | <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) |
 |  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 |
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |

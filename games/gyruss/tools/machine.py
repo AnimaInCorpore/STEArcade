@@ -250,3 +250,128 @@ if __name__ == "__main__":
         g.run_frame()
     print("300 frames in %.1f s, main pc %04X sub pc %04X, sound commands %d" % (time.time() - t, g.main.pc, g.sub.pc,
                                                                                len(g.sound_log)))
+
+
+class GyrussPort(Gyruss):
+    """The STE runtime's schedule (src/gyruss.s), one call of run_frame_port an arcade frame.
+
+    Main CPU: its foreground is a task loop (05F4-0601: the queue at ([$5865] << 8) + [$9433]; an entry with bit 7 set
+    is empty) and the NMI handler ($0066 -> $0103) plays the game.  The foreground's idle hook is 05F7 with an empty
+    queue: there the NMI is delivered (when the latch's Q0 allows it) with TOKEN as its return address; on return the
+    foreground goes on at the hook until the queue is empty again.
+    Sub CPU: all its work is the IRQ handler (F0B8; the foreground idles at F0B6).  In the arcade both start at the
+    VBLANK and meet at two semaphores: the main's NMI sets $A701 (the sub may go on with the previous frame's list ->
+    the sprite RAM) and, after copying its object list ($9800 -> $A000 / $A200 by $A700), $A702 (the sub projects the
+    new list).  The data are disjoint (the sub's first phase reads the other buffer; the main never reads $A400-$A7FF),
+    so the port runs the sub's IRQ after the main's NMI returned, in one go; the wait for $A701 (F0CA, already cleared
+    again then) is skipped (F0CA -> F0CF), the one for $A702 (F0EF / F1BC) is satisfied.  The sub's IRQ comes only in
+    a frame whose NMI ran (the arcade's sub waits for it) and while its mask ($2000) is set.  `ld a,r` reads a shift
+    register (rnd).
+    The beam: the sub multiplexes the sprites.  Its first phase writes the 48 entries (the arcade: from the VBLANK into
+    line ~30); with more objects, it scans the entries between its processing steps (F695 / F6EE: a read of the beam's
+    line for each) and gives an entry whose sprite the beam has passed (line + its y carries) to the next object.  The
+    port's beam: line = 25 + 0.6 k at the k-th read of the IRQ (k from 0; at most 239), fitted to the MAME-timed
+    reference (Gyruss: rms 9 lines); the first phase's writes count as the VBLANK's (241).  The picture is drawn per band
+    of lines as MAME's partial updates draw it (sprite_bands: the sprite RAM at the frame's start and the writes with
+    their lines).
+    The boot: the main from its reset to the first idle, the sub from its reset (a delay loop, its RAM test) to F0B6.
+    """
+    TOKEN = 0x7FFE                         # (the empty diagnostics socket: never code)
+    MAIN_IDLE = 0x05F7
+    SUB_IDLE = 0xF0B6
+    SUB_SKIP = {0xF0CA: 0xF0CF}
+
+    @staticmethod
+    def beam(k):
+        """the port's beam at the sub's k-th read of the IRQ (src/sub.s sub_io_r)"""
+        return min(239, 25 + ((k * 154) >> 8))
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.main.r_hook = self.rnd
+        self.rnd_state = 0xACE1
+        self.booted = False
+        self.nmi_count = 0
+        self.line = 241
+        self.reads = 0
+
+    def rnd(self):
+        """What the port's z80_rnd gives for `ld a,r`: a 16-bit shift register byte (as Kung-Fu Master's)."""
+        s = self.rnd_state
+        s = (s >> 1) ^ (0xB400 if s & 1 else 0)
+        self.rnd_state = s
+        return s & 0xFF
+
+    def main_waits(self):
+        m = self.mem
+        return m[(self.rom[0x5865] << 8) | m[0x9433]] & 0x80 != 0
+
+    def run_to_idle(self, limit=5000000):
+        """the main's foreground (at least one instruction) until the task queue is empty at the hook"""
+        c = self.main
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.MAIN_IDLE and self.main_waits():
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def run_sub_to_idle(self, limit=3000000):
+        s = self.sub
+        skip = self.SUB_SKIP
+        for _ in range(limit):
+            s.step()
+            pc = s.pc
+            if pc == self.SUB_IDLE:
+                return
+            if pc in skip:
+                s.pc = skip[pc]
+        raise RuntimeError('the sub CPU did not return (pc %04X, frame %d)' % (s.pc, self.frame))
+
+    def sub_frac(self):
+        return 0.0
+
+    def run_frame_port(self):
+        c = self.main
+        self.sprite_s0 = bytes(self.sub_mem[0x4040:0x4100])
+        self.sprite_writes = []
+        if not self.booted:
+            self.run_to_idle()
+            self.run_sub_to_idle()
+            self.booted = True
+        if self.latch[0]:
+            c.iff2, c.iff1 = c.iff1, 0     # (as Z80.nmi; the handler ends with ret, not retn)
+            c.halted = False
+            c.push(self.TOKEN)
+            c.pc = 0x66
+            for _ in range(5000000):
+                c.step()
+                if c.pc == self.TOKEN:
+                    break
+            else:
+                raise RuntimeError('the NMI did not return (frame %d)' % self.frame)
+            self.nmi_count += 1
+            if self.sub_irq_mask:
+                s = self.sub
+                self.line, self.reads = 241, 0
+                s.set_irq(True)
+                self.run_sub_to_idle()
+                s.set_irq(False)
+            c.pc = self.MAIN_IDLE
+        self.run_to_idle()
+        self.frame += 1
+        self.bands_s0, self.bands_writes = self.sprite_s0, self.sprite_writes
+
+    def srd(self, a):
+        if a == 0:
+            self.line = self.beam(self.reads)
+            self.reads += 1
+            return self.line
+        return super().srd(a)
+
+    def bands(self):
+        return sprite_bands(self.bands_s0, self.bands_writes)
+
+    def render_rgb(self, rotate=True):
+        if self.video is None:
+            self.video = Video()
+        return self.video.render_rgb(self.mem, self.bands(), bool(self.latch[5]), rotate)

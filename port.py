@@ -30,11 +30,15 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 # the registered ports, in README order (other entries are work in progress), and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
          "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
-         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG", "gauntlet": "GAUNTLET.PRG"}
+         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG", "gauntlet": "GAUNTLET.PRG",
+         "gyruss": "GYRUSS.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
+               ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
+               ("ref/cover_sound.py", [1, 2, 3], 30000)],          # random commands
     "gauntlet": [("ref/cover.py", [-1], 420),                   # the BIOS's boot on the reference board (as MAME)
                  ("ref/cover.py", [0, 1, 2, 3, 4, 11, 12, 13, 14, 15], 15000)],   # attract; random play, 1-4 players
     "1943": [("ref/cover.py", list(range(1, 21)), 20000),      # 4-5: attract, the test inputs; 6-20: cheats, one stage each
@@ -56,6 +60,13 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "gyruss": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/logic_test.py", ["{n}"], 3000),
+               ("tools/logic_test.py", ["6000", "--seed", "5"], None),     # play, infinite lives
+               ("tools/render_test.py", ["3000", "--start", "1000", "--every", "3"], None),
+               ("tools/sprite_test.py", [], None),                 # edges, 16 shifts, holes, bands, 64 KB crossings
+               ("tools/sound_test.py", ["4000"], None)],           # the translated driver and the YM
     "gauntlet": [("tools/prepare.py", [], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),           # the patched program against the original (attract)

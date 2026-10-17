@@ -148,6 +148,10 @@ class Program:
     static_write    {6809 address: 68000 label}: a store with that static address calls the label (d5 = the byte;
                     every register but d5-d7 / a0 kept) instead of the generic <cpu>_io_w (a bank register)
     natives         {virtual pc: 68000 label} hand-written replacements
+    indirect_slots  {virtual pc: slot}: an indirect operand's target lies in that slot (the pointer read keeps its
+                    own: a static pointer address's slot is its top bits)
+    opcode_reader   rd -> rd_op: the opcode bytes when they differ from the data (KONAMI-1: m6809.konami1_opcode), or
+                    None
     inline_calls    {virtual target: (68000 label, DP)}: a direct JSR / BSR to it (with that DP at the call) becomes
                     `jsr label` (label_nf when no flag is read after the return) and runs on into the next
                     instruction: the routine does the callee's work and its flags, no 6809 return address pushed
@@ -157,8 +161,10 @@ class Program:
                  io_pages=(), hooks=None, natives=None, page_addr=None, hook_flags=NZVC, io_sites=None,
                  hook_next=None, static_read=None, inline_banks=False, io_fold=None, indirect_live=False, after=None, nf_dispatch=False, pid_checks=False,
                  dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False, static_write=None, wrap_sites=(),
-                 inline_calls=None):
+                 inline_calls=None, opcode_reader=None, indirect_slots=None):
         self.name, self.prefix = name, prefix
+        self.indirect_slots = dict(indirect_slots or {})
+        self.opcode_reader = opcode_reader
         self.inline_calls = dict(inline_calls or {})
         self.static_write = dict(static_write or {})
         self.wrap_sites = set(wrap_sites)
@@ -241,7 +247,7 @@ def discover(prog):
                 break
             rd, slot = prog.reader(v)
             pc = (slot << 13) | (v & 0x1FFF)
-            ins = decode(rd, pc, prog.dp_at(v))
+            ins = decode(rd, pc, prog.dp_at(v), rd_op=prog.opcode_reader(rd) if prog.opcode_reader else None)
             code[v] = ins
             nxt = pc + ins.length
             if ins.target is not None and ins.flow in ("jmp", "jcc", "call"):
@@ -525,6 +531,14 @@ class Emitter:
             raise Unsupported("operand of " + ins.text)
         if x.indirect or x.kind == "abs":
             self.ea_to_d7(v, ins)
+            k = self.p.indirect_slots.get(v) if x.indirect else None
+            if k is not None:
+                # (the program says where the pointer points: Program.indirect_slots)
+                b = self.cached(k)
+                if b is None:
+                    self.e("move.l %d(a6),a0" % (VB_OFF + 4 * k))
+                    b = "a0"
+                return "%d(%s,d7.l)" % (off, b) if off else "(%s,d7.l)" % b
             self.slot_base_dyn()
             return "%d(a0,d7.l)" % off if off else "(a0,d7.l)"
         r = x.reg
@@ -681,7 +695,9 @@ class Emitter:
             # the pointer: two bytes at d7 (its slot from the coverage when the instruction reads nothing else: a
             # computed jump or call)
             ptr = None
-            if ins.mn in ("jmp", "jsr"):
+            if x.kind in ("abs", "pcr8", "pcr16"):
+                ptr = x.addr >> 13            # (a static pointer address: its slot is its top bits)
+            elif ins.mn in ("jmp", "jsr"):
                 reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
                 if len(reads) == 1:
                     ptr = next(iter(reads))

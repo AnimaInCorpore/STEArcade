@@ -64,6 +64,27 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
 * **Verify claims about other work by running it**: a summary that says a renderer is a stub may be stale.
 * Script names in `ref/` and `tools/` must not shadow the standard library (`dis.py` broke `import inspect` inside numpy).
 * Branch-out-of-range and `lea` displacement warnings in vasm are normal at this size; real errors stop the build.
+* **A macro must not be named like a vasm directive** (Gyruss 2026-10-17): a macro called `LIST` expanded to nothing
+  (vasm took the listing directive), silently; two of four natives were wrong until the listing (`vasm -L`) showed it.
+* **Odd-sized BSS variables before word / long ones**: Musashi accepts the odd access, Hatari takes an address error
+  (Gyruss's `snd_ym_new` after a 5-byte array).  Pad the arrays; look at the map for odd addresses of word data.
+* **Sprite multiplexers that race the beam** (Gyruss): a CPU that reads the beam's line and reuses the sprite entries
+  the beam has passed shows more sprites than the hardware has; MAME's partial updates draw each entry's old content
+  above the write's line and the new one below.  A translation cannot follow the beam: give the reads a model fitted
+  to the MAME-timed reference (Gyruss: line = 25 + 0.6 x the reads of the IRQ), render the reference per band of lines
+  with it, and on the STE log each reused entry's old content and line and draw every content clipped to its band.
+* **6809 translations** (engine/m6809x.py, 2026-10-17): `Program.opcode_reader` decodes encrypted opcodes (KONAMI-1:
+  `lambda rd: konami1_opcode(rd)`); an indirect operand through a static pointer address (`[$4211]`) reads the
+  pointer from the slot of its top bits (no run-time slot lookup: the same result in every port), and
+  `Program.indirect_slots` names the target's slot where the coverage saw one besides the pointer's; a flat program
+  (no MMU) maps each slot to its memory in the context (Gyruss: slot 3 is the main CPU's shared RAM in the Z80 block).
+* **Z80 translations**: z80x computes H after `inc` / `dec` where it is read (a `daa` after `inc a`: Gyruss's frame
+  counter); `inline_leaves` and an emitter's `x_rst` override put the short `rst` I/O helpers of a sound driver in
+  place (Gyruss's sound: 57k -> 52k cycles a frame).
+* **MAME's debugger for exact traces of a small CPU** (Gyruss's i8039, `games/gyruss/tools/i8039.py --mame`): a
+  breakpoint action's `printf` reads the registers of the debugger's current CPU, not of the one that hit the
+  breakpoint (stop once on that CPU first); a command reaching a CPU through a latch with a delayed write needs its
+  interrupt a frame after the latch when the test drives both.
 
 ## Checking a reference against MAME (applies to every port)
 

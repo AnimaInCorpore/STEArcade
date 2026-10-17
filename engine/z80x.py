@@ -1192,10 +1192,24 @@ class Emitter:
             pre, ea = self.read8(dst, io_read=False)
             for l in pre:
                 self.e(l)
+        hcomp = None
         if self.lo & H:
-            raise Unsupported("H flag after inc/dec")
+            # H = a carry out of the low nibble: it was $F (inc) / a borrow: it was 0 (dec); d5 = $FF then
+            self.e("move.b %s,d5" % ea)
+            self.e("and.b #$0F,d5")
+            if isinc:
+                self.e("cmp.b #$0F,d5")
+            self.e("seq d5")
+
+            def hcomp():
+                l = self.new_label()
+                self.e("bclr #5,d6")
+                self.e("tst.b d5")
+                self.e("beq.s %s" % l)
+                self.e("bset #5,d6")
+                self.lines.append(l + ":")
         self.e("%s.b #1,%s" % (op, ea))
-        self.flags(S | Z, const_set=0 if isinc else N, const_clear=N if isinc else 0)
+        self.flags(S | Z, const_set=0 if isinc else N, const_clear=N if isinc else 0, hcomp=hcomp)
         for l in post:
             self.e(l)
 
