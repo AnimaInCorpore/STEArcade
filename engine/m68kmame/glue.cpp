@@ -26,6 +26,9 @@ static line_fn g_reset_cb, g_ack_cb;
 static hook_fn g_hook;
 static u8 g_hookmap[1 << 21];         // a bit per even address: call g_hook before the instruction there
 static int g_hooks_on;
+static u8 g_exclmap[1 << 21];         // a bit per even address: not counted by the instruction budget
+static u32 g_count, g_limit;          // instructions counted (outside g_exclmap); at g_limit the slice ends
+static int g_stolen;                  // abort_timeslice's cycles of the running slice
 static u32 *g_trace;                  // (pc, cycles before it) pairs while tracing
 static int g_trace_len, g_trace_cap;
 
@@ -43,8 +46,11 @@ static u32 g_base[4096];
 
 static inline bool sl(int t, u32 a) { return (a & g_sl_mask[t]) == g_sl_value[t]; }
 
+static u32 g_sl_changes;                 // bank changes so far (statistics)
+
 static void sl_change_bank(int bank)
 {
+	g_sl_changes++;
 	g_sl_bank = bank;
 	for (u32 i = 0; i < g_sl_npages; i++)
 		g_base[g_sl_pages[i]] = g_sl_bankbase[bank] + ((g_sl_pages[i] & 1) << 12);
@@ -97,6 +103,7 @@ static void slapstic(u32 a)
 
 // coverage: for each instruction address below 512 KB, bit r (read) / 16 + r (write) of every region r (a page
 // table the board sets) its data accesses touched (opcode and immediate fetches are not counted)
+static u32 g_romwrites, g_romwrite_addr, g_romwrite_pc;   // writes lost on ROM pages (the last one's address, pc)
 static u32 *g_cov;
 static u8 g_region[4096];
 static u32 g_cur_pc;
@@ -135,6 +142,7 @@ void glue_write_word(offs_t a, u16 data, u16 mask)
 		break;
 	}
 	case PAGE_CALLBACK: g_write(a, data, mask); break;
+	case PAGE_ROM: g_romwrites++; g_romwrite_addr = a; g_romwrite_pc = g_cur_pc; break;
 	default: break;
 	}
 }
@@ -215,6 +223,11 @@ static glue_cpu *g_cpu;
 void cpu_device::debugger_instruction_hook(offs_t pc)
 {
 	g_cur_pc = pc;
+	if (g_limit && !(g_exclmap[(pc & 0xffffff) >> 4] >> ((pc >> 1) & 7) & 1) && ++g_count >= g_limit) {
+		g_limit = 0;
+		int &ic = g_cpu->icount();
+		if (ic > 0) { g_stolen += ic; ic = 0; }
+	}
 	if (g_trace) {
 		if (g_trace_len + 2 > g_trace_cap) {
 			g_trace_cap = g_trace_cap ? 2 * g_trace_cap : 1 << 16;
@@ -293,6 +306,8 @@ void m68k_slapstic(const u32 *masks, const u32 *values, int shift, const u32 *pa
 	g_sl_on = 1;
 	sl_change_bank(start);
 }
+u32 m68k_rom_writes(u32 *last) { last[0] = g_romwrite_addr; last[1] = g_romwrite_pc; return g_romwrites; }
+u32 m68k_slapstic_changes() { return g_sl_changes; }
 int m68k_slapstic_state() { return g_sl_state | (g_sl_bank << 8) | (g_sl_loaded << 16); }
 void m68k_coverage(u32 *cov, const u8 *regions) { g_cov = cov; if (regions) memcpy(g_region, regions, sizeof g_region); }
 void m68k_hooks_on(int on) { g_hooks_on = on; }
@@ -304,7 +319,12 @@ void m68k_create()
 	g_cpu->start();
 }
 void m68k_reset() { g_cpu->reset(); }
-int m68k_run(int cycles) { return g_cpu->run(cycles); }
+int m68k_run(int cycles) { g_stolen = 0; int r = g_cpu->run(cycles); return r - g_stolen; }
+void m68k_abort() { int &ic = g_cpu->icount(); if (ic > 0) { g_stolen += ic; ic = 0; } }
+int m68k_executed(int n) { return n - g_stolen - g_cpu->icount(); }
+u8 *m68k_exclmap() { return g_exclmap; }
+void m68k_budget(u32 count, u32 limit) { g_count = count; g_limit = limit; }
+u32 m68k_counted() { return g_count; }
 int m68k_icount() { return g_cpu->icount(); }
 void m68k_set_icount(int n) { g_cpu->icount() = n; }
 void m68k_set_input(int line, int state) { g_cpu->set_input(line, state); }

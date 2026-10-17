@@ -70,6 +70,12 @@ GAMES = [
      "playable, but slow: about 38% of the arcade's speed and 4 pictures a second in play (Hatari); exact logic,\n"
      "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
      "punch: Space, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  jump: Control, C, pad C."),
+    ("gauntlet", "GAUNTLET.PRG", "Gauntlet (Atari Games 1985)",
+     "the arcade's own 68010 program, natively: a game frame every VBL (83% of the arcade's 60 Hz), 14-20 pictures a\n"
+     "  second (Hatari); 320 of the 336 pixels (the side panel moved left), 16 colours; music, effects and speech.\n"
+     "  Needs the whole 4 MB: Esc resets the STE",
+     "fire: Space, Control, Z, joystick fire, pad A.  magic (and the start): Alternate, X, pad B / C.  coins 1-4:\n"
+     "  5-8 (players 1-4; pads: Option).  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

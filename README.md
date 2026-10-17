@@ -32,7 +32,7 @@ reference renderer and MAME.
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |
 | <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
 | <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) |
-|  | [Gauntlet](games/gauntlet/README.md) | MC68010 + 6502 (YM2151, POKEY, TMS5220; slapstic): reference board exact against MAME, port not started |
+| <a href="games/gauntlet/README.md"><img src="games/gauntlet/docs/screenshot.png" width="160" alt="Gauntlet"></a> | [Gauntlet](games/gauntlet/README.md) | MC68010 (the program itself, natively, patched in place) + 6502 sound (modelled; music and effects on the YM, speech on the DMA sound) |
 
 `python port.py list` lists the ports supported by the common build, test, run and release commands. The table
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI

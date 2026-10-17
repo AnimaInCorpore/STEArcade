@@ -45,6 +45,7 @@ which preparation experiments have actually been measured.
 | Kung-Fu Master | hardware-scrolled rings and a separate score panel | cached opaque rows in natural order by default; optional mask grouping | reference indices, sprite edges and panel/playfield composition |
 | Trojan | cached background layers and foreground characters | reordered equal-mask rows and prepared masks | reference pictures, sprite priority and side-edge tests |
 | Double Dragon | cached background and foreground characters | reordered equal-mask rows, multipart sprite objects | reference pictures, sprite priority and side-edge tests |
+| Gauntlet | the playfield torus as a bitmap, two hardware-scrolled rings copying only new strips and damage; text runs as Blitter copies | objects baked per colour mapping, a pass a row, shadows from a shadow-coloured playfield | reference pictures (any level), edges, 16 shifts, shadows, 64 KB |
 
 Bubble Bobble uses static column layers and a dirty-block sprite renderer for the usual object layouts.
 The 512-pixel virtual screen has horizontal margins and vertical guards. Cached sprites contain unshifted

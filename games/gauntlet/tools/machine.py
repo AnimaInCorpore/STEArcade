@@ -110,6 +110,24 @@ def mirrors(start, end, mirror):
     return out
 
 
+# the main CPU's address regions (coverage: engine/m68kmame.py M68010.coverage), as MAME maps them with their mirrors
+REGIONS = ["rom", "bank", "rom2", "ram", "eeprom", "io", "playfield", "mo", "spare", "alpha", "palette", "xscroll",
+           "unmapped"]
+REGION_RANGES = [(0x000000, 0x037FFF, 0x280000), (0x038000, 0x03FFFF, 0x280000), (0x040000, 0x07FFFF, 0x280000),
+                 (0x800000, 0x801FFF, 0x2FC000), (0x802000, 0x802FFF, 0x2FC000), (0x803000, 0x803FFF, 0x2FC000),
+                 (0x900000, 0x901FFF, 0x2C8000), (0x902000, 0x903FFF, 0x2C8000), (0x904000, 0x904FFF, 0x2C8000),
+                 (0x905000, 0x905FFF, 0x2C8000), (0x910000, 0x91FFFF, 0x2C0000), (0x930000, 0x93FFFF, 0x2C0000)]
+
+
+def region_table():
+    """page (4 KB) -> index into REGIONS"""
+    t = np.full(4096, len(REGIONS) - 1, np.uint8)
+    for r, (start, end, mirror) in enumerate(REGION_RANGES):
+        for s, e in mirrors(start, end, mirror):
+            t[s >> 12:(e >> 12) + 1] = r
+    return t
+
+
 class Timer:
     __slots__ = ("expire", "seq", "fn", "live")
 

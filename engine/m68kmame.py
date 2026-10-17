@@ -11,7 +11,7 @@ opcode table builder, execute_run, device_reset, init_cpu_common / init_cpu_m680
 exception) are copied out unchanged; engine/m68kmame/emu.h stands in for MAME's framework and glue.cpp is the C
 interface (memory pages, callbacks, the instruction hook).  It rebuilds when a source is newer than the library.
 
-    cpu = M68010(read, write)              read(addr, mask, kind) -> u16; write(addr, data, mask): CALLBACK pages
+    cpu = M68010(read, write[, instance=k]) read(addr, mask, kind) -> u16; write(addr, data, mask): CALLBACK pages
     cpu.map(start, end, mode, base=None)   pages of 4 KB: RAM, ROM, UNMAPPED, CALLBACK (base: mirror of that address)
     cpu.mem                                the 16 MB of bytes (numpy uint8, big-endian words), shared with the core
     cpu.reset(); n = cpu.run(cycles)       MAME's device_reset / execute_run (n may overshoot: whole instructions)
@@ -92,14 +92,22 @@ WRITE = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_uint16, ctypes.c_uint16
 LINE = ctypes.CFUNCTYPE(None, ctypes.c_int)
 HOOK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_uint32)
 
-_lib = None
+_libs = {}
 U32P = ctypes.POINTER(ctypes.c_uint32)
 
 
-def _load():
-    global _lib
-    if _lib is None:
-        lib = ctypes.CDLL(str(build()))
+def _load(instance=0):
+    """the library for one core instance: the core's state is global in a library, so instance k > 0 loads a copy of
+    the file (its own globals)"""
+    if instance not in _libs:
+        path = build()
+        if instance:
+            import shutil
+            copy = OUT / ("libm68kmame_%d.dylib" % instance)
+            if not copy.exists() or copy.stat().st_mtime < path.stat().st_mtime:
+                shutil.copy(path, copy)
+            path = copy
+        lib = ctypes.CDLL(str(path))
         for name, res, args in [("m68k_memory", ctypes.POINTER(ctypes.c_uint8), []),
                                 ("m68k_modes", ctypes.POINTER(ctypes.c_uint8), []),
                                 ("m68k_bases", ctypes.POINTER(ctypes.c_uint32), []),
@@ -108,9 +116,15 @@ def _load():
                                 ("m68k_hooks_on", None, [ctypes.c_int]),
                                 ("m68k_slapstic", None, [U32P, U32P, ctypes.c_int, U32P, ctypes.c_int, U32P, ctypes.c_int]),
                                 ("m68k_slapstic_state", ctypes.c_int, []),
+                                ("m68k_slapstic_changes", ctypes.c_uint32, []),
+                                ("m68k_rom_writes", ctypes.c_uint32, [U32P]),
                                 ("m68k_coverage", None, [U32P, ctypes.POINTER(ctypes.c_uint8)]),
                                 ("m68k_create", None, []), ("m68k_reset", None, []),
                                 ("m68k_run", ctypes.c_int, [ctypes.c_int]), ("m68k_icount", ctypes.c_int, []),
+                                ("m68k_abort", None, []), ("m68k_executed", ctypes.c_int, [ctypes.c_int]),
+                                ("m68k_exclmap", ctypes.POINTER(ctypes.c_uint8), []),
+                                ("m68k_budget", None, [ctypes.c_uint32, ctypes.c_uint32]),
+                                ("m68k_counted", ctypes.c_uint32, []),
                                 ("m68k_set_icount", None, [ctypes.c_int]),
                                 ("m68k_set_input", None, [ctypes.c_int, ctypes.c_int]),
                                 ("m68k_get", ctypes.c_uint32, [ctypes.c_int]),
@@ -121,18 +135,18 @@ def _load():
             f = getattr(lib, name)
             f.restype = res
             f.argtypes = args
-        _lib = lib
-    return _lib
+        _libs[instance] = lib
+    return _libs[instance]
 
 
 PC, SR, USP, ISP, PPC, IR, STOPPED, IPL = 16, 17, 18, 19, 20, 21, 22, 23
 
 
 class M68010:
-    """One per process (the core's state is global in the library)."""
+    """One per instance number in a process (the core's state is global in its library)."""
 
-    def __init__(self, read, write, reset_out=None, irq_ack=None):
-        lib = self.lib = _load()
+    def __init__(self, read, write, reset_out=None, irq_ack=None, instance=0):
+        lib = self.lib = _load(instance)
         lib.m68k_create()
         self.mem = np.ctypeslib.as_array(lib.m68k_memory(), shape=(1 << 24,))
         self.mem[:] = 0
@@ -147,7 +161,6 @@ class M68010:
         lib.m68k_hooks_on(0)
         self.total = 0                      # cycles of finished runs
         self.n = 0                          # the running slice's budget
-        self.stolen = 0
 
     def map(self, start, end, mode, base=None):
         """pages start..end (inclusive, 4 KB aligned) as mode; base: they show the bytes from base on (a mirror)"""
@@ -166,8 +179,7 @@ class M68010:
         """MAME's execute_run for n cycles: returns the cycles it ran (MAME's `ran`: the budget minus what is left minus
         what abort() stole)"""
         self.n = n
-        self.stolen = 0
-        done = self.lib.m68k_run(n) - self.stolen
+        done = self.lib.m68k_run(n)
         self.total += done
         self.n = 0
         return done
@@ -175,13 +187,23 @@ class M68010:
     def executed(self):
         """cycles into the running slice at the current access (MAME's time: the instruction's cycles come off icount
         after it)"""
-        return self.n - self.stolen - self.lib.m68k_icount()
+        return self.lib.m68k_executed(self.n)
 
     def abort(self):
-        icount = self.lib.m68k_icount()
-        if icount > 0:
-            self.stolen += icount
-            self.lib.m68k_set_icount(0)
+        self.lib.m68k_abort()
+
+    def budget(self, limit, exclude=()):
+        """end the slice after `limit` more instructions, not counting those at the addresses in `exclude`
+        (a VBL after a fixed amount of the program, the same in two builds whose patched sites differ)"""
+        ex = np.ctypeslib.as_array(self.lib.m68k_exclmap(), shape=(1 << 21,))
+        if exclude is not None:
+            ex[:] = 0
+            for pc in exclude:
+                ex[pc >> 4] |= 1 << ((pc >> 1) & 7)
+        self.lib.m68k_budget(0, limit)
+
+    def counted(self):
+        return self.lib.m68k_counted()
 
     def slapstic(self, tests, shift, pages, bankbase, start):
         """the slapstic in the core: tests = [(mask, value)] in glue.cpp's SL_* order"""
@@ -196,6 +218,12 @@ class M68010:
         self.regions = np.ascontiguousarray(regions, np.uint8)
         self.lib.m68k_coverage(self.cov.ctypes.data_as(U32P), self.regions.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)))
         return self.cov
+
+    def rom_writes(self):
+        """(count, last address, its pc) of the writes to ROM pages (lost, as on the arcade)"""
+        last = (ctypes.c_uint32 * 2)()
+        n = self.lib.m68k_rom_writes(last)
+        return n, last[0], last[1]
 
     def slapstic_state(self):
         s = self.lib.m68k_slapstic_state()

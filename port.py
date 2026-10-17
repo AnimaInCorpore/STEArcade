@@ -29,11 +29,13 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 # the registered ports, in README order (other entries are work in progress), and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
          "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
-         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG"}
+         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG", "gauntlet": "GAUNTLET.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "gauntlet": [("ref/cover.py", [-1], 420),                   # the BIOS's boot on the reference board (as MAME)
+                 ("ref/cover.py", [0, 1, 2, 3, 4, 11, 12, 13, 14, 15], 15000)],   # attract; random play, 1-4 players
     "1943": [("ref/cover.py", list(range(1, 21)), 20000),      # 4-5: attract, the test inputs; 6-20: cheats, one stage each
              ("ref/cover.py", list(range(21, 41)), 60000)],    # 21-40: random play that dies, every start stage
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
@@ -53,6 +55,15 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "gauntlet": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),           # the patched program against the original (attract)
+                 ("tools/logic_test.py", ["8000", "--seed", "1"], None),     # play, one player
+                 ("tools/logic_test.py", ["8000", "--seed", "12"], None),    # play, two to four players
+                 ("tools/render_test.py", ["--seed", "1", "--frames", "1500", "--first", "600", "--every", "5"], None),
+                 ("tools/render_test.py", ["--seed", "11", "--level", "7", "--frames", "1200", "--first", "500", "--every", "4", "--nobuild"], None),
+                 ("tools/sprite_test.py", ["--nobuild"], None),      # edges, 16 shifts, holes, shadows, 64 KB crossings
+                 ("tools/sound_test.py", ["player"], None)],         # the STE's sound player against its model
     "ddragon": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
