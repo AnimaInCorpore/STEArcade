@@ -213,10 +213,10 @@ sr_frame:
 	rts
 
 ; ------------------------------------------------------------------------------
- ; Whole sprites may draw into guard rows and margin groups. Before drawing
+ ; Sprites may draw into vertical guard rows. Before drawing
  ; the next picture into a page, restore that page's old guard background.
  ; Boundary sprites join the damage set even if unchanged, so they draw whole
- ; again after that restore. There is no edge-specific sprite drawing path.
+ ; vertically again after that restore. sr_draw1 clips at the side picture edges.
 sr_guard_marks:
 	sf sr_has_guard			; (bits: 0 left, 1 right, 2 top, 3 bottom guard)
 	lea sr_vlist,a3
@@ -2082,9 +2082,8 @@ sr_overlay:
 	rts
 
 ; ------------------------------------------------------------------------------
- ; One whole sprite, into the virtual screen's guard rows and margin groups.
- ; The damage/closure footprint remains bounded to the game area. It does
- ; not trim drawing: every opaque sprite row and both groups are emitted.
+ ; One sprite, whole vertically into guard rows and clipped at the aligned
+ ; side picture edges using its prepared masks with the outer end mask zero.
 sr_draw1:
 	ifd SIM
 	addq.l #1,sim_c_draw

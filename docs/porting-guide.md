@@ -1,7 +1,8 @@
 # Porting guide
 
-How a game goes from a ROM set to a running STE port, and what the first three ports taught.  The architecture
-is in `architecture.md`; `port.py` runs every step (`port.py cover|build|test|run|mame <game>`).
+How a game goes from a ROM set to a running STE port, with lessons from the ports. The architecture
+is in `architecture.md`; `port.py` runs the registered ports (`port.py cover|build|test|run|mame <game>`).
+Work in progress outside `port.py list` uses its own scripts under `games/<game>/tools/` and `ref/`.
 
 ## Steps
 
@@ -311,24 +312,28 @@ the rules its runtime must keep:
   the ports' lock-step tests, and for Galaga `engine/xdiff.py` against the build before the change.  `engine/xprof.py
   <game>` says where the cycles go per Z80 instruction form.
 
-## Whole-object drawing (all ports)
+## Sprite edges and guard damage (all ports)
 
-Use a wider virtual screen with enough hidden space on both sides for a whole
-object, including the extra destination word of a shifted sprite. Objects crossing
-an edge are drawn whole and disappear behind the visible display window. Do not
-clip sprites, implement sprite clipping routines, calculate edge masks at runtime,
-or erase a sprite's overhang after drawing. This rule applies to every port,
-including legacy fallback paths. Culling an entirely invisible object is allowed;
-a partially visible object must always be drawn whole. Reserve
-vertical guard rows too when whole objects can cross the top or bottom.
+The hardware display window and the arcade picture inside it are different bounds. Pixels outside the hardware
+window are hidden; side bands inside it remain visible. Reserve a wider virtual screen and vertical guard rows
+for shifted objects, and restore each draw buffer's old sprite damage, including guard damage, before drawing again.
 
-Sprite drawing follows `/Users/saschaspringer/Work/stefastbobs2/main.s`: reorder source rows to group
-equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
-Blitter state and its automatically advancing source address. Use short HOG blits
-with the shared early border handlers. Try this approach in every port and measure CPU plus bus
-cycles before keeping it. Commando, 1942, 1943, Gun.Smoke, Black Tiger and Bubble Bobble use reordered
-source data. DK/Galaga’s original-order shared assets retain their generated mask-reuse paths: the
-reproducible `engine/sprite_reorder_audit.py` experiment found no win after the extra address moves.
+At a picture's left or right edge on a 16-pixel group boundary, cull sprites wholly outside and draw only the inner
+destination word of a crossing sprite. Use the prepared opaque masks with the outer end mask zero, or a one-word
+pass using the inner word's prepared end mask. Do not calculate another edge mask or erase new overhang after drawing.
+This applies to every sprite path, including generic, cache-miss and address-crossing fallbacks. Top and bottom:
+draw whole sprites into guard rows. Where a side edge falls inside a group, keep whole drawing into margins;
+ports with moving windows may clip at the surrounding full band words while preserving the partial edge group.
+
+The former blanket no-clipping rule was superseded on 2026-10-12. See `AGENTS.md` for the current rules and
+`docs/sprite-preparation.md` for the preparation method and per-port results. Verify all four edges, all 16 shifts,
+transparent holes, priority, 64 KB address crossings and consecutive frames against an independent reference.
+
+Try the full stefastbobs2 preparation in each port: opaque runs and chains, grouping equal masks, reordered source,
+prepared masks and generated code per shift, with reusable Blitter state and advancing source addresses. Retain an
+optimization only after measuring CPU plus Blitter bus cycles; keep logic speed separate from picture rate. Cost
+estimates and partial prototypes do not complete that experiment. Every HOG pass must stay at or below 256 bus
+cycles and use the shared early, synchronized border handlers; verify timer timing in the pinned Hatari build.
 
 ## Change detection by translated writers (2026-10-09)
 
@@ -382,8 +387,8 @@ Also seen in Black Tiger (2026-10-09):
   reads the destination (~256 bus cycles, half a line), and a line wider than that into column strips (1942's and
   1943's 56-word copies).  No pass shares the bus: one without HOG runs on during the interrupts and stretches the timed
   code that opens the borders (Commando's margin clear was one).  Check with `BLIT_STATS=256` (`engine/sim.py`): a
-  simulator run then lists every HOG pass longer than 256 bus cycles and every pass without HOG; all seven bordered
-  ports list none (2026-10-11).
+  simulator run then lists every HOG pass longer than 256 bus cycles and every pass without HOG. The seven bordered
+  ports checked on 2026-10-11 listed none; repeat this check for each renderer change and new port.
 * **Generated sprite code is large for big sprite sets**: 2008 shapes (x 16 shifts) would take 2.85 MB.  Generate the
   routines and streams for the shapes coverage drew most within a budget (1074 shapes, 96.5% of the draws, 830 KB) and
   draw the rest with the same Blitter calls a row at a time, end masks from the stored opaque rows.

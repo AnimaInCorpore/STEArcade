@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Pack a release: the eight ports as self-contained TOS programs (the arcade's code and graphics are built into each
-.PRG, nothing is loaded at run time) and a README.TXT.  The ROM sets themselves are not part of it (nor of git).
+"""Pack a release: the registered ports in port.GAMES as self-contained TOS programs and a README.TXT.
+The arcade's code and graphics are built into each .PRG; nothing is loaded at run time.
+The ROM sets themselves are not part of it (nor of git).
 
     python tools/release.py <version> [--no-build]      -> release/STEArcade-<version>/ and release/STEArcade-<version>.zip
 
@@ -82,12 +83,13 @@ DEBUG_NAMES = (b"COUNTERS.BIN", b"DEBUG.BIN", b"LATEPC.BIN", b"RATE.BIN", b"TIME
 README = """STE Arcade {version}
 {underline}
 
-Z80 arcade games on the Atari STE: each arcade program is statically translated to 68000 code (and checked against
-a reference emulator in lock-step), the picture is drawn with the Blitter.  Source and documentation:
+Arcade games on the Atari STE (Z80, 6809-family and NEC V30): each arcade program is statically translated to
+68000 code (and checked against a reference emulator in lock-step), the picture is drawn with the Blitter.
+Source and documentation:
 https://github.com/AnimaInCorpore/STEArcade  (commit {commit})
 
 Requirements: an Atari STE (or Mega STE) with 4 MB of RAM, a colour monitor or TV (50 Hz).  Start the programs from
-the desktop (a hard disk or a GEMDOS drive: they are 1-3 MB each).  Every program is self-contained: the arcade's
+the desktop from a hard disk or a GEMDOS drive. Every program is self-contained: the arcade's
 code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.85 MB);
 if TOS says there is not enough, start without accessories and AUTO folder programs.
 

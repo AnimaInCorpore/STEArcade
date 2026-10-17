@@ -5,7 +5,7 @@
 ; an object is a strip of 8 x 8 tiles whose shape comes from a PROM (up to 32 rows of 2 tiles,
 ; columns chained across objects), the tile numbers and colour banks are in the video RAM
 ; ($C000-$DCFF, 2 bytes per tile).  Objects are drawn in list order, pen 15 is transparent, the
-; background is palette entry 255.  See bublbobl.py render_raw.
+; background is palette entry 255. See tools/machine.py render_raw.
 ;
 ; The STE shows 16 colours: the 15 most used colours of the banks in use are kept (index 0 =
 ; the background), everything else maps to the nearest of them (rf_palette).  A tile is baked
@@ -1719,6 +1719,7 @@ draw_tile:
 	lea	(a3,d4.w),a3
 	lea	1(a3),a4
 .u_go:
+	move.w	d0,-(sp)		; original x: omit the cell outside the aligned picture edge
 	lea	mh_table,a6
 	move.w	d6,d4
 	lsl.w	#2,d4
@@ -1729,6 +1730,8 @@ draw_tile:
 	sub.w	d6,d4			; the left shift of the right cell's part: 8 - s
 	lea	8(a0),a1
 	moveq	#8-1,d1
+	tst.w	d0
+	bmi.s	.right_cell		; x -7..-1: only the inner (right) cell
 .lrow:					; the left cell: (x >> s), the high s bits transparent
 	move.l	(a1)+,d0
 	move.l	(a1)+,d5
@@ -1742,6 +1745,10 @@ draw_tile:
 	movep.l	d7,0(a3)
 	lea	STRIDE(a3),a3
 	dbf	d1,.lrow
+.right_cell:
+	move.w	(sp)+,d0
+	cmp.w	#248,d0
+	bgt.s	.out			; x 249..255: only the inner (left) cell
 	lea	8(a0),a1
 	moveq	#8-1,d1
 .rrow:					; the right cell: (x << (8 - s)), the low 8 - s bits transparent

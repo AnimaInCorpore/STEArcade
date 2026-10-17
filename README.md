@@ -1,9 +1,9 @@
 # Arcade games on the Atari STE
 
-Static translation of Z80 and 6809 arcade programs to 68000 code, with a Blitter based renderer, running on an unexpanded
+Static translation of Z80, 6809-family and NEC V30 arcade programs to 68000 code, with a Blitter based renderer, running on an unexpanded
 8 MHz Atari STE (4 MB).  Each port is a reference machine written from the MAME driver, a whole-program translation
 checked against it in lock-step, and a runtime that delivers the arcade's interrupts at the vertical blank and draws the
-arcade's tiles and sprites (sprites with the Blitter: one blit per sprite line, masks as end masks).
+arcade's tiles and sprites (sprites with short HOG Blitter passes and prepared opaque end masks).
 
 This project is developed with AI coding agents (Claude Code): much of the translators, runtimes, tools and
 documentation was written by them under the author's direction.  Correctness is checked by testing rather than by
@@ -32,6 +32,12 @@ reference renderer and MAME.
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |
 | <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
 | <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) |
+
+`python port.py list` lists the ports supported by the common build, test, run and release commands. The table
+also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI
+has a renderer harness; the remaining entries currently provide board/reference work. Use their local scripts;
+their presence in the table does not put them in the release. Input and release instructions below refer to
+registered ports. Current source capabilities and measurements may be newer than release 0.3.
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
@@ -74,7 +80,7 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
       docs/            screenshot.png, rom_manifest.json, notes and reference data (palettes, coverage, captures)
     tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), release.py, windows/
                        (PowerShell helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
-    docs/              architecture.md, porting-guide.md, reference/ (68000 and Z80 manuals)
+    docs/              architecture.md, porting-guide.md, sprite-preparation.md, reference/ (68000 and Z80 manuals)
     assets/roms/       the ROM archives (assets/roms/README.md); extracted/<game>/ is unpacked by port.py prepare (not in git)
     build/ run/        generated code, assets, coverage data / the .PRG (ROMs embedded) (not in git)
     release/           port.py release: the packed programs (not in git)

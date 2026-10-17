@@ -15,12 +15,22 @@ the repository** (`.gitignore`): supply the archives below yourself; `port.py pr
 | `blktiger.zip` | Black Tiger (MAME `blktiger`) | `extracted/blktiger/` (20 verified files; `port.py prepare blktiger`) | `games/blktiger` |
 | `commando.zip` | Commando (World, MAME `commando`) | `extracted/commando/` (22 verified files; `port.py prepare commando`) | `games/commando` |
 | `gunsmoke.zip` | Gun.Smoke (MAME `gunsmoke`) | `extracted/gunsmoke/` (32 verified files; `port.py prepare gunsmoke`) | `games/gunsmoke` |
-| `galaga88.zip` | other set | not extracted yet | — |
+| `splatter.zip` | Splatterhouse (Namco System 1) | `extracted/splatter/` | standalone Splatterhouse tools |
+| `galaga88.zip` | Galaga '88 (Namco System 1) | `extracted/galaga88/` | standalone Galaga '88 tools |
+| `pacmania.zip` | Pac-Mania (Namco System 1) | `extracted/pacmania/` | reference tools |
+| `dspirit.zip` | Dragon Spirit (Namco System 1) | `extracted/dspirit/` | reference tools |
+| `trackfld.zip` | Track & Field | `extracted/trackfld/` | reference tools |
+| `hyperspt.zip` | Hyper Sports | `extracted/hyperspt/` | reference tools |
+| `gyruss.zip` | Gyruss | `extracted/gyruss/` | reference tools |
 | `rtype.zip` | R-Type (World, MAME `rtype`; without the M72 boards' PROMs and PALs, which the driver never reads) | `extracted/rtype/` (20 verified files); `build/rtype/mame_roms/` for MAME 0.289 (its names, zero-filled stand-ins) | `games/rtype` |
 | `mrheli.zip` + `mh_c-pr-.ic1` | Mr. HELI no Daibouken (Japan, MAME `mrheli`; an older set: the i8751 program `mh_c-pr-.ic1`, crc32 897dc4ee, is a separate file) | `extracted/mrheli/` (19 verified files + the MCU program); `build/mrheli/mame_roms/` as for R-Type | `games/mrheli` |
 | `kungfum.zip` | Kung-Fu Master (World, MAME `kungfum`; MAME's file names) | `extracted/kungfum/` (28 verified files) | `games/kungfum` |
 | `trojanr.zip` | Trojan (Romstar, set 1, MAME `trojanr`; old file names `tb01.bin`-`tb25.bin`, `mb7114e.1e` = `tbb-1.1e`, `tbp24s10.7j` = `tbb-2.7j`) | `extracted/trojan/` (27 verified files); `build/trojan/mame_roms/` with MAME's names | `games/trojan` |
 | `ddragon.zip` | Double Dragon (Japan set 1, MAME `ddragonj`; MAME's file names) | `extracted/ddragon/` (23 verified files); MAME runs `ddragonj` from `assets/roms` | `games/ddragon` |
+
+Only the games in `port.py list` are registered with the common front end. For the other sets above, run
+`venv/bin/python games/<game>/tools/prepare.py`; each uses its local manifest. Their renderer/reference scripts
+are run directly rather than through `port.py`.
 
 `extracted/` is not in git: `python port.py prepare <game>` (each game's `tools/prepare.py`) verifies the archive
 against `games/<game>/docs/rom_manifest.json` and unpacks it; `port.py build`, `cover`, `test` and `mame` do that first

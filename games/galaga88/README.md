@@ -3,8 +3,9 @@
 Atari STE port (4 MB) of the MAME set `galaga88` (Namco System 1, ROT270): the main and sub MC6809E programs
 translated to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) on the reference board
 `engine/namcos1.py` (its renderer pixel-exact against MAME), as Splatterhouse (`games/splatter`).  Work in progress:
-the translated logic runs in lock-step with the reference; the STE program (renderer, MCU, sound, display) is not
-written yet.
+the translated logic runs in lock-step with the reference, and the STE runtime, native MCU and renderer are
+implemented below. Sound, the HUD palette and the last 11 picture rows remain unfinished. This port uses its
+standalone scripts and is not registered in `port.py` or included in releases.
 
 ## Logic
 
@@ -99,7 +100,7 @@ CPU), stars ~30% (the warps' streaks: ~1400 pixels a picture), the background's 
 Tried and dropped: star runs by the Blitter (`-D REN_STARBLIT=1`: most runs are 1-2 rows, a pass costs more than
 four bit operations).
 
-Measurement switches (not exact; 2026-10-13, Hatari BENCH, arcade frames 600-1600, a picture every 2 frames):
+Measurement switches (2026-10-13, Hatari BENCH, arcade frames 600-1600, a picture every 2 frames):
 
 | build | arcade frames/s | pictures/s | render VBLs | colour choices |
 |---|---|---|---|---|
@@ -108,7 +109,7 @@ Measurement switches (not exact; 2026-10-13, Hatari BENCH, arcade frames 600-160
 | `-D REN_NOCYCLE=1` (layer 3 / 4 bank changes ignored, no re-choice for a worse fit) | 15.08 | 7.55 | 2499 | 3 |
 | both | 25.06 | 12.57 | 1176 | 3 |
 
-The logic stays ~810-840 VBLs in all four.  Both off, a picture is ~291k cycles in Musashi (BENCH states), sprites
+The logic stays ~810-840 VBLs in the baseline and the first three variants.  Both off, a picture is ~291k cycles in Musashi (BENCH states), sprites
 the largest part (draw 48k, conversion 40k, geometry 28k).
 
 The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
@@ -117,5 +118,5 @@ and shift on first use: pieces ordered by their shifted masks, the reordered sou
 (~1%, within the noise) for 96 KB: not on by default.  Details and numbers in the doc's table.
 
 Open: speed (stars in the warps, layer 3's bank / scroll changes, colour choices, the logic's ~130k cycles a
-frame); the last 11 rows; the HUD palette; sound; the stefastbobs2 sprite method still to be prototyped and measured
-(AGENTS.md).
+frame); the last 11 rows; the HUD palette; sound. The stefastbobs2 prototype above did not produce a measured
+CPU plus Blitter saving; preparing its plans at build time remains a separate experiment.

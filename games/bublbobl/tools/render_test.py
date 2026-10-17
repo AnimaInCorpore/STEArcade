@@ -33,11 +33,12 @@ def decode_screen(mem, base, lines0, nlines):
 
 
 def check_guards(mem, sym, base):
-    """The sprite renderer draws whole sprites into the margins and guard rows around the arcade picture (game rows
-    0-15 and 240-255, one 16 pixel group left and right of it; the side bands are visible).  Outside the picture
-    every set pixel must belong to a sprite drawn now: no stale damage.  -> the number of stray pixels."""
-    if not mem.r8(sym["sr_active"]):
-        return 0                                   # (the general renderer draws whole tiles there)
+    """Side bands must stay black; vertical guards may contain current sprites.
+
+    Game rows 0-15 and 240-255 are guards; the group on either side of the
+    picture is visible in the hardware window. Return the stray pixel count.
+    """
+    sprite_path = bool(mem.r8(sym["sr_active"]))
     raw = np.frombuffer(bytes(mem.r_block(base, 256 * 280)), np.uint8).reshape(280, 256)
     allowed = np.zeros((256, 18 * 16), bool)       # game rows 0-255, virtual x 112-399
     for p in range(sym["sr_vlist"], mem.r32(sym["sr_vend"]), 4):
@@ -45,12 +46,14 @@ def check_guards(mem, sym, base):
         x = (mem.r16(rec + 16) ^ 0x8000) - 0x8000 + 16      # R_X, relative to x 112
         y = mem.r16(rec + 18)                               # R_Y
         allowed[max(0, y):y + 16, max(0, x):max(0, x + 16)] = True
+    allowed[:, :16] = False
+    allowed[:, 272:] = False
     stray = 0
     for yy in range(256):
         line = raw[10 + yy]                        # (YPAD)
         inside = 16 <= yy < 240
         for g in range(18):
-            if inside and 1 <= g <= 16:
+            if (inside or not sprite_path) and 1 <= g <= 16:
                 continue
             o = 56 + g * 8
             w = 0
@@ -83,7 +86,7 @@ def main():
     while True:
         if not lt.run_to(s, stop):
             print("68000 stopped before the idle loop")
-            return
+            return 1
         b = mem.r8(sym["booted1"])
         sp = cpu.r_reg(R.A7)
         cpu.w_pc(mem.r32(sp)); cpu.w_reg(R.A7, sp + 4)
@@ -114,7 +117,7 @@ def main():
             n += r.cycles
             if n > 400_000_000:
                 print("render_frame does not return, pc %06X" % cpu.r_pc())
-                return
+                return 1
         scr = mem.r32(sym["draw_screen_address"])
         swap_screens = lambda: (mem.w32(sym["draw_screen_address"], mem.r32(sym["display_screen_address"])), mem.w32(sym["display_screen_address"], scr))   # the VBL swaps after a render
         got = decode_screen(mem, scr, 10 + 16, 224)
@@ -133,7 +136,7 @@ def main():
         if len(frames) <= 8:
             check_cache(mem, sym)
             check_slots(s, ref, sym)
-        if nd:
+        if diff.any():
             ys, xs = np.nonzero(diff)
             print("   first:", [(int(x), int(y), int(got[y, x]), int(exp[y, x])) for x, y in zip(xs[:6], ys[:6])])
             cells = sorted({(int(x) // 8, int(y) // 8) for x, y in zip(xs, ys)})
@@ -150,9 +153,10 @@ def main():
             save_png(np.hstack([pal[got], ref.render_rgb()]), "/tmp/bbr_cmp_%d.png" % target, 1)
             save_png(pal[got], "/tmp/bbr_got_%d.png" % target, 2)
             save_png(pal[exp], "/tmp/bbr_exp_%d.png" % target, 2)
-        if nd and len(frames) > 8:
-            return
+        if nd:
+            return 1
         swap_screens()
+    return 0
 
 
 def check_cache(mem, sym):
@@ -270,4 +274,4 @@ def ste_palette(mem, sym):
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

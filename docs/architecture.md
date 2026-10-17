@@ -1,20 +1,22 @@
 # Architecture
 
-The project ports Z80 and 6809 arcade games to the Atari STE (8 MHz 68000, 4 MB, 16 colours, Blitter).  Every port
+The project ports Z80, 6809-family and NEC V30 arcade games to the Atari STE (8 MHz 68000, 4 MB, 16 colours, Blitter).  Every port
 has three parts, and the first two are checked against each other with a lock-step test:
 
 1. **A reference machine** (`games/<game>/tools/machine.py`, on `engine/z80.py`, `engine/m6809.py` (KONAMI-1 too),
-   `engine/m6801.py` / `engine/hd63701.py` for the MCUs; the Namco System 1 board is shared: `engine/namcos1.py`): a
+   `engine/m6801.py` / `engine/hd63701.py` for the MCUs, `engine/v30.py` for NEC V30; shared boards:
+   `engine/namcos1.py` and `engine/m72board.py`): a
    Python model of the arcade board from the MAME driver.  It is the ground truth for the logic
    (RAM compared every frame) and for the picture (`render_raw`, itself compared with MAME's own screenshot, see
    `docs/porting-guide.md`).
-2. **A static translation** of the Z80, 6801 and 6809 programs to 68000 code (`engine/z80x.py`, `engine/translate.py`,
-   `engine/m6801x.py`, `engine/m6809x.py`; the game specific part in `games/<game>/tools/gen.py`).  No interpreter runs: the arcade program
-   is 68000 code, with the hardware accesses calling runtime routines.
+2. **A static translation** of the Z80, 6801, 6809-family and V30 programs to 68000 code (`engine/z80x.py`, `engine/translate.py`,
+   `engine/m6801x.py`, `engine/m6809x.py`, `engine/v30x.py`; the game specific part in `games/<game>/tools/gen.py`).  The main arcade program runs as
+   68000 code, with hardware accesses calling runtime routines. Auxiliary processors may use translated firmware,
+   a native model, an interpreter (Black Tiger's MCU), or recorded sound as specified by each port.
 3. **The STE runtime and renderer** (`games/<game>/src/*.s`, shared `engine/rt/rtlib.s`): video with the borders removed,
    the arcade's interrupts at the vertical blank, input, and a renderer that draws the arcade's tile map and sprite
-   list.  Sprites are drawn with the **Blitter** (one blit per sprite line, masks as end masks, no clearing pass);
-   tiles with the CPU.
+   list. Sprites use short HOG **Blitter** passes with prepared opaque end masks and no clearing pass;
+   tiles primarily with the CPU, with per-port Blitter composition and restore paths.
 
 Layout (the conventions are in the README's "Layout"): `engine/` (shared), `games/<game>/{src,tools,ref,docs}`,
 `build/<game>/`, `run/<game>/` and `release/` (generated, not in git), `assets/roms/` (the archives; `extracted/<game>/`
@@ -24,6 +26,11 @@ variables select the tools).
 
 ## Renderers of the ports
 
+The table covers the registered ports in `port.py list`. Splatterhouse and Galaga '88 have standalone runtimes
+and renderer tests; Mr. HELI uses the shared M72 renderer in a harness. Their READMEs and local tools describe
+current limitations; the other game folders contain reference/board work. See `docs/sprite-preparation.md` for
+which preparation experiments have actually been measured.
+
 | game | tiles | sprites | what is exact |
 |---|---|---|---|
 | Donkey Kong | CPU, shadow diff of the tile map, dirty queue per draw screen | Blitter, generated per shape/skew code | pixel for pixel against the reference and MAME |
@@ -31,6 +38,13 @@ variables select the tools).
 | Bubble Bobble | CPU tile bake cache; static column layers and dirty blocks | Blitter, unshifted cached 16 x 16 sprites with mask-grouped rows; CPU tile fallback for other object layouts | game picture pixel for pixel against the reference; whole sprites in the guards |
 | 1942 | hardware scroll of a 768 line ring (three draw rings + clean), tiles baked per palette bank, characters redrawn when the window moves | Blitter, one blit per line, masks as end masks, rectangles put back from the clean ring | pixel for pixel against the reference (which equals MAME) |
 | Commando | hardware scroll of three virtual screens with twin lines (line l = line l+320), only scrolled-in tile rows and changed tiles drawn, no clean map; characters a list rebuilt on change, `movep.l` | Blitter, baked shift streams; a damage list put back from the twin lines | pixel for pixel against the reference (which equals MAME) |
+| 1943 | cached background and front layers in hardware-scrolled rings | reordered source, prepared shift masks, one-word side clipping | renderer and reference tests, including front-layer priority and edge sweeps |
+| Black Tiger | hardware-scrolled tile ring, cached tiles and characters | reordered equal-mask rows, clipped at full band words | reference pictures, moving window edges and sprite priority |
+| Gun.Smoke | hardware-scrolled rings and a separate character strip | reordered streams; aligned clipping and whole drawing at fine offsets | reference pictures, scroll sweeps and edge tests |
+| R-Type | shared M72 layer composition, separate HUD image and palette | converted pieces, generated line routines; clipped and priority fallback | reference indices after colour reduction; centred 320 of 384 pixels |
+| Kung-Fu Master | hardware-scrolled rings and a separate score panel | cached opaque rows in natural order by default; optional mask grouping | reference indices, sprite edges and panel/playfield composition |
+| Trojan | cached background layers and foreground characters | reordered equal-mask rows and prepared masks | reference pictures, sprite priority and side-edge tests |
+| Double Dragon | cached background and foreground characters | reordered equal-mask rows, multipart sprite objects | reference pictures, sprite priority and side-edge tests |
 
 Bubble Bobble uses static column layers and a dirty-block sprite renderer for the usual object layouts.
 The 512-pixel virtual screen has horizontal margins and vertical guards. Cached sprites contain unshifted
@@ -53,7 +67,7 @@ Instructions added for Galaga: `ldi`/`ldd`/`lddr`/`cpi`, `jp pe/po` right after 
 (P/V = BC != 0, the only parity use), `rld`, `ex (sp),hl`, `halt` (runtime `z80_halt`:
 wait for the next interrupt), `ld a,r` (runtime `z80_rnd`, a shift register the reference
 reproduces), the IX/IY halves.  `translate.compile_code()` is the common pipeline (flag liveness, CCR analysis,
-emission); every port's gen.py goes through it.
+emission); the Z80 ports' gen.py files go through it. Other CPU families use their own translators below.
 
 ### Registers
 
@@ -263,8 +277,8 @@ different shift/pipeline arrangement. Colour data remains shared by every skew.
 The generated instruction sequences and compressed mask streams are deduplicated
 separately. Sprites near a 64 KB boundary retain the original unrolled full-address
 path. `-D NOSPRITECODE=1` selects the generic renderer for comparison. END2 is unused.  Not implemented: the 16-sprites-per-
-scanline limit and the wrap-around of the arcade hardware; sprites are not clipped at the
-left/right edge of the game area.
+scanline limit and the wrap-around of the arcade hardware. Sprites are clipped at the aligned
+left/right picture edges, including the generic 64 KB fallback; top and bottom use guard rows.
 
 Most of the 128 list entries are empty, and visiting them all twice a frame cost 24K
 cycles: a frame first lists the entries that are not empty (`tst.l` over the list), and
@@ -295,9 +309,10 @@ running (including Galaga's sprites). Bubble Bobble gained a separate reordered 
 renderer in `games/bublbobl/src/srender.s`; its tile renderer remains the fallback.
 
 The reference's arbitrary row reordering relies on matching reordered source data.
-Copying that order directly into these ports would break their sequential source
-walk. This revision retains the source layout and uses the reference's register
-reuse and variable-width blits where they can be applied without new colour copies.
+Copying that order without also preparing matching source data would break their sequential source walk.
+This revision retains the source layout and uses register reuse and variable-width blits. The later
+`engine/sprite_reorder_audit.py` is an instruction-cost estimate for source seeks, not an executed prototype of
+reordered source data; the full preparation experiment remains outstanding (see `docs/sprite-preparation.md`).
 
 ## Tiles (`games/dkong/src/render.s`)
 
@@ -311,14 +326,15 @@ logo cycle that is about 160 of 896 tiles; the first frame draws all of them.
 
 ## Border removal
 
-Timer A must arrive in the *middle* of scanline 31 (`TA_DATA`), its handler then waits for
-the next scanline start.  The VBL handler arms both timers first thing, and the rest of
-the frame runs below the VBL level, so a frame that overruns the next VBL is interrupted
-by it (`vbl_skip`) and the borders keep being removed.  Blits do not start while Timer A
-is pending or Timer B is within 5 lines (`wait_borders`).  (Now: `engine/rt/borders.s`, whose events come early and
-sync themselves; every Blitter pass is HOG and at most ~256 bus cycles, `blit_go`.)  A measurement for all of this:
-the top row of the game area in a Hatari AVI of 1800 VBLs is 0 for 1788 frames, 58 (border
-not removed) for none.
+`engine/rt/borders.s` schedules events early and synchronizes them to the video. Timer B opens the bottom
+border and arms Timer A at that line-exact point for the following top border. The VBL restarts Timer B and arms
+Timer A as a fallback only when the preceding bottom event did not do so (including startup). `BD_HUD` extends
+Timer B with palette switches; `BD_VSWITCH` also switches video addresses for separate HUD images.
+
+Every Blitter pass is HOG and at most 256 bus cycles. `blit_go` splits longer transfers into lines or column
+strips, allowing interrupts between pieces. The former `wait_borders` policy is superseded by these short passes
+and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
+record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
 ## Input (all ports)
 
@@ -386,45 +402,34 @@ a frame there).  The rest are the start, the title wipe (0 -> 2: nearly every ti
 single level starts.  The game runs one NMI per 50 Hz VBL: 5/6 of the arcade's speed.
 
 
-## Whole-object drawing (all ports)
+## Sprite edges and guard damage (all ports)
 
-(For the left and right edges this rule is deprecated: see the update below.) Use a wider
-virtual screen with enough hidden space on both sides for a whole object, including the extra destination word of a shifted sprite. Objects crossing
-an edge are drawn whole and disappear behind the visible display window. Do not
-clip sprites, implement sprite clipping routines, calculate edge masks at runtime,
-or erase a sprite's overhang after drawing. This rule applies to every port,
-including legacy fallback paths. Culling an entirely invisible object is allowed;
-a partially visible object must always be drawn whole. Reserve
-vertical guard rows too when whole objects can cross the top or bottom.
+The hardware display window and the arcade picture inside it are different bounds. Pixels outside the hardware
+window are hidden; side bands inside it remain visible. Reserve a wider virtual screen and vertical guard rows
+for shifted objects, and restore each draw buffer's old sprite damage, including guard damage, before drawing again.
 
-**Update 2026-10-12: the no-clipping rule above is deprecated for the left and right edges.** Where the
-arcade picture's left or right edge lies on a 16-pixel group boundary (inside the visible side bands), clip
-there: a sprite across the edge draws only its inner destination word, either with the outer word's end mask 0
-(Bubble Bobble's `sr_draw1`: a second draw loop, used only for such sprites, ANDs the prepared row masks with
-$0000ffff or $ffff0000) or as a one-word Blitter pass (1943's `clip_part`: right edge, the skewed source under
-END1; left edge, FXSR and source Y increment 0 under the stream's END3 mask). A sprite wholly in a band is culled.
-Measured: Bubble Bobble's edge sprite +2% CPU, the same Blitter cycles, and the left/right guard clears gone;
-1943's frames +0.02-0.04% (the one compare per sprite). The side bands then stay clean, so the left/right guard
-restores go. The top and bottom stay whole sprites in guard rows; a port whose edge is not group-aligned keeps
-the whole-object margins.
+At a picture's left or right edge on a 16-pixel group boundary, cull sprites wholly outside and draw only the inner
+destination word of a crossing sprite. Use the prepared opaque masks with the outer end mask zero, or a one-word
+pass using the inner word's prepared end mask. Do not calculate another edge mask or erase new overhang after drawing.
+This applies to every sprite path, including generic, cache-miss and address-crossing fallbacks. Top and bottom:
+draw whole sprites into guard rows. Where a side edge falls inside a group, keep whole drawing into margins;
+ports with moving windows may clip at the surrounding full band words while preserving the partial edge group.
 
-All eight ports now clip this way (2026-10-12; each README has a dated section with its numbers and its
-`tools/sprite_test.py`: both edges, all 16 shifts, transparent holes, a 64 KB crossing, failing on the old code).
-The common path pays one unsigned compare (`cmp #224-16 / bhi edge`); the edge path is out of line. Picture cost on
-Musashi, before -> after: 1942 -0.004% a tick, 1943 +0.02-0.04%, Black Tiger -0.05..+0.06%, Bubble Bobble cheaper
-(edge sprite +2%, guard columns gone), Commando +0.04%, Donkey Kong +0.03%, Galaga -0.17%, Gun.Smoke -0.10%.
-Black Tiger's game edges move with the fine scroll, so it clips at the always-black band words (1|2, 18|19);
-Gun.Smoke clips while its window is group-aligned and draws whole (clearing the 16 pixels beside it) at fine offsets.
+The former blanket no-clipping rule was superseded on 2026-10-12. See `AGENTS.md` for the current rules and
+`docs/sprite-preparation.md` for the preparation method and per-port results. Verify all four edges, all 16 shifts,
+transparent holes, priority, 64 KB address crossings and consecutive frames against an independent reference.
 
-Sprite drawing follows `/Users/saschaspringer/Work/stefastbobs2/main.s`: reorder source rows to group
-equal opaque masks, bake the end masks for all 16 horizontal shifts, and reuse
-Blitter state and its automatically advancing source address. Use short HOG blits
-with the shared early border handlers. Try this method in every port and measure CPU plus bus
-cycles before retaining a change. `engine/sprite_reorder_audit.py` tries mask-group order with
-DK/Galaga’s shared original-order assets: no variant saves cycles after the extra address moves.
-They retain the generated mask-reuse path and generic 64 KB fallback. Commando, 1942, 1943,
-Gun.Smoke, Black Tiger and Bubble Bobble use reordered source data.
+Try the full stefastbobs2 preparation in each port: opaque runs and chains, grouping equal masks, reordered source,
+prepared masks and generated code per shift, with reusable Blitter state and advancing source addresses. Retain an
+optimization only after measuring CPU plus Blitter bus cycles; keep logic speed separate from picture rate. Cost
+estimates and partial prototypes do not complete that experiment. Every HOG pass must stay at or below 256 bus
+cycles and use the shared early, synchronized border handlers; verify timer timing in the pinned Hatari build.
 
+The eight ports measured on 2026-10-12 were Donkey Kong, Galaga, Bubble Bobble, 1942, 1943, Black Tiger,
+Commando and Gun.Smoke. Their picture costs on Musashi, before -> after clipping: 1942 -0.004% a tick,
+1943 +0.02-0.04%, Black Tiger -0.05..+0.06%, Bubble Bobble cheaper overall (edge sprite +2%, guard columns gone),
+Commando +0.04%, Donkey Kong +0.03%, Galaga -0.17%, Gun.Smoke -0.10%. These are historical results for that
+cohort, not a claim that every current or future port has completed the same validation.
 
 ## The 6809 translator (`engine/m6809x.py`, Splatterhouse 2026-10-12)
 

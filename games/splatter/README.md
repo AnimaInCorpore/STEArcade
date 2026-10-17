@@ -163,11 +163,11 @@ pictures 100 frames apart) 0.028 / 0.027 / 0.043.  One palette for the whole pic
 * Palette timing (Timer B, borders.s): `ren_vbl_hpal` from the picture's first line when htop > 0 (else
   `ren_vbl_pal`), `ren_vbl_pal` from line htop, `ren_vbl_hpal` from line hbot (< 224), black after line 223.
   borders.s has the on and off events (`BD_PALETTE`, `shown_pal`, `PIC_TOP`, `PIC_LINES` = 224); the two switches at
-  htop and hbot are an extension of its Timer B chain (not done here: `-D REN_ONEPAL=1` until then, with
-  `shown_pal = ren_vbl_pal`).
-* Proposed for `tools/gen.py`: `st tile_written` / `st tile_written_fix` after the translated stores into tile RAM
-  (layers 0-3 / the fixed layers' words), and `-D TILE_FLAG=1`: the tile RAM is then compared only after a store
-  (the game changes it in ~4% of its frames): -110k cycles a picture in play.
+  htop and hbot use its `BD_HUD` Timer B chain, enabled by default in `splatter.s`.
+  `-D REN_ONEPAL=1` selects the experimental single-palette path.
+* `tools/gen.py` emits `st tile_written` / `st tile_written_fix` after translated tile RAM stores
+  (layers 0-3 / the fixed layers' words). `TILE_FLAG=1` is enabled in `splatter.s`: tile RAM is compared after a
+  store (the game changes it in ~4% of its frames). Per-row fixed-layer flags are also implemented.
 
 ### Tests
 
@@ -286,11 +286,9 @@ saved against ~160k for the bookkeeping.
 
 * Speed: ~2 VBLs a picture in play besides the logic; a new scene takes ~1/2 s of black pictures.  Next: the draw
   setup (~1-2k a sprite or overlay cell: many memory variables), the restores (Blitter), the priority rows' scan, the
-  palette's per-picture checksum and representatives (~20k), the damage lists.  Outside render.s: per-row flags from
-  the fixed layers' writers (gen.py) would cut the fixed layers' diff (~33k a picture); showing the HUD bars from a
-  fixed image by switching the video address at the bar lines (borders.s' Timer B events already switch the
-  palette there) would remove the bar copies while scrolling (~65k a picture in Hatari).
-* The HUD palette needs the Timer B extension; `REN_ONEPAL` meanwhile.
+  palette's per-picture checksum and representatives (~20k), the damage lists. Fixed-layer writer flags and
+  the HUD video-address switches (`REN_VSW=1`, `BD_VSWITCH=1`, `BD_HUD=1`) are already enabled; their measured
+  effects are described above.
 * Colours: a representative pen that does not fade like its colour's other pens (the HUD skulls stay white in a
   fade); colours appearing after the choice (stage 4's purple lightning, sprites of a new colour) map to the nearest
   existing colour until the next choice; stage 5's red scene leaves no teal for Rick.

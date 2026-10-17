@@ -3875,11 +3875,13 @@ m72r_bodfix:
 ; pixels out of its masks line by line (from the layer images' over planes).  The background under the pieces is
 ; saved (m72r_ssave) and restored before the buffer's next composition (m72r_srestore).
 ;
-; Rows reordered by equal masks (stefastbobs2's source order) were measured and not kept: in R-Type's and Mr. HELI's
+; Row-mask counts were compared for equal-mask ordering (not an executed reordered-source prototype): in R-Type's and Mr. HELI's
 ; 4096 pieces the mask changes from one opaque row to the next in 69% / 48% of the rows in their own order and 62% /
 ; 43% with equal masks grouped (one mask write pair saved per piece on average), while a reordered piece needs a
 ; destination step per line (add.w #imm,(a4): 4 cycles a line more than the constant step in d4) and its own source
 ; order for the priority and clip paths; the generated routines already write a mask only where it changes.
+; These counts and instruction-cost estimates do not replace the full measured prototype required by AGENTS.md;
+; that experiment remains outstanding (docs/sprite-preparation.md).
 ; m72r_sprites: the sprites into the buffer.  1. the pieces in the list's order (m72r_plist: code, attribute, buffer
 ; x, picture line; empty and wholly outside pieces left out); 2. the background under each saved (m72r_ssave: all
 ; before any is drawn, so the next picture of this buffer restores them in any order: m72r_srestore, before the

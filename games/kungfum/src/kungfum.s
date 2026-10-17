@@ -1,5 +1,6 @@
 ; Kung-Fu Master (Irem M62, 1984) for the Atari STE: the main Z80 program translated (tools/gen.py ->
-; build/kungfum/code_kungfum.s), the picture drawn by render.s.  No sound yet: the sound commands go into a ring.
+; build/kungfum/code_kungfum.s), the picture drawn by render.s; the translated M6803 sound driver feeds
+; the YM player and DMA voices (sound.s).
 
 	ifnd MAX_PENDING
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)

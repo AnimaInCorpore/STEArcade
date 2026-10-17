@@ -28,18 +28,18 @@
 ; the row mask's second word as END1; right: the first word).  A cell wholly outside is culled.
 ;
 ; Sprites (stefastbobs2's preparation, docs/sprite-preparation.md): a cell (code, colour, flip x) is baked on first
-; use into a slot of the sprite cache: its opaque rows (transparent rows left out) in an order that groups equal row
-; masks, each with its row index and mask, then the rows' four plane words in that order, so the Blitter's source
+; use into a slot of the sprite cache: its opaque rows (transparent rows left out) in natural row order,
+; each with its row index and mask, then the rows' four plane words in that order, so the Blitter's source
 ; address runs on from row to row and END1 / END3 are written only when the mask changes.  A row is one HOG pass (Y
-; count 4: the planes; X count 2 with NFSR when shifted, 1 when not).  -D REN_ORDER=0 keeps the rows in their
-; natural order (the comparison of the README).
+; count 4: the planes; X count 2 with NFSR when shifted, 1 when not). -D REN_ORDER=1 groups equal row masks;
+; the measured whole-picture cost is higher, so natural order is the default (docs/sprite-preparation.md).
 ;
 ; Colours: kf_scene picks the scene (the floor while a game or the demo runs, else the attract screens); each scene
 ; has 16 colours and a map of the 512 pens (tools/assets.py).  A change of scene flushes the caches and draws
 ; everything again.
 
 	ifnd REN_ORDER
-REN_ORDER = 1
+REN_ORDER = 0
 	endc
 
 LB = 424				; bytes a buffer line (53 words: the window's 21 from any Wx < 512)

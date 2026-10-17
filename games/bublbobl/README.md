@@ -90,13 +90,14 @@ the general renderer below (switching draws everything once).  On the 8 x 8 grid
   across the left or right picture edge (2026-10-12): the edges lie on 16-pixel groups, so the word outside gets an
   end mask of 0 (the Blitter leaves it untouched; a second loop, used only for such sprites, ANDs the row masks
   with $0000ffff or $ffff0000), and the 32-pixel visible side bands stay clean.  Top and bottom: whole sprites into
-  the guard rows, restored before drawing.  The general renderer still draws whole sprites into all four guards.
+  the guard rows, restored before drawing. The general tile fallback also clips at the side picture edges by
+  omitting the outer 8-pixel cell, retaining its prepared opacity masks; it draws whole vertically into guards.
   Each screen remembers which guards it was drawn into (`sr_guard_pages`: bits left, right, top, bottom); only
   those are cleared (the sprite renderer now sets only top and bottom).
 
 Exact: `render_test.py seq 100 1500` (attract, coin, start, two rounds, a level transition) 1500 of 1500 frames,
 `render_bench.py` 0 wrong pixels.  `render_test.py` also checks the margins and guard rows around the picture: every set
-pixel there must lie in a sprite drawn now (no stale damage; it reports the stray pixels).  `render_bench.py ... --step 2` renders every second frame (the pace of 25 pictures a
+pixel in a vertical guard must lie in a sprite drawn now; the side bands must stay black. Mismatches fail the test.  `render_bench.py ... --step 2` renders every second frame (the pace of 25 pictures a
 second); it leaves the first frame (a full redraw) out of its means and profile and prints how many sprites were drawn
 and baked.
 
@@ -177,7 +178,7 @@ Paths relative to `games/bublbobl/`; from the repository root `python port.py te
     venv/bin/python tools/align_test.py 900          # odd word accesses (a 68000 faults on them, Musashi does not)
     venv/bin/python tools/render_bench.py 110 60 400 60 620 120   # renderer cost and picture quality, windows of frames
     venv/bin/python tools/profile.py 1200            # where the 68000's cycles go, in the real VBL schedule
-    venv/bin/python tools/sprite_test.py             # whole sprites: all shifts, holes, guard edges, cache collisions
+    venv/bin/python tools/sprite_test.py             # clipped sides, vertical guards, all shifts, holes, cache collisions, tile fallback
     venv/bin/python tools/sound_test.py              # the sound player against tools/sound.py's model
     tools/bench.sh 1500                              # Hatari: game rounds and pictures per 300 VBLs, border events
     python port.py run bublbobl shot@20              # Hatari (F030Arcade), screenshots
@@ -273,11 +274,10 @@ timers (see the Blitter notes in `docs/porting-guide.md`), so they would have to
 numbers are simulated bus cycles, not Hatari frame times.  A Blitter renderer for this game would pay for a background layer
 composited by rectangle copies and for sprite-like objects, i.e. a different renderer, not a different inner loop.
 
-**Whole-object rule (updated 2026-10-11):** all ports draw partially visible sprites whole. The old
-`rf_cleanup` eraser described in the 2026-10-09 experiments below has been removed. Bubble Bobble now uses
-a 512-pixel virtual screen and restores previous guard damage before drawing the next picture. The visible
-side bands are part of the hardware window, so whole sprites may appear there.  (2026-10-12: the sprite
-renderer's Blitter path now clips at the left and right picture edges, see above.)
+**Current edge rule:** the old `rf_cleanup` eraser described in the 2026-10-09 experiments below has been
+removed. The 512-pixel virtual screen restores old guard damage before drawing the next picture. Left and right
+picture edges are group-aligned and clip in both the Blitter sprite path and the general tile fallback; top and
+bottom draw whole into guard rows. Side bands within the hardware window are visible and must stay clean.
 Next, in order: the steady cost of the play, i.e. the per-cell work (the aligned tile: ~300 cycles of set-up before
 its first row, `get_tile`'s hash, the clearing of a cell an opaque tile overwrites anyway, `rf_redraw`'s object loop),
 fewer dirty cells (an object marks all its tiles, old and new), table driven `obj_slots`; the scene change (draw the
@@ -409,8 +409,9 @@ they are not Hatari fps measurements. Steady 25+ fps is still unmet: translated 
 further work. Older measurements above predate the corrected bus accounting.
 
 Validation: 3,000 logic frames match; 1,500 consecutive render frames (100–1599) have zero wrong game pixels;
-128 independent whole-sprite cases cover all skews, four borders, transparent holes, colliding tile-cache entries
-and a 64 KB destination crossing. Alignment test: zero odd-access sites in 900 frames. The renderer makes
+128 independent sprite cases cover all skews, four borders, transparent holes, colliding tile-cache entries
+and a 64 KB destination crossing. The 2026-10-17 fallback regression adds 768 tile cases, including both side
+edges, all horizontal positions, flips, holes and vertical guards; it fails on the old fallback at x = -7. Alignment test: zero odd-access sites in 900 frames. The renderer makes
 250,730 HOG passes in the sequential test, none longer than 256 bus cycles and none sharing the bus. A 4 MB
 pinned Hatari debug build completed 2,500 game rounds, including coin/start gameplay, with no crash file;
 `BORDERS.BIN` reports two startup fallbacks and zero late top/bottom events. Normal builds do not stop at that limit.
@@ -574,3 +575,14 @@ late VBLs count too.  The game's logic is the limit: a play round costs 85-160k 
 Hatari) of the 160k a VBL has, so the extra rounds take the pictures' time.  It stays an option until a round is much
 cheaper.
 
+
+## Consistency checks (2026-10-17)
+
+The general tile fallback now skips the outer cell at the aligned side edges instead of drawing into visible
+bands; its prepared opacity masks remain unchanged. `tools/sprite_test.py` passes 128 sprite cases and 768
+fallback tile cases, including a genuine 64 KB crossing in each path. The old fallback fails at x = -7.
+`tools/render_test.py seq 600 20` passes with both the default renderer and `NOSR=1`. Side-band pixels are now
+rejected even when a current sprite covers them; mismatches and render timeouts return failure to `port.py test`.
+
+Pinned Hatari: `EXTRA='-D NOSR=1' tools/bench.sh 1200` completed 1,212 VBLs with zero late top, bottom or palette
+events (two startup fallback armings). This checks fallback timer safety; it is not a before/after speed comparison.

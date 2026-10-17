@@ -105,7 +105,8 @@ the 5th floor boss's table (`gen.py TABLES`); the other `jp (hl)` tables run who
   cache) into the clean screen and marked in each ring's bitmap; a ring is brought to its picture from the clean
   screen with short HOG Blitter passes (`blit_go`): the columns the window's move brought into the picture span,
   the band columns blackened, its last sprites' rectangles, the marked cells (movep.l when inside the span).
-* **Sprites**: cells baked on first use (see `docs/sprite-preparation.md`), a HOG pass a row (4 planes, under
+* **Sprites**: cells baked on first use in natural row order (`REN_ORDER=0`; grouping equal masks measured
+  slower overall and remains optional as `-D REN_ORDER=1`; see `docs/sprite-preparation.md`), a HOG pass a row (4 planes, under
   2 x 4 words), END1 / END3 from the row mask only when it changes, full destination addresses (no 64 KB limit).
   The picture's edges are at Wx + 32 and Wx + 288: a cell across the word boundary at or outside an edge draws only
   its inner word (left: FXSR, source X increment 0; right: the first word), a cell wholly outside is culled.  With Wx
@@ -217,3 +218,12 @@ RAM, scroll, I/O ports 0 and 1); a second short run takes the sprite palette's p
 Not covered: the flip screen (cocktail; the renderer raises), play with coins and inputs (the comparison runs the
 attract sequence only).
 
+
+## Default row order (2026-10-17)
+
+`REN_ORDER=0` is now the default, matching the lower whole-picture CPU plus Blitter cost recorded in
+`docs/sprite-preparation.md`; `-D REN_ORDER=1` retains the grouped-mask experiment. Verification: 1,122 synthetic
+edge pictures exact (54 pictures crossing 64 KB), and 200 consecutive reference pictures with
+`tools/render_test.py 800 --seed 4 --start 600 --stop`. Pinned Hatari `tools/bench.sh 2000` completed 2,001 VBLs
+with zero late border or palette events (two startup fallback armings). This run checks timing for the selected
+default; the earlier 6,000-frame measurement remains the basis for choosing it.

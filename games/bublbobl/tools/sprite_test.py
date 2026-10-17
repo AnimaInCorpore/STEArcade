@@ -76,7 +76,7 @@ def main():
         screen = 0x3DFF00
         mem.w32(sym['rf_screen'], screen)
         for shift in range(16):
-            for x, y in ((shift - 15, 128), (240 + shift, 128), (112 + shift, 0), (112 + shift, 248)):
+            for x, y in ((shift - 15, 128), (240 + shift, 128), (112 + shift, 0), (112 + shift, 240)):
                 # background colour five; all transparent pixels must retain it.
                 row = b'\xff\xff\x00\x00\xff\xff\x00\x00' * 32
                 mem.w_block(screen, row * 280)
@@ -102,7 +102,44 @@ def main():
                 want[:, 384:] = 5
                 assert np.array_equal(pixels, want), (x, y, int((pixels != want).sum()))
                 cases += 1
-    print(f'{cases} sprite/shift/edge cases: exact (clipped left/right, whole into the top/bottom guards), '
+    # The general object renderer uses draw_tile when sr_frame cannot handle a
+    # layout. Its 8-pixel cells must obey the same picture edges as sr_draw1.
+    fallback_cases = 0
+    vram = sym['snap_vram']
+    screen = 0x3D0100                         # y=239 crosses 64 KB between its rows
+    mem.w32(sym['rf_screen'], screen)
+    for code, bank, fx, fy in ordinary:
+        mem.w8(vram, code & 255)
+        mem.w8(vram + 1, ((code >> 8) & 3) | (bank << 2) | (fx << 6) | (fy << 7))
+        tile = tiles[code]
+        if fy: tile = tile[::-1]
+        if fx: tile = tile[:, ::-1]
+        mapped = np.array([ttab[bank * 16 + int(p)] for p in tile.ravel()], np.uint8).reshape(8, 8)
+        for x in list(range(-16, 16)) + list(range(240, 272)):
+            for y in (9, 128, 239):
+                mem.w_block(screen, row * 280)
+                cpu.w_reg(R.D0, x & 0xffff)
+                cpu.w_reg(R.D1, y)
+                cpu.w_reg(R.D2, 0)
+                cpu.w_reg(R.D3, code & 0x3c00)
+                cpu.w_reg(R.A7, 0x3CF000 - 4)
+                mem.w32(0x3CF000 - 4, stop)
+                cpu.w_sr(0x2700); cpu.w_pc(sym['draw_tile'])
+                assert lt.run_to(s, stop), 'fallback tile stopped'
+                want = np.full((280, 512), 5, np.uint8)
+                lo, hi = max(0, x), min(256, x + 8)
+                if lo < hi:
+                    want[y + 10:y + 18, lo + 128:hi + 128] = np.where(
+                        tile[:, lo - x:hi - x] != 15, mapped[:, lo - x:hi - x], 5)
+                # Compare every byte, including the margins and vertical guards.
+                planar = np.zeros((280, 32, 4), dtype='>u2')
+                for p in range(4):
+                    for bit in range(16):
+                        planar[:, :, p] |= (((want[:, bit::16] >> p) & 1).astype(np.uint16) << (15 - bit))
+                assert bytes(mem.r_block(screen, 256 * 280)) == planar.tobytes(), ('fallback', x, y, code)
+                fallback_cases += 1
+    print(f'{cases} sprite/shift/edge cases and {fallback_cases} fallback tile cases: exact '
+          '(clipped left/right, whole into the top/bottom guards), '
           'transparent holes preserved')
 
 

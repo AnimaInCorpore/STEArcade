@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python").exists() else sys.executable
 
-# the ports, in the order of the README, and their programs (run/<game>/<program>)
+# the registered ports, in README order (other entries are work in progress), and their programs (run/<game>/<program>)
 GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
          "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
          "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG"}

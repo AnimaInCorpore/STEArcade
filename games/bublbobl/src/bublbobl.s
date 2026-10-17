@@ -13,14 +13,14 @@
 ;   shared RAM at $FC00) and the sub CPU's (IM 1), each to completion, then the frame is
 ;   drawn.  The CPUs' foreground threads only boot to their idle loops (the main CPU's
 ;   boot waits for the MCU's handshake at $0158: the hook gives the MCU and the sub CPU a
-;   turn).  There is no sound CPU (its commands go nowhere).
+;   turn). The sound CPU is recorded offline; runtime commands feed the shared YM player (sound.s).
 ;
 ; Memory: one block holds [sub ROM 32K | shared RAM 32K ($8000-$FFFF) | main ROM 32K];
 ; the main CPU's code addresses with a6 = its ROM and signed word offsets (the RAM lies
 ; below), the sub CPU's with a6 = its ROM and long offsets (the RAM above).  The window
 ; $8000-$BFFF of the main CPU shows one of four 16 KB ROM banks: g_winbase = the current
 ; one's copy + $8000 (g_win + $4000 * bank + $8000), a4 = the current bank's dispatch table.
-; (a0-a3 hold A' BC' DE' HL' for the translated code: nothing is left for the window.)
+; The translated register maps are z80x.FAST for main and FAST_LONG for sub; see docs/architecture.md.
 ;
 ; The CPU ROMs a78-06-1.51 a78-05-1.52 a78-08.37 a78-01.17 are embedded, the boot tests patched (rom_table).
 ;
