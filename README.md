@@ -32,6 +32,7 @@ reference renderer and MAME.
 | <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |
 | <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
 | <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) |
+|  | [Gauntlet](games/gauntlet/README.md) | MC68010 + 6502 (YM2151, POKEY, TMS5220; slapstic): reference board exact against MAME, port not started |
 
 `python port.py list` lists the ports supported by the common build, test, run and release commands. The table
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI
@@ -45,7 +46,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 **Screenshots and trademarks.** The screenshots and captures show the original games' graphics, which remain the
 copyright of their owners: Donkey Kong © 1981 Nintendo; Galaga © 1981 Namco; Bubble Bobble © 1986 Taito;
 1942 © 1984 Capcom; 1943 © 1987 Capcom; Black Tiger © 1987 Capcom; Commando © 1985 Capcom; Gun.Smoke © 1985 Capcom;
-R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom; Double Dragon © 1987 Technos Japan. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
+R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom; Double Dragon © 1987 Technos Japan; Gauntlet © 1985 Atari Games. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
 
 ## Download
 

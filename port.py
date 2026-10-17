@@ -149,7 +149,8 @@ ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/i
                 "engine/v30_test.py",                              # (MAME traces: build/v30/)
                 "engine/v30x_test.py",
                 "engine/i8051_test.py",                            # (MAME traces: build/i8051/)
-                "engine/z80m72_test.py"]                           # (MAME trace: build/z80m72/)
+                "engine/z80m72_test.py",                           # (MAME trace: build/z80m72/)
+                "engine/m6502mame_test.py"]                        # (MAME logs: build/m6502mame/)
 assert set(COVER) == set(TESTS) == set(GAMES)
 
 
