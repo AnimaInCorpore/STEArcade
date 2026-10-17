@@ -26,7 +26,15 @@ import time
 SEG = 12
 
 
-def record(game, ticks, seed=1, out=None, log=print):
+def record(game, ticks, seed=1, out=None, log=print, *, policy=None, stats=None):
+    """Record with the existing search, optionally proposing segments via policy(game, machine, tick, rng).
+
+    Policies share the same rewind rules. stats, when supplied, receives search
+    costs (including discarded attempts); the return value remains replay bytes.
+    """
+    if ticks < game.PLAY:
+        raise ValueError('recording must include the startup frames')
+    started = time.perf_counter()
     rnd = random.Random(seed)
     m = game.machine()
     system, p1 = [], []
@@ -43,16 +51,21 @@ def record(game, ticks, seed=1, out=None, log=print):
     r_death = r_stuck = 0
     death_at = -1000
     deaths = rewinds = 0
+    attempts = simulated = 0
     t0 = time.time()
     half = game.POS_WRAP // 2
     while game.PLAY + len(segs) * SEG < ticks:
         n = len(segs)
         progress = hist[n][1]
-        seg = game.segment(rnd)
-        y = game.pos(m); died = False
         t = game.PLAY + n * SEG
+        seg = game.segment(rnd) if policy is None else policy(game, m, t, rnd)
+        if len(seg) != SEG or any(type(v) is not int or not 0 <= v <= 255 for v in seg):
+            raise ValueError('a policy must return SEG active-low input bytes')
+        attempts += 1
+        y = game.pos(m); died = False
         for i, v in enumerate(seg):
             game.tick(m, t + i, idle, v)
+            simulated += 1
             died |= game.died(m)
             ny = game.pos(m)
             d = (ny - y) % game.POS_WRAP
@@ -86,6 +99,11 @@ def record(game, ticks, seed=1, out=None, log=print):
     data = encode(list(zip(system[:ticks], p1[:ticks])))
     if out:
         out.write_bytes(data)
+    if stats is not None:
+        stats.update(seed=seed, ticks=ticks, segment_frames=SEG, attempts=attempts,
+                     simulated_frames=game.PLAY + simulated, rewinds=rewinds,
+                     accepted_deaths=deaths, search_progress=hist[-1][1],
+                     recording_seconds=time.perf_counter() - started)
     log(f'{ticks} ticks -> {out} ({len(data)} bytes): progress {hist[-1][1]}, deaths {deaths}, rewinds {rewinds}')
     return data
 

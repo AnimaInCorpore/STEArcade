@@ -10,6 +10,7 @@
     port.py test   engine                    the engine's own tests (Blitter sprite code, the pad reader, the IKBD stream, the 6809)
     port.py run    <game> [item@s ...]       Hatari (tools/hatari.sh): screenshots, key presses, memory dumps
     port.py mame   <game> [frames ...]       reference renderer against MAME's own picture (needs `mame`)
+    port.py ppo <game|all> <train|record|verify|test> [args]  PPO exploration (optional build/ppo-venv)
     port.py release <version> [--no-build]  every port built and packed: release/STEArcade-<version>.zip (tools/release.py)
 
 The python is the repository's venv (venv/bin/python) when it exists.  Everything it starts is a plain script in
@@ -154,7 +155,8 @@ TESTS = {
              ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
+ENGINE_TESTS = ["engine/ppo_test.py", "engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
+                "engine/hdd_test.py",                              # (tools/hddtest.sh: the same on Hatari's disks)
                 "engine/m6809_test.py", "engine/hd63701_test.py",   # (MAME traces: build/m6809/, build/hd63701/)
                 "engine/m6809x_test.py", "engine/konami1_test.py",
                 "engine/v30_test.py",                              # (MAME traces: build/v30/)
@@ -195,6 +197,34 @@ def main():
         return 0
     if cmd == "release":
         return call([PY, str(ROOT / "tools" / "release.py")] + a[1:])
+    if cmd == "ppo":
+        if len(a)<3 or a[1] not in (*GAMES, "all"):
+            print("usage: port.py ppo <game|all> <train|record|verify|test> [--steps N --frames N]")
+            return 2
+        worker=os.environ.get("PPO_PYTHON",str(ROOT/"build/ppo-venv/bin/python"))
+        if not Path(worker).exists():
+            print("Create build/ppo-venv and install engine/ppo-requirements.txt")
+            return 2
+        games=list(GAMES) if a[1]=="all" else [a[1]]
+        results=[]
+        for g in games:
+            if g=="galaga":
+                print("galaga: deferred by user (real 51xx/54xx MCU ROMs required)")
+                results.append(dict(game=g,status="deferred"))
+                if a[1]!="all":return 2
+                continue
+            options=list(a[2:])
+            if a[1]=="all":
+                for i,option in enumerate(options):
+                    if option=="--out" and i+1<len(options):options[i+1]=str(Path(options[i+1])/g)
+                    elif option.startswith("--out="):options[i]="--out="+str(Path(option.split("=",1)[1])/g)
+            rc=call([worker,str(ROOT/"engine/ppo.py"),g,*options],cwd=ROOT)
+            results.append(dict(game=g,status="passed" if rc==0 else "failed",returncode=rc))
+            if a[1]!="all" and rc:return rc
+        import json
+        directory=ROOT/"build/ppo";directory.mkdir(exist_ok=True)
+        (directory/"campaign.json").write_text(json.dumps(results,indent=2)+"\n")
+        return int(any(r.get("returncode",0) for r in results))
     if len(a) < 2 or a[1] not in GAMES:
         print("usage: port.py %s <%s> ..." % (cmd, "|".join(GAMES)))
         return 2

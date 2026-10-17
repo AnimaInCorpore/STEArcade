@@ -586,3 +586,7 @@ rejected even when a current sprite covers them; mismatches and render timeouts 
 
 Pinned Hatari: `EXTRA='-D NOSR=1' tools/bench.sh 1200` completed 1,212 VBLs with zero late top, bottom or palette
 events (two startup fallback armings). This checks fallback timer safety; it is not a before/after speed comparison.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo bublbobl test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

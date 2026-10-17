@@ -400,7 +400,11 @@ z80_hook:
 	bne	.wait
 .busy:	movem.l	(sp)+,d0-d7/a0-a6
 	rts
-.wait:	tst.b	frame_dirty
+.wait:
+	ifd REPLAY_AUDIT
+	bsr	replay_audit
+	endc
+	tst.b	frame_dirty
 	beq	.check
 	tst.b	vbl_pending
 	beq	.render
@@ -844,6 +848,9 @@ z80_unsupported:
 
 	section text,code
 	include	"rtlib.s"
+	ifd REPLAY_AUDIT
+	include	"replay_audit.s"
+	endc
 
 	section data,data
 	ifd PLAYBACK

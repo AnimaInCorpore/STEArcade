@@ -227,3 +227,68 @@ edge pictures exact (54 pictures crossing 64 KB), and 200 consecutive reference 
 `tools/render_test.py 800 --seed 4 --start 600 --stop`. Pinned Hatari `tools/bench.sh 2000` completed 2,001 VBLs
 with zero late border or palette events (two startup fallback armings). This run checks timing for the selected
 default; the earlier 6,000-frame measurement remains the basis for choosing it.
+
+## Gameplay recordings
+
+PPO is the standard supplemental exploration workflow; see [the shared guide](../../docs/ppo.md).
+The earlier Kev experiment has been retired and its weights/runtime removed. Its small historical
+[benchmark report](docs/gameplay-bot-benchmark.md) is retained as evidence.
+
+The existing search recorder and RLE replay contract remain supported. Validate a recording without changing
+canonical artifacts with `tools/play_replay_test.py RECORDING`; add `--every 1` for consecutive reference pictures.
+
+### PPO RAM policy trained in MAME
+
+The optional PPO controller trains on the original `kungfum` board in **MAME**, not the Python reference.
+Use a separate Python 3.13 environment (the normal test environment stays independent):
+
+```sh
+python3.13 -m venv build/ppo-venv
+build/ppo-venv/bin/pip install -r games/kungfum/tools/ppo-requirements.txt
+build/ppo-venv/bin/python games/kungfum/tools/ppo_test.py --mame
+build/ppo-venv/bin/python games/kungfum/tools/play_ppo.py train --steps 4096
+build/ppo-venv/bin/python games/kungfum/tools/play_ppo.py record --model build/kungfum/ppo/policy.zip --seed 1
+venv/bin/python games/kungfum/tools/ppo_hatari.py build/kungfum/ppo/ppo_1.bin
+venv/bin/python games/kungfum/tools/play_replay_test.py build/kungfum/ppo/ppo_1.bin
+```
+
+`MAME`, `HATARI` and `TOS` override executable/ROM paths; the default Hatari/TOS paths are the pinned local
+F030Arcade tools used by the other benchmarks. MAME 0.289 was used for the measured run. Existing generated
+Kung-Fu Master code/assets and the assembler toolchain are required for Hatari and simulator replay checks.
+`--out DIR` isolates a training/recording campaign. Each decision executes 12 MAME frames; `--frames 3600`
+includes the 900-frame coin/start bootstrap. Training `--steps` counts decisions, rounded up to a 256-step PPO
+rollout. `record --random` runs a uniform baseline over the same 21 actions, without rewinds.
+
+The observation consists of E000-E8FF work/object RAM, C000-C0FF sprite shadow and the scroll bytes,
+normalised to 0..1, with two consecutive observations. The policy has separate 64/64-unit actor and critic
+networks, runs on CPU and has no text or screenshot model. Coverage is **exact first execution of main-ROM
+instruction addresses** after frame 900, measured with one-shot MAME debugger breakpoints at every address
+0000-7FFF. It can discover code missing from the existing disassembly. The reward combines global and episodic
+PC novelty, within-floor scroll progress and new floors, with small death/time penalties. Coverage itself is not
+part of the model observation. Coin/start, DIP switches and infinite lives follow the existing recorder's contract;
+there are no stage skips, infinite energy or death rewinds. The model must be trained; no pretrained universal
+arcade-game policy is supplied.
+
+Outputs under ignored `build/kungfum/ppo/` include `policy.zip`, `training.json`, RLE `.bin` recordings,
+MAME `.states.jsonl` checkpoints and per-run coverage/metrics `.json`. The recordings retain the existing
+count/SYSTEM/P1 triples and zero terminator; inference and training are not needed to replay them.
+
+`ppo_hatari.py` assembles an isolated, instrumented **native Hatari** program with normal rendering. It records
+RAM/sprites/scroll and the port RNG at completed arcade-frame idle hooks, every 12 frames from 900, independent
+of STE VBL timing or picture skipping. It compares those checkpoints against native MAME and separately against
+`KungFuPort`, excluding only the dead merged-PUSH/POP stack bytes already excluded by `logic_test.py`.
+`divergences.json` reports the earliest **captured checkpoint** that differs and the first differing addresses.
+A matching audit is not an assertion about intermediate frames; `play_replay_test.py` checks every logic frame
+in the existing simulator and sampled or consecutive reference pictures. Native MAME uses different CPU timing
+and a hardware refresh-register RNG; MAME checkpoints also include the next-frame lives poke, whereas Hatari's
+precede it. A native MAME mismatch alone therefore does not establish a translation bug. Hatari vs `KungFuPort`
+mismatches, crashes, missing checkpoints, timeouts and mismatched replay metadata fail the audit.
+
+The audit's `REPLAY_AUDIT` instrumentation is absent from normal builds. It writes diagnostic data through
+GEMDOS, so its wall time is not a normal game-speed benchmark. Canonical `play_inputs.bin`, simulator PRG/map,
+normal game PRG and existing coverage pickles are not replaced. See the [PPO coverage report](docs/ppo-coverage.md)
+for the local training and replay results.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo kungfum test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

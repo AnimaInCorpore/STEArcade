@@ -222,3 +222,7 @@ recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again 
 Not done: the flip screen (the DIP switch is upright), the service mode. The last
 line of the picture is sometimes black from a varying x on: Timer A's palette off comes
 in that line (seen in Hatari screenshots before and after the hardware scrolling).
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo gunsmoke test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

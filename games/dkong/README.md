@@ -94,3 +94,7 @@ code was lean (16 cycles a Z80 instruction, mostly memory moves), the gain is th
 `tools/insn_bench.py` knows the swapped BC and the 65536 entry dispatch table now (it failed 61 cases since BC was swapped);
 the engine's `engine/xbench.py` covers every opcode and memory layout.  Known, not from this change: `logic_test.py`
 stops at frame ~1030 (`z80_badjump`, d7 = $2BD) on the commit before it too; `port.py test dkong` runs 3000 frames.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo dkong test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

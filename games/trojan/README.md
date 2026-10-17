@@ -169,3 +169,7 @@ BSS + 256; the limit 3,700,000).
 * The ADPCM voices; flip screen (cocktail) is not drawn; one palette for the whole game (per-level palettes would fit
   level 5 better).
 * Coverage is random play: code no seed reached stops at `z80_badpc` (CRASH.TXT names the bank and pc).
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo trojan test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

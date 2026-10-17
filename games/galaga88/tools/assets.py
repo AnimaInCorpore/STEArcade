@@ -13,6 +13,9 @@ render_raw:
 Files:
   ren_chr.bin   8192 characters x 64 bytes: R[dr][dc] (8 bit pens), row by row
   ren_mask.bin  8192 x 8 bytes: per row dr the opaque pixels, bit 7 = column 0
+  ren_cvals.bin 8192 x 8 bytes: the pens a character uses in groups of 4 (pen >> 2), two longs: bit g of the first
+                for groups 0-31, bit g - 32 of the second for groups 32-63 (render.s REN_BANKDIFF: the cells a bank
+                change affects)
   ren_spr.bin   1536 sprites x 512 bytes: S[dr][dc] (4 bit pens, two a byte, the left one high), row by row
   ren_pal.bin   16 STE colour words (index 0 black): a fixed palette from the recorded reference pictures
                 (build/galaga88/render_states.pkl; the first milestone, before the colours are chosen per scene)
@@ -106,6 +109,11 @@ def build(out=None):
     rc, rm, rs = turned()
     (out / "ren_chr.bin").write_bytes(rc.astype(np.uint8).tobytes())
     (out / "ren_mask.bin").write_bytes(np.packbits(rm, axis=2).tobytes())
+    groups = np.zeros((NCHR, 64), bool)
+    for g in range(64):
+        groups[:, g] = (((rc >> 2) == g) & rm).any((1, 2))
+    w = (groups.reshape(NCHR, 2, 32).astype(np.uint64) << np.arange(32, dtype=np.uint64)).sum(2)
+    (out / "ren_cvals.bin").write_bytes(w.astype(">u4").tobytes())
     s = rs.astype(np.uint8).reshape(NSPR, 32, 16, 2)
     (out / "ren_spr.bin").write_bytes(((s[..., 0] << 4) | s[..., 1]).astype(np.uint8).tobytes())
     (out / "ren_lab.bin").write_bytes(lab_table().tobytes())

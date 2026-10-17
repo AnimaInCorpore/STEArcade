@@ -9,6 +9,9 @@ the renderer maps pens to its 16 indices at run time (m72render.s, "Colours").  
                               32 bytes each: the pen's bit planes, bit 0 first: 8 bytes each (a byte a row, top row
                               first, bit 7 = the left pixel)
     m72_uf.bin / m72_ub.bin   a word a tile: the pens it uses (bit p = pen p)
+    m72_bs.bin                10 bytes a BG tile: its few other pixels when all but 1-4 have one pen (the stars:
+                              drawn as pixels, engine/rt/m72render.s m72r_stars): the count (0: one pen, 255: not
+                              such a tile), the main pen, 4 x (the pixel: y * 8 + x, its pen)
     m72_sp.bin                the 16 x 16 sprite pieces (4096), 128 bytes each: 16 rows of 8 bytes, a byte two pixels
                               (the left one's pen in the high nibble)
     m72_su.bin                a long a piece: the pens it uses (word), the first and the last opaque row (bytes; an
@@ -95,6 +98,26 @@ def tile_data(tiles):
     return pl.astype(np.uint8).tobytes(), pens_used(np.asarray(tiles)).astype(">u2").tobytes()
 
 
+def sparse_data(tiles, k=4):
+    """m72_bs bytes: per tile the count of pixels other than its main pen (1-k; 0 one pen; 255 more), the main pen,
+    k x (y * 8 + x, pen)"""
+    out = bytearray()
+    for tl in np.asarray(tiles, np.int64):
+        dom = int(np.bincount(tl.ravel(), minlength=16).argmax())
+        ys, xs = np.nonzero(tl != dom)
+        rec = bytearray(2 + 2 * k)
+        rec[1] = dom
+        if len(ys) <= k:
+            rec[0] = len(ys)
+            for i, (y, x) in enumerate(zip(ys.tolist(), xs.tolist())):
+                rec[2 + 2 * i] = y * 8 + x
+                rec[3 + 2 * i] = int(tl[y, x])
+        else:
+            rec[0] = 255
+        out += rec
+    return bytes(out)
+
+
 def sprite_data(spr):
     """(m72_sp bytes, m72_su bytes)"""
     spr = np.asarray(spr, np.int64)
@@ -126,6 +149,7 @@ def build(game, out=None):
         d, u = tile_data(t)
         write(out / ("m72_t%s.bin" % name), d)
         write(out / ("m72_u%s.bin" % name), u)
+    write(out / "m72_bs.bin", sparse_data(v.tiles[1]))
     d, u = sprite_data(v.sprites)
     write(out / "m72_sp.bin", d)
     write(out / "m72_su.bin", u)

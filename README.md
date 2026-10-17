@@ -69,7 +69,8 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
                        Musashi (sim.py), Blitter sprite code generator, ROM preparation (roms.py), paths and toolchain;
                        sound: capsnd.py (Capcom sound drivers recorded per command), opn.py / opl.py (YM2203 / YM3526
                        envelopes), lz.py (packed data); rt/: the shared 68000 runtime (rtlib.s, borders.s, jagpad.s,
-                       ikbd.s, capsnd.s / capsnd_core.s: the sound players, lz.s, m6809rt.s); *_test.py: the engine's tests
+                       ikbd.s, capsnd.s / capsnd_core.s: the sound players, lz.s, m6809rt.s, hdd.s: data streamed from the
+                       hard disk); *_test.py: the engine's tests
     games/<game>/      one folder per port, all alike:
       README.md        state, controls, method, measurements (a screenshot at the top)
       src/             <game>.s (start, VBL schedule, input, hooks) and the parts it includes, named by topic without a
@@ -79,7 +80,8 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
       ref/             cover*.py (port.py cover), mame_cmp_<game>.py + mame_dump.lua (port.py mame), analysis scripts;
                        ref/probes/: the numbered one-off experiments of the early ports, kept for the record
       docs/            screenshot.png, rom_manifest.json, notes and reference data (palettes, coverage, captures)
-    tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), release.py, windows/
+    tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), hddtest.sh (engine/rt/hdd.s
+                       on Hatari's ACSI / IDE disks), release.py, windows/
                        (PowerShell helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
     docs/              architecture.md, porting-guide.md, sprite-preparation.md, reference/ (68000 and Z80 manuals)
     assets/roms/       the ROM archives (assets/roms/README.md); extracted/<game>/ is unpacked by port.py prepare (not in git)
@@ -106,3 +108,10 @@ Reading order: `docs/architecture.md` (how a port works), `docs/porting-guide.md
 then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
 are a deliberate failure), check the reference against MAME before building graphics, and verify with the pinned
 F030Arcade Hatari build.  MAME source: `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`.
+
+## PPO gameplay exploration
+
+Use `venv/bin/python port.py ppo <game> train|record|verify|test` for the standard supplemental RAM-policy
+workflow. It trains in MAME and verifies recordings through a private Hatari replay build, preserving canonical
+fixtures and curated translator coverage. See [the shared PPO guide](docs/ppo.md) for setup, verification limits,
+and storage policy. Galaga is deferred pending its real 51xx/54xx MCU ROMs; unregistered ports remain work in progress.

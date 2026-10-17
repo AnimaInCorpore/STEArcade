@@ -269,3 +269,7 @@ clear F').  `gen.py` goes through
 exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -> 24.3k cycles a tick (1.16x).  The
 rest is spread thin: `ret`, `ldir` (by longs already), `push`/`pop af` around calls, `bit n,(ix+d)` with the exact S.
 Tests: `logic_test.py 6000`, `sprite_test.py`, `render_test.py seq 200 1 1200` pass; Hatari runs the attract mode.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo 1942 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

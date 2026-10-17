@@ -64,12 +64,16 @@ def main():
     ap.add_argument('--play', action='store_true')
     ap.add_argument('--stop', action='store_true', help='stop at the first difference')
     ap.add_argument('--prof', action='store_true', help='sample render_frame\'s pc every 64 cycles: cycles by routine')
+    ap.add_argument('--recording', type=Path, default=BUILD / 'play_inputs.bin', help='reference inputs with --play')
+    ap.add_argument('--program', type=Path, help='alternate simulator PRG')
+    ap.add_argument('--map', dest='mapfile', type=Path, default=BUILD / 'kungfum_sim.map')
     args = ap.parse_args()
     pal = pickle.loads((BUILD / 'kf_palettes.pkl').read_bytes())
     maps, pmap = pal['maps'], pal['panel_map']
     run = ROOT / 'run' / 'kungfum_sim'
-    s = Sim(str(run / 'KUNGFUM.PRG'), run_dir=run, ram_kib=16384)
-    sym = {k: v + s.base for k, v in s.symbols(BUILD / 'kungfum_sim.map').items()}
+    program = args.program or run / 'KUNGFUM.PRG'
+    s = Sim(str(program), run_dir=program.parent, ram_kib=16384)
+    sym = {k: v + s.base for k, v in s.symbols(args.mapfile).items()}
     mem, cpu = s.mem, s.cpu
     wait, done, bad = sym['sim_wait'], sym['sim_frame_done'], sym['z80_badpc']
     a6 = sym['g_block'] + 0x8000
@@ -135,7 +139,9 @@ def main():
     play = None
     if args.play:
         import playbot
-        play = playbot.load(BUILD / 'play_inputs.bin')
+        play = playbot.load(args.recording)
+        if len(play) < args.frames:
+            ap.error('--recording is shorter than the requested frame count')
     bad_frames = 0
     checked = 0
     for f in range(args.frames):

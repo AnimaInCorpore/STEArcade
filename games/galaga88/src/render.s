@@ -1359,6 +1359,9 @@ ren_bg_check:
 	move.l	8(a1),d1
 	cmp.l	d1,d0
 	beq	.b
+	ifd	REN_BANKDIFF
+	move.l	d1,ren_bkold
+	endc
 	move.l	d0,8(a1)
 	eor.l	d0,d1
 	tst.b	d1			; layer 5
@@ -1371,11 +1374,21 @@ ren_bg_check:
 	lsr.l	#8,d1
 	tst.b	d1			; layer 4
 	beq	.b3
+	ifd	REN_BANKDIFF
+	moveq	#4,d2
+	bsr	ren_bank_diff
+	else
 	bsr	ren_mark4_all
+	endc
 .b3:	lsr.l	#8,d1
 	tst.b	d1			; layer 3
 	beq	.b
+	ifd	REN_BANKDIFF
+	moveq	#3,d2
+	bsr	ren_bank_diff
+	else
 	bsr	ren_mark3_all
+	endc
 	endc
 .b:	move.l	12(a0),d0		; layer 3's scroll
 	cmp.l	(a1),d0
@@ -1526,6 +1539,102 @@ ren_mark_fixed:
 	st	ren_any
 	movem.l	(sp)+,d0-d2/a2
 	rts
+
+	ifd	REN_BANKDIFF
+; d2.w = layer 3 or 4, its bank changed (ren_bkold: the banks before, ren_bgpar + 8 now): the cells whose characters
+; use a pen whose index differs between the two banks' maps (ren_bmap, this choice of colours) dirty, the others keep
+; their converted lines.  The pens compared in groups of 4 (a long of the maps), the characters' groups from
+; ren_cvals (assets.py).  Keeps everything.
+ren_bank_diff:
+	movem.l	d0-d7/a0-a3,-(sp)
+	tst.b	ren_all
+	bne	.r			; (everything composed anyway)
+	lea	ren_bkold,a0
+	moveq	#0,d0
+	move.b	-2(a0,d2.w),d0		; the old bank (layer 3: byte 1, layer 4: byte 2)
+	moveq	#0,d3
+	lea	ren_bgpar+8-2,a0
+	move.b	(a0,d2.w),d3		; the new one
+	bsr	.map
+	exg	d0,d3
+	bsr	.map
+	lsl.w	#8,d0
+	lsl.w	#8,d3
+	lea	ren_bmap,a0
+	lea	(a0,d3.w),a2
+	add.w	d0,a0
+	moveq	#0,d4			; the differing groups: d4 0-31, d5 32-63
+	moveq	#0,d5
+	moveq	#0,d6
+	moveq	#64-1,d7
+.g:	cmpm.l	(a0)+,(a2)+
+	beq	.ng
+	cmp.w	#32,d6
+	bhs	.hi
+	bset	d6,d4
+	bra	.ng
+.hi:	bset	d6,d5			; (bset on a register: the bit number mod 32)
+.ng:	addq.w	#1,d6
+	dbf	d7,.g
+	move.l	d4,d0
+	or.l	d5,d0
+	beq	.r			; (the same indices: nothing to compose)
+	lea	ren_cvals,a3
+	cmp.w	#3,d2
+	bne	.l4
+	lea	ren_tcopy3,a0		; layer 3: its words at its scroll (as ren_mark3_all)
+	lea	ren_ne16,a1
+	moveq	#-1,d6
+	move.w	#32*64-1,d7
+.l3:	addq.w	#1,d6
+	moveq	#0,d0
+	move.w	(a0)+,d0
+	tst.b	(a1,d0.l)
+	dbne	d7,.l3
+	beq	.r
+	bsr	.uses
+	beq	.n3
+	bsr	ren_mark3
+.n3:	dbf	d7,.l3
+	bra	.r
+.l4:	lea	ren_tcopy4,a0		; layer 4 (as ren_mark4_all)
+	lea	ren_nonempty,a1
+	moveq	#0,d6
+.w4:	moveq	#0,d0
+	move.w	(a0)+,d0
+	and.w	#$3FFF,d0
+	cmp.w	#8192,d0
+	bhs	.n4
+	tst.b	(a1,d0.w)
+	beq	.n4
+	bsr	.uses
+	beq	.n4
+	bsr	ren_mark_fixed
+.n4:	addq.w	#1,d6
+	cmp.w	#36*28,d6
+	bne	.w4
+.r:	movem.l	(sp)+,d0-d7/a0-a3
+	rts
+; d0.l = a tile word -> Z clear when its character uses a differing group
+.uses:	and.w	#$1FFF,d0		; (non-empty: below 8192)
+	lsl.l	#3,d0
+	move.l	(a3,d0.l),d1
+	and.l	d4,d1
+	bne	.u
+	move.l	4(a3,d0.l),d1
+	and.l	d5,d1
+.u:	rts
+; d0.w = a bank: its map made for this choice of colours
+.map:	move.w	d0,d1
+	add.w	d1,d1
+	lea	ren_bmtag,a0
+	move.w	ren_epoch,d6
+	cmp.w	(a0,d1.w),d6
+	beq	.mr
+	move.w	d6,(a0,d1.w)
+	bsr	ren_bmap_make
+.mr:	rts
+	endc
 
 ; layer 4's non-empty cells dirty (its bank changed)
 ren_mark4_all:
@@ -3995,6 +4104,9 @@ ren_sqrt:	incbin	"ren_sqrt.bin"
 	even
 ren_chr:	incbin	"ren_chr.bin"
 ren_mask:	incbin	"ren_mask.bin"
+	ifd	REN_BANKDIFF
+ren_cvals:	incbin	"ren_cvals.bin"
+	endc
 ren_spr:	incbin	"ren_spr.bin"
 ren_epoch:	dc.w	1
 ren_zero32:	dcb.l	8,0
@@ -4019,6 +4131,7 @@ ren_cur:	ds.w	1
 ren_vbl_pal:	ds.w	16
 ren_bpal:	ds.w	16*REN_NBUF
 ren_bgpar:	ds.l	4		; layer 3's scroll, the priorities, the banks
+ren_bkold:	ds.l	1		; (REN_BANKDIFF: the banks before a change)
 ren_bgl:	ds.b	3*6
 ren_bgn:	ds.w	1
 ren_bgkey:	ds.w	1
@@ -4122,6 +4235,7 @@ ren_colpat:	ds.w	16*4
 ren_ne16:	ds.b	65536		; (ren_nonempty by the whole tile word, $FF / 0)
 ren_ltab:	ds.l	PIC_H+16
 ren_ctab:	ds.w	PIC_H
+	even
 ren_bmap:	ds.b	8*256
 	even
 ren_bspread:	ds.l	8*256		; (per bank and pen: its index's spread long, ren_spread)

@@ -1,0 +1,4 @@
+# Optional Python 3.13 environment. No model packages in the emulator test venv.
+torch==2.8.0
+stable-baselines3==2.9.0
+gymnasium==1.2.3

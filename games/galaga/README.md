@@ -372,3 +372,7 @@ and `-D NOSPRITECODE=1` too.  `port.py test galaga`: sound_test 2987 frames / 30
 render_test 0 pixels at 2200, 3600, 5200 (and 1500, 3000, 4400, 6400, 8000), schedule_test as before (differs from frame
 900, the stars); `engine/sprite_blit_test.py` passes (Galaga: 8192 shape/skew/direction checks, 48 renderer
 comparisons of the NOSPRITECODE and the generated-code build, both clipping).
+
+## Standard PPO exploration
+
+Native MAME PPO gameplay is deferred by user until the real 51xx/54xx MCU ROMs are available. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

@@ -74,6 +74,10 @@ sync_block:
 	bhs.s	.n0
 	lea	m72v_pal0,a1		; $C8000-$C8BFF
 	st	m72v_pdirty
+	move.l	a0,d2			; (the block: the renderer compares the marked ones)
+	lea	m72v_pdblk,a0
+	st	(a0,d1.w)
+	move.l	d2,a0
 	bra.s	.copy
 .n0:	sub.w	#$40,d1
 	bcs.s	.none
@@ -81,6 +85,10 @@ sync_block:
 	bhs.s	.n1
 	lea	m72v_pal1,a1		; $CC000-$CCBFF
 	st	m72v_pdirty
+	move.l	a0,d2
+	lea	m72v_pdblk+12,a0
+	st	(a0,d1.w)
+	move.l	d2,a0
 	bra.s	.copy
 .n1:	sub.w	#$40,d1
 	bcs.s	.none

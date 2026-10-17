@@ -31,11 +31,15 @@ def main():
     ap.add_argument('--play', action='store_true', help='the recorded play (play_search.py) against a sim build '
                     'with -D PLAYBACK=1')
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--recording', type=Path, default=BUILD / 'play_inputs.bin', help='reference inputs with --play')
+    ap.add_argument('--program', type=Path, help='alternate simulator PRG (e.g. an isolated bot replay build)')
+    ap.add_argument('--map', dest='mapfile', type=Path, default=BUILD / 'kungfum_sim.map')
     args = ap.parse_args()
     run = ROOT / 'run' / 'kungfum_sim'
-    s = Sim(str(run / 'KUNGFUM.PRG'), run_dir=run)
+    program = args.program or run / 'KUNGFUM.PRG'
+    s = Sim(str(program), run_dir=program.parent)
     s.mem.set_trace_mode(False)
-    sym = {k: v + s.base for k, v in s.symbols(BUILD / 'kungfum_sim.map').items()}
+    sym = {k: v + s.base for k, v in s.symbols(args.mapfile).items()}
     mem, cpu = s.mem, s.cpu
     mem.w16(sym['render_frame'], 0x4e75)
     wait, done, bad = sym['sim_wait'], sym['sim_frame_done'], sym['z80_badpc']
@@ -136,7 +140,9 @@ def main():
     play = None
     if args.play:
         import playbot
-        play = playbot.load(BUILD / 'play_inputs.bin')
+        play = playbot.load(args.recording)
+        if len(play) < args.frames:
+            ap.error('--recording is shorter than the requested frame count')
     for f in range(args.frames):
         if play:
             m.system, m.p1 = play[f]

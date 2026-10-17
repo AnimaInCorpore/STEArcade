@@ -369,6 +369,36 @@ against Hatari's model of the pads.
 An arcade program may reject a coin held too long: 1942 ignores one of 40 ticks (credits 3-20, the reference machine),
 so a test script taps the coin key (`tools/hatari.sh tap:5@20`), a long `hold:` is lost.
 
+## Hard disk streaming (`engine/rt/hdd.s`, 2026-10-13)
+
+The driver for the plan in `docs/sprite-preparation.md` ("Memory: prepared data from the hard disk"); the blueprint
+is stedaimakaimura's `dma_test.s`.  No port uses it yet.  Two phases:
+
+* **`hdd_open`, while TOS still owns the machine** (before `init_hardware`, supervisor mode, interrupts on): reads the
+  data file once through GEMDOS with a hook in `hdv_rw` ($476) that logs every sector read GEMDOS makes straight into
+  the scan buffer.  With Getbpb (logical -> 512-byte sectors) and the AHDI partition table (`pun_info` at $516: the
+  partition's start, ACSI or IDE, the unit) that gives the file's extents (file sector -> physical sector), so a
+  fragmented file works (up to `HDD_EXTENTS` pieces).  An IDE drive is asked for LBA and its geometry (CHS otherwise).
+  The file and the scan buffer are multiples of 32 KB: a partial sector or cluster goes through GEMDOS's own buffer,
+  which the hook does not see (`HDD_E_CACHED`).
+* **`hdd_read` / `hdd_poll` while the game runs**: one request at a time, started by `hdd_read` and advanced by
+  `hdd_poll` from the main loop (never inside the border or VBL handlers), split at extents and into commands of
+  `HDD_STEP` sectors.  ACSI: READ(6) through the DMA chip, which moves the data alone; only the six command bytes are
+  waited for, completion is GPIP bit 5 (polled: the ports keep that MFP interrupt off), the floppy locked out (flock)
+  meanwhile.  IDE ($FFF00000, the Falcon's registers and the ST / STE adapters that copy them): PIO, at most
+  `HDD_IDE_POLL` sectors a call (~2600 cycles each), checked on the alternate status (no wait, no interrupt line).
+  Timeouts count the port's VBLs (`hdd_vbl` in its handler).  `hdd_stop` before giving the hardware back (quit, crash)
+  lets a command in flight finish.  Errors are codes (`HDD_E_*`): the caller keeps drawing by the path that needs no
+  prepared data (the plan's fallback), so a slow or missing disk costs speed, never correctness.
+
+Tests: `engine/hdd_test.py` (`port.py test engine`) runs `hdd_read` / `hdd_poll` against register models of the DMA
+chip with an ACSI target and of an IDE drive: requests across extents and longer than a command, the ACSI command
+bytes, IDE in LBA and CHS (master and slave), a request while busy, beyond the file, no ACSI target, error statuses,
+an IDE drive busy for good.  `tools/hddtest.sh` runs the whole module in Hatari with EmuTOS's own drivers: a FAT16
+image whose test file lies in two pieces, on ACSI and on IDE (LBA) with 512-byte logical sectors and on ACSI with
+2 KB ones; every request reads back without a bad sector.  Not measured yet: the reads' cost in a game picture and
+how the DMA chip's transfers share the bus with the Blitter's HOG passes.
+
 ## Measuring (`games/dkong/tools/build.py` options, `games/dkong/tools/frametimes.py`)
 
 * `--debug`: frame, Timer A, Timer B, VBL and skipped-VBL counters as bits in the top-left

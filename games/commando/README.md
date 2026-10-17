@@ -305,3 +305,7 @@ Speed: `perf_test.py 2500 900` (play): logic 41,918 cycles a tick before and aft
 Musashi cycles (174.0k with the screens at the old 64 KB alignment: which sprites cross a 64 KB boundary and take
 `generic_part` depends on where the screens are); `render_test.py 20 scroll` median 1.71M -> 1.57M.  Hatari
 `bench.sh`: 55.8 -> 57.0 game ticks and 26.7 -> 26.9 drawn frames a second.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo commando test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

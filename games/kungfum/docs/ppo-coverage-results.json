@@ -1,0 +1,515 @@
+{
+  "date": "2026-10-17",
+  "training": {
+    "mode": "train",
+    "requested_steps": 4096,
+    "actual_steps": 4096,
+    "seed": 1,
+    "episode_frames": 3600,
+    "decision_frames": 12,
+    "parameters": 665750,
+    "seconds": 397.04976654198254,
+    "coverage": 2643,
+    "checkpoint_sha256": "089e673e91a740a30b90001625656db1d8f5bdcc216db0700deac687c88a2d47",
+    "macos": "27.0.1",
+    "machine": "arm64",
+    "python": "3.13.16",
+    "versions": {
+      "torch": "2.8.0",
+      "stable-baselines3": "2.9.0",
+      "gymnasium": "1.2.3"
+    },
+    "sources": {
+      "play_ppo.py": "76439cc5a039ca773044f29028075a5eeecd784408672778e728d17d71ebbf0b",
+      "ppo_env.py": "ada6749a661fac3f3be7dabb80dcd3b82e659834d54f41f36ebca4d0ac5d148b",
+      "ppo_mame.py": "782062ac51e1d1e100b50288bb25b2c9f708df868f55ded3f14025de968d6284",
+      "ppo_mame.lua": "11303eda67e4773e7cdd92019a9792a4f8a16cee21377cb502ae8ecac4757adf"
+    },
+    "mame_version": "MAME v0.289 (unknown)",
+    "mame_sha256": "6d40df87963c58cdd3857d203e186af854fea49ae03b2ab555e30ef1029636d9",
+    "rom_archive_sha256": "e729202e6e2a6ba1ea3c9f271b6ef415d4175f419eaacdde8919d114c8470fcb",
+    "controlled_arcade_frames": 49152,
+    "normal_program_sha256": "09161abd7c4885556b6a6cd74e66ce4ddde9b939f055db7a7aac6eabfa209eed",
+    "normal_private_build_byte_identical": true
+  },
+  "results": [
+    {
+      "policy": "random",
+      "seed": 1,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2626,
+      "global_coverage": 2626,
+      "new_global_pcs": 0,
+      "progress_pixels": 47,
+      "deaths": 3,
+      "floors": [
+        1
+      ],
+      "seconds": 19.472511207975913,
+      "replay_sha256": "115587c3f1394f46cb19c5493b745dd4531e4493743b869de0acad075d464b81",
+      "checkpoint_sha256": null,
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    },
+    {
+      "policy": "random",
+      "seed": 2,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2596,
+      "global_coverage": 2596,
+      "new_global_pcs": 0,
+      "progress_pixels": 49,
+      "deaths": 3,
+      "floors": [
+        1
+      ],
+      "seconds": 27.617953790992033,
+      "replay_sha256": "a7fd6998a1d8370e274d3e473c5c443f05f711ef53315fd155d1f2ce02452ba2",
+      "checkpoint_sha256": null,
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    },
+    {
+      "policy": "random",
+      "seed": 3,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2593,
+      "global_coverage": 2593,
+      "new_global_pcs": 0,
+      "progress_pixels": 57,
+      "deaths": 2,
+      "floors": [
+        1
+      ],
+      "seconds": 21.164082292001694,
+      "replay_sha256": "1c40f98315ba4b591169261e2da6825338172178965a3a05c66366dacab7db4f",
+      "checkpoint_sha256": null,
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    },
+    {
+      "policy": "ppo",
+      "seed": 1,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2637,
+      "global_coverage": 2637,
+      "new_global_pcs": 0,
+      "progress_pixels": 45,
+      "deaths": 4,
+      "floors": [
+        1
+      ],
+      "seconds": 18.57437458296772,
+      "replay_sha256": "eebec4d5c1bc7562ea3c06919764295751381538cfea1efe64b38d85686a0570",
+      "checkpoint_sha256": "089e673e91a740a30b90001625656db1d8f5bdcc216db0700deac687c88a2d47",
+      "states_sha256": "b5262a9e148bc10205d3ec81d8417ae23899012a1ddc0695a819ef2900a8f581",
+      "mame_version": "MAME v0.289 (unknown)",
+      "mame_sha256": "6d40df87963c58cdd3857d203e186af854fea49ae03b2ab555e30ef1029636d9",
+      "rom_archive_sha256": "e729202e6e2a6ba1ea3c9f271b6ef415d4175f419eaacdde8919d114c8470fcb",
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    },
+    {
+      "policy": "ppo",
+      "seed": 2,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2600,
+      "global_coverage": 2600,
+      "new_global_pcs": 0,
+      "progress_pixels": 67,
+      "deaths": 4,
+      "floors": [
+        1
+      ],
+      "seconds": 20.831709999998566,
+      "replay_sha256": "329350ec3afcb11b514024d1853eac92ca566eb488a16a30449c48eac2334abd",
+      "checkpoint_sha256": "089e673e91a740a30b90001625656db1d8f5bdcc216db0700deac687c88a2d47",
+      "states_sha256": "c3793acdcdabf655a939c1d32ff88d504b4ee2e4525966cf5967cd46894aa17c",
+      "mame_version": "MAME v0.289 (unknown)",
+      "mame_sha256": "6d40df87963c58cdd3857d203e186af854fea49ae03b2ab555e30ef1029636d9",
+      "rom_archive_sha256": "e729202e6e2a6ba1ea3c9f271b6ef415d4175f419eaacdde8919d114c8470fcb",
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    },
+    {
+      "policy": "ppo",
+      "seed": 3,
+      "frames": 3600,
+      "frame": 3600,
+      "coverage": 2621,
+      "global_coverage": 2621,
+      "new_global_pcs": 0,
+      "progress_pixels": 26,
+      "deaths": 4,
+      "floors": [
+        1
+      ],
+      "seconds": 21.589088208973408,
+      "replay_sha256": "2c6951a4d91da00f23d7a1d4e5feb0209cc5f98d1ec4407d20136eeabad56d1b",
+      "checkpoint_sha256": "089e673e91a740a30b90001625656db1d8f5bdcc216db0700deac687c88a2d47",
+      "states_sha256": "a8b4279eaef7db2acbd74d1a66e66104bfef8575c75b30acf028ea1b8a724daf",
+      "mame_version": "MAME v0.289 (unknown)",
+      "mame_sha256": "6d40df87963c58cdd3857d203e186af854fea49ae03b2ab555e30ef1029636d9",
+      "rom_archive_sha256": "e729202e6e2a6ba1ea3c9f271b6ef415d4175f419eaacdde8919d114c8470fcb",
+      "macos": "27.0.1",
+      "machine": "arm64",
+      "python": "3.13.16",
+      "versions": {
+        "torch": "2.8.0",
+        "stable-baselines3": "2.9.0",
+        "gymnasium": "1.2.3"
+      }
+    }
+  ],
+  "evaluation_pc_union": {
+    "random": 2639,
+    "ppo": 2641
+  },
+  "ppo_only_pcs": [
+    5304,
+    5305
+  ],
+  "random_only_pcs": [],
+  "training_pcs_absent_from_existing_coverage": [
+    5745,
+    5747
+  ],
+  "native_hatari": [
+    {
+      "recording": "build/kungfum/ppo/ppo_1.bin",
+      "recording_sha256": "eebec4d5c1bc7562ea3c06919764295751381538cfea1efe64b38d85686a0570",
+      "frames": 3600,
+      "checkpoint_stride": 12,
+      "checkpoints": 226,
+      "hatari_seconds": 12.071077458036598,
+      "comparison_seconds": 11.271546833973844,
+      "native_mame": {
+        "differing_checkpoints": 226,
+        "first_difference": {
+          "frame": 900,
+          "changes": [
+            {
+              "region": "ram",
+              "count": 19,
+              "first": [
+                {
+                  "address": "e010",
+                  "expected": 158,
+                  "actual": 122
+                },
+                {
+                  "address": "e011",
+                  "expected": 24,
+                  "actual": 229
+                },
+                {
+                  "address": "e012",
+                  "expected": 130,
+                  "actual": 194
+                },
+                {
+                  "address": "e013",
+                  "expected": 223,
+                  "actual": 80
+                },
+                {
+                  "address": "e014",
+                  "expected": 131,
+                  "actual": 132
+                },
+                {
+                  "address": "e015",
+                  "expected": 108,
+                  "actual": 243
+                },
+                {
+                  "address": "e016",
+                  "expected": 162,
+                  "actual": 149
+                },
+                {
+                  "address": "e017",
+                  "expected": 57,
+                  "actual": 206
+                },
+                {
+                  "address": "e084",
+                  "expected": 6,
+                  "actual": 3
+                },
+                {
+                  "address": "e705",
+                  "expected": 216,
+                  "actual": 211
+                },
+                {
+                  "address": "e880",
+                  "expected": 126,
+                  "actual": 125
+                },
+                {
+                  "address": "e882",
+                  "expected": 93,
+                  "actual": 88
+                }
+              ]
+            }
+          ],
+          "mame_pc": "5718",
+          "hatari_hook_pc": "5714"
+        },
+        "interpretation": "Native board timing and refresh-register RNG differ. MAME checkpoints also include the next-frame lives poke; Hatari checkpoints precede it. These differences alone do not establish a port bug."
+      },
+      "port_reference": {
+        "differing_checkpoints": 0,
+        "first_difference": null
+      },
+      "hatari_sha256": "b3279c6de6893a666e8e3c87b65eb4cf69f10f296a098b39272f7757731f1f7d",
+      "tos_sha256": "bcf89ce4e897c848f819b2227987ce754fa37994024d9f39a10ceb3bc91c999d",
+      "program_sha256": "0536a073d6a5c07ca475a96ee64a2d56f16adce9ac89fa2448b3da8d7682f895"
+    },
+    {
+      "recording": "build/kungfum/ppo/ppo_2.bin",
+      "recording_sha256": "329350ec3afcb11b514024d1853eac92ca566eb488a16a30449c48eac2334abd",
+      "frames": 3600,
+      "checkpoint_stride": 12,
+      "checkpoints": 226,
+      "hatari_seconds": 12.498172916995827,
+      "comparison_seconds": 11.671744833001867,
+      "native_mame": {
+        "differing_checkpoints": 226,
+        "first_difference": {
+          "frame": 900,
+          "changes": [
+            {
+              "region": "ram",
+              "count": 19,
+              "first": [
+                {
+                  "address": "e010",
+                  "expected": 158,
+                  "actual": 122
+                },
+                {
+                  "address": "e011",
+                  "expected": 24,
+                  "actual": 229
+                },
+                {
+                  "address": "e012",
+                  "expected": 130,
+                  "actual": 194
+                },
+                {
+                  "address": "e013",
+                  "expected": 223,
+                  "actual": 80
+                },
+                {
+                  "address": "e014",
+                  "expected": 131,
+                  "actual": 132
+                },
+                {
+                  "address": "e015",
+                  "expected": 108,
+                  "actual": 243
+                },
+                {
+                  "address": "e016",
+                  "expected": 162,
+                  "actual": 149
+                },
+                {
+                  "address": "e017",
+                  "expected": 57,
+                  "actual": 206
+                },
+                {
+                  "address": "e084",
+                  "expected": 6,
+                  "actual": 3
+                },
+                {
+                  "address": "e705",
+                  "expected": 216,
+                  "actual": 211
+                },
+                {
+                  "address": "e880",
+                  "expected": 126,
+                  "actual": 125
+                },
+                {
+                  "address": "e882",
+                  "expected": 93,
+                  "actual": 88
+                }
+              ]
+            }
+          ],
+          "mame_pc": "5718",
+          "hatari_hook_pc": "5714"
+        },
+        "interpretation": "Native board timing and refresh-register RNG differ. MAME checkpoints also include the next-frame lives poke; Hatari checkpoints precede it. These differences alone do not establish a port bug."
+      },
+      "port_reference": {
+        "differing_checkpoints": 0,
+        "first_difference": null
+      },
+      "hatari_sha256": "b3279c6de6893a666e8e3c87b65eb4cf69f10f296a098b39272f7757731f1f7d",
+      "tos_sha256": "bcf89ce4e897c848f819b2227987ce754fa37994024d9f39a10ceb3bc91c999d",
+      "program_sha256": "ba9c7533086eabeea09764a57fae4cf8e592bcd3de3f85bd8ba20c163aa58fce"
+    },
+    {
+      "recording": "build/kungfum/ppo/ppo_3.bin",
+      "recording_sha256": "2c6951a4d91da00f23d7a1d4e5feb0209cc5f98d1ec4407d20136eeabad56d1b",
+      "frames": 3600,
+      "checkpoint_stride": 12,
+      "checkpoints": 226,
+      "hatari_seconds": 12.911320000013802,
+      "comparison_seconds": 11.902387875015847,
+      "native_mame": {
+        "differing_checkpoints": 226,
+        "first_difference": {
+          "frame": 900,
+          "changes": [
+            {
+              "region": "ram",
+              "count": 19,
+              "first": [
+                {
+                  "address": "e010",
+                  "expected": 158,
+                  "actual": 122
+                },
+                {
+                  "address": "e011",
+                  "expected": 24,
+                  "actual": 229
+                },
+                {
+                  "address": "e012",
+                  "expected": 130,
+                  "actual": 194
+                },
+                {
+                  "address": "e013",
+                  "expected": 223,
+                  "actual": 80
+                },
+                {
+                  "address": "e014",
+                  "expected": 131,
+                  "actual": 132
+                },
+                {
+                  "address": "e015",
+                  "expected": 108,
+                  "actual": 243
+                },
+                {
+                  "address": "e016",
+                  "expected": 162,
+                  "actual": 149
+                },
+                {
+                  "address": "e017",
+                  "expected": 57,
+                  "actual": 206
+                },
+                {
+                  "address": "e084",
+                  "expected": 6,
+                  "actual": 3
+                },
+                {
+                  "address": "e705",
+                  "expected": 216,
+                  "actual": 211
+                },
+                {
+                  "address": "e880",
+                  "expected": 126,
+                  "actual": 125
+                },
+                {
+                  "address": "e882",
+                  "expected": 93,
+                  "actual": 88
+                }
+              ]
+            }
+          ],
+          "mame_pc": "5718",
+          "hatari_hook_pc": "5714"
+        },
+        "interpretation": "Native board timing and refresh-register RNG differ. MAME checkpoints also include the next-frame lives poke; Hatari checkpoints precede it. These differences alone do not establish a port bug."
+      },
+      "port_reference": {
+        "differing_checkpoints": 0,
+        "first_difference": null
+      },
+      "hatari_sha256": "b3279c6de6893a666e8e3c87b65eb4cf69f10f296a098b39272f7757731f1f7d",
+      "tos_sha256": "bcf89ce4e897c848f819b2227987ce754fa37994024d9f39a10ceb3bc91c999d",
+      "program_sha256": "76d9a3b277bfeca709b139fa6d5da2b495b82a0675759569ee14c10146d03a36"
+    }
+  ],
+  "simulator_validation": [
+    {
+      "seed": 1,
+      "returncode": 0,
+      "logic_frames": 3600,
+      "pictures": 300
+    },
+    {
+      "seed": 2,
+      "returncode": 0,
+      "logic_frames": 3600,
+      "pictures": 0
+    },
+    {
+      "seed": 3,
+      "returncode": 0,
+      "logic_frames": 3600,
+      "pictures": 0
+    }
+  ],
+  "native_mame_repeatability": "passed",
+  "contract_tests": 3
+}

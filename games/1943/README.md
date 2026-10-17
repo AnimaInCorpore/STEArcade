@@ -284,3 +284,7 @@ MCU states each against the translated firmware (the 256 bytes of RAM and SFRs, 
 pc), identical; `logic_test.py` 4000 frames matched.  `tools/perf_test.py 1400 1300`: the logic 57.1k -> 48.0k cycles a
 tick (the MCU 1.2k).
 
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo 1943 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

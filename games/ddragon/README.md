@@ -197,3 +197,7 @@ entries, the character cache 256, the sprites' row orders two a byte.
   routines now), and a picture costs as much as 3 frames of logic.
 * The flip screen (cocktail) is not modelled; play against MAME itself (not the reference board) not compared.
 * The music is the YM2151 reduced to three square-wave voices.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo ddragon test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

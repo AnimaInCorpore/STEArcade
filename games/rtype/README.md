@@ -73,3 +73,7 @@ demo ~105k, heavy invulnerable play 150-176k; the picture 0.7-1.7M (the renderer
 Memory: text 233 KB (the translation), data 1.2 MB (the renderer's graphics 836 KB, the ROM 256 KB, the snapshot, the
 dispatcher's tables), BSS 2.2 MB (the V30 image's RAM and video part 640 KB, the IP table 256 KB, the renderer's layer
 images, buffers and caches 1.17 MB).
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo rtype test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

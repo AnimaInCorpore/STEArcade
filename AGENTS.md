@@ -29,3 +29,13 @@ These rules apply to every game port and every sprite fallback path.
   performance reports.
 
 See `docs/architecture.md` and `docs/porting-guide.md` for the runtime contracts.
+
+# Gameplay exploration
+
+- Use the shared `port.py ppo <game> train|record|verify|test` workflow for new PPO exploration; see
+  `docs/ppo.md`. Add explicit per-game RAM/input profiles and test their native replay transport before use.
+- Preserve the count/SYSTEM/P1 replay contract, curated coverage scripts and canonical fixtures. A short PPO
+  integration test is not full-game coverage or lock-step reference/render equivalence.
+- Keep snapshots compressed and private emulator builds temporary. Retain small reports and usable checkpoints;
+  avoid downloading language-model weights for this workflow.
+- Galaga is deferred by user pending real 51xx/54xx MCU ROMs. Do not substitute blank MCU ROMs for gameplay.

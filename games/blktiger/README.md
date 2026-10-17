@@ -337,3 +337,7 @@ and palettes from the window unguarded (the image of another bank), and their st
 palette is now noted).  `--audit` names the instruction that made the access (the PC is past it when the access
 happens: the next instruction's label was named before) and adds to its file instead of replacing it.
 `BT_GUARD_ALL=1` (every indirect access guarded) showed the story right, which pointed at the sites.
+
+## Standard PPO exploration
+
+Use `venv/bin/python port.py ppo blktiger test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.

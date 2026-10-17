@@ -1,0 +1,328 @@
+{
+  "date": "2026-10-17",
+  "host": {
+    "chip": "Apple M1",
+    "physical_memory_bytes": 8589934592,
+    "macos": "27.0.1",
+    "kev_runtime_commit": "1f04cfa28e6a708485b28a9585010b9e436b776e"
+  },
+  "results": [
+    {
+      "policy": "search",
+      "search": {
+        "seed": 1,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 556,
+        "simulated_frames": 7572,
+        "rewinds": 11,
+        "accepted_deaths": 1,
+        "search_progress": 90,
+        "recording_seconds": 17.16087445896119
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 2188,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 88,
+        "deaths": 1,
+        "energy_lost": 63,
+        "max_stall_frames": 468,
+        "stalls_180_frames": 4,
+        "distinct_gameplay_pcs": 2124,
+        "visible_other_shapes": 91,
+        "final_state_sha256": "01cdbaeb4ecda4ad9e16a5b3a6ba04ed7cfefd2add5f1cc8108adba69cb4678a"
+      },
+      "replay_sha256": "ebd27b3a9c6fd0617ea23292ba2518bdba850e5bc86e65123a835f921642d7a7",
+      "parent_peak_rss_bytes": 46186496,
+      "generation_seconds_including_load": 17.16114745795494,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "c1c0f4f502529aa8bf9d0801db3bbd748ff1deaa24f5a40f6b1bc7a7d7ee8cd9",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": null
+    },
+    {
+      "policy": "kev",
+      "search": {
+        "seed": 1,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 432,
+        "simulated_frames": 6084,
+        "rewinds": 7,
+        "accepted_deaths": 0,
+        "search_progress": 131,
+        "recording_seconds": 212.5943845420261
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 2367,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 130,
+        "deaths": 0,
+        "energy_lost": 24,
+        "max_stall_frames": 905,
+        "stalls_180_frames": 2,
+        "distinct_gameplay_pcs": 2318,
+        "visible_other_shapes": 88,
+        "final_state_sha256": "f20ce9700c1c58944bb9846291ea80b4cedde3a82a780665061e05e1e3506a79"
+      },
+      "replay_sha256": "8b7e2a983f3709ea1cd1ec8d8c4459f183a6f559b375a7ca3a3b540ddcc113bd",
+      "parent_peak_rss_bytes": 38010880,
+      "generation_seconds_including_load": 225.58339866698952,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "2421b0e1ced27e5629e6d42801594c2917c1ae3de6fee37cee197d3eb28994b5",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": {
+        "model": "jaredpalmer/kev-0.6b@dece6dba8d43f0f7ded45e9f5b9df12474d90843",
+        "base": "Qwen/Qwen3-0.6B-Base",
+        "base_revision": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+        "weights_sha256": "deaab63b61f95d628503831e8b336e1c3e334b9a42d3530d979a5149b429c492",
+        "device": "mps",
+        "dtype": "torch.float16",
+        "backend": "torch",
+        "load_seconds": 10.375059999991208,
+        "versions": {
+          "torch": "2.8.0",
+          "transformers": "5.20.1",
+          "peft": "0.21.2",
+          "kev": "0.1.0"
+        },
+        "warmup_seconds": 0.4970691250055097,
+        "calls": 379,
+        "inference_seconds": 189.49452633509645,
+        "latency_median_seconds": 0.4913722919882275,
+        "latency_p95_seconds": 0.5614436669857241,
+        "peak_rss_bytes": 1115537408,
+        "peak_mps_driver_bytes": 1495138304
+      }
+    },
+    {
+      "policy": "kev",
+      "search": {
+        "seed": 2,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 783,
+        "simulated_frames": 10296,
+        "rewinds": 18,
+        "accepted_deaths": 3,
+        "search_progress": 94,
+        "recording_seconds": 407.3144011250115
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 1830,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 89,
+        "deaths": 3,
+        "energy_lost": 234,
+        "max_stall_frames": 344,
+        "stalls_180_frames": 4,
+        "distinct_gameplay_pcs": 2127,
+        "visible_other_shapes": 89,
+        "final_state_sha256": "24dd053e1d8f7b98af0e5aa8c9d3c221cab5735005a316766505432a3f9add9a"
+      },
+      "replay_sha256": "2017e1b9158ad5f4c167de78aa821ba1194f4abbc3b2a371c94921e23085a6eb",
+      "parent_peak_rss_bytes": 38027264,
+      "generation_seconds_including_load": 422.3307115830248,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "2421b0e1ced27e5629e6d42801594c2917c1ae3de6fee37cee197d3eb28994b5",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": {
+        "model": "jaredpalmer/kev-0.6b@dece6dba8d43f0f7ded45e9f5b9df12474d90843",
+        "base": "Qwen/Qwen3-0.6B-Base",
+        "base_revision": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+        "weights_sha256": "deaab63b61f95d628503831e8b336e1c3e334b9a42d3530d979a5149b429c492",
+        "head_sha256": "ce6cd9ffc54db41c179b65a33d60973dc8280c29e886218eb3ec07dc28d6f28b",
+        "device": "mps",
+        "dtype": "torch.float16",
+        "backend": "torch",
+        "load_seconds": 11.613906332990155,
+        "versions": {
+          "torch": "2.8.0",
+          "transformers": "5.20.1",
+          "peft": "0.21.2",
+          "kev": "0.1.0"
+        },
+        "warmup_seconds": 0.5003864170284942,
+        "calls": 626,
+        "inference_seconds": 352.60246865602676,
+        "latency_median_seconds": 0.5293869164888747,
+        "latency_p95_seconds": 0.7449587080045603,
+        "peak_rss_bytes": 1100857344,
+        "peak_mps_driver_bytes": 1501429760
+      }
+    },
+    {
+      "policy": "search",
+      "search": {
+        "seed": 2,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 556,
+        "simulated_frames": 7572,
+        "rewinds": 11,
+        "accepted_deaths": 1,
+        "search_progress": 57,
+        "recording_seconds": 19.058578958036378
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 2188,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 55,
+        "deaths": 1,
+        "energy_lost": 115,
+        "max_stall_frames": 459,
+        "stalls_180_frames": 5,
+        "distinct_gameplay_pcs": 2121,
+        "visible_other_shapes": 90,
+        "final_state_sha256": "367e8b0533cdc2fa1f62c8458f225c6cc3f8f459f14561a304a872be82aa9f6e"
+      },
+      "replay_sha256": "dc389440ab770eef2f1659f49cb3febaac857210ccc734fa4c501c6d2720c88d",
+      "parent_peak_rss_bytes": 52854784,
+      "generation_seconds_including_load": 19.058761499996763,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "2421b0e1ced27e5629e6d42801594c2917c1ae3de6fee37cee197d3eb28994b5",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": null
+    },
+    {
+      "policy": "search",
+      "search": {
+        "seed": 3,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 597,
+        "simulated_frames": 8064,
+        "rewinds": 12,
+        "accepted_deaths": 2,
+        "search_progress": 31,
+        "recording_seconds": 19.61168512504082
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 2009,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 28,
+        "deaths": 2,
+        "energy_lost": 163,
+        "max_stall_frames": 662,
+        "stalls_180_frames": 4,
+        "distinct_gameplay_pcs": 2130,
+        "visible_other_shapes": 93,
+        "final_state_sha256": "810ad04c64335362ff438c106b9d757faa356c776dad56fb762b91fa8566bf05"
+      },
+      "replay_sha256": "7d78dbaf0c20c61b72e0a7a112e4c372e00d162cebd737dc0b0a2bb35e11a3a6",
+      "parent_peak_rss_bytes": 43843584,
+      "generation_seconds_including_load": 19.611914291977882,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "2421b0e1ced27e5629e6d42801594c2917c1ae3de6fee37cee197d3eb28994b5",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": null
+    },
+    {
+      "policy": "kev",
+      "search": {
+        "seed": 3,
+        "ticks": 3600,
+        "segment_frames": 12,
+        "attempts": 597,
+        "simulated_frames": 8064,
+        "rewinds": 12,
+        "accepted_deaths": 2,
+        "search_progress": 107,
+        "recording_seconds": 322.8011646249797
+      },
+      "evaluation": {
+        "frames": 3600,
+        "play_frames": 2009,
+        "floors": [
+          1
+        ],
+        "progress_pixels": 104,
+        "deaths": 2,
+        "energy_lost": 188,
+        "max_stall_frames": 346,
+        "stalls_180_frames": 5,
+        "distinct_gameplay_pcs": 2102,
+        "visible_other_shapes": 96,
+        "final_state_sha256": "181f0d7140207772bb624c4d49040359af0c908ccc896143ed0e9beab4d60e84"
+      },
+      "replay_sha256": "48e2929a0aed858ab21d545faf1a212509dffe64a3e02bbadfbe8712b48e9bc8",
+      "parent_peak_rss_bytes": 37847040,
+      "generation_seconds_including_load": 336.98798054200597,
+      "source_sha256": {
+        "games/kungfum/tools/play_kev.py": "5f22d5d6c342e7ef81c7847c94b7d7409731d296b9545117d71a893729002de4",
+        "engine/playbot.py": "4f9d63ad6a53f0ae8cacb9ecdcedbeb2cb7b207450478e9ed32c0ca51f47a4fa",
+        "engine/kev_worker.py": "2421b0e1ced27e5629e6d42801594c2917c1ae3de6fee37cee197d3eb28994b5",
+        "engine/kev_policy.py": "f280c7592881186871ee472b7cb365ef448a8f0ff709b0945267e7e87d6b3c2e",
+        "games/kungfum/tools/play_search.py": "2a73100ee4fe69fe7d140f4130d02e3acc0576084ab882219c671bf11f9ddc2d"
+      },
+      "worker": {
+        "model": "jaredpalmer/kev-0.6b@dece6dba8d43f0f7ded45e9f5b9df12474d90843",
+        "base": "Qwen/Qwen3-0.6B-Base",
+        "base_revision": "da87bfb608c14b7cf20ba1ce41287e8de496c0cd",
+        "weights_sha256": "deaab63b61f95d628503831e8b336e1c3e334b9a42d3530d979a5149b429c492",
+        "head_sha256": "ce6cd9ffc54db41c179b65a33d60973dc8280c29e886218eb3ec07dc28d6f28b",
+        "device": "mps",
+        "dtype": "torch.float16",
+        "backend": "torch",
+        "load_seconds": 11.210554791032337,
+        "versions": {
+          "torch": "2.8.0",
+          "transformers": "5.20.1",
+          "peft": "0.21.2",
+          "kev": "0.1.0"
+        },
+        "warmup_seconds": 0.4992404580116272,
+        "calls": 487,
+        "inference_seconds": 273.354036489618,
+        "latency_median_seconds": 0.5456392909982242,
+        "latency_p95_seconds": 0.7172060000011697,
+        "peak_rss_bytes": 1125957632,
+        "peak_mps_driver_bytes": 1495138304
+      }
+    }
+  ],
+  "replay_validation": {
+    "recordings": 6,
+    "logic_frames_per_recording": 3600,
+    "renderer_stride": 12,
+    "pictures_per_recording": 300,
+    "differences": 0,
+    "consecutive_kev_smoke_logic_frames": 1800,
+    "consecutive_kev_smoke_pictures": 1800
+  }
+}

@@ -201,6 +201,11 @@ class Harness:
         w(self.sym["m72v_vdirty"], bytes(dirty))
         if prev is None or st["pal0"] != prev["pal0"] or st["pal1"] != prev["pal1"]:
             self.mem.w8(self.sym["m72v_pdirty"], 0xFF)
+            if prev is not None and "m72v_pdblk" in self.sym:    # (the blocks written, as the program marks them)
+                for n, key in enumerate(("pal0", "pal1")):
+                    for b in range(12):
+                        if st[key][256 * b:256 * b + 256] != prev[key][256 * b:256 * b + 256]:
+                            self.mem.w8(self.sym["m72v_pdblk"] + 12 * n + b, 0xFF)
         self.prev = st
 
     def frame(self):
