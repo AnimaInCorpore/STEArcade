@@ -66,6 +66,14 @@ class Unsupported(Exception):
     pass
 
 
+# The 68000 the code is for.  68030 (F030Arcade's Falcon ports: set before the Program is made) allows what the 68000
+# forbids and is cheaper there: 16 bit stack and memory operands at odd addresses as one word move (the 6809's byte
+# order is the 68000's), and the return point compares as branches taken only on a match.  On the 030 a translated
+# instruction's cost is mostly its fetch (the 256 byte cache holds little of a program: ~9 cycles a long missed), so
+# fewer bytes win over the 68000's cycle counts.
+CPU = int(os.environ.get("STE_XCPU", "68000"))      # (the env var: STEArcade's own tests of the 68030 forms)
+
+
 def base_mn(mn):
     """lbne -> bne, xlbra -> bra"""
     if mn.startswith("x"):
@@ -163,6 +171,7 @@ class Program:
                  dp=0, a3_slot=0, a4_slot=1, dp_sites=None, dynamic_stack=False, static_write=None, wrap_sites=(),
                  inline_calls=None, opcode_reader=None, indirect_slots=None):
         self.name, self.prefix = name, prefix
+        self.c030 = CPU >= 68020
         self.indirect_slots = dict(indirect_slots or {})
         self.opcode_reader = opcode_reader
         self.inline_calls = dict(inline_calls or {})
@@ -439,6 +448,7 @@ class Emitter:
         self.live_in = {}                       # (set by translate: the flags each instruction reads)
         self.lines = []
         self._a0 = None
+        self.ret_stubs = set()                  # (68030) targets whose `<label>_rf` stub restores the CCR (ret_match)
         self.tail = []                          # (data after the code: the jump tables)
         self.refs = set()
         self.uid = 0
@@ -619,9 +629,7 @@ class Emitter:
     def acc_add_d7(self, kind):
         """d7 (16 bit, upper word 0) += the accumulator offset (A and B signed)"""
         if kind == "acc_d":
-            self.e("move.b d0,-(sp)")
-            self.e("move.w (sp)+,d6")
-            self.e("move.b d1,d6")
+            self.d_compose("d6")
             self.e("add.w d6,d7")
         else:
             self.e("move.b %s,d6" % ("d0" if kind == "acc_a" else "d1"))
@@ -908,10 +916,13 @@ class Emitter:
             self.e("move.w d5,%s" % dst)
             return
         a = self.static_addr(ins)
-        if a is not None and not a & 1 and (a & 0x1FFF) != 0x1FFF:
+        if a is not None and (not a & 1 or self.p.c030) and (a & 0x1FFF) != 0x1FFF:
             self.e("move.w %s,%s" % (self.ea(v, ins), dst))
             return
         op0, op1 = self.byte_operands(v, ins)
+        if self.p.c030 and a is None:
+            self.e("move.w %s,%s" % (op0, dst))      # (op1 is op0 + 1: one word at any address)
+            return
         self.e("move.b %s,-(sp)" % op0)              # (a byte pushed on a7 is the high byte of a word)
         self.e("move.w (sp)+,d6")
         self.e("move.b %s,d6" % op1)
@@ -987,10 +998,13 @@ class Emitter:
             self.e("tst.w (sp)+")
             return
         a = self.static_addr(ins)
-        if a is not None and not a & 1 and (a & 0x1FFF) != 0x1FFF:
+        if a is not None and (not a & 1 or self.p.c030) and (a & 0x1FFF) != 0x1FFF:
             self.e("move.w %s,%s" % (src, self.ea(v, ins)))
             return
         op0, op1 = self.byte_operands(v, ins)
+        if self.p.c030 and a is None:
+            self.e("move.w %s,%s" % (src, op0))
+            return
         self.e("move.b %s,%s" % (src, op1))
         self.e("move.w %s,-(sp)" % src)
         self.e("move.b (sp)+,%s" % op0)
@@ -1010,7 +1024,24 @@ class Emitter:
         live = self.live_out.get(v, NZVC) & NZVC
         d, u = defs_uses(self.code[v])
         keep = live & ~d & ~ok                  # unchanged by the 6809, spoiled by the 68000 code
-        if keep:
+        if keep and self.p.c030:
+            self.stats["wrapped"] += 1
+            at = len(self.lines)
+            body()
+            free = self.d7_free(at)
+            self.lines.insert(at, "\tmove.w sr,%s" % ("d7" if free else "-(sp)"))     # old
+            self.e("move.w sr,d6")              # new
+            if not free:
+                self.e("move.w (sp)+,d7")
+            if not keep & (N | Z) and self.clears_vc(self.lines[-2]):
+                self.e("and.b #%d,d7" % keep)   # (the body's last op cleared V and C: the kept ones or'ed in)
+                self.e("or.b d7,d6")
+            else:
+                self.e("eor.b d6,d7")
+                self.e("and.b #%d,d7" % keep)
+                self.e("eor.b d7,d6")
+            self.e("move.w d6,ccr")
+        elif keep:
             self.stats["wrapped"] += 1
             self.e("move.w sr,-(sp)")
             body()
@@ -1031,13 +1062,46 @@ class Emitter:
     def preserve_all(self, v, body):
         """body() spoils every flag and the 6809 instruction keeps them all"""
         live = self.live_out.get(v, NZVC) & NZVC
-        if live:
+        if live and self.p.c030:
+            self.stats["wrapped"] += 1
+            at = len(self.lines)
+            body()
+            if self.d7_free(at):
+                self.lines.insert(at, "\tmove.w sr,d7")
+                self.e("move.w d7,ccr")
+            else:
+                self.lines.insert(at, "\tmove.w sr,-(sp)")
+                self.e("move.w (sp)+,ccr")
+        elif live:
             self.stats["wrapped"] += 1
             self.e("move.w sr,-(sp)")
             body()
             self.e("move.w (sp)+,ccr")
         else:
             body()
+
+    def d7_free(self, at):
+        """(68030 wrappers) the lines from `at` on neither read nor write d7 and are straight code: the SR saved before
+        them can stay in d7 (no stack round trip)"""
+        for line in self.lines[at:]:
+            if not line.startswith("\t") or "d7" in line:
+                return False
+            op = line[1:].split(" ")[0]
+            if op[:1] in ("b", "j", "d") and not op.startswith(("btst", "bset", "bclr", "bchg")):
+                return False
+        return True
+
+    @staticmethod
+    def clears_vc(line):
+        """the 68000 line leaves V and C clear (a move, logical op, tst, clr, not, ext to a data register or memory)"""
+        if not line.startswith("\t"):
+            return False
+        op, _, args = line[1:].partition(" ")
+        base = op.split(".")[0]
+        dst = args.rsplit(",", 1)[-1].strip().lower() if args else ""
+        if base in ("move", "and", "andi", "or", "ori", "eor", "eori"):
+            return dst not in ("ccr", "sr", "sp") and not (len(dst) == 2 and dst[0] == "a" and dst[1].isdigit())
+        return base in ("moveq", "tst", "clr", "not", "ext")
 
     # ---- emission ------------------------------------------------------------
     def emit_all(self):
@@ -1141,8 +1205,11 @@ class Emitter:
             if fl == "icall":
                 self.jump_table(v, ins, ret)
                 self.ea_to_d7(v, ins)
-            self.e("move.b #$%02X,-(a5)" % (ret & 0xFF))
-            self.e("move.b #$%02X,-(a5)" % (ret >> 8))
+            if self.p.c030:
+                self.e("move.w #$%04X,-(a5)" % ret)
+            else:
+                self.e("move.b #$%02X,-(a5)" % (ret & 0xFF))
+                self.e("move.b #$%02X,-(a5)" % (ret >> 8))
             if fl == "icall":
                 self.dispatch(v, saved=True)
             else:
@@ -1390,12 +1457,17 @@ class Emitter:
         live = self.live_out.get(v, NZVC) & NZVC
         if live:
             self.e("move.w sr,d5")
-        self.e("move.b (a5)+,-(sp)")
-        self.e("move.w (sp)+,d7")
-        self.e("move.b (a5)+,d7")
+        if self.p.c030:
+            self.e("move.w (a5)+,d7")
+        else:
+            self.e("move.b (a5)+,-(sp)")
+            self.e("move.w (sp)+,d7")
+            self.e("move.b (a5)+,d7")
         cands = sorted(self.ret_cands(v))
         for t in cands:
             pc = self.p.cpu_pc(t)
+            if self.ret_match(t, pc, live):
+                continue
             skip = self.new_label()
             self.e("cmp.w #$%04X,d7" % pc)
             self.e("bne.s %s" % skip)
@@ -1409,6 +1481,41 @@ class Emitter:
         if live:
             self.e("move.w d5,ccr")
         self.dispatch_jump(live)
+
+    def ret_match(self, t, pc, saved):
+        """(68030) d7 = pc goes to t by a branch taken only on the match: a mismatch costs a compare and a branch not
+        taken, where the 68000 form branches round the transfer.  saved: the transfer restores the CCR from d5 first,
+        in a stub right before t's code (ret_stubs).  False: not for this target (the slot has other pages)."""
+        if not self.p.c030 or not self.fixed_slot(pc >> 13):
+            return False
+        self.e("cmp.w #$%04X,d7" % pc)
+        if saved:
+            self.ret_stubs.add(t)
+            self.e("beq %s_rf" % self.lab(t))
+        else:
+            self.e("beq %s" % self.lab(t))
+        return True
+
+    def place_ret_stubs(self):
+        """the stubs of ret_match: `<label>_rf: move.w d5,ccr` right before the label where the code before never falls
+        through (a JSR's transfer), else after the code with a branch"""
+        at = {}
+        for i, line in enumerate(self.lines):
+            if not line.startswith("\t") and ":" in line:
+                at[line.split(":", 1)[0]] = i
+        tail = []
+        inserts = []
+        for t in sorted(self.ret_stubs):
+            name = self.p.label(t)
+            i = at.get(name)
+            prev = self.lines[i - 1].strip() if i else ""
+            if i is not None and prev.split(" ")[0] in ("bra", "jmp"):
+                inserts.append((i, ["%s_rf:" % name, "\tmove.w d5,ccr"]))
+            else:
+                tail += ["%s_rf:" % name, "\tmove.w d5,ccr", "\tbra %s" % name]
+        for i, ls in sorted(inserts, reverse=True):
+            self.lines[i:i] = ls
+        self.lines += tail
 
     def fixed_slot(self, slot):
         """a slot from which only one code page runs (Program.fixed_slots; default slot 7, the vectors): code that
@@ -1426,15 +1533,21 @@ class Emitter:
         self.e("move.b (a5)+,d1")
         self.e("addq.l #1,a5")                          # DP (the program's constant)
         for r in ("d2", "d3", "d4"):
+            if self.p.c030:
+                self.e("move.w (a5)+,%s" % r)
+                continue
             self.e("move.b (a5)+,d6")
             self.e("lsl.w #8,d6")
             self.e("move.b (a5)+,d6")
             self.e("move.w d6,%s" % r)
         self.lines.append(skip + ":")
         self.e("moveq #0,d7")
-        self.e("move.b (a5)+,d7")
-        self.e("lsl.w #8,d7")
-        self.e("move.b (a5)+,d7")
+        if self.p.c030:
+            self.e("move.w (a5)+,d7")
+        else:
+            self.e("move.b (a5)+,d7")
+            self.e("lsl.w #8,d7")
+            self.e("move.b (a5)+,d7")
         self.e("and.w #$0F,d5")
         self.e("move.w d5,ccr")
         self.e("jmp %s_dispatch" % self.p.name)
@@ -1459,7 +1572,9 @@ class Emitter:
         for bit, r in self.STACK_REGS:
             if not mask & bit:
                 continue
-            if r == "pc":
+            if r == "pc" and self.p.c030:
+                self.e("move.w #$%04X,-(%s)" % (ret, sp))
+            elif r == "pc":
                 self.e("move.b #$%02X,-(%s)" % (ret & 0xFF, sp))
                 self.e("move.b #$%02X,-(%s)" % (ret >> 8, sp))
             elif r in ("x", "y", "us"):
@@ -1471,6 +1586,9 @@ class Emitter:
                         src = "d4"
                 else:
                     src = REG16[r]
+                if self.p.c030:
+                    self.e("move.w %s,-(%s)" % (src, sp))
+                    continue
                 self.e("move.b %s,-(%s)" % (src, sp))
                 self.e("move.w %s,-(sp)" % src)         # (the high byte through the stack: no shift)
                 self.e("move.b (sp)+,-(%s)" % sp)
@@ -1521,15 +1639,23 @@ class Emitter:
             elif r in ("x", "y", "us"):
                 if r == "us" and user:
                     new_s = True
+                    if self.p.c030:
+                        self.e("move.w (%s)+,-(sp)" % sp)
+                        continue
                     self.e("move.b (%s)+,d6" % sp)
                     self.e("lsl.w #8,d6")
                     self.e("move.b (%s)+,d6" % sp)
                     self.e("move.w d6,-(sp)")
                 else:
                     dr = "d4" if r == "us" else REG16[r]     # (the high byte through the stack: no shift)
+                    if self.p.c030:
+                        self.e("move.w (%s)+,%s" % (sp, dr))
+                        continue
                     self.e("move.b (%s)+,-(sp)" % sp)
                     self.e("move.w (sp)+,%s" % dr)
                     self.e("move.b (%s)+,%s" % (sp, dr))
+            elif r == "pc" and self.p.c030:
+                self.e("move.w (%s)+,d7" % sp)
             elif r == "pc":
                 self.e("move.b (%s)+,-(sp)" % sp)
                 self.e("move.w (sp)+,d7")
@@ -1554,6 +1680,8 @@ class Emitter:
                 self.e("move.w sr,d5")
             for t in cands:
                 pc = self.p.cpu_pc(t)
+                if self.ret_match(t, pc, keep):
+                    continue
                 skip = self.new_label()
                 self.e("cmp.w #$%04X,d7" % pc)
                 self.e("bne.s %s" % skip)
@@ -1675,9 +1803,7 @@ class Emitter:
                 self.e("move.b %s,d0" % op0)
                 self.e("move.b %s,d1" % op1)
                 if live:
-                    self.e("move.b d0,-(sp)")
-                    self.e("move.w (sp)+,d6")
-                    self.e("move.b d1,d6")
+                    self.d_compose("d6")
                     self.e("tst.w d6")
             self.wrap(v, N | Z | V, b)
             return
@@ -1705,9 +1831,7 @@ class Emitter:
                 self.e("move.b d0,%s" % op0)
                 self.e("move.b d1,%s" % op1)
                 if live:
-                    self.e("move.b d0,-(sp)")
-                    self.e("move.w (sp)+,d6")
-                    self.e("move.b d1,d6")
+                    self.d_compose("d6")
                     self.e("tst.w d6")
             self.wrap(v, N | Z | V, b)
             return
@@ -1862,8 +1986,16 @@ class Emitter:
         return 0xF200 <= a < 0xF400
 
     def d_to(self, reg):
-        self.e("move.b d0,-(sp)")
-        self.e("move.w (sp)+,%s" % reg)
+        self.d_compose(reg)
+
+    def d_compose(self, reg):
+        """reg.w = D (A high, B low; the flags those of move.b d1: N Z of B, V C clear)"""
+        if self.p.c030:
+            self.e("move.b d0,%s" % reg)          # (no memory: the 030 shifts in 4 cycles, a stack round trip costs two
+            self.e("lsl.w #8,%s" % reg)           # data accesses on the bus)
+        else:
+            self.e("move.b d0,-(sp)")
+            self.e("move.w (sp)+,%s" % reg)
         self.e("move.b d1,%s" % reg)
 
     def set_const_flags(self, v, mask, value):
@@ -2017,9 +2149,7 @@ class Emitter:
 
             def b():
                 if x.kind == "acc_d":
-                    self.e("move.b d0,-(sp)")
-                    self.e("move.w (sp)+,d6")
-                    self.e("move.b d1,d6")
+                    self.d_compose("d6")
                 else:
                     self.e("move.b %s,d6" % ("d0" if x.kind == "acc_a" else "d1"))
                     self.e("ext.w d6")
@@ -2155,6 +2285,7 @@ def translate(prog):
     # direct returns: up to four return points compared, else the dispatcher
     em.ret_points = {k: set(sorted(v)[:4]) for k, v in rets.items()}
     em.emit_all()
+    em.place_ret_stubs()
     missing = sorted(v for v in em.refs if v not in code)
     lines = list(em.lines) + em.tail
     lines.append("; --- referenced but not code")

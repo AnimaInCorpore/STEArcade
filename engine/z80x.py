@@ -75,8 +75,12 @@ class Config:
                  block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
                  table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
-                 alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0):
+                 alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0, cpu030=None):
         self.prefix = prefix
+        # the 68030 forms (F030Arcade's Falcon ports; default: the STE_XCPU environment variable, the tests): the high
+        # byte of a pair moved with shifts in registers, not through the 68000 stack.  The 68000 pays 6 + 2n cycles a
+        # shift, the 030 shifts in a few and pays for every bus access (the stack is ST-RAM on the Falcon).
+        self.cpu030 = int(os.environ.get("STE_XCPU", "68000")) >= 68020 if cpu030 is None else cpu030
         self.inline_leaves = inline_leaves  # calls of leaf functions of up to this many instructions emitted in place
         self.alt_af = alt_af            # "a3" | "upper" (see the module docs)
         self.alt_regs = alt_regs        # "areg" | "upper"
@@ -624,6 +628,8 @@ class Emitter:
                 return [], "d0"
             if n in HALF:
                 reg, hi = self.half(n)
+                if hi and self.cfg.cpu030:
+                    return ["move.w %s,d7" % reg, "lsr.w #8,d7"], "d7"
                 if hi:
                     # the high byte through the 68000 stack: the word pushed, its first byte popped (a byte
                     # move on a7 steps by 2): 16 cycles instead of 26 for move.w / lsr.w #8.  The ea must be
@@ -680,6 +686,11 @@ class Emitter:
             if src_ea == "(a7)+":
                 out.append("move.b (a7)+,d7")
                 src_ea = "d7"
+            if self.cfg.cpu030:
+                if reg in src_ea:               # (ld h,l / ld h,(hl): the source read before the pair turns)
+                    out.append("move.b %s,d7" % src_ea)
+                    src_ea = "d7"
+                return out + ["ror.w #8,%s" % reg, "move.b %s,%s" % (src_ea, reg), "ror.w #8,%s" % reg]
             # through the 68000 stack: 24 cycles from a register instead of 38 (lsl.w #8 / andi / or)
             out += ["move.w %s,-(a7)" % reg, "move.b %s,(a7)" % src_ea, "move.w (a7)+,%s" % reg]
             return out
@@ -1181,9 +1192,14 @@ class Emitter:
                     if not self.lo & (S | Z | H | N):
                         self.e("%s.w #$0100,%s" % ("add" if isinc else "sub", reg))     # (no flags wanted)
                         return
-                    self.e("move.w %s,-(a7)" % reg)       # on the 68000 stack: the byte is its first
-                    post = ["move.w (a7)+,%s" % reg]
-                    ea = "(a7)"
+                    if self.cfg.cpu030:
+                        self.e("ror.w #8,%s" % reg)       # (the 030: turned in the register)
+                        post = ["ror.w #8,%s" % reg]
+                        ea = reg
+                    else:
+                        self.e("move.w %s,-(a7)" % reg)   # on the 68000 stack: the byte is its first
+                        post = ["move.w (a7)+,%s" % reg]
+                        ea = "(a7)"
                 else:
                     ea = reg
             else:

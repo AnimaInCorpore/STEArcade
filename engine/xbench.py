@@ -199,7 +199,7 @@ class Case:
             self.binary, self.sym = assemble("\n".join(src))
         except RuntimeError as e:
             raise RuntimeError("assembly failed for %s\n%s\n%s" % ([i.text for i in code.values()], "\n".join(em.lines), e))
-        self.m = Machine(CPUType.M68000, 2048)
+        self.m = Machine(CPUType.M68030 if int(os.environ.get("STE_XCPU", "68000")) >= 68020 else CPUType.M68000, 2048)
         self.cpu, self.mem = self.m.cpu, self.m.mem
         self.mem.w_block(CODE, self.binary)
         self.mem.w_block(TABLE, self.sym["Zdisp"].to_bytes(4, "big") * 65536)

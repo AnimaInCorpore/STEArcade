@@ -223,7 +223,7 @@ def run_batch(args, rng, batch):
         raise SystemExit("vasm failed (%s)" % tmp)
     binary = (tmp / "t.bin").read_bytes()
     from machine68k import CPUType, Machine, Register as R
-    mach = Machine(CPUType.M68000, 2048)
+    mach = Machine(CPUType.M68030 if m6809x.CPU >= 68020 else CPUType.M68000, 2048)
     mem68, cpu68 = mach.mem, mach.cpu
     mem68.w_block(ORG, binary)
     stopper = ORG + binary.index(bytes.fromhex("4e7160fc"))   # nop; bra stopper
@@ -350,7 +350,10 @@ if __name__ == "__main__":
     ap.add_argument("--dp", type=lambda x: int(x, 0), default=0, help="the program's DP (e.g. 0x40: Galaga '88; a3 then "
                     "caches DP's slot, the stack's)")
     ap.add_argument("--dynamic-stack", action="store_true", help="the stack's slot from the context (Galaga '88)")
+    ap.add_argument("--cpu030", action="store_true", help="the 68030 forms (m6809x.CPU, F030Arcade), run on a 68030")
     args = ap.parse_args()
+    if args.cpu030:
+        m6809x.CPU = 68030
     DP = args.dp
     DYN = args.dynamic_stack
     sys.exit(1 if run(args) else 0)

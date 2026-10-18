@@ -183,6 +183,16 @@ knowledge (the meet over its callers) hold at every call; only the final emissio
 calls.  The return address the Z80 would leave below SP is not written (dead).  `ret_cands` leaves out the inlined
 calls' return points.  Off by default (0); Bubble Bobble uses 16: its main CPU 92.5k -> ~83.5k cycles a game frame.
 
+### The 68030 forms (`Config(cpu030=True)`, F030Arcade)
+
+The emitter's idioms are chosen by 68000 cycle counts (a pair's high byte through the 68000 stack: 16 cycles against 26
+for `lsr.w #8`).  The Falcon ports of F030Arcade run the same translation on a 68030 from ST-RAM, where the program is far
+larger than the 256-byte instruction cache, shifts cost a few cycles and every stack round trip two bus accesses:
+`cpu030=True` (default: the `STE_XCPU` environment variable, 68000) reads a high byte as `move.w rr,d7` / `lsr.w #8,d7`,
+writes it with `ror.w #8` around a byte move and turns `inc`/`dec` of one in the register.  The STE ports' output is
+unchanged.  Check it on a 68030: `STE_XCPU=68030 python engine/xbench.py` (Musashi's 68030; the `long` layouts' two
+`inc`/`dec (iy+d)` failures are older than this switch and show on a 68000 too).
+
 ### Tests and measurements of the translator
 
 * `engine/xbench.py`: every Z80 opcode (operand bytes random) and random straight-line sequences with forward jumps
@@ -493,8 +503,17 @@ a2 = PB[7], each kept by the runtime when its slot changes.
   `LDX #table` uses a 68000 table of the entries when they are code in a fixed slot or in the same page.
 * **Natives** replace a pc with a hand-written routine; the translation stays under `<label>_t` (fallback, tests).
 
+**68030 forms** (`m6809x.CPU = 68030`, default the `STE_XCPU` environment variable: F030Arcade's Falcon ports): the
+68030 reads and writes words at odd addresses, so the return address JSR pushes, PSHS/PULS/RTI of X Y U PC and the indexed
+16-bit operands are one word move each (the 6809's byte order is the 68000's), D is composed with `lsl.w #8` instead of
+the stack, RTS / PULS PC compare a return point and branch only on the match (`ret_match`; when the flags are read
+there a stub `<label>_rf: move.w d5,ccr` before the return point restores them, `place_ret_stubs`), and the
+flag-keeping wrapper keeps the SR in d7 when the body leaves d7 alone (an OR instead of the merge when only V / C are kept
+and the body's last instruction cleared them).  Double Dragon on the Falcon: 6.76 -> 5.75 ms an arcade frame.  Tested by
+`m6809x_test.py --cpu030` and the games' `logic_test.py` with `STE_XCPU=68030` (Musashi's 68030; `sim.py` follows it).
+
 Tests: `engine/m6809x_test.py` (every documented instruction in every mode, random states, against `engine/m6809.py` on
-Musashi; batches of 8 KB pages), the games' `logic_test.py` (frame by frame against the reference's port schedule, with
+Musashi; batches of 8 KB pages; `--cpu030`: the 68030 forms on a 68030), the games' `logic_test.py` (frame by frame against the reference's port schedule, with
 `--steplock F`: instruction by instruction inside a frame) and `profile.py` (68000 cycles per 6809 instruction).
 
 ## The V30 translator (`engine/v30x.py`, R-Type 2026-10-13)

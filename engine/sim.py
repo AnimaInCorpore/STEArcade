@@ -188,7 +188,8 @@ def blit_stats(sim, mapfile=None, limit=512):
 class Sim:
     def __init__(self, prg, ram_kib=4096, run_dir=RUN):
         self.run_dir = Path(run_dir)
-        self.m = Machine(CPUType.M68000, ram_kib)
+        # (STE_XCPU=68030: the translators' 68030 forms, F030Arcade's, on a 68030)
+        self.m = Machine(CPUType.M68030 if int(os.environ.get("STE_XCPU", "68000")) >= 68020 else CPUType.M68000, ram_kib)
         self.io_ram = ram_kib >= 16384        # RAM up to $ffffff: the hardware registers are readable memory
         self.cpu, self.mem = self.m.cpu, self.m.mem
         self.io = bytearray(0x8000)           # $ff8000..$ffffff
