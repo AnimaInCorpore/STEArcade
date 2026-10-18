@@ -172,6 +172,11 @@ class Program:
                  inline_calls=None, opcode_reader=None, indirect_slots=None):
         self.name, self.prefix = name, prefix
         self.c030 = CPU >= 68020
+        # (68030 forms, set after construction like fixed_slots)
+        self.ret_weights = None   # {virtual return point: how often it was returned to} (a profile): the order of the
+                                  # RTS / PULS PC compares, the most frequent first, and which ones (RET_WEIGHTED)
+        self.slot_ctx = None      # (page, slot) -> the context address (an expression) whose slot holds that page for
+                                  # good, or None: the page check compares a6 with it instead of reading PID
         self.indirect_slots = dict(indirect_slots or {})
         self.opcode_reader = opcode_reader
         self.inline_calls = dict(inline_calls or {})
@@ -1394,7 +1399,10 @@ class Emitter:
 
     def page_cmp(self, page, slot):
         """the CCR's Z = the slot holds the page (its page number when the runtime keeps them: cheaper than PB)"""
-        if self.p.pid_checks:
+        ctx = self.p.slot_ctx(page, slot) if self.p.c030 and self.p.slot_ctx else None
+        if ctx is not None:
+            self.e("cmpa.l #%s,a6" % ctx)        # (a6 is that context: no load of the PID word)
+        elif self.p.pid_checks:
             self.e("cmp.w #$%X,%d(a6)" % (page, PID_OFF + 2 * slot))
         else:
             self.e("cmp.l #%s,%d(a6)" % (self.p.page_addr(page), 4 * slot))
@@ -1449,7 +1457,7 @@ class Emitter:
 
     def ret_cands(self, v):
         """return points of the functions whose code reaches the RTS at v (a guess, checked at run time)"""
-        return self.ret_points.get(v, set())
+        return self.ret_points.get(v, [])
 
     def emit_ret(self, v):
         """pop the return address; its callers' return points directly, else the dispatcher.  The flags pass: the
@@ -1463,7 +1471,7 @@ class Emitter:
             self.e("move.b (a5)+,-(sp)")
             self.e("move.w (sp)+,d7")
             self.e("move.b (a5)+,d7")
-        cands = sorted(self.ret_cands(v))
+        cands = self.ret_cands(v)
         for t in cands:
             pc = self.p.cpu_pc(t)
             if self.ret_match(t, pc, live):
@@ -1674,7 +1682,7 @@ class Emitter:
             if user:
                 raise Unsupported("PULU PC")
             # a return: the callers' return points, else dispatch (the flags as pulled / as they were)
-            cands = sorted(self.ret_cands(v))
+            cands = self.ret_cands(v)
             keep = bool(self.live_flags(v) or not self.p.nf_dispatch)
             if cands and keep:
                 self.e("move.w sr,d5")
@@ -2275,6 +2283,21 @@ class Emitter:
             self.e("move.w %s,%s" % (src, REG16[r]))
 
 
+RET_CANDS = 4          # return points compared at an RTS (by address), the rest through the dispatcher
+RET_WEIGHTED = 6       # with Program.ret_weights: up to this many, those returned to most first
+
+
+def ret_order(prog, points):
+    """the return points an RTS compares, in order: by address; with a profile (ret_weights, 68030 forms) the ones
+    returned to most first, up to RET_WEIGHTED of those seen, filled up to RET_CANDS by address"""
+    w = prog.ret_weights if prog.c030 else None
+    if not w:
+        return sorted(points)[:RET_CANDS]
+    seen = sorted((p for p in points if w.get(p)), key=lambda p: (-w[p], p))[:RET_WEIGHTED]
+    rest = sorted(p for p in points if p not in seen)
+    return seen + rest[:max(0, RET_CANDS - len(seen))]
+
+
 def translate(prog):
     """-> (asm lines, report dict, emitter)"""
     code, joins = discover(prog)
@@ -2283,7 +2306,7 @@ def translate(prog):
     em = Emitter(prog, code, joins, live_out)
     em.live_in = live_in
     # direct returns: up to four return points compared, else the dispatcher
-    em.ret_points = {k: set(sorted(v)[:4]) for k, v in rets.items()}
+    em.ret_points = {k: ret_order(prog, v) for k, v in rets.items()}
     em.emit_all()
     em.place_ret_stubs()
     missing = sorted(v for v in em.refs if v not in code)

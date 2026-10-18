@@ -75,6 +75,19 @@ def selectors_asm():
     return "\n".join(out) + "\n"
 
 
+# (F030Arcade, 68030 forms: {virtual return point: returns to it} from a profile, m6809x.ret_order)
+RET_WEIGHTS = None
+
+
+def bank_ctx(page, slot):
+    """m6809x Program.slot_ctx: context k (ctx_banks + k * CTX_STRIDE, src/core.s) holds pages 8 + 2k and 9 + 2k in
+    slots 2 and 3 for good (init_context's bank_set, nothing changes them after), and main_bank_w makes a6 the context
+    of the bank selected: a6 == that context <=> the slot holds the page"""
+    if slot in (2, 3) and page >= 8 and (page - 8) % 2 == slot - 2:
+        return "ctx_banks+%d" % ((page - 8) // 2 * 256)
+    return None
+
+
 STATIC_WRITE = {0x3808: "main_bank_w"}          # the bank register: straight to its routine
 AREAS = {"pal": "pal_written", "fg": "fg_written", "spr": "spr_written", "bg": "bg_written"}
 
@@ -197,6 +210,8 @@ def program(cover):
                           inline_calls={v: ("sel_%04X" % v, 0) for v in SELECTORS},
                           dp_sites={v: next(iter(s)) for v, s in dps.items()}, wrap_sites=wraps, pid_checks=True, dp=0, a3_slot=0, a4_slot=1)
     prog.fixed_slots = (4, 5, 6, 7)
+    prog.slot_ctx = bank_ctx
+    prog.ret_weights = RET_WEIGHTS
     return prog
 
 

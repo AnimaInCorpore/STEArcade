@@ -509,7 +509,11 @@ a2 = PB[7], each kept by the runtime when its slot changes.
 the stack, RTS / PULS PC compare a return point and branch only on the match (`ret_match`; when the flags are read
 there a stub `<label>_rf: move.w d5,ccr` before the return point restores them, `place_ret_stubs`), and the
 flag-keeping wrapper keeps the SR in d7 when the body leaves d7 alone (an OR instead of the merge when only V / C are kept
-and the body's last instruction cleared them).  Double Dragon on the Falcon: 6.76 -> 5.75 ms an arcade frame.  Tested by
+and the body's last instruction cleared them).  Two more, set on the Program after construction: `ret_weights` ({return
+point: returns to it}, a profile of the port's play: `ret_order` compares up to `RET_WEIGHTED` seen ones, the most
+frequent first, instead of the first `RET_CANDS` by address) and `slot_ctx` ((page, slot) -> the address of a context
+that holds that page there for good: the page check is `cmpa.l #ctx,a6`, no read of PID; Double Dragon's `gen.bank_ctx`,
+its port sets `gen.RET_WEIGHTS`).  Double Dragon on the Falcon: 6.76 -> 5.62 ms an arcade frame.  Tested by
 `m6809x_test.py --cpu030` and the games' `logic_test.py` with `STE_XCPU=68030` (Musashi's 68030; `sim.py` follows it).
 
 Tests: `engine/m6809x_test.py` (every documented instruction in every mode, random states, against `engine/m6809.py` on
