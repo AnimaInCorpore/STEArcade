@@ -39,3 +39,6 @@ See `docs/architecture.md` and `docs/porting-guide.md` for the runtime contracts
 - Keep snapshots compressed and private emulator builds temporary. Retain small reports and usable checkpoints;
   avoid downloading language-model weights for this workflow.
 - Galaga is deferred by user pending real 51xx/54xx MCU ROMs. Do not substitute blank MCU ROMs for gameplay.
+- Before a new PPO profile or a longer search recording, consider Go-Explore (`docs/go-explore.md`): a cell
+  archive over `playbot.py`'s snapshot/restore and segments reaches side paths and deep states that PPO and the
+  forward-only progress search miss.

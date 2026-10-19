@@ -7,6 +7,8 @@ available. Unregistered work-in-progress boards are not silently treated as fini
 Keep the curated `port.py cover` runs, scripted stage/boss/ending tests and existing search recordings. A short
 PPO campaign does not replace their coverage. The Kung-Fu Master pilot passed independent port-reference and
 picture checks, but its three short evaluations improved logical PC coverage by only 0.55% and stayed on floor 1.
+For deeper coverage, [go-explore.md](go-explore.md) describes the recommended next step: an archive of game-state
+cells with return-by-restore over `engine/playbot.py`'s snapshots.
 
 ## Commands
 
