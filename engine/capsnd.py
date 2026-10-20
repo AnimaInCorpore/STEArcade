@@ -267,7 +267,11 @@ def _fx_job(a):
 def pool_map(f, args):
     """f over args in processes (the recordings are independent; the Z80 in Python is slow)"""
     import multiprocessing
-    with multiprocessing.get_context("fork").Pool(min(len(args), os.cpu_count() or 4) or 1) as p:
+    # Windows has no fork; spawned workers import numpy independently. Bound
+    # their count so a fresh asset build does not exhaust committed memory.
+    workers = int(os.environ.get("CAPSND_WORKERS", "4")) if os.name == "nt" else os.cpu_count() or 4
+    workers = max(1, min(len(args), workers))
+    with multiprocessing.get_context("spawn" if os.name == "nt" else "fork").Pool(workers) as p:
         return p.map(f, args, chunksize=1)
 
 
