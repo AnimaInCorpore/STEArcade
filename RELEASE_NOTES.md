@@ -13,6 +13,9 @@ certify natural complete playability.
   types reached difficulty 6 and wrapped the repeating board sequence. A fresh
   replay completed 38,200 inputs with 318 matching RAM checkpoints and 22
   identical framebuffer/palette samples.
+- **Release builds:** R-Type writes diagnostic counter files only with `DEBUG`;
+  normal programs pass the package's debug-artifact check. Sound-asset workers
+  use bounded Windows-compatible processes.
 - Include the shared short-HOG Blitter copy/fill paths, conservative bus-cycle
   budgeting, M72 bitmap rotations and cross-port validation notes. See
   [the measurements](docs/virtual-scroll-performance.md); small simulator-cycle

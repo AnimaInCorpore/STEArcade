@@ -11,7 +11,7 @@
 ; counts 11 arcade frames per 10 fields into `ticks`.  The logic runs one arcade frame per tick when it keeps up (it
 ; does not: ~100k cycles a frame, the picture ~1M); a picture after every PIC_EVERY-th arcade frame (or when no tick
 ; is waiting); arcade frames the logic falls behind by more than MAX_BEHIND are dropped (the game slows down, its
-; pace stays even).  The logic rate and the picture rate are counted apart (COUNTERS.BIN on quitting).
+; pace stays even).  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
 ; The display: the renderer's buffers, engine/rt/borders.s (top and bottom border open, the picture's palette and the
 ; status bar's own screen and palette: BD_HUD, BD_VSWITCH).  Sound: none yet (the sound latch's bytes are kept in core.s' ring).
 ; Untranslated code reached: CRASH.TXT "BADPC xxxxx" (the linear address), back to the desktop.
@@ -227,6 +227,7 @@ port_crash:
 ; COUNTERS.BIN (longs): VBLs, arcade frames run, pictures drawn, arcade frames dropped, pictures skipped (no free
 ; buffer), renderer calls without a picture (conversions of a new scene)
 write_counters:
+	ifd DEBUG
 	move.l	m72r_pictures,cnt_pictures
 	move.l	m72r_skipped,cnt_skipped
 	move.l	m72r_lates,cnt_lates
@@ -250,6 +251,9 @@ write_counters:
 .r:	rts
 .name:	dc.b	"COUNTERS.BIN",0
 	even
+	else
+	rts
+	endc
 
 ; ---- the hardware: the VBL (borders, the picture, the ticks, the pads), the timers (borders.s), the ACIA (keys,
 ; joysticks) ----
