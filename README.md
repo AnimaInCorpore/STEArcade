@@ -10,29 +10,42 @@ documentation was written by them under the author's direction.  Correctness is 
 trust: every translation runs in lock-step against its reference machine, and the pictures are compared with the
 reference renderer and MAME.
 
-| screenshot (Hatari) | game | CPUs |
-|---|---|---|
-| <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 |
-| <a href="games/galaga/README.md"><img src="games/galaga/docs/screenshot.png" width="160" alt="Galaga"></a> | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) |
-| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) |
-| <a href="games/1942/README.md"><img src="games/1942/docs/screenshot.png" width="160" alt="1942"></a> | [1942](games/1942/README.md) | Z80 (a cooperative kernel; the sound driver's output recorded) |
-| <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) |
-| <a href="games/blktiger/README.md"><img src="games/blktiger/docs/screenshot.png" width="160" alt="Black Tiger"></a> | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) |
-| <a href="games/commando/README.md"><img src="games/commando/docs/screenshot.png" width="160" alt="Commando"></a> | [Commando](games/commando/README.md) | Z80 (encrypted opcodes; the sound driver's output recorded) |
-| <a href="games/gunsmoke/README.md"><img src="games/gunsmoke/docs/screenshot.png" width="160" alt="Gun.Smoke"></a> | [Gun.Smoke](games/gunsmoke/README.md) | Z80 (four ROM banks with code; sound CPU omitted) |
-|  | [Splatterhouse](games/splatter/) | Namco System 1: 3 x MC6809 + HD63701 MCU (main and sub translated, the MCU native) |
-|  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
-|  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
-|  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU |
-|  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 |
-|  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 |
-| <a href="games/gyruss/README.md"><img src="games/gyruss/docs/screenshot.png" width="160" alt="Gyruss"></a> | [Gyruss](games/gyruss/README.md) | Z80 + KONAMI-1 (encrypted 6809, both translated) + Z80 sound (translated; YM) + i8039 (effects rendered offline; DMA sound) |
-| <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) |
-|  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 |
-| <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) |
-| <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) |
-| <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) |
-| <a href="games/gauntlet/README.md"><img src="games/gauntlet/docs/screenshot.png" width="160" alt="Gauntlet"></a> | [Gauntlet](games/gauntlet/README.md) | MC68010 (the program itself, natively, patched in place) + 6502 sound (modelled; music and effects on the YM, speech on the DMA sound) |
+| screenshot (Hatari) | game | CPUs | Port status |
+|---|---|---|---|
+| <a href="games/dkong/README.md"><img src="games/dkong/docs/screenshot.png" width="160" alt="Donkey Kong"></a> | [Donkey Kong](games/dkong/README.md) | Z80 | ![Verification pending](docs/status/verification-pending.svg)<br>Assisted loop replay verified; full-game checks pending |
+| <a href="games/galaga/README.md"><img src="games/galaga/docs/screenshot.png" width="160" alt="Galaga"></a> | [Galaga](games/galaga/README.md) | 3 x Z80 (+ simulated 51xx/54xx) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Deferred pending real 51xx/54xx MCU ROMs |
+| <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
+| <a href="games/1942/README.md"><img src="games/1942/docs/screenshot.png" width="160" alt="1942"></a> | [1942](games/1942/README.md) | Z80 (a cooperative kernel; the sound driver's output recorded) | ![Verification pending](docs/status/verification-pending.svg)<br>Assisted ending replay verified; full-game checks pending |
+| <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) | ![Incomplete](docs/status/incomplete.svg)<br>Clipping and busy-scene speed limitations |
+| <a href="games/blktiger/README.md"><img src="games/blktiger/docs/screenshot.png" width="160" alt="Black Tiger"></a> | [Black Tiger](games/blktiger/README.md) | Z80 + i8751 (firmware interpreter; sound CPU omitted) | ![Verification pending](docs/status/verification-pending.svg)<br>Full-game Hatari verification pending |
+| <a href="games/commando/README.md"><img src="games/commando/docs/screenshot.png" width="160" alt="Commando"></a> | [Commando](games/commando/README.md) | Z80 (encrypted opcodes; the sound driver's output recorded) | ![Verification pending](docs/status/verification-pending.svg)<br>Full-game Hatari verification pending |
+| <a href="games/gunsmoke/README.md"><img src="games/gunsmoke/docs/screenshot.png" width="160" alt="Gun.Smoke"></a> | [Gun.Smoke](games/gunsmoke/README.md) | Z80 (four ROM banks with code; sound CPU omitted) | ![Verification pending](docs/status/verification-pending.svg)<br>Full-game Hatari verification pending |
+|  | [Splatterhouse](games/splatter/) | Namco System 1: 3 x MC6809 + HD63701 MCU (main and sub translated, the MCU native) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+| <a href="games/gyruss/README.md"><img src="games/gyruss/docs/screenshot.png" width="160" alt="Gyruss"></a> | [Gyruss](games/gyruss/README.md) | Z80 + KONAMI-1 (encrypted 6809, both translated) + Z80 sound (translated; YM) + i8039 (effects rendered offline; DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Cocktail and service modes unfinished |
+| <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented |
+|  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+| <a href="games/kungfum/README.md"><img src="games/kungfum/docs/screenshot.png" width="160" alt="Kung-Fu Master"></a> | [Kung-Fu Master](games/kungfum/README.md) | Irem M62: Z80, M6803 sound (both translated) | ![Incomplete](docs/status/incomplete.svg)<br>Cocktail and service modes unfinished |
+| <a href="games/trojan/README.md"><img src="games/trojan/docs/screenshot.png" width="160" alt="Trojan"></a> | [Trojan](games/trojan/README.md) | Z80 (four ROM banks; the sound driver's output recorded, ADPCM omitted) | ![Incomplete](docs/status/incomplete.svg)<br>ADPCM voices missing; speed limitations |
+| <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
+| <a href="games/gauntlet/README.md"><img src="games/gauntlet/docs/screenshot.png" width="160" alt="Gauntlet"></a> | [Gauntlet](games/gauntlet/README.md) | MC68010 (the program itself, natively, patched in place) + 6502 sound (modelled; music and effects on the YM, speech on the DMA sound) | ![Verification pending](docs/status/verification-pending.svg)<br>Full-game Hatari verification pending |
+
+Port status (2026-10-20; based on the linked port reports):
+
+- ![Complete](docs/status/complete.svg) — Graphics and sound implemented; complete playability verified in Hatari.
+- ![Verification pending](docs/status/verification-pending.svg) — Graphics, sound and gameplay implemented; Hatari testing still incomplete.
+- ![Incomplete](docs/status/incomplete.svg) — Runs in Hatari, but has missing features or significant issues.
+- ![Not playable](docs/status/not-playable.svg) — Gameplay blocked by crashes, broken behavior or performance.
+- ![Experimental / deferred](docs/status/experimental-deferred.svg) — Early implementation, reference work, or development on hold.
+
+Short attract-mode or assisted runs do not establish complete playability. Green is reserved for ports
+confirmed to meet all three criteria; none is currently certified complete by this table.
+See the [full-game verification policy](docs/port-status.md) for every port, including
+what an automated player can attempt and what evidence establishes completion.
 
 `python port.py list` lists the ports supported by the common build, test, run and release commands. The table
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI

@@ -1,0 +1,15 @@
+{
+  "source": "C:\\Arbeit\\dreamerv3\\runs\\stearcade-1942-assisted",
+  "original_program_sha256": "3a3610d11c862f570c7f6721071adf80c9b8d0bfa76a42c56c6b331e275c0907",
+  "fixed_program_sha256": "9d67f790e432ff65c576582486dea3902beb8c96109cca591f58c4b7deefe532",
+  "ram_relocation": 52,
+  "checked": 347,
+  "ticks": 41650,
+  "continuation_ticks": 1200,
+  "mismatch": null,
+  "failure": null,
+  "retained_timeline_completed": true,
+  "final_stage_byte": 32,
+  "crash": null,
+  "passed": true
+}

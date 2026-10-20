@@ -273,3 +273,59 @@ Tests: `logic_test.py 6000`, `sprite_test.py`, `render_test.py seq 200 1 1200` p
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo 1942 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Dreamer Hatari playtest: late-game failure (2026-10-20)
+
+The adjacent Dreamer project's `scripts/stearcade_play.py` tested a private
+instrumented build directly in patched Windows Hatari (executable SHA256
+`f113a3853fd993cac459cb672748f1c20c59ee4ac370501f49d5a6597cbf1796`).
+Natural play ran 22,600 ticks (1,800 decisions, 434 learner updates), losing
+lives and restarting but never advancing `$E103` beyond 0. Its fresh replay
+matched all 188 sampled RAM checkpoints. An assisted run used the existing
+lives, invincibility and finish-level cheats; it reached `$E103 = 32`, then
+stopped after tick 41,649 and wrote `CRASH.TXT`. A fresh full replay matched
+347 RAM checkpoints and reproduced the byte-identical crash and registers.
+
+Fatal code 99 is the translated-code failure path. D7 `$0003C9C0` is the swapped
+dispatch index for Z80 target `$70F2`; that table entry is `z80_badpc`. The ROM
+has code there, and translated `$7056` loads BC with `$70F2` before `rst $38`,
+but generated `code_1942.s` has no `Z70F2` entry. This is a missing translated
+task target in the tested build. The subsequent fix adds `$70F2` as an explicit
+task root in `tools/gen.py`, emitting its five instructions and a real dispatch
+entry independently of observed coverage. Natural reachability of this failure
+without cheats is untested. Complete, issue-free playability is **not verified**.
+
+The fixed private build replayed all 347 retained RAM checkpoints exactly,
+completed the previously fatal input (tick 41,650), and continued another 1,200
+ticks without a crash or input mismatch. `$E103` remained 32. See
+[the regression report](../../docs/1942-70f2-regression-2026-10-20.md) for hashes,
+reproduction and scope. `python games/1942/tools/gen_test.py` checks that the task
+and its swapped dispatch entry survive even when absent from coverage.
+
+Retained evidence is in the Dreamer project under
+`runs/stearcade-1942-assisted` and `runs/stearcade-1942-assisted-replay`;
+its `docs/stearcade-results-2026-10-20.md` contains the crash, hashes, command
+and scope. Controls bypass host keyboard/pads, sound is disabled, and these
+replays establish reproducibility rather than independent logic/render
+equivalence. Sampled guest framebuffers showed gameplay.
+
+The subsequent assisted ending exploration reached the final ending screen and
+then exposed two more missing high-score task entries, `$6EEB` and `$6EDA`, both
+installed through BC / `rst $38` at `$6CC2-$6CCD`. They are now explicit roots
+alongside `$70F2`, with coverage-independent dispatch regression checks. See
+[the ending regression report](../../docs/1942-ending-regression-2026-10-20.md).
+The ROM finishes with game-over/continue handling rather than an automatic
+difficulty loop; the recorded continuation uses explicit coin/start inputs.
+The final build completed 51,176 ticks, reached the ending and then stage byte 6
+after starting/continuing again. A fresh-process replay matched all 426 retained
+RAM checkpoints and the complete input stream, with no crash or input mismatch.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). The assisted replay results above retain their
+stated scope and do not certify natural complete playability.

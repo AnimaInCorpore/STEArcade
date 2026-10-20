@@ -32,7 +32,10 @@ SCAN_HOOK = 0x0087               # the scheduler's scan for a ready task (0087-0
 IDLE_HOOK = 0x009A               # the scheduler's idle loop found no task: the runtime's schedule (z80_hook)
 PV_FORCE = {0x261A}               # `or a,a` whose parity is read at 262D after an ex af,af' pair
 BANK_HOOK = (0xC806, 0xC806, "g_bank_w", None)
-# the kernel's entry points reached only through interrupt vectors / task tables: rst vectors are roots below
+# Tasks installed through BC / rst $38 cannot be followed by recursive descent.
+# $7056 installs the ending task; $6CC2/$6CC8 install high-score entry tasks.
+# All three were reached by the retained assisted ending replay, but not coverage.
+TASK_ROOTS = (0x6EDA, 0x6EEB, 0x70F2)
 
 
 def image():
@@ -235,7 +238,7 @@ def generate(hooks=(), extra_roots=()):
     wsites = window_sites()
     cfg = config()
     hooks = set(hooks) | {IDLE_HOOK, SCAN_HOOK}
-    roots = [0, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38] + list(extra_roots)
+    roots = [0, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38] + list(TASK_ROOTS) + list(extra_roots)
     code, tables = discover.discover(img, roots + sorted(dyn) + EXTRA_TABLE_ROOTS(img), known=dyn, rst28_tables=False,
                                      hl_tables=False, table_calls=TABLE_CALLS)
     code = {pc: i for pc, i in code.items() if pc < WIN_LO}

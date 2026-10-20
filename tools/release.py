@@ -104,8 +104,18 @@ the desktop from a hard disk or a GEMDOS drive. Every program is self-contained:
 code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.85 MB);
 if TOS says there is not enough, start without accessories and AUTO folder programs.
 
+Verification status
+-------------------
+
+No port is certified Complete by this release.  1942 and Donkey Kong passed assisted ending/loop replay
+regressions in native Hatari; natural complete playability, ordinary controls and sound remain unverified
+by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 / 318.
+Galaga is experimental/deferred pending real MCU ROMs.  See the source README for the five-color status
+legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
+not measurements of this release or proof of a full natural playthrough.
+
 Controls (all games)
---------------------
+-------------------
 
 Keyboard:  cursor keys  move           1 / 2  start 1 / 2 players     5 / 6  coin 1 / 2      Esc  quit to the desktop
            Space, Control, Alternate: the buttons (see the games)

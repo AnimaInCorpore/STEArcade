@@ -98,3 +98,43 @@ stops at frame ~1030 (`z80_badjump`, d7 = $2BD) on the commit before it too; `po
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo dkong test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Dreamer Hatari playtest (2026-10-20)
+
+The adjacent Dreamer project now supplies `scripts/stearcade_play.py` for direct
+closed-loop Windows Hatari exploration. With patched Hatari SHA256
+`f113a3853fd993cac459cb672748f1c20c59ee4ac370501f49d5a6597cbf1796`,
+the natural run completed 22,200 ticks (1,800 decisions, 434 learner updates)
+without a detected crash, input mismatch or 600 identical RAM observations.
+It lost lives and restarted but did not clear barrels. A separate 22,200-tick
+assisted run refilled lives and requested stage types 2, 3, 4 and 1 by writing
+`$6227`; these are assisted visits, not natural clears. Both fresh-process
+replays matched all 185 sampled RAM checkpoints exactly (370 total).
+
+The private build instruments NMI opportunities and owns the input bytes;
+keyboard/pad handling, sound, full renderer equivalence and ordinary full-game
+progression were not verified. Sampled guest framebuffers showed gameplay.
+Complete, issue-free playability remains **unverified**. The Dreamer project's
+`docs/stearcade-playtesting.md` describes the commands, instrumentation and
+limits; its dated results document records the retained evidence.
+
+The subsequent assisted continuation completed the ROM's board-clear paths for
+all four types, entered difficulty 4 after the four-type level 3 sequence, and
+then reached the repeating sequence's level 5 → 6 pointer wrap at tick 36,727.
+It refilled lives and assisted exit/rivet conditions; the extension did not write
+stage, difficulty, pointer or phase state. No missing translation or port crash
+was found, so no runtime/translation fix was needed. A fresh process replayed
+all 38,200 retained inputs with 318 exact RAM checkpoints and identical
+progression. See [the loop regression report](../../docs/dkong-loop-regression-2026-10-20.md).
+This establishes assisted progression, not a natural clear; status remains
+yellow, **Verification pending**.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). The assisted replay results above retain their
+stated scope and do not certify natural complete playability.
