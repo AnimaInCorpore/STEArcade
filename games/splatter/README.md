@@ -1,5 +1,8 @@
 # Splatterhouse
 
+2026-10-19: clean-image restores and no-source fills use specialized shared dispatch paths. The full-picture
+effect is small; see [measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+
 Atari STE port (4 MB) of the MAME set `splatter` (Namco System 1): the main and sub MC6809E programs translated to
 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`), the reference board `engine/namcos1.py` (its renderer
 pixel-exact against MAME), and the STE renderer below.  Work in progress.
@@ -297,3 +300,13 @@ saved against ~160k for the bookkeeping.
   `run/splatter_TAG` with Hatari started there: no pkill; `PHASES=1` adds render.s' phase VBLs, `EXTRA="-D
   BENCH_NOPIC=1"` the logic alone).  `render_test.py --bench 560-1100 --every 2 --profile` sums CPU + Blitter cycles
   by routine (`PROF_FOCUS=label`: that routine's instructions).
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

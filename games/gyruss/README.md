@@ -148,3 +148,13 @@ the slot's row masks cut to the band).
 * **The reference** (`tools/machine.py`): `Gyruss` with MAME's timing (the CPUs interleaved by lines, `sprite_bands`
   for the partial updates), `GyrussPort` the port's schedule.  engine/z80.py and engine/m6809.py (KONAMI-1:
   engine/konami1_test.py replays MAME traces of this sub CPU).
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

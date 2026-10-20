@@ -686,7 +686,7 @@ col_black:
 	move.w #240,$ffff8a38.w
 	move.w #$0000,$ffff8a3a.w	; (HOP 0, OP 0: zeros)
 	clr.b $ffff8a3d.w
-	bsr blit_go
+	bsr blit_go_copy
 	movem.l (sp)+,d0-d1/a0
 	rts
 

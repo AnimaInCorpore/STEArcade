@@ -1,6 +1,6 @@
 ; 768-pixel virtual screens, 256-pixel scroll pages inside a 544-line buffer.
-; The camera moves the Shifter window.  A clean screen holds the background of
-; the visible window (and its twins 16 cells away, ready for the next page);
+; The camera moves the Shifter window. A clean screen holds the checked window;
+; other physical instances are filled when their keys are checked on entry.
 ; each of the two display rings restores only the cells on its damage list.
 ; The black side margins are masks restored before new objects, with camera state kept per cell.  A sprite
 ; across the always-black band words (window words 0, 1 | 2 and 18 | 19, 20) draws only its inner word
@@ -15,6 +15,9 @@ GUARD = 16*STRIDE
 COLS = 48
 ROWS = 34
 CELLS = COLS*ROWS
+    ifnd BT_EAGER_TWINS
+BT_EAGER_TWINS = 0              ; validate/draw a twin when it enters the window, not speculatively
+    endc
 WIN_COLS = 17                    ; the cells the 256-pixel view can touch
 WIN_ROWS = 15                    ; and the 224 lines
     ifnd TILE_ENTRIES
@@ -774,8 +777,9 @@ check_rect:
     dbf d7,.row
     rts
 
-; check_cell: the clean cell d4, d5 against its key; a new tile goes to the
-; cell and to its twins outside the window.  Keeps d4/d5.
+; check_cell: the clean cell d4, d5 against its key. Draw only the needed
+; instance; another instance is checked when it enters the window. The
+; BT_EAGER_TWINS comparison build also prepares offscreen twins. Keeps d4/d5.
 check_cell:
     ifd DEBUG
     addq.l #1,dbg_checks
@@ -801,6 +805,7 @@ check_cell:
 .got:
     move.l a1,cell_src
     bsr draw_at
+    if BT_EAGER_TWINS
     tst.b no_twins
     bne.s .no_twins
     movem.w d4-d5,-(sp)
@@ -843,6 +848,7 @@ check_cell:
     dbf d7,.twin
     movem.w (sp)+,d4-d5
 .no_twins:
+    endc
     rts
 
 mark_both macro

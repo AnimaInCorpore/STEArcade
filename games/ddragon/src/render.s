@@ -425,7 +425,7 @@ col_black:
 	move.w #240,$ffff8a38.w
 	move.w #$0000,$ffff8a3a.w	; (HOP 0, OP 0: zeros)
 	clr.b $ffff8a3d.w
-	bsr blit_go
+	bsr blit_go_copy
 	movem.l (sp)+,d0-d1/a0
 	rts
 
@@ -1570,8 +1570,8 @@ solid_fill:
 	addq.w #1,d5
 	move.w d5,$ffff8a36.w
 	addq.w #2,d5
-	moveq #64,d2
-	divu d5,d2			; the lines a pass (64 accesses: 256 cycles)
+	moveq #0,d2
+	move.b .fill_lines(pc,d5.w),d2	; 64 / accesses per line, without DIVU
 	move.w (sp)+,d3
 	moveq #3,d6
 .p:	move.l a0,BLT_DST_ADDR.w
@@ -1593,6 +1593,12 @@ solid_fill:
 	dbf d6,.p
 	move.w #$0203,$ffff8a3a.w
 	rts
+.fill_lines:
+	dc.b 64
+	rept 64
+	dc.b 64/(REPTN+1)
+	endr
+	even
 
 ; pair_get: the pair d0 (the first's code), d2 (the second's), colour d1 (0-7) -> a1: as char_get's images, the
 ; first's pixels in the high bytes, the second's in the low ones (made from the two characters' images).

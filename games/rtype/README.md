@@ -1,5 +1,8 @@
 # R-Type (Irem, 1987)
 
+2026-10-19: the shared M72 renderer uses cheaper contribution-bitmap rotations and reuses its access-count
+table in transfer fallback paths. This also serves Mr. HELI. See [measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![R-Type on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `rtype` (Irem M72): the main CPU's NEC V30 program statically translated to 68000 code
@@ -77,3 +80,13 @@ images, buffers and caches 1.17 MB).
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo rtype test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

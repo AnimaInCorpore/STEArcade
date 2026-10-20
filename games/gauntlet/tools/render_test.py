@@ -67,7 +67,9 @@ def arc_map():
 def build_harness(defines=()):
     """build/gauntlet/render_test.prg: src/render_test.s (render.s in a harness) for engine/sim.py"""
     import assets
+    from patch import write_map
     build = build_dir("gauntlet")
+    write_map(build)
     if not (build / "palette.bin").exists() or not (build / "sprite_code.s").exists():
         assets.build()
     src = src_dir("gauntlet")

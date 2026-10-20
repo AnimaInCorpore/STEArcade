@@ -496,7 +496,7 @@ blit_copy:
 	move.w	#$0203,BLT_HOP_OP.w
 	clr.b	BLT_SKEW.w
 	move.w	d1,BLT_COUNT+2.w
-	bra	blit_go
+	bra	blit_go_copy
 
 	include "bg.s"
 	include "chr.s"

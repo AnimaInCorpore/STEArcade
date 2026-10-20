@@ -1,5 +1,8 @@
 # 1943: The Battle of Midway
 
+2026-10-19: scrolling damage restores use the shared full-word copy path. See the
+[cross-port measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![1943 on the STE (Hatari)](docs/screenshot.png)
 
 Atari STE port (4 MB) of the `1943` set (Euro), registered as `1943`: the main Z80 translated to 68000 code, the
@@ -288,3 +291,13 @@ tick (the MCU 1.2k).
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo 1943 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

@@ -1,6 +1,6 @@
 """Sprites at every edge against the reference renderer (render.s through engine/sim.py, tools/assets.py Oracle).
 
-    python games/ddragon/tools/sprite_test.py
+    python games/ddragon/tools/sprite_test.py [--seed N]
 
 A play state (ref/cover.py seed -1, the reference at frame 2400: its RAM, palette and registers) with the text layer
 cleared (its frame of solid characters would hide the picture's edges) is drawn with test sprite lists: for each of
@@ -13,6 +13,7 @@ the side bands black but where render.s draws a sprite whole into a masked word 
 31 and 288 .. 303 - f).
 """
 from pathlib import Path
+import argparse
 import sys
 
 import numpy as np
@@ -123,11 +124,11 @@ def check(r, oracle, m, label):
     return None
 
 
-def run():
+def run(seed=-1):
     r = Renderer()
     oracle = Oracle()
     v = Video()
-    dsw1, inputs = cover.schedule(-1)
+    dsw1, inputs = cover.schedule(seed)
     m = DDragonPort(DSW0, dsw1)
     for f in range(2400):
         p1, p2, extra, coins = inputs(f)
@@ -170,7 +171,10 @@ def run():
 
 
 def main():
-    err, cases, crossings = run()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--seed', type=int, default=-1, help='reference scenario; default preserves the recorded-play fixture')
+    args = parser.parse_args()
+    err, cases, crossings = run(args.seed)
     if err:
         print("FAIL", err)
         return 1

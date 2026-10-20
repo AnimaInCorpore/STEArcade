@@ -130,3 +130,13 @@ and shift on first use: pieces ordered by their shifted masks, the reordered sou
 Open: speed (stars in the warps, layer 3's bank / scroll changes, colour choices, the logic's ~130k cycles a
 frame); the last 11 rows; the HUD palette; sound. The stefastbobs2 prototype above did not produce a measured
 CPU plus Blitter saving; preparing its plans at build time remains a separate experiment.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

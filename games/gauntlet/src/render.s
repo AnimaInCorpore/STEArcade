@@ -1630,7 +1630,7 @@ copy_piece:
 	move.w	d3,BLT_YC.w
 	move.w	#$0203,BLT_HOP.w
 	clr.b	BLT_SKEW.w
-	bra	blit_go
+	bra	blit_go_copy
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; dmg_restore: the ring's damage (objects, transparent characters) copied back from P
@@ -3488,9 +3488,8 @@ sblit:
 	btst	#7,BLT_SKEW.w
 	beq	.pf
 	addq.w	#1,d2
-.pf:	lsl.w	#2,d2
-	move.l	#256,d3
-	divu	d2,d3
+.pf:	moveq	#0,d3
+	move.b	.access_lines(pc,d2.w),d3	; 64 / bus accesses per line
 	tst.w	d3
 	bne	.pn
 	moveq	#1,d3
@@ -3507,6 +3506,13 @@ sblit:
 	dbf	d5,.pl
 	rts
 
+
+.access_lines:
+	dc.b	64
+	rept	64
+	dc.b	64/(REPTN+1)
+	endr
+	even
 
 	include	"sprite_code.s"
 

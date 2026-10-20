@@ -1,5 +1,9 @@
 # Gauntlet (Atari Games, 1985) for the Atari STE
 
+2026-10-19: incoming playfield strips use the full-word copy dispatcher, and shifted panel/shadow copies
+look up piece sizes. The renderer harness now generates its fixed map without program coverage.
+See [measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![Gauntlet on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `gauntlet` (rev 14; driver `atari/gauntlet.cpp`).  Unlike the other ports nothing is translated:
@@ -181,3 +185,13 @@ colour's bit $80), the alphanumerics 64 x 31 on top; 1024 pens IRGB_4444; 336 x 
 * Speed: about 6 ms an arcade frame without the sound CPU's devices, 13 ms with them (the 68010 runs native).
 * Not checked yet: play (coins, start, the levels) against MAME; the EEPROM's writes (the high-score table) beyond
   the attract mode.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

@@ -203,7 +203,10 @@ def program(cover):
         return bytes(rom[o:o + 0x2000])
     io = {v for v, s in ioacc.items() if any(0x3800 <= a < 0x3810 or 0x2200 <= a < 0x2800 for rw, a in s)} | mirror
     hooks = {v: lab for v, lab in HOOKS.items()}
-    prog = DDProgram("main", "M", page_bytes, slot_of, roots=[RESET, NMI, FIRQ] + sorted(HOOKS),
+    # native_coll_object jumps back into these two translated paths. They are
+    # required even when a coverage seed never takes the native's rare branch.
+    native_returns = [0x20559, 0x20564]
+    prog = DDProgram("main", "M", page_bytes, slot_of, roots=[RESET, NMI, FIRQ] + sorted(HOOKS) + native_returns,
                           exec_cover={v for v, s in exec_}, acc_cover=acc, targets=tg, hooks=hooks,
                           page_addr=page_addr, io_sites=io,
                           after=writer_marks(acc, wr), natives=NATIVES, static_write=STATIC_WRITE, nf_dispatch=True,

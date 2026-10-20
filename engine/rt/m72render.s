@@ -1767,18 +1767,31 @@ m72r_rol:
 	exg	d0,d1
 .lo:	and.w	#31,d2
 	beq	.done
-	moveq	#32,d3
-	sub.w	d2,d3
+	move.w	d2,d3
+	lsl.w	#2,d3
 	move.l	d0,d6
-	move.l	d1,d7
-	lsl.l	d2,d0
-	lsl.l	d2,d1
-	lsr.l	d3,d6
-	lsr.l	d3,d7
-	or.l	d7,d0
-	or.l	d6,d1
+	eor.l	d1,d6
+	cmp.w	#16,d2
+	bls.s	.left
+	neg.w	d2
+	add.w	#32,d2
+	ror.l	d2,d0
+	ror.l	d2,d6
+	bra.s	.mix
+.left:	rol.l	d2,d0
+	rol.l	d2,d6
+.mix:	; Rotate A and A xor B, then exchange their wrapped low bits.
+	move.l	d6,d7
+	and.l	.mixmask(pc,d3.w),d7
+	eor.l	d7,d0
+	move.l	d0,d1
+	eor.l	d6,d1
 .done:	movem.l	(sp)+,d6-d7
 	rts
+.mixmask:
+	rept	32
+	dc.l	(1<<REPTN)-1
+	endr
 
 ; ======================================================================================================================
 ; the bands, the window
@@ -3878,12 +3891,11 @@ m72r_xcore:
 	bsr	m72r_tpos
 	clr.l	m72r_x_dstep
 .go:	; the lines a piece: 256 bus cycles / (4 x accesses a line)
-	lsl.w	#2,d6
-	move.l	#256,d1
-	divu	d6,d1
-	tst.w	d1
-	bne	.p1
-	moveq	#1,d1
+	; The same access-count table used by the row compositor. The visible
+	; width bounds d6 below 128, including FXSR and destination reads.
+	lea	m72r_ptab,a0
+	moveq	#0,d1
+	move.b	(a0,d6.w),d1
 .p1:	move.w	d1,m72r_x_piece
 	move.b	#2,BLT_HOP.w
 	cmp.b	#3,m72r_x_sk

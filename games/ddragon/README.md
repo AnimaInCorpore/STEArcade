@@ -1,5 +1,9 @@
 # Double Dragon (Technos, 1987) for the Atari STE
 
+2026-10-19: margin clears use the full-word dispatcher and solid text fills look up their piece sizes.
+Native continuation roots are explicit; `sprite_test.py --seed 1` supplements the default private replay test.
+See [measurements and validation](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![Double Dragon on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`): the main CPU's 6809
@@ -201,3 +205,13 @@ entries, the character cache 256, the sprites' row orders two a byte.
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo ddragon test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

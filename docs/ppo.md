@@ -92,3 +92,27 @@ The retired Kev experiment's downloaded weights, checkout and unneeded MLX/langu
 The dedicated PPO environment retains Torch, Gymnasium and Stable-Baselines3; its interpreter is `build/ppo-venv`.
 Small historical measurement reports remain available as evidence. Local adapter results are recorded in
 [ppo-rollout-results.json](ppo-rollout-results.json).
+
+## Full-game claims and indirect tasks
+
+A training/replay integration pass does not certify complete playability. Retain
+natural progression separately from stage pokes and finish cheats, and exercise
+ending/loop transitions explicitly. An indirect task address loaded as an
+immediate can remain absent from discovery even when its scheduling instruction
+was translated. Check the failing dispatch target against ROM code and the
+generated dispatch table; preserve the original failing inputs and require a
+fresh replay before attributing a timeout to a game bug. The
+[1942 Dreamer late-game failure](../games/1942/README.md#dreamer-hatari-playtest-late-game-failure-2026-10-20)
+is a reproduced example.
+
+Headless Hatari debugger screenshots may be black while the guest framebuffer
+contains a valid picture. Use the game's buffer pointer, stride and palette for
+picture inspection; that still does not check hardware scanout or border timing.
+
+## Port completion claims
+
+For every port, automated exploration can attempt full progression after its
+adapter and native replay transport are verified. Success is not guaranteed by
+agent support. Use the shared [status and full-game verification policy](port-status.md)
+to distinguish natural completion, assisted coverage and incomplete verification;
+reserve green **Complete** for verified Hatari playability with graphics and sound.

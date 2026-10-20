@@ -348,6 +348,12 @@ strips, allowing interrupts between pieces. The former `wait_borders` policy is 
 and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
 record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
+Known full-mask, unskewed copies/fills use `blit_go_copy`; HOP 0 fills with arbitrary masks use
+`blit_go_fill`. Both can budget 32 words per piece because there are at most two bus accesses per word.
+The generic dispatcher accounts for masked destination reads and FXSR fetches. Strip line counts come from
+tables rather than a division per strip. `engine/borders_blit_test.py` checks pixels, register endpoints,
+preservation and pass lengths; `engine/m72_bitmap_test.py` checks the M72 contribution-bitmap rotation.
+
 ## Input (all ports)
 
 Each port has its own IKBD handler (`acia_isr`): the keyboard through `key_table` (scancode -> the bits it sets in

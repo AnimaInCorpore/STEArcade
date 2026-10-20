@@ -39,14 +39,17 @@ Two 768 by 544 planar buffers (the display rings) and a third, clean one hold
 the background as virtual screens: the camera moves the Shifter address
 (coarse) and `$ffff8265` (fine, with the extra-fetch correction in
 `$ffff820f`); the larger buffers avoid a scanout wrap interrupt sharing Timer B.
-Everything is drawn whole into hidden margins, nothing is clipped. Per frame
+Sprites clip at the full band words; at fine picture edges and in vertical guards
+they draw whole, as described below. Per frame
 (`render.s`):
 
 * **The clean screen** holds the 17 by 15 cells the view can touch. Only the
   cells scrolled in are checked against their cache key; a full check of the
   window comes with a new 256-pixel page, a mode (flip, layout, background
-  off), map or palette change. A new tile is also drawn to its twins 16 cells
-  away outside the window, so the jump to the next page finds them ready.
+  off), map or palette change. Other physical instances are checked and filled
+  when they enter the window, rather than drawing up to eight offscreen twins
+  speculatively. `-D BT_EAGER_TWINS=1` retains the old path for comparisons.
+  See [the scrolling measurements](../../docs/virtual-scroll-performance.md).
 * **Each ring** keeps a damage list of cells (those the clean screen changed,
   margin cells that must lose their black) and a list of rectangles (what its
   sprites covered, and its text runs once the text is redone: a run's 8 lines,
@@ -341,3 +344,13 @@ happens: the next instruction's label was named before) and adds to its file ins
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo blktiger test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

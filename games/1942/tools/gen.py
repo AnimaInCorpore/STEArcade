@@ -224,6 +224,8 @@ def window_sites():
         return set(json.load(open(sites_file)))
     pcs, wread = coverage()
     sites = {pc for pc, bank in wread}
+    if os.path.exists(sites_file):
+        sites |= set(json.load(open(sites_file)))  # a shorter replay must not forget established guards
     for f in glob.glob(os.path.join(BUILD, "wsites_audit_*.pkl")):      # logic_test.py --audit
         sites |= set(pickle.load(open(f, "rb")))
     with open(sites_file, "w") as f:

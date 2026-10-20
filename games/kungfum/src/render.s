@@ -724,6 +724,7 @@ blit_rect:
 	tst.w	d4
 	bne.s	.op
 	moveq	#0,d0
+	clr.b	B_HOP.w			; a black band needs no source fetches
 .op:	move.b	d0,B_OP.w
 	move.w	d3,d5			; the lines
 	cmp.w	#$ffff,d1
@@ -748,7 +749,7 @@ blit_rect:
 	move.l	a1,B_SRC.w
 	move.l	a0,B_DST.w
 	move.w	d5,B_YC.w
-	bra	blit_go
+	bra	blit_go_copy
 .planes:
 	move.w	d6,d0
 	addq.w	#1,d0
@@ -763,8 +764,13 @@ blit_rect:
 	move.w	d6,B_DYI.w
 	move.w	d1,B_END1.w
 	move.w	d7,B_END3.w
-	moveq	#16,d2		; (masked: the destination is read too, whatever the op: BLIT_PIECE / 2 words a piece)
-	divu	d0,d2
+	moveq	#0,d2		; 1..21 words: the 320-pixel window, including its partial end groups
+	tst.w	d4
+	beq.s	.fill_piece
+	move.b	.masked_lines(pc,d0.w),d2
+	bra.s	.piece_ready
+.fill_piece:	move.b	.fill_lines(pc,d0.w),d2
+.piece_ready:
 	tst.w	d2
 	bne.s	.lp
 	moveq	#1,d2
@@ -779,6 +785,17 @@ blit_rect:
 	addq.l	#2,a1
 	dbf	d6,.pl
 .none:	rts
+.masked_lines:
+	dc.b	0
+	rept	21
+	dc.b	16/(REPTN+1)
+	endr
+.fill_lines:
+	dc.b	0
+	rept	21
+	dc.b	32/(REPTN+1)
+	endr
+	even
 
 ; ======================================================================================================================
 ; ring_update: the drawn ring brought to the new window (span_a / span_b, cur_wx): whole again, or the strips of the

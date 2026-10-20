@@ -3412,13 +3412,15 @@ ren_bar_copy:
 	lsl.w	#3,d2
 	add.w	d2,d1
 	add.l	ren_dbuf,d1
+	move.l	d1,a0
+	moveq	#1,d1			; 20/21 words, at most one partial end: one line is <=172 bus cycles
 	moveq	#4-1,d6
 .p:	move.l	d0,BLT_SRC.w
-	move.l	d1,BLT_DST.w
+	move.l	a0,BLT_DST.w
 	move.w	d7,BLT_YC.w
-	bsr	blit_go
+	bsr	blit_go_lines
 	addq.l	#2,d0
-	addq.l	#2,d1
+	addq.l	#2,a0
 	dbf	d6,.p
 	addq.l	#1,ren_barcopies
 	movem.l	(sp)+,d0-d7/a0
@@ -4933,7 +4935,7 @@ ren_bi_sync:
 	add.l	ren_dbi,d0
 	move.l	d0,BLT_DST.w
 	move.w	d1,BLT_YC.w
-	bsr	blit_go
+	bsr	blit_go_copy
 .cn:	rts
 	endc
 
@@ -5855,7 +5857,7 @@ ren_restore_list:
 	move.l	d1,BLT_SRC.w
 	move.l	d0,BLT_DST.w
 	move.w	d3,BLT_YC.w
-	bsr	blit_go
+	bsr	blit_go_copy
 	addq.l	#1,ren_restores
 	cmp.l	a3,a2
 	blo	.r
@@ -5904,7 +5906,7 @@ ren_restore_list:
 	move.l	d1,BLT_SRC.w
 	move.l	d0,BLT_DST.w
 	move.w	d3,BLT_YC.w
-	bsr	blit_go
+	bsr	blit_go_copy
 	addq.l	#1,ren_restores
 	cmp.l	a3,a2
 	blo	.r
@@ -7019,7 +7021,7 @@ ren_fill:
 	moveq	#4-1,d6
 .p:	move.l	d4,BLT_DST.w
 	move.w	d3,BLT_YC.w
-	bsr	blit_go
+	bsr	blit_go_fill
 	addq.l	#2,d4
 	dbf	d6,.p
 	movem.w	(sp)+,d0-d3/d5

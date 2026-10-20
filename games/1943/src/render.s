@@ -733,7 +733,7 @@ restore_damage:
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- bra blit_go
+ bra blit_go_copy
 .test:
  cmp.l a3,a2
  blo .rect

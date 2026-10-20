@@ -498,8 +498,46 @@ borders_blit_go	macro
 blit_go_lines:
 	movem.l	d0-d2,-(sp)
 	move.w	$ffff8a38.w,d0		; the lines
+	bra	blit_go_split
+; Full-mask, unskewed copies/fills (OP 0, 3, 12 or 15): the caller has
+; established that no destination read or extra source fetch is needed.
+; blit_go_fill: HOP 0 (no source), arbitrary masks/op: at most a
+; destination read and write per word, so the same 32-word budget is safe.
+blit_go_fill:
+blit_go_copy:
+	movem.l	d0-d2,-(sp)
+	move.w	$ffff8a38.w,d0
+	bra	blit_go_copy_setup
+blit_go:
+	movem.l	d0-d2,-(sp)
+	move.w	$ffff8a38.w,d0		; the lines
+	moveq	#15,d1
+	and.b	$ffff8a3b.w,d1
+	move.w	#%1001000000001001,d2	; (the ops 0, 3, 12, 15 do not read the destination)
+	btst	d1,d2
+	beq.s	blit_go_dest
+	; Even OP 3 needs destination reads where an end mask preserves pixels.
+	move.w	$ffff8a28.w,d2
+	and.w	$ffff8a2a.w,d2
+	and.w	$ffff8a2c.w,d2
+	addq.w	#1,d2
+	bne.s	blit_go_dest
+	btst	#7,$ffff8a3d.w		; FXSR can add a source fetch to every line
+	bne.s	blit_go_dest
+blit_go_copy_setup:
+	move.w	$ffff8a36.w,d2		; the words a line
+	moveq	#BLIT_PIECE,d1		; the words a piece
+	cmp.w	d1,d2
+	bhi	blit_go_wide
+	move.b	bd_lines(pc,d2.w),d1	; the lines a piece
 	bra.s	blit_go_split
-; the lines a piece by the words a line (0-BLIT_PIECE): a copy or fill, an op that reads the destination
+blit_go_dest:	move.w	$ffff8a36.w,d2
+	moveq	#BLIT_PIECE/2,d1	; (a destination read too: half)
+	cmp.w	d1,d2
+	bhi	blit_go_wide
+	move.b	bd_lines_d(pc,d2.w),d1
+	bra.s	blit_go_split
+; Keep both tables within the 68000's signed-byte PC-index displacement.
 bd_lines:
 BD_W	set	1
 	dc.b	0
@@ -515,25 +553,6 @@ BD_W	set	1
 BD_W	set	BD_W+1
 	endr
 	even
-blit_go:
-	movem.l	d0-d2,-(sp)
-	move.w	$ffff8a38.w,d0		; the lines
-	moveq	#15,d1
-	and.b	$ffff8a3b.w,d1
-	move.w	#%1001000000001001,d2	; (the ops 0, 3, 12, 15 do not read the destination)
-	btst	d1,d2
-	beq.s	.h
-	move.w	$ffff8a36.w,d2		; the words a line
-	moveq	#BLIT_PIECE,d1		; the words a piece
-	cmp.w	d1,d2
-	bhi.s	blit_go_wide
-	move.b	bd_lines(pc,d2.w),d1	; the lines a piece
-	bra.s	blit_go_split
-.h:	move.w	$ffff8a36.w,d2
-	moveq	#BLIT_PIECE/2,d1	; (a destination read too: half)
-	cmp.w	d1,d2
-	bhi.s	blit_go_wide
-	move.b	bd_lines_d(pc,d2.w),d1
 blit_go_split:
 	cmp.w	d0,d1
 	bhs.s	.whole
@@ -543,7 +562,14 @@ blit_go_split:
 	tst.w	d1
 	bne.s	.n
 	moveq	#1,d1
-.n:	bsr.s	bd_pieces
+.n:	move.w	d1,d2
+	cmp.w	d0,d2
+	bls.s	.go
+	move.w	d0,d2
+.go:	move.w	d2,$ffff8a38.w
+	move.b	#$c0,$ffff8a3c.w
+	sub.w	d2,d0
+	bne.s	.n
 	movem.l	(sp)+,d0-d2
 	rts
 .whole:	move.b	#$c0,$ffff8a3c.w
@@ -615,8 +641,22 @@ blit_go_wide:
 	cmp.w	#1,d4
 	bne.s	.m3
 	move.w	bd_c_em3,$ffff8a28.w	; (a strip of one word has endmask 1 only)
-.m3:	move.w	bd_c_piece,d1
-	divu	d4,d1			; its lines a piece
+.m3:	bra.s	.piece_lines
+; Wide strips use either BLIT_PIECE/2 or BLIT_PIECE words. Index =
+; piece - BLIT_PIECE/2 - 1 + strip width: no DIVU for each strip.
+.wide_lines:
+	rept	BLIT_PIECE/2
+	dc.b	(BLIT_PIECE/2)/(REPTN+1)
+	endr
+	rept	BLIT_PIECE
+	dc.b	BLIT_PIECE/(REPTN+1)
+	endr
+	even
+.piece_lines:	moveq	#0,d1
+	move.w	bd_c_piece,d1
+	sub.w	#BLIT_PIECE/2+1,d1
+	add.w	d4,d1
+	move.b	.wide_lines(pc,d1.w),d1	; its lines a piece
 	move.w	d7,d0
 	bsr	bd_pieces
 	add.w	d4,d3

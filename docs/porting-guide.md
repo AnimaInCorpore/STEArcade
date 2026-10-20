@@ -297,6 +297,39 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
     every running `hatari` first, so two sessions benchmarking at once kill each other's runs: `games/commando/tools/bench.sh` starts its
     own Hatari (`HATARI` may name a renamed copy of the pinned build).
 
+## Virtual-screen follow-up (2026-10-19)
+
+F030Arcade-private's Black Tiger keeps a persistent ring and repairs pages from a clean image. Its useful
+STE lesson is to avoid preparing duplicates before a window needs them. Black Tiger's STE renderer now
+checks other physical instances on entry instead of eagerly drawing eight offscreen twins. Do not apply
+this blindly to Commando-style twin-line restoration: those twins are the clean source for old damage.
+
+Keep a copy/fill's dispatch cost out of its inner loop: known full-mask, unskewed transfers can call
+`blit_go_copy`, HOP 0 fills (including masked fills) `blit_go_fill`. A copy with partial masks needs
+destination reads even with OP 3; FXSR can also add a source fetch. Count both before choosing a HOG
+piece. Tests: `python engine/borders_blit_test.py`, also `--copies-only --entry blit_go_copy` and
+`--fills-only --entry blit_go_fill`. The test compares split output and final registers with an unsplit
+operation across shifts, reverse increments and 64 KB boundaries and rejects passes over 256 cycles.
+
+The M72 renderer shares the existing access-count table in its transfer fallback and rotates its 64-bit
+contribution maps by rotating A and A xor B, then exchanging the wrapped bits. This avoids four long
+variable shifts; `python engine/m72_bitmap_test.py` checks all 512 pixel offsets against a mathematical
+rotation. Preserve sprite/background priority and validate whole consecutive pictures after such a change.
+
+Results and rejected experiments: [virtual-scroll-performance.md](virtual-scroll-performance.md).
+
+On Windows, sound recording uses bounded `spawn` workers (`CAPSND_WORKERS`, default 4) because `fork`
+is unavailable and each spawned worker imports its own Python modules. `OPENBLAS_NUM_THREADS=1` is
+useful when generating assets alongside other builds. Gun.Smoke binds its own sound module before its
+graphics builder adds another game's tools to the module search path. The Gauntlet renderer harness
+generates its fixed address map independently of the program patcher's coverage. Shorter coverage runs
+must not discard previously established ROM-window guards (1942 and 1943); native continuation targets
+are explicit discovery roots even when a play seed does not take them (Double Dragon).
+
+Double Dragon's sprite test still defaults to its canonical recorded play. `--seed 1` supplies an explicit
+reference scenario when that private recording is absent; it supplements, and does not replace, replay
+or full-game coverage checks.
+
 ## The translator's register maps and second pass (all ports, 2026-10-08)
 
 The translated code got 1.08-1.73 times faster (`architecture.md`, "Translator").  What a port has to do to get it, and
@@ -596,3 +629,11 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   checked by logic_test), and before a picture the marked blocks are swapped back (`movep`, ~3k cycles a block) into the
   renderer's video state, the sprite list after a DMA.  A swapped-order mode in `engine/rt/m72render.s` would make the
   copies unnecessary.
+
+## Port completion claims
+
+For every port, automated exploration can attempt full progression after its
+adapter and native replay transport are verified. Success is not guaranteed by
+agent support. Use the shared [status and full-game verification policy](port-status.md)
+to distinguish natural completion, assisted coverage and incomplete verification;
+reserve green **Complete** for verified Hatari playability with graphics and sound.

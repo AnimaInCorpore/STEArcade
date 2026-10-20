@@ -166,7 +166,8 @@ TESTS = {
              ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/ppo_test.py", "engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
+ENGINE_TESTS = ["engine/ppo_test.py", "engine/borders_blit_test.py", "engine/m72_bitmap_test.py",
+                "engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
                 "engine/hdd_test.py",                              # (tools/hddtest.sh: the same on Hatari's disks)
                 "engine/m6809_test.py", "engine/hd63701_test.py",   # (MAME traces: build/m6809/, build/hd63701/)
                 "engine/m6809x_test.py", "engine/konami1_test.py",

@@ -1,5 +1,8 @@
 # Kung-Fu Master (Irem, 1984) for Atari STE
 
+2026-10-19: ring copies use the full-word dispatcher, masked strip piece sizes use a lookup, and black-band
+fills avoid source reads. See [measurements and the rejected overlap experiment](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![Kung-Fu Master on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `kungfum` (Irem M62).  The main Z80 program (32 KB, flat) is statically translated to 68000 code; the
@@ -292,3 +295,13 @@ for the local training and replay results.
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo kungfum test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

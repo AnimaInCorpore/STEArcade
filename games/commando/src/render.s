@@ -177,7 +177,7 @@ clear_margins:
 .segment:
  move.l a0,BLT_DST_ADDR.w
  move.w #32,BLT_COUNT+2.w
- bsr blit_go
+ bsr blit_go_copy
  lea 32*256(a0),a0
  dbf d1,.segment
  rts
@@ -822,7 +822,7 @@ restore_damage:
  blo .rect
  rts
 .divide:
- bsr blit_go
+ bsr blit_go_copy
  bra.s .test
 
  section data,data

@@ -4,7 +4,7 @@ the part must change exactly its opaque pixels inside the game area (transparent
 chunks beside the game area included: a part across the left (x -15..-1) or right edge (x 209..223) draws only its inner word
 (draw_edge) - and the rectangle restore must put the seed back.  Every sprite code is also drawn at both edges with all 15 shifts
 there, plainly and across a 64 KB boundary of the ring.  (An old build without draw_edge is tested through draw_part: it fails.)
-Build with --sim first, then python games/1942/tools/sprite_test.py [all]    (`all`: every code and y, takes a few minutes)
+Build with --sim without --debug first (DEBUG paints counters into the screen), then python games/1942/tools/sprite_test.py [all]    (`all`: every code and y, takes a few minutes)
 """
 import os
 import random
@@ -124,7 +124,10 @@ def main():
             mem.w_block(clean + (T + y - 1) * 256, seed)
             call("rf_spr_restore")
             if bytes(mem.r_block(line0, len(seed))) != seed:
-                print("FAIL restore code %d x %d y %d" % (code, x, y))
+                got = bytes(mem.r_block(line0, len(seed)))
+                bad = [i for i in range(len(seed)) if got[i] != seed[i]]
+                print("FAIL restore code %d x %d y %d ring %d T %d: %d bytes, first %s" %
+                      (code, x, y, idx, T, len(bad), bad[:12]))
                 return 1
             checks += 1
             edges += x < 0 or x > 208

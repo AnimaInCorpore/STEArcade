@@ -1,5 +1,8 @@
 # 1942, Atari STE
 
+2026-10-19: scrolling restores use the shared full-word copy path. See the
+[cross-port measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+
 ![1942 on the STE (Hatari)](docs/screenshot.png)
 
 Fourth port (started 2026-10-08), the first with a **hardware scrolled** background.  The `1942` set (Capcom 1984, Revision B,
@@ -152,6 +155,9 @@ pixels (old build: 56 of 600 frames with margin pixels), `seq 200` and `ATTRACT=
 (logic_test 6000 + more, 0 differences).
 
 ## Tests
+
+Build with `--sim` without `--debug` for the sprite restore check: DEBUG paints
+counters into ring 0, which correctly fails the check for untouched pixels.
 
     python port.py test 1942                       # build --sim, logic_test (6000 frames), render_test seq 200
     python games/1942/tools/logic_test.py 40000    # whole program on Musashi against the Z80 reference, RAM compared every frame

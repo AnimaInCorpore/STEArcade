@@ -264,6 +264,8 @@ def generate(extra_roots=()):
         sites = indirect
     elif pcs:
         sites = {pc for pc in indirect if pc in wdata or pc not in pcs}
+        if sites_file.exists():
+            sites |= indirect & set(json.loads(sites_file.read_text()))
         for f in BUILD.glob('w_sites_audit_*.pkl'):
             with f.open('rb') as h:
                 sites |= indirect & set(pickle.load(h))

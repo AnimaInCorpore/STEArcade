@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
+import sound                    # assets adds 1942's tools to sys.path; bind this game's driver first
 import gen
 from prepare import prepare
 from paths import build_dir, ROOT

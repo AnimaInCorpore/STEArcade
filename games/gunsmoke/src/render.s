@@ -573,7 +573,7 @@ clear_span:
  sub.w d0,d3
  move.l a0,BLT_DST_ADDR.w
  move.w d0,BLT_COUNT+2.w
- bsr blit_go
+ bsr blit_go_fill
  ext.l d0
  lsl.l #8,d0
  add.l d0,a0
@@ -892,7 +892,7 @@ restore_damage:
  move.l d1,BLT_SRC_ADDR.w
  move.l d0,BLT_DST_ADDR.w
  move.w d3,BLT_COUNT+2.w
- bsr blit_go
+ bsr blit_go_copy
 .test:
  cmp.l a3,a2
  blo.s .rect
