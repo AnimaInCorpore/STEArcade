@@ -13,6 +13,10 @@ certify natural complete playability.
   types reached difficulty 6 and wrapped the repeating board sequence. A fresh
   replay completed 38,200 inputs with 318 matching RAM checkpoints and 22
   identical framebuffer/palette samples.
+- Include the shared short-HOG Blitter copy/fill paths, conservative bus-cycle
+  budgeting, M72 bitmap rotations and cross-port validation notes. See
+  [the measurements](docs/virtual-scroll-performance.md); small simulator-cycle
+  improvements are not new native-fps claims.
 - Add the five-color port-status legend, dated reports, small machine-readable
   results, screenshots, and Windows retained-input replay runners. Full timelines,
   RAM checkpoints, ROM sets and private emulator files remain local.
@@ -24,7 +28,7 @@ certify natural complete playability.
 
 The release archive contains default, self-contained TOS programs and a
 README.TXT with controls and SHA-256 sums. It is built from the release commit,
-excluding unrelated local renderer work. The new regression coverage uses native
+including the shared Blitter/renderer updates and port validation notes. The new regression coverage uses native
 Hatari with sound disabled and injected held inputs; ordinary control devices,
 sound, natural completion and real STE timing were not verified by these runs.
 
