@@ -88,7 +88,7 @@ assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]
 # has free: TOS 2.06 alone leaves 4,061,212 bytes (Hatari), a tester's Mega STE with a hard disk driver and
 # accessories 3,831,554 ("not enough memory" from 1942, 1943, Black Tiger, Bubble Bobble and Commando at 3.93-4.05 MB).
 MAX_LOAD = 3700000
-OVER_LOAD = {"RTYPE.PRG"}   # (packed with a warning: R-Type's shrinking was deferred on 2026-10-15; it needs 3,846,514)
+OVER_LOAD = {"RTYPE.PRG"}   # (packed with a warning: R-Type's shrinking was deferred on 2026-10-15; it needs 3,893,790)
 DEBUG_NAMES = (b"COUNTERS.BIN", b"DEBUG.BIN", b"LATEPC.BIN", b"RATE.BIN", b"TIMES.BIN", b"DUMP.BIN")
 
 README = """STE Arcade {version}
@@ -101,7 +101,7 @@ https://github.com/AnimaInCorpore/STEArcade  (commit {commit})
 
 Requirements: an Atari STE (or Mega STE) with 4 MB of RAM, a colour monitor or TV (50 Hz).  Start the programs from
 the desktop from a hard disk or a GEMDOS drive. Every program is self-contained: the arcade's
-code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.85 MB);
+code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.90 MB);
 if TOS says there is not enough, start without accessories and AUTO folder programs.
 
 Verification status

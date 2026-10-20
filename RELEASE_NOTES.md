@@ -15,7 +15,8 @@ certify natural complete playability.
   identical framebuffer/palette samples.
 - **Release builds:** R-Type writes diagnostic counter files only with `DEBUG`;
   normal programs pass the package's debug-artifact check. Sound-asset workers
-  use bounded Windows-compatible processes.
+  use bounded Windows-compatible processes. R-Type needs about 3.90 MB of free
+  memory; start it without accessories or AUTO-folder programs.
 - Include the shared short-HOG Blitter copy/fill paths, conservative bus-cycle
   budgeting, M72 bitmap rotations and cross-port validation notes. See
   [the measurements](docs/virtual-scroll-performance.md); small simulator-cycle
