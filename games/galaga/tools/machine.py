@@ -11,7 +11,9 @@ Three Z80s at 3.072 MHz with a shared memory map (MAME galaga.cpp):
   A000-A007 video latch (starfield control, flip)
 Interrupts: IRQ to CPU1 and CPU2 at the vertical blank (scanline 224) if enabled, NMI
 to CPU3 at scanlines 64 and 192 if enabled, NMI to CPU1 from the 06XX clock while a
-transfer is running.  The 51XX is simulated (the MCU program is not in the ROM set).
+transfer is running.  The 51XX is simulated the way old MAME did it (Namco51), or, with Galaga(mcu=True), the real
+51XX and 54XX programs run on the MB88 core (engine/mb88.py; namco51.zip / namco54.zip) behind an exact model of the
+06XX's clock edges (Namco51MCU, Namco54MCU).
 
 Provides scripted inputs and a reference renderer (tiles + sprites, rotated 90) without
 the starfield for now.
@@ -22,6 +24,7 @@ import numpy as np
 
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 from z80 import Z80
+from mb88 import MB88
 
 from paths import EXTRACTED
 ROMDIR = str(EXTRACTED / "galaga")
@@ -32,6 +35,20 @@ CYCLES_PER_FRAME = CYCLES_PER_LINE * LINES   # 50688, 60.606 Hz
 VBLANK_LINE = 224
 CPU3_NMI_LINES = (64, 192)
 CLOCK_06XX = 3072000 // 64     # 48 kHz
+
+
+Z80_PER_MCU = 12              # the custom chips' MB88s: 1.536 MHz / 6 = 256 kHz machine cycles
+
+
+def load_mcu(zipname, member, crc):
+    """an MCU program from its own MAME set in assets/roms (checked)"""
+    import zipfile, zlib
+    from paths import ROMS
+    with zipfile.ZipFile(os.path.join(ROMS, zipname)) as z:
+        data = z.read(member)
+    if zlib.crc32(data) != crc:
+        raise ValueError("%s/%s: crc %08x, expected %08x" % (zipname, member, zlib.crc32(data), crc))
+    return data
 
 
 def load(name):
@@ -256,6 +273,74 @@ class Namco51:
         return joy
 
 
+class Namco51MCU:
+    """The real 51XX: MAME's namco51.cpp around the MB8843.  K = the 06XX's R/W line (bit 3) and the low three bits of
+    the shared latch (portO: the main CPU's writes, the MCU's O output, read back by the main CPU), R0-R3 = IN0 low,
+    IN0 high, IN1 low, IN1 high; P = lamps and coin counters (logged)."""
+
+    def __init__(self, machine):
+        self.m = machine
+        self.mcu = MB88(load_mcu("namco51.zip", "51xx.bin", 0xc2f57ef8), 64,
+                        read_k=lambda: (self.rw << 3) | (self.port_o & 7),
+                        read_r=self.read_r, write_o=self.write_o, write_p=self.write_p)
+        self.port_o = 0
+        self.rw = 0
+        self.held = True
+        self.mode = None          # (the simulation's state, for the old printouts)
+        self.log = []
+        self.p_log = []
+
+    def read_r(self, n):
+        m = self.m
+        return (m.in0, m.in0 >> 4, m.in1, m.in1 >> 4)[n & 3] & 0x0f
+
+    def write_o(self, v, mask):
+        self.port_o = v & 0xff
+
+    def write_p(self, v):
+        self.p_log.append((self.m.frame, v))
+
+    def reset(self):
+        self.mcu.reset()
+
+    def write(self, v):
+        self.log.append(("w", v))
+        self.port_o = v
+
+    def read(self):
+        self.log.append(("r", self.port_o))
+        return self.port_o
+
+
+class Namco54MCU:
+    """The real 54XX (MB8844): K = the command's high nibble, R0 its low nibble; the outputs (O nibbles, R1) go to the
+    discrete explosion circuit and are logged as (frame, MCU cycle, port, value)."""
+
+    def __init__(self, machine):
+        self.m = machine
+        self.mcu = MB88(load_mcu("namco54.zip", "54xx.bin", 0xee7357e0), 64,
+                        read_k=lambda: self.cmd >> 4, read_r=lambda n: self.cmd & 0x0f if n == 0 else 0,
+                        write_r=self.write_r, write_o=self.write_o)
+        self.cmd = 0
+        self.held = True
+        self.log = []
+        self.out = []
+
+    def write_o(self, v, mask):
+        self.out.append((self.m.frame, self.mcu.cycles, "o0" if mask == 0x0f else "o1", (v & mask) >> (0 if mask == 0x0f else 4)))
+
+    def write_r(self, n, v):
+        if n == 1:
+            self.out.append((self.m.frame, self.mcu.cycles, "r1", v & 0x0f))
+
+    def reset(self):
+        self.mcu.reset()
+
+    def write(self, v):
+        self.log.append((self.m.frame, v))
+        self.cmd = v
+
+
 def skip_ram_test(rom):
     """The main CPU's boot RAM test (video RAM x10 passes at $3382, the rest of the RAM at
     $3466, ~700 frames) patched out: the first jumps to the SP setup after the test, the
@@ -269,7 +354,12 @@ def skip_ram_test(rom):
 
 
 class Galaga:
-    def __init__(self, skip_tests=False):
+    def __init__(self, skip_tests=False, mcu=False, frame_line=None):
+        """mcu: the real 51XX / 54XX.  frame_line: the screen line a frame starts at; 0 is the top of the display, 224 the
+        start of the vertical blank, where MAME powers on and calls its frame_done callbacks: the reference then runs in
+        MAME's phase (ref/mame_cmp_51xx.py).  The default is 224 with the MCUs and the full boot, else 0: the shortened
+        boot (skip_tests) reaches the sub CPUs' handshake at frame 13 while they are still in their own self-tests, and
+        only gets through in the old phase."""
         self.roms = [load("gg1_1b.3p") + load("gg1_2b.3m") + load("gg1_3.2m") + load("gg1_4b.2l"),
                      load("gg1_5b.3f"), load("gg1_7b.2c")]
         if skip_tests:
@@ -282,7 +372,17 @@ class Galaga:
         self.in1 = 0xff
         self.dswa = 0xf7                      # easy, demo sounds on, upright
         self.dswb = 0x97                      # 1 coin 1 credit, 20K 70K 70K, 3 lives
-        self.n51 = Namco51(self)
+        self.mcu_mode = mcu
+        self.frame_line = (VBLANK_LINE if mcu and not skip_tests else 0) if frame_line is None else frame_line
+        if mcu:
+            self.n51 = Namco51MCU(self)
+            self.n54 = Namco54MCU(self)
+        else:
+            self.n51 = Namco51(self)
+        self.t06 = None                       # mcu mode: the 06XX's next clock edge (main CPU cycles)
+        self.half06 = 0
+        self.state06 = False
+        self.stretch06 = False
         self.stars = Starfield()
         self.ctrl06 = 0
         self.nmi06_next = None
@@ -359,14 +459,25 @@ class Galaga:
             self.irq_pending[1] = False
         elif bit == 3:
             # CPU2, CPU3 (and the custom chips) held in reset while 0
+            if self.mcu_mode:
+                self.mcu_sync(self.cpus[0].cycles)
+                for chip in (self.n51, self.n54):
+                    if not v:
+                        chip.held = True
+                    elif chip.held:
+                        chip.held = False
+                        chip.reset()
             if v and self.held[1]:
                 self.cpus[1].reset()
                 self.cpus[2].reset()
-                self.n51.reset()
+                if not self.mcu_mode:
+                    self.n51.reset()
             self.held[1] = self.held[2] = not v
 
     # 06XX
     def data06_r(self):
+        if self.mcu_mode:
+            self.mcu_sync(self.cpus[0].cycles)
         if not (self.ctrl06 & 0x10):
             return 0
         v = 0xff
@@ -376,6 +487,13 @@ class Galaga:
 
     def data06_w(self, v):
         if self.ctrl06 & 0x10:
+            return
+        if self.mcu_mode:
+            self.mcu_sync(self.cpus[0].cycles)
+            if self.ctrl06 & 1:
+                self.n51.write(v)
+            if self.ctrl06 & 8:
+                self.n54.write(v)
             return
         if self.ctrl06 & 1:
             self.n51.write(v)
@@ -393,6 +511,8 @@ class Galaga:
             self.n54_triggers += 1
 
     def ctrl06_w(self, v):
+        if self.mcu_mode:
+            return self.ctrl06_w_mcu(v)
         self.ctrl06 = v
         if (v & 0xe0) == 0:
             self.nmi06_next = None
@@ -417,13 +537,68 @@ class Galaga:
         first = period * (2 if v & 0x10 else 1)                # a read suppresses the first pulse
         self.nmi06_next = self.cpus[0].cycles + first
 
+    # ---- the 06XX and the MCUs (mcu mode: MAME's namco06.cpp) ----------
+    def ctrl06_w_mcu(self, v):
+        if self.port_mode:
+            raise NotImplementedError("the STE schedule (run_frame_port) with the real 51XX")
+        now = self.cpus[0].cycles
+        self.mcu_sync(now)
+        self.ctrl06 = v
+        if (v & 0xe0) == 0:
+            self.t06 = None
+            self.state06 = False
+            self.n51.mcu.set_irq(0)
+            self.n54.mcu.set_irq(0)
+            return
+        self.stretch06 = bool(v & 0x10)        # a read: the first NMI pulse is suppressed
+        self.half06 = (3072000 // CLOCK_06XX // 2) << (v >> 5)
+        tick = 3072000 // CLOCK_06XX
+        self.t06 = (now // tick + 1) * tick    # the next falling edge of the 48 kHz clock
+
+    def edge06(self):
+        """one edge of the 06XX's divided clock (at self.t06): the falling one (state True) sets the R/W lines, pulses
+        the main CPU's NMI (unless a read stretches the first) and selects the chips"""
+        t = self.t06
+        self.mcu_sync(t)
+        self.state06 = st = not self.state06
+        c = self.ctrl06
+        if st:
+            self.n51.rw = (c >> 4) & 1
+        nmi = st and not self.stretch06
+        self.stretch06 = False
+        self.n51.mcu.set_irq(st and c & 1)
+        self.n54.mcu.set_irq(st and c & 8)
+        self.t06 = t + self.half06
+        return nmi
+
+    def mcu_sync(self, t):
+        """run the MCUs that are out of reset up to main CPU cycle t"""
+        target = t // Z80_PER_MCU
+        for chip in (self.n51, self.n54):
+            mcu = chip.mcu
+            if chip.held:
+                mcu.cycles = max(mcu.cycles, target)
+            else:
+                mcu.run_to(target)
+
+    def run_main_mcu(self, cpu, t):
+        """mcu mode: the main CPU up to cycle t with the 06XX's edges in between"""
+        while cpu.cycles < t:
+            while self.t06 is not None and self.t06 <= cpu.cycles:
+                if self.edge06():
+                    cpu.nmi()
+            if self.irq_pending[0] and cpu.iff1:
+                cpu.irq()
+            cpu.step()
+
     # ---- running -------------------------------------------------------
     def run_frame(self, slice_cycles=128):
         cpus = self.cpus
         start = cpus[0].cycles
         end = start + CYCLES_PER_FRAME
-        events = sorted([(VBLANK_LINE * CYCLES_PER_LINE, "vbl")] +
-                        [(l * CYCLES_PER_LINE, "nmi3") for l in CPU3_NMI_LINES])
+        at = lambda line: ((line - self.frame_line) % LINES) * CYCLES_PER_LINE
+        events = sorted([(at(VBLANK_LINE), "vbl")] + [(at(l), "nmi3") for l in CPU3_NMI_LINES] +
+                        ([(at(0), "vblend")] if self.mcu_mode else []))
         ei = 0
         t = start
         while t < end:
@@ -431,7 +606,13 @@ class Galaga:
             while ei < len(events) and start + events[ei][0] < t:
                 kind = events[ei][1]
                 ei += 1
-                if kind == "vbl":
+                if kind == "vblend":
+                    self.mcu_sync(start + events[ei - 1][0])
+                    self.n51.mcu.set_tc(1)              # the vertical blank ends: the 51XX's TC pin goes high
+                elif kind == "vbl":
+                    if self.mcu_mode:
+                        self.mcu_sync(start + events[ei - 1][0])
+                        self.n51.mcu.set_tc(0)          # the vertical blank starts: the timer counts
                     if self.latch[0]:
                         self.irq_pending[0] = True
                     if self.latch[1]:
@@ -443,6 +624,9 @@ class Galaga:
                 if self.held[n]:
                     cpu.cycles = max(cpu.cycles, t)
                     continue
+                if n == 0 and self.mcu_mode:
+                    self.run_main_mcu(cpu, t)
+                    continue
                 while cpu.cycles < t:
                     if n == 0 and self.nmi06_next is not None and cpu.cycles >= self.nmi06_next:
                         cpu.nmi()
@@ -450,6 +634,8 @@ class Galaga:
                     if n < 2 and self.irq_pending[n] and cpu.iff1:
                         cpu.irq()
                     cpu.step()
+        if self.mcu_mode:
+            self.mcu_sync(end)                  # (the inputs change between frames)
         # the starfield of this frame, then the control bits for the next one (as the
         # vertical blank callbacks do it)
         self.stars.draw()

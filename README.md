@@ -76,7 +76,7 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
 
 ## Layout
 
-    engine/            shared: Z80 / 6801 / 6809 (KONAMI-1 too) / HD63701 emulators and disassemblers, translators (z80x,
+    engine/            shared: Z80 / 6801 / 6809 (KONAMI-1 too) / HD63701 / MB88 emulators and disassemblers, translators (z80x,
                        translate, m6801x, m6809x), the Namco System 1 board (namcos1.py) with its MAME check
                        (namcos1_mame.py), MAME comparison helpers (mamegfx.py, mame_cmp.py, *.lua), STE simulator on
                        Musashi (sim.py), Blitter sprite code generator, ROM preparation (roms.py), paths and toolchain;

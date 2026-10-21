@@ -36,7 +36,8 @@ Reference: `tools/machine.py` models the arcade from MAME's galaga.cpp: three Z8
 RAM 8000-9BFF with the sprite table at the end of each 1 KB, video latch A000), IRQ to
 CPU1/CPU2 at the vertical blank when enabled, NMI to CPU3 at lines 64 and 192, the 06XX's
 NMI clock to CPU1 during transfers, the 51XX simulated the way old MAME did (coins,
-credits, start buttons, joysticks with the fire edge; the MCU ROM is not in the set), the
+credits, start buttons, joysticks with the fire edge), or with `Galaga(mcu=True)` the real 51XX and 54XX programs (see
+"The real 51XX and 54XX" below), the
 05XX starfield (LFSR period walked once per frame), the renderer (tiles 36x28 through
 tilemap_scan, 64 sprites with the double sizes, stars under them, characters over them,
 rotated 90).  It boots to the attract mode in 1500 frames at ~45 frames/s; coin, start and
@@ -372,6 +373,48 @@ and `-D NOSPRITECODE=1` too.  `port.py test galaga`: sound_test 2987 frames / 30
 render_test 0 pixels at 2200, 3600, 5200 (and 1500, 3000, 4400, 6400, 8000), schedule_test as before (differs from frame
 900, the stars); `engine/sprite_blit_test.py` passes (Galaga: 8192 shape/skew/direction checks, 48 renderer
 comparisons of the NOSPRITECODE and the generated-code build, both clipping).
+
+## The real 51XX and 54XX (2026-10-21)
+
+The MCU sets are now in `assets/roms/` (`namco51.zip`: `51xx.bin`, crc c2f57ef8; `namco54.zip`: `54xx.bin`, crc ee7357e0,
+both as MAME 0.289 expects them).  So far they are in the reference only; the STE program still runs the simulation.
+
+* `engine/mb88.py` is the MB8843 / MB8844 core, a port of MAME 0.289's `mb88xx.cpp` (identical to the vendored 0.286):
+  64 nibbles of data RAM, the 8-bit PLA on OUTO, the external / timer / serial interrupts, the TC pin, the serial timer
+  (the 54XX switches it on); an unconnected input reads 0, as in MAME.  `engine/mb88dis.py` disassembles,
+  `engine/mb88_test.py` tests the core on small programs.
+* `tools/machine.py`: `Galaga(mcu=True)` runs both chips at 256,000 machine cycles a second (12 main-CPU cycles each)
+  behind the 06XX as MAME's `namco06.cpp` clocks it: the edges of the divided 48 kHz clock at their exact main-CPU
+  cycles, the chip select (the MCU's /IRQ) and the NMI on the falling edge, a read suppressing the first NMI pulse.  The
+  51XX reads K = R/W line and the low three bits of the shared latch, R0-R3 = IN0 / IN1 nibbles, and counts the vertical
+  blanks on its TC pin; the 54XX reads its command from K / R0 and its outputs (O nibbles, R1: the discrete explosion
+  circuit) are logged in `n54.out`.  The MCUs run lazily up to the time of each 06XX access, edge, latch write and frame
+  end (the inputs change between frames).  The latch bit that resets CPU2 / CPU3 holds them too.
+* MAME powers on at the start of a vertical blank and calls its frame callbacks there (line 224, every 264 lines): with
+  the MCUs and the full boot the reference's frames now start there too (`frame_line`, 224; the old default 0 stays for
+  the simulation).  The shortened boot (`skip_tests`) does not get through in that phase: it reaches the sub CPUs'
+  handshake at frame 13 while they are still in their own self-tests; it keeps phase 0.
+
+`ref/mame_cmp_51xx.py [frames] [script]` runs MAME 0.289 (`ref/mame_51xx.lua`: the same inputs, every 06XX access of the
+main CPU, the MCUs' data RAM at each frame) and the reference from power-on and compares them:
+
+| script | frames | 51XX traffic | 51XX data RAM, every frame |
+|---|---|---|---|
+| `coin`: coin, start, fire and move | 2400 | 8448 accesses identical, values and frames | identical |
+| `two`: two coins, two players, play | 6000 | 15861 identical | identical |
+| `coins`: coin 2, service, a coin held 100 frames, coins in a game, starts with too few credits | 3000 | 6861 identical | identical |
+
+The 54XX's RAM matches until it leaves reset.  The reference's main CPU writes that latch 16.4 lines earlier than MAME's
+(frame 699, line 150.3 against 166.7: main-CPU timing, not the MCU), so its noise generator runs ~250 cycles ahead;
+started at MAME's moment, it matches within MAME's sampling jitter (a few cycles) through its first commands, until the
+commands themselves arrive at slightly different times.  The main CPU's RAM differs in a few stack bytes after the boot
+handshake and in gameplay from about frame 1500 on (the reference's random numbers are not MAME's): a reference property
+that this comparison shows for the first time (MAME could not run the game without the MCU ROMs), not a 51XX one.
+
+Where the old simulation (and the STE program) differs from the real 51XX, in the same phase over the `coin` script:
+the third byte of a switch-mode read is $FF (simulation $00); in credit mode before a game the joystick bytes have bits
+6-7 set ($FF, simulation $3F); coins, start buttons and the fire edge reach the game one frame later.  The commands
+(05 x4, 01 + coinage, 02, 03, 00) are the same.
 
 ## Standard PPO exploration
 
