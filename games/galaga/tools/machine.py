@@ -38,6 +38,23 @@ CLOCK_06XX = 3072000 // 64     # 48 kHz
 
 
 Z80_PER_MCU = 12              # the custom chips' MB88s: 1.536 MHz / 6 = 256 kHz machine cycles
+DEFER51 = 200                 # event-driven 51XX: an edge's handler runs after the main CPU's access, at the latest here
+
+
+def wait51(mcu):
+    """the event-driven 51XX is at a wait point: its main loop with the timer unchanged ($182: TTLA / C / JPL $097 /
+    JMP $182), or the coinage command's waits for the chip select to end ($00D) and to come again ($010); a pending
+    interrupt is taken after the next instruction"""
+    if not mcu.in_irq and mcu.pending & mcu.pio:
+        return False
+    pc = mcu.addr
+    if pc == 0x182:
+        return not mcu.in_irq and mcu.ram[0x09] == mcu.tl
+    if pc == 0x00D:
+        return mcu.irq_line == 1
+    if pc == 0x010:
+        return mcu.irq_line == 0
+    return False
 
 
 def load_mcu(zipname, member, crc):
@@ -354,8 +371,9 @@ def skip_ram_test(rom):
 
 
 class Galaga:
-    def __init__(self, skip_tests=False, mcu=False, frame_line=None):
-        """mcu: the real 51XX / 54XX.  frame_line: the screen line a frame starts at; 0 is the top of the display, 224 the
+    def __init__(self, skip_tests=False, mcu=False, frame_line=None, mcu_events=False):
+        """mcu: the real 51XX / 54XX.  mcu_events: the 51XX without a clock, run from wait point to wait point by its
+        events (wait51, run51; the model of the STE translation, ref/mcu_events_test.py).  frame_line: the screen line a frame starts at; 0 is the top of the display, 224 the
         start of the vertical blank, where MAME powers on and calls its frame_done callbacks: the reference then runs in
         MAME's phase (ref/mame_cmp_51xx.py).  The default is 224 with the MCUs and the full boot, else 0: the shortened
         boot (skip_tests) reaches the sub CPUs' handshake at frame 13 while they are still in their own self-tests, and
@@ -373,6 +391,9 @@ class Galaga:
         self.dswa = 0xf7                      # easy, demo sounds on, upright
         self.dswb = 0x97                      # 1 coin 1 credit, 20K 70K 70K, 3 lives
         self.mcu_mode = mcu
+        self.mcu_events = mcu and mcu_events
+        self.defer51 = None
+        self.steps51 = 0
         self.frame_line = (VBLANK_LINE if mcu and not skip_tests else 0) if frame_line is None else frame_line
         if mcu:
             self.n51 = Namco51MCU(self)
@@ -467,6 +488,8 @@ class Galaga:
                     elif chip.held:
                         chip.held = False
                         chip.reset()
+                        if chip is self.n51 and self.mcu_events:
+                            self.run51()
             if v and self.held[1]:
                 self.cpus[1].reset()
                 self.cpus[2].reset()
@@ -478,6 +501,13 @@ class Galaga:
     def data06_r(self):
         if self.mcu_mode:
             self.mcu_sync(self.cpus[0].cycles)
+            if self.mcu_events:
+                v = self.data06_r_now()
+                self.access51()
+                return v
+        return self.data06_r_now()
+
+    def data06_r_now(self):
         if not (self.ctrl06 & 0x10):
             return 0
         v = 0xff
@@ -494,6 +524,8 @@ class Galaga:
                 self.n51.write(v)
             if self.ctrl06 & 8:
                 self.n54.write(v)
+            if self.mcu_events:
+                self.access51()
             return
         if self.ctrl06 & 1:
             self.n51.write(v)
@@ -549,6 +581,9 @@ class Galaga:
             self.state06 = False
             self.n51.mcu.set_irq(0)
             self.n54.mcu.set_irq(0)
+            if self.mcu_events:
+                self.defer51 = None
+                self.run51()
             return
         self.stretch06 = bool(v & 0x10)        # a read: the first NMI pulse is suppressed
         self.half06 = (3072000 // CLOCK_06XX // 2) << (v >> 5)
@@ -568,6 +603,11 @@ class Galaga:
         self.stretch06 = False
         self.n51.mcu.set_irq(st and c & 1)
         self.n54.mcu.set_irq(st and c & 8)
+        if self.mcu_events:
+            if st and c & 1:
+                self.defer51 = t + DEFER51    # (the main CPU's NMI accesses the latch first: access51)
+            else:
+                self.run51()
         self.t06 = t + self.half06
         return nmi
 
@@ -576,10 +616,29 @@ class Galaga:
         target = t // Z80_PER_MCU
         for chip in (self.n51, self.n54):
             mcu = chip.mcu
-            if chip.held:
+            if chip.held or (chip is self.n51 and self.mcu_events):
                 mcu.cycles = max(mcu.cycles, target)
             else:
                 mcu.run_to(target)
+
+    def run51(self):
+        """event-driven 51XX: run it to its next wait point"""
+        if self.n51.held:
+            return
+        mcu = self.n51.mcu
+        k = 0
+        while not wait51(mcu):
+            mcu.step()
+            k += 1
+            if k > 100000:
+                raise RuntimeError("51XX does not reach a wait point (pc %03X)" % mcu.addr)
+        self.steps51 += k
+
+    def access51(self):
+        """the main CPU accessed the 06XX data: the selected 51XX handles this edge now"""
+        if self.defer51 is not None:
+            self.defer51 = None
+            self.run51()
 
     def run_main_mcu(self, cpu, t):
         """mcu mode: the main CPU up to cycle t with the 06XX's edges in between"""
@@ -587,6 +646,8 @@ class Galaga:
             while self.t06 is not None and self.t06 <= cpu.cycles:
                 if self.edge06():
                     cpu.nmi()
+            if self.defer51 is not None and cpu.cycles >= self.defer51:
+                self.access51()
             if self.irq_pending[0] and cpu.iff1:
                 cpu.irq()
             cpu.step()
@@ -609,10 +670,14 @@ class Galaga:
                 if kind == "vblend":
                     self.mcu_sync(start + events[ei - 1][0])
                     self.n51.mcu.set_tc(1)              # the vertical blank ends: the 51XX's TC pin goes high
+                    if self.mcu_events:
+                        self.run51()
                 elif kind == "vbl":
                     if self.mcu_mode:
                         self.mcu_sync(start + events[ei - 1][0])
                         self.n51.mcu.set_tc(0)          # the vertical blank starts: the timer counts
+                        if self.mcu_events:
+                            self.run51()
                     if self.latch[0]:
                         self.irq_pending[0] = True
                     if self.latch[1]:

@@ -416,6 +416,40 @@ the third byte of a switch-mode read is $FF (simulation $00); in credit mode bef
 6-7 set ($FF, simulation $3F); coins, start buttons and the fire edge reach the game one frame later.  The commands
 (05 x4, 01 + coinage, 02, 03, 00) are the same.
 
+### The 51XX program and an event-driven model (2026-10-21)
+
+`python engine/mb88dis.py <51xx.bin>` lists it; the code ends at $2BD, the rest of the 1 KB is zero.
+
+| address | what |
+|---|---|
+| $000 | reset: `JPL $07E` |
+| $002 | the interrupt (one per 06XX byte): save A, `INK`, `DIS #$04`, `JPA #$01`: a table at $040 + 4 x K, K = R/W line x 8 + the latch's low three bits |
+| $040-$05C | the writes (K 0-7): 0, 6, 7 nothing; 1 coinage; 2 credit mode (`M[3]` = 0); 3 / 4 joystick remap off / on (`M[2]`); 5 switch mode (`M[3]` = 1); all leave through $022 (the read pointer `M[6]` back to 4, restore, `EN #$04`, `RTI`) |
+| $008 | command 1: inside the interrupt, waits for the chip select to end ($00D: `TSTI` loop) and to come again ($010) four times, `INK` each: the four coinage nibbles into `M[1:3..0]` (a 0 sets the free-play flag `M[1:A]`) |
+| $060-$07C | the reads (K 8-15): `JPL $24F`: the byte at `M[2:Y]`, `M[2:Y+1]` (Y = the pointer `M[6]`) as two `OUTO` nibbles, Y + 2, 4 again after $B |
+| $07E | init: clears the RAM, defaults, switch mode, `EN #$64` (TC counter, serial, external interrupt) |
+| $17E-$186 | the main loop: `TTLA` / `C` against `M[9]` until the timer low nibble changes: the TC pin counts the vertical blanks, so the body below runs once a frame, 4-8 cycles after the blank starts |
+| $097 | the frame body: switch mode ($0A4) copies R0-R3 into the output bytes; credit mode ($0BE) does coins (both slots, service), the credits in BCD ($187, $1A4, $1C6), the start buttons ($1D7: one or two credits off), the lamps and coin counters (`OUTP`), the joysticks through the remap table ($272: `JPA #$0A`) and the fire edges, into the output bytes `M[2:4..B]`; the service switch (R3 bit 3) goes to $239 |
+
+The serial port is enabled but nothing reads it back (the program only writes SB with `TAS`), so it does not matter.
+
+Over the `two` script (6000 frames) the body takes 170 cycles in 4902 of 5279 frames (39-280 otherwise; one 2788 when the
+coinage command arrived during it) and is interrupted by a transfer only in frames 861-864 (the switch to credit mode);
+the first transfer comes 12 or more cycles after it ends.  At a write edge the main CPU's NMI handler (`exx` / `ldi`)
+writes the byte 15-25 Z80 cycles after the edge and the 51XX's `INK` reads it 28-68 cycles after; at a read edge the main
+CPU takes the byte 15-50 cycles after, the 51XX outputs the next one 220-280 cycles after.  So at every edge the main
+CPU's access comes first.
+
+`Galaga(mcu=True, mcu_events=True)` runs the 51XX that way, without a clock: from wait point to wait point (`wait51`:
+the main loop at $182 with the timer unchanged, $00D with the chip select high, $010 with it low; a pending interrupt
+first) at each TC edge, at each chip-select edge right after the main CPU's 06XX access of that edge (at the latest 200
+cycles after it: the first, stretched edge of a read has no NMI), and when the chip select ends.  `ref/mcu_events_test.py`
+compares it with the cycle-exact 51XX: `two` and `coins`, 6000 frames each: all 15849 reads identical, the 51XX's RAM
+identical in every frame, the main CPU's RAM equal at the end; 211-249 MB88 instructions a frame.  That is the model for
+the STE translation (step 3): the program translated to 68000 code that resumes at the saved address and returns at the
+wait points, called by the vertical blank and by the 06XX transfer after each NMI handler pass (the STE schedule runs
+those synchronously in `ctrl06_w`, `run_frame_port`), the 54XX left out of the gameplay path (sound only).
+
 ## Standard PPO exploration
 
 Native MAME PPO gameplay is deferred by user until the real 51xx/54xx MCU ROMs are available. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
