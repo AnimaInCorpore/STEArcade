@@ -159,7 +159,11 @@ start:
 	move.b	#$FF,snd_expl_t
 	bsr	snd_init
 
+	ifd N51SIM
 	bsr	n51_reset
+	else
+	st	n51_held		; (held in reset until the program releases latch $6823)
+	endc
 	move.l	#$1234,rnd_state
 	ifd IOLOG
 	move.l	#iolog_buf,iolog_ptr
@@ -481,7 +485,10 @@ vbl:
 	addq	#1,cnt_vbl
 	endc
 	movem.l	d0-d7/a0-a6,-(sp)
-	bsr	jagpad_poll		; (n51_read merges jp_in)
+	bsr	jagpad_poll		; (the 51XX's inputs merge jp_in)
+	ifnd N51SIM
+	bsr	n51_vbl			; the 51XX's frame: the vertical blank on its TC pin
+	endc
 
 	; A frame finished drawing since the last VBL: show it, draw into the other one.
 
@@ -1000,6 +1007,7 @@ iolog	macro
 	endc
 	endm
 
+	ifd N51SIM			; the old simulation of the 51XX (-D N51SIM=1)
 g_ctrl06:
 	move.l	g1_ret_to,-(sp)		; (the IRQ handler we may be in returns through it)
 	iolog	1,G_IO1+$7100
@@ -1009,7 +1017,7 @@ g_ctrl06:
 	and.b	#$e0,d7
 	beq	.done
 	btst	#4,ctrl06_mode
-	beq.s	.nmi			; write
+	beq	.nmi			; write
 	btst	#0,ctrl06_mode
 	beq.s	.nmi
 	bsr	n51_read
@@ -1281,6 +1289,205 @@ n51_read:
 	iolog	3,d7
 	movem.l	(sp)+,d0-d3/a0
 	rts
+
+	else				; the real 51XX
+
+; The transfer runs right here, one clock period a pass, as tools/machine.py ctrl06_port_mcu: the R/W line and the
+; chip select; the NMI handler (a read's first pulse is suppressed: the 51XX puts out its byte first); the 51XX after
+; the handler's access (the main CPU's NMI reaches the latch before the chip's INK / OUTO, ref/mcu_events_test.py);
+; the chip select off.  The handler's stop ($10) comes back here nested and only sets the register.  A VBL during a
+; transfer leaves the 51XX's frame to the end of the pass (n51_tick).
+
+g_ctrl06:
+	tst.b	n51_busy
+	bne	.nested
+	move.l	g1_ret_to,-(sp)		; (the IRQ handler we may be in returns through it)
+	st	n51_busy
+	iolog	1,G_IO1+$7100
+	bsr	n51_check
+	st	n51_first
+.loop:
+	move.b	G_IO1+$7100,d7
+	move.b	d7,ctrl06_mode
+	and.b	#$e0,d7
+	beq	.done
+	move.b	ctrl06_mode,d7		; the falling edge: R/W, the 51XX's chip select
+	lsr.b	#4,d7
+	and.b	#1,d7
+	move.b	d7,N51_state+N51_S_RW
+	move.b	ctrl06_mode,d7
+	and.b	#1,d7
+	bsr	N51_set_irq
+	btst	#4,ctrl06_mode
+	beq	.nmi			; write
+	tst.b	n51_first
+	beq.s	.byte
+	bsr	n51_run			; a read's first pulse: no NMI
+	bra	.rise
+.byte:	moveq	#-1,d7			; the byte the handler reads: the 51XX's latch
+	btst	#0,ctrl06_mode
+	beq.s	.ff
+	move.b	N51_state+N51_S_PORTO,d7
+.ff:	iolog	3,d7
+	move.b	d7,G_IO1+$7000		; the port is the whole $7000-$70FF range: the
+	move.b	d7,G_IO1+$7001		; handler's pointer walks through it
+	move.b	d7,G_IO1+$7002
+	move.b	d7,G_IO1+$7003
+	move.b	d7,G_IO1+$7004
+	move.b	d7,G_IO1+$7005
+	move.b	d7,G_IO1+$7006
+	move.b	d7,G_IO1+$7007
+	move.b	d7,G_IO1+$7008
+	move.b	d7,G_IO1+$7009
+	move.b	d7,G_IO1+$700A
+	move.b	d7,G_IO1+$700B
+	move.b	d7,G_IO1+$700C
+	move.b	d7,G_IO1+$700D
+	move.b	d7,G_IO1+$700E
+	move.b	d7,G_IO1+$700F
+.nmi:
+	move.b	g1_iff,-(sp)		; an NMI disables the interrupts until its retn
+	clr.b	g1_iff
+	move.w	#TOKEN,-(a5)
+	move.l	#.back,g1_ret_to
+	jmp	Z0066
+.back:
+	move.b	(sp)+,g1_iff
+	btst	#4,ctrl06_mode
+	bne.s	.after
+	move.l	d2,d7			; the handler's `ldi` wrote through de' (after its exx back the upper
+	swap	d7			; word of d2: z80x.FAST keeps the alternate registers there),
+	subq.w	#1,d7			; one past the byte
+	move.b	(a6,d7.w),d7
+	iolog	2,d7
+	btst	#0,ctrl06_mode
+	beq.s	.no51
+	move.b	d7,N51_state+N51_S_PORTO
+.no51:	btst	#3,ctrl06_mode
+	beq.s	.after
+	bsr	n54_write
+.after:	bsr	n51_run			; the 51XX takes this pulse
+.rise:	moveq	#0,d7			; the chip select off
+	bsr	N51_set_irq
+	bsr	n51_run_low
+	clr.b	n51_first
+	bsr	n51_late
+	bra	.loop
+.done:
+	moveq	#0,d7
+	bsr	N51_set_irq
+	bsr	n51_run_low
+	clr.b	n51_busy
+	bsr	n51_late
+	move.l	(sp)+,g1_ret_to
+.nested:
+	rts
+
+; A plain data write ($7000, hooked): into the 51XX's latch / to the 54XX if the transfer is a write.
+
+g_data06:
+	move.b	G_IO1+$7100,d7
+	btst	#4,d7
+	bne.s	.done
+	btst	#0,d7
+	beq.s	.no51
+	move.b	G_IO1+$7000,N51_state+N51_S_PORTO
+.no51:	btst	#3,d7
+	beq.s	.done
+	move.b	G_IO1+$7000,d7
+	bra	n54_write
+.done:
+	rts
+
+; ------------------------------------------------------------------------------
+; 51XX: the chip's own program, translated (engine/mb88x.py -> build/galaga/n51_code.s): it runs from wait point to
+; wait point at its events, as tools/machine.py's event-driven model (Galaga(mcu=True, mcu_events=True)).
+; Every routine keeps every register.
+; ------------------------------------------------------------------------------
+
+; The reset line is latch $6823 (0: held); a release resets the chip and runs its boot to the main loop.
+
+n51_check:
+	tst.b	G_IO1+$6823
+	bne.s	.on
+	st	n51_held
+	rts
+.on:	tst.b	n51_held
+	beq.s	.r
+	clr.b	n51_held
+	bsr	N51_reset
+	bsr	N51_run
+.r:	rts
+
+n51_run:
+	tst.b	n51_held
+	bne.s	.r
+	bra	N51_run
+.r:	rts
+
+; After the chip select went low: only the coinage command's wait for that ($00D) goes on; anywhere else the chip
+; would stop again at once (the run is left out: the event model's run, tools/machine.py run51, changes nothing there).
+
+n51_run_low:
+	cmp.l	#N51_00D,N51_state+N51_S_RESUME
+	beq.s	n51_run
+	rts
+
+; At the VBL: the TC pin goes high and low (the vertical blank counts), the frame body runs with this frame's inputs.
+; During a transfer it waits for the end of the pass.
+
+n51_vbl:
+	tst.b	n51_busy
+	bne.s	.later
+	bra.s	n51_frame
+.later:	st	n51_tick
+	rts
+
+n51_late:
+	tst.b	n51_tick
+	beq.s	.r
+	clr.b	n51_tick
+	bra.s	n51_frame
+.r:	rts
+
+n51_frame:
+	movem.l	d6-d7,-(sp)
+	bsr	n51_check
+	ifd IOLOG
+	tst.b	n51_held
+	bne.s	.held
+	iolog	4,N51_state+N51_S_R	; (tools/n51_test.py: a 51XX tick)
+.held:
+	endc
+	move.b	in0_kbd,d7		; the inputs, active low as the arcade's: R0 / R1 IN0 low / high (joysticks),
+	or.b	in0_joy,d7		; R2 / R3 IN1 low / high (fire, starts, coins, service)
+	or.b	jp_in,d7
+	not.b	d7
+	move.b	d7,d6
+	and.b	#$0f,d6
+	move.b	d6,N51_state+N51_S_R
+	lsr.b	#4,d7
+	move.b	d7,N51_state+N51_S_R+1
+	move.b	in1_kbd,d7
+	or.b	in1_joy,d7
+	or.b	jp_in+1,d7
+	not.b	d7
+	move.b	d7,d6
+	and.b	#$0f,d6
+	move.b	d6,N51_state+N51_S_R+2
+	lsr.b	#4,d7
+	move.b	d7,N51_state+N51_S_R+3
+	moveq	#1,d7			; (the rising edge counts nothing: no run)
+	bsr	N51_set_tc
+	moveq	#0,d7
+	bsr	N51_set_tc
+	bsr	n51_run
+	movem.l	(sp)+,d6-d7
+	rts
+
+	include	"n51_code.s"
+
+	endc
 
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): the pressed bits of in0 (joystick) and in1 (buttons)
@@ -1579,7 +1786,10 @@ g2_iff:		ds.b	1
 	even
 	ifd IOLOG
 iolog_ptr:	ds.l	1
-iolog_buf:	ds.b	512
+	ifnd IOLOGSIZE
+IOLOGSIZE = 512
+	endc
+iolog_buf:	ds.b	IOLOGSIZE
 iolog_end:
 	endc
 	even
@@ -1622,6 +1832,7 @@ snd_expl_t:	ds.b	1		; the explosion: its frame of snd_expl_env, $FF off
 n54_skip:	ds.b	1		; parameter bytes of a 54XX command still to come
 	even
 
+	ifd N51SIM
 n51_state:
 n51_mode:	ds.b	1		; 0 switches, 1 credits, 2 in game
 n51_count:	ds.b	1
@@ -1635,6 +1846,13 @@ n51_lastcoins:	ds.b	1
 n51_lastbuttons:	ds.b	1
 	ds.b	1
 N51_SIZE = *-n51_state
+	else
+n51_held:	ds.b	1		; the 51XX is in reset (latch $6823 is 0)
+n51_busy:	ds.b	1		; a transfer runs (g_ctrl06)
+n51_first:	ds.b	1		; its first pulse
+n51_tick:	ds.b	1		; a VBL came during it: the 51XX's frame is due
+	include	"n51_bss.s"
+	endc
 
 	cnop 0,4
 g_block:	ds.b	$18000		; [sub ROM 32K | RAM 32K | main ROM 32K]

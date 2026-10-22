@@ -377,7 +377,7 @@ comparisons of the NOSPRITECODE and the generated-code build, both clipping).
 ## The real 51XX and 54XX (2026-10-21)
 
 The MCU sets are now in `assets/roms/` (`namco51.zip`: `51xx.bin`, crc c2f57ef8; `namco54.zip`: `54xx.bin`, crc ee7357e0,
-both as MAME 0.289 expects them).  So far they are in the reference only; the STE program still runs the simulation.
+both as MAME 0.289 expects them).  The STE program runs the 51XX since step 3 ("The real 51XX on the STE").
 
 * `engine/mb88.py` is the MB8843 / MB8844 core, a port of MAME 0.289's `mb88xx.cpp` (identical to the vendored 0.286):
   64 nibbles of data RAM, the 8-bit PLA on OUTO, the external / timer / serial interrupts, the TC pin, the serial timer
@@ -449,6 +449,48 @@ identical in every frame, the main CPU's RAM equal at the end; 211-249 MB88 inst
 the STE translation (step 3): the program translated to 68000 code that resumes at the saved address and returns at the
 wait points, called by the vertical blank and by the 06XX transfer after each NMI handler pass (the STE schedule runs
 those synchronously in `ctrl06_w`, `run_frame_port`), the 54XX left out of the gameplay path (sound only).
+
+## The real 51XX on the STE (2026-10-21)
+
+The STE program now runs the 51XX's own program (the old simulation stays as `-D N51SIM=1`; the 54XX is still the
+explosion-noise simulation of "Sound").
+
+* `engine/mb88x.py` translates the MB88 program into 68000 code that runs without a clock, from wait point to wait
+  point, as `Galaga(mcu=True, mcu_events=True)` does: every reachable instruction gets a label (582), JPA becomes a table,
+  the chip's four-entry stack holds 68000 addresses, so it returns to the runtime with a plain `rts` at any depth.  The
+  RAM is addressed through a row pointer (`a2` = state + 16 x X, the address `(a2,d2.w)`), a flag liveness analysis drops
+  the dead ST / ZF stores, a quick entry returns at once when the chip would stop again.  One native path: a read at the
+  main loop's wait (three a frame) in ~40 instructions instead of the interrupt, $002, $24F and RTI (`FAST_51XX`).
+  `build.py` writes `build/galaga/n51_code.s` and `n51_bss.s` from `namco51.zip`.
+* `galaga.s`: `g_ctrl06` runs a transfer one clock period a pass as the reference's `ctrl06_port_mcu`: the R/W line and
+  the chip select, the NMI handler (a read's first pulse has none: the 51XX puts out its byte first), the 51XX after the
+  handler's access, the chip select off (a run only if the chip waits at $00D for that).  At every VBL `n51_vbl`
+  gives it the inputs (keyboard, joysticks, pads as before) and pulses its TC pin.  Latch $6823 holds it in reset; a
+  release resets it and runs its boot.  A VBL that comes during a transfer runs the 51XX's frame at the end of the pass.
+* The coinage at the start ($3737: write 8 bytes at the slowest 06XX clock, read 3 back, again until the first is a BCD
+  credit count): on the arcade the transfer takes more than a frame, a vertical blank falls into it and the 51XX's frame
+  switches its answers to credit mode before the read (MAME reads $00 the first time).  The reference's schedule does it
+  all at once, reads $FF and repeats until its next VBL; the STE build reads it right when a VBL falls between the write
+  and the read, as it did in the tests.  Every round sends the same commands: the state afterwards is the same.
+* Coverage seed 7 (`ref/cover.py 7 20000`, `port.py cover galaga`) plays with the event-driven 51XX: 64 main-CPU
+  addresses the seeds 1-3 did not reach.
+
+Tests (`port.py test galaga` runs them with 3000):
+
+| test | what | result |
+|---|---|---|
+| `engine/mb88x_test.py` | every pin change, reset, port value and run of the reference's 51XX replayed on the translated code in the simulator; after each run RAM, latch, A, X, Y, TL, PIO | `two` / `coins`, 6000 frames: 52945 / 52929 runs, 0 differ |
+| `ref/mcu_events_test.py` | the event-driven 51XX against the cycle-exact one (MAME's) | 6000 frames each, identical |
+| `tools/n51_test.py` | the --sim build (IOLOG) and `run_frame_port` with the same inputs per 51XX tick: the 51XX's transfers, bytes written and read, tick by tick | `coin` 1500, `two` / `coins` 4000 ticks: 3811 ticks compared, 0 differ |
+
+In `n51_test.py` the build reads the coinage back 26 ticks later than the reference (its boot schedule of the sub CPUs),
+and the 54XX's explosion commands differ in 2 of 4001 ticks: the play differs between the two from the boot on.
+
+The cost (68000 cycles over the frames the 51XX runs, `engine/mb88x_test.py` replaying every event): the plain
+translation 16950 a frame, with the flag liveness and the quick entry 14429, the row pointer 13647, the flags of an
+interrupt as bytes 13038, the native read 7128.  Hatari (`tools/bench.sh 9000`, attract, frames drawn a second;
+the logic runs at every VBL in both): the old simulation 33.2, the real 51XX first 28.6, without the runs that change
+nothing 29.3, with the native read 31.1.
 
 ## Standard PPO exploration
 

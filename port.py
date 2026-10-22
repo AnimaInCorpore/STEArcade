@@ -49,7 +49,8 @@ COVER = {
               ("ref/cover.py", [8], 20000), ("ref/cover.py", [9, 10], 40000)],   # 8-10: Invulnerability (stage 2)
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
-    "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000)],   # 4-6: high scores, the name entry
+    "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry
+               ("ref/cover.py", [7], 20000)],                                          # 7: the real 51XX
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
@@ -149,7 +150,10 @@ TESTS = {
                ("tools/build.py", ["--sim"], None),
                ("tools/sprite_test.py", [], None),               # left/right edge clipping, sizes, flips, 16 shifts, 64 KB
                ("tools/sound_test.py", ["{n}"], 3000),          # the sound CPU against the reference, the YM mapping
-               ("tools/render_test.py", [], None)],               # the picture at frozen moments of the attract mode
+               ("tools/render_test.py", [], None),                # the picture at frozen moments of the attract mode
+               ("ref/mcu_events_test.py", ["{n}"], 3000),        # the event-driven 51XX against the cycle-exact one
+               ("../../engine/mb88x_test.py", ["{n}"], 3000),    # the translated 51XX against the event-driven one
+               ("tools/n51_test.py", ["{n}"], 3000)],            # the build's 51XX traffic against the reference
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 2000),          # (into the play: src/natives.s runs there)

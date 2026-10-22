@@ -122,7 +122,7 @@ def vwriters():
 
 
 def coverage():
-    require_coverage("galaga", ["galaga_cover_%d.pkl" % s for s in (1, 2, 3, 4, 5, 6)])
+    require_coverage("galaga", ["galaga_cover_%d.pkl" % s for s in (1, 2, 3, 4, 5, 6, 7)])
     dyn = [set(), set(), set()]
     for f in glob.glob(os.path.join(BUILD, "galaga_cover_*.pkl")):
         d = pickle.load(open(f, "rb"))

@@ -572,7 +572,7 @@ class Galaga:
     # ---- the 06XX and the MCUs (mcu mode: MAME's namco06.cpp) ----------
     def ctrl06_w_mcu(self, v):
         if self.port_mode:
-            raise NotImplementedError("the STE schedule (run_frame_port) with the real 51XX")
+            return self.ctrl06_port_mcu(v)
         now = self.cpus[0].cycles
         self.mcu_sync(now)
         self.ctrl06 = v
@@ -589,6 +589,43 @@ class Galaga:
         self.half06 = (3072000 // CLOCK_06XX // 2) << (v >> 5)
         tick = 3072000 // CLOCK_06XX
         self.t06 = (now // tick + 1) * tick    # the next falling edge of the 48 kHz clock
+
+    def ctrl06_port_mcu(self, v):
+        """the STE runtime's 06XX (galaga.s g_ctrl06) with the event-driven 51XX: the transfer runs right here, one
+        clock period a pass: the R/W line and the chip select, the main CPU's NMI handler (a read's first pulse is
+        suppressed: the 51XX puts out its byte first), the 51XX after the handler's access, the chip select off; a
+        control write from inside the handler (its stop) only sets the register"""
+        if not self.mcu_events:
+            raise NotImplementedError("the STE schedule (run_frame_port) needs the event-driven 51XX")
+        self.ctrl06 = v
+        if self.in_nmi06:
+            return
+        n51, n54 = self.n51, self.n54
+        self.in_nmi06 = True
+        first = True
+        k = 0
+        while self.ctrl06 & 0xe0:
+            c = self.ctrl06
+            n51.rw = (c >> 4) & 1
+            n51.mcu.set_irq(c & 1)
+            n54.mcu.set_irq(c & 8)
+            if first and c & 0x10:
+                self.run51()
+            else:
+                self.defer51 = 0
+                self.run_handler(self.cpus[0], nmi=True)
+                self.access51()
+            n51.mcu.set_irq(0)
+            n54.mcu.set_irq(0)
+            self.run51()
+            first = False
+            k += 1
+            if k > 64:
+                raise RuntimeError("06XX transfer does not end")
+        self.in_nmi06 = False
+        n51.mcu.set_irq(0)
+        n54.mcu.set_irq(0)
+        self.run51()
 
     def edge06(self):
         """one edge of the 06XX's divided clock (at self.t06): the falling one (state True) sets the R/W lines, pulses
@@ -806,6 +843,11 @@ class Galaga:
             if cpu1.pc in yields:
                 self.boot_turns()
         self.boot_turns()                       # the VBL gives the booting CPUs a turn too
+        if self.mcu_events:                     # the 51XX's frame (galaga.s n51_vbl): TC high, then low
+            self.n51.mcu.set_tc(1)
+            self.run51()
+            self.n51.mcu.set_tc(0)
+            self.run51()
         if self.latch[0] and self.run_handler(cpu1):
             self.handler_runs[0] += 1
         if self.latch[1] and self.booted[1] and self.run_handler(cpu2):

@@ -2,7 +2,8 @@
 -> run/galaga/GALAGA.PRG, run/galaga_sim/GALAGA.PRG with --sim (the CPU ROMs are embedded: build/galaga/rom_cpu*.rom)"""
 import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
-import gen, assets, sound
+import gen, assets, sound, mb88x
+from machine import load_mcu
 from paths import build_dir, run_dir
 from toolchain import assemble_link
 from machine import ROMDIR
@@ -27,6 +28,9 @@ def main():
         print("CPU%d: %d instructions, unsupported %d" % (n + 1, rep["instructions"], len(rep["unsupported"])))
         for u in rep["unsupported"][:10]:
             print("   %04X %-24s %s" % u)
+    n51, _ = mb88x.translate_51xx(load_mcu("namco51.zip", "51xx.bin", 0xc2f57ef8))     # the 51XX's program
+    (build_dir("galaga") / "n51_code.s").write_text(n51)
+    (build_dir("galaga") / "n51_bss.s").write_text(mb88x.bss("N51"))
     assets.build()
     sound.emit(build_dir("galaga") / "sound_tables.s")
     rd = lambda f: open(os.path.join(ROMDIR, f), "rb").read()

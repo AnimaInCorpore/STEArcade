@@ -8,7 +8,13 @@ from machine import Galaga
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 rnd = random.Random(seed)
-m = Galaga()
+MCU = seed >= 7                     # 7: random play with the real 51XX (event-driven: the STE build's), as seed 1 otherwise
+m = Galaga(skip_tests=True, mcu=True, mcu_events=True) if MCU else Galaga()
+
+
+def credit_mode():
+    """the 51XX is back in credit mode (a game over): the simulation's mode 1, the real chip's RAM $03 = 0 (2 in a game)"""
+    return m.n51.mcu.ram[3] == 0 if MCU else m.n51.mode == 1
 pcs = [set(), set(), set()]
 vwrites = [set(), set(), set()]     # the instructions that write the video RAM (8000-87FF): gen.py flags them
 cur = [0, 0, 0]
@@ -28,7 +34,7 @@ for n in range(3):
 # Seeds 4-6 force a high score (the score is six digits in the video RAM, 83F8 up, 24 = blank; the table's fifth
 # entry is 20000): the name entry after the game over (3000: the ranks' jump table at 31A6, the letter wheel), played
 # with the random inputs (4: one player, 5: two players, both ranking; 6: no input, it times out).
-HIGH = seed >= 4
+HIGH = 4 <= seed <= 6
 PLAYERS = 2 if seed == 5 else 1
 SCORES = [30000, 25000, 21000, 123450, 20010]
 
@@ -66,7 +72,7 @@ for f in range(frames):
             poke_score(0x83F8, SCORES[games % len(SCORES)])
             if PLAYERS == 2:
                 poke_score(0x83E3, SCORES[(games + 2) % len(SCORES)])
-        if m.n51.mode == 1 and (g > 9000 or HIGH and g > 600):    # game over (51xx back in credit mode)
+        if credit_mode() and (g > 9000 or HIGH and g > 600):    # game over (51xx back in credit mode)
             state, t0 = "over", f
             games += 1
     if state == "over" and g > (4000 if HIGH else 0):     # (the name entry: a minute at most, then the attract)
