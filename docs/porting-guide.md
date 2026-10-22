@@ -215,6 +215,48 @@ renderer changes.  A plane order or a colour weight that is wrong in the referen
   and the wrap around of sprites at the arcade's 256 pixel edge (MAME draws them again at x - 256 / y - 256).  Neither
   is visible in normal play.
 
+## Recorded arcade games as an acceptance test (MARP; Black Tiger, 2026-10-22)
+
+The MAME Action Replay Page (http://replay.marpirc.net/, plain HTTP) keeps
+whole expert games recorded in WolfMAME. Played back in the WolfMAME version
+that recorded it (Windows builds: github.com/mahlemiut/wolfmame/releases), a
+recording is the board's own game, and a frame dump of it is ground truth.
+F030Arcade replays such a game on its Falcon Black Tiger port, which uses
+this repository's translation, frame for frame: 67 minutes, 2,006,700
+points, equal at every check to game over. The workflow and tools are in
+F030Arcade's `docs/marp-replay.md` (`scripts/mame_inp_dump.py` dumps any set's
+ports and RAM per frame). Use it for any port whose exact set has a
+recording: it found what coverage, PPO and reference tests had not.
+
+What it found in this repository's Black Tiger translation:
+
+- **`docs/window-sites.json` misses block copies.** Bank 0's `ldir` at `$AC71`
+  copies the 32-byte object template at `$AF06` from the banked window. It is
+  not a window site, so the translation reads the image and makes the object
+  from zeros. Guard every block copy: the guard tests HL at run time.
+- **Object-script handlers are missing as roots.** Scripts are 5-byte records;
+  `00 lo hi` jumps to a handler in the script's bank. Scripts reached only
+  through data tables are not followed by `gen.generate`'s `script()`
+  discovery. F030Arcade added about 50 roots, in its
+  `games/blktiger/docs/main-roots-extra.json`: 40 from scans for a handler
+  record after a goto, between timed records, or before an end marker (target
+  bytes like the known handlers), and 9 from replay stops.
+- **Task starts are missing as roots.** The task kernel starts a task with
+  `ld a,n / ld bc,entry / call $00F6`. BC is not followed as code, so the
+  high-score name entry (`$51DE`, `$5276`) and three more entries (`$275D`,
+  `$2778`, bank 6 `$A9E8`) were untranslated. Scan for `01 lo hi cd f6 00`:
+  29 sites in the ROM.
+- **The score is at `$E1E8`** (8 unpacked digits, shown with a trailing 0;
+  `$E1E0` is the high score).
+- **A frame-exact replay needs the Z80's time.** Delivering the frame
+  interrupt only when the task kernel idles runs each frame's work in zero
+  time. The boot's five overrun frames then leave the random generator
+  `$E008` five frames ahead, and the game changes at the start press. A cycle
+  budget charged per translated block (MAME's `z80.cpp` tables), with the
+  interrupt taken mid-task through the game's own handler, fixes it (F030Arcade
+  `games/blktiger/scripts/cycle_budget.py`, an `Emitter` subclass; its
+  PORTING.md, "Original CPU time and recorded games").
+
 ## What the 1942 port added (2026-10-08)
 
 * **A game whose foreground is the game.**  1942's Z80 runs a cooperative kernel (tasks, a scheduler with an idle loop, two interrupts); the
