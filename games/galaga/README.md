@@ -494,7 +494,8 @@ nothing 29.3, with the native read 31.1.
 
 ## Standard PPO exploration
 
-Native MAME PPO gameplay is deferred by user until the real 51xx/54xx MCU ROMs are available. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+The hold for the real 51xx/54xx MCU ROMs ended on 2026-10-22 (they are in, the port runs the real 51XX); native MAME
+PPO needs a RAM/input profile in `engine/ppo_profiles.py` first, which is not written yet. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
 
 ## Full-game verification status
 

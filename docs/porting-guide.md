@@ -119,7 +119,8 @@ prints 0 differing pixels for all four frames now.  Notes:
 * **No key press**: MAME shows its startup screens (game info, "ROMs not correct" warning) and waits for a key
   unless `-seconds_to_run` is below 300 (`ui.cpp`: the startup screens are off for `-str` < 300).  The scripts use
   `-seconds_to_run 250` (about 15000 frames with `-nothrottle`, enough for every check here).  The warning itself
-  stays in the log; Galaga's comes from the blank MCU ROMs below, Bubble Bobble's from the PAL dumps nobody has.
+  stays in the log; Galaga's came from blank MCU ROMs before its real ones were in (2026-10-21), Bubble Bobble's
+  from the PAL dumps nobody has.
 * **The MAME source in `F030Arcade/third_party/mame` is older than the binary** (Galaga's blue channel differs:
   the source says 0x47/0x97, MAME 0.289 produces 0x51/0xAE).  The installed `mame` is the truth.
 * **Several frames in one run, write logs with the beam line** (`engine/mame_frames.lua` + `engine/mame_cmp.py`, used

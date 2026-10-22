@@ -1,6 +1,6 @@
 """Explicit native-input and RAM contracts for the registered ports.
 
-Galaga is deliberately deferred: real 51xx/54xx MCU ROMs are required for gameplay.
+Galaga has no profile yet (its real 51xx/54xx MCU ROMs are in since 2026-10-22; blank ones never stand in).
 PPO is supplemental exploration; the curated translator coverage is never replaced.
 """
 from pathlib import Path
@@ -22,7 +22,7 @@ def profile(game):
         'dkong': dict(boot=600,coin=400,start=450,system_idle=0,p1_idle=0,high_system=True,high_p1=True,
                       coin_mask=128,start_mask=4,buttons=[16],directions=[1,2,8,4],legacy=False,
                       ram=[(0x6000,0xc00,'z80_block+$6000')],rom=[(0,0x5fff)]),
-        'galaga': dict(deferred='Missing real 51xx.bin / 54xx.bin MCU ROMs; deferred by user.'),
+        'galaga': dict(deferred='No RAM/input profile yet (the real 51xx/54xx ROMs are in since 2026-10-22).'),
         'bublbobl': dict(boot=600,coin=400,start=460,system_idle=3,high_system=True,coin_mask=4,
                          start_source='p1',start_mask=64,buttons=[32,16],directions=[2,1,0,0],legacy=False,
                          ram=[(0xe000,0x1800,'g_block+$e000')]),

@@ -38,7 +38,8 @@ See `docs/architecture.md` and `docs/porting-guide.md` for the runtime contracts
   integration test is not full-game coverage or lock-step reference/render equivalence.
 - Keep snapshots compressed and private emulator builds temporary. Retain small reports and usable checkpoints;
   avoid downloading language-model weights for this workflow.
-- Galaga is deferred by user pending real 51xx/54xx MCU ROMs. Do not substitute blank MCU ROMs for gameplay.
+- Galaga runs its real 51XX (namco51.zip, translated by engine/mb88x.py) since 2026-10-21; the 54XX's explosions
+  are still simulated. Never substitute blank MCU ROMs for gameplay. It has no PPO profile yet.
 - Before a new PPO profile or a longer search recording, consider Go-Explore (`docs/go-explore.md`): a cell
   archive over `playbot.py`'s snapshot/restore and segments reaches side paths and deep states that PPO and the
   forward-only progress search miss.

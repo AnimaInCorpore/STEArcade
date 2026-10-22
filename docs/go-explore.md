@@ -46,7 +46,7 @@ archive or improve every cell met (keeping the shortest timeline to it).
 Rules that carry over unchanged from [ppo.md](ppo.md): the count/SYSTEM/P1
 replay contract, native Hatari replay of every kept timeline before it is used
 anywhere, curated `port.py cover` runs and canonical fixtures are never
-replaced, and Galaga stays deferred until its real MCU ROMs are available.
+replaced, and Galaga is not explored before it has a tested RAM/input profile (its MCU hold ended 2026-10-22).
 
 ## What it is not
 

@@ -9,7 +9,8 @@ supported port, including its final stage or loop transition. This is an
 exploration goal, not a guarantee that its learned policy can finish the game.
 Check that the game's RAM/input adapter and native Hatari replay transport work
 before starting; support for one port does not establish support for every port.
-Galaga remains deferred pending real 51xx/54xx MCU ROMs.
+Galaga's hold for its real 51xx/54xx MCU ROMs ended on 2026-10-22: the port runs the real 51XX
+(see [its README](../games/galaga/README.md#the-real-51xx-on-the-ste-2026-10-21)); it has no PPO adapter yet.
 
 A green **Complete** status requires graphics and sound to be implemented and
 complete playability to be verified in Hatari. Record a successful natural

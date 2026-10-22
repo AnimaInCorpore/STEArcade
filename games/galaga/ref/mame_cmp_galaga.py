@@ -1,11 +1,11 @@
 """Compare tools/machine.py render_raw() with MAME (see ref/mame_cmp_dkong.py, README "Checking a
 reference against MAME").
 
-MAME's Galaga needs the Namco 51xx and 54xx MCU ROMs, which are not in the ROM set.  With a blank
-stand-in (a 1 KB file of zeros as namco51.zip / namco54.zip, "wrong checksum", MAME warns and runs)
-it stops in the test screen, so the RAM image of the reference machine is written into MAME's RAM
-(engine/mame_dump.lua, INJECT) and MAME's own video code draws it: this checks the renderer (tiles,
-sprites, palette), not the game.  The starfield is left out of the reference (its phase depends on
+The RAM image of the reference machine is written into MAME's RAM (engine/mame_dump.lua, INJECT) and
+MAME's own video code draws it: this checks the renderer (tiles, sprites, palette), not the game.  It
+was written when the Namco 51xx / 54xx MCU ROMs were missing (blank stand-ins kept MAME in its test
+screen); the real namco51.zip / namco54.zip are used now when assets/roms has them (the game against
+MAME: ref/mame_cmp_51xx.py).  The starfield is left out of the reference (its phase depends on
 the exact frame), so a pixel where MAME has a star and the reference the black background is
 expected and counted separately; any other difference is an error.
 
@@ -29,8 +29,11 @@ frames = [int(a) for a in sys.argv[1:]] or [900, 1500, 2100]
 rompath = tempfile.mkdtemp()
 os.symlink(os.path.join(ROMS, "galaga.zip"), os.path.join(rompath, "galaga.zip"))
 for n, f in (("namco51", "51xx.bin"), ("namco54", "54xx.bin")):
-    with zipfile.ZipFile(os.path.join(rompath, n + ".zip"), "w") as z:
-        z.writestr(f, bytes(1024))
+    if os.path.exists(os.path.join(ROMS, n + ".zip")):
+        os.symlink(os.path.join(ROMS, n + ".zip"), os.path.join(rompath, n + ".zip"))
+    else:                                   # (the renderer check only: never for game play)
+        with zipfile.ZipFile(os.path.join(rompath, n + ".zip"), "w") as z:
+            z.writestr(f, bytes(1024))
 
 m = machine.Galaga(skip_tests=True)
 m.gfx = g = machine.Gfx()

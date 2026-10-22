@@ -101,7 +101,7 @@ modules; engine/rt/m72render.s for R-Type and Mr. HELI. Contracts and existing o
 history: docs/architecture.md, docs/porting-guide.md, docs/sprite-preparation.md.
 
 Static oversized buffers used for margins are not camera-scrolling implementations:
-Donkey Kong, Galaga and Bubble Bobble are outside this review. Galaga remains deferred.
+Donkey Kong, Galaga and Bubble Bobble are outside this review (Galaga was deferred at the time).
 Galaga '88 uses fixed-width display buffers and software plots/composition for scrolling
 layers, rather than the virtual-screen hardware-scroll path under review. Other folders
 containing only board/reference work do not establish an STE scrolling implementation.

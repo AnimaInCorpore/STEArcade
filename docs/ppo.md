@@ -1,8 +1,8 @@
 # Standard PPO exploration workflow
 
 PPO is the standard **supplemental input generator** for new port exploration. The shared entry point covers
-all games registered by `port.py`; Galaga is explicitly deferred until its real Namco 51xx/54xx MCU ROMs are
-available. Unregistered work-in-progress boards are not silently treated as finished ports.
+all games registered by `port.py` but Galaga: its real Namco 51xx/54xx MCU ROMs are in since 2026-10-22, its
+RAM/input profile is not written yet. Unregistered work-in-progress boards are not silently treated as finished ports.
 
 Keep the curated `port.py cover` runs, scripted stage/boss/ending tests and existing search recordings. A short
 PPO campaign does not replace their coverage. The Kung-Fu Master pilot passed independent port-reference and
@@ -31,8 +31,8 @@ venv/bin/python port.py ppo all test --steps 256 --frames 2100
 ```
 
 `test` trains, saves/reloads the model, records, repeats the recording in a fresh native MAME process, and runs
-an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips the
-user-deferred Galaga. A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
+an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips Galaga
+(no profile yet). A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
 the optional interpreter and emulator paths. MAME 0.289 and the project's pinned Hatari build are used locally.
 `--steps` counts 12-frame decisions and rounds up to a 256-decision PPO rollout. `--frames` includes bootstrap;
 it must extend beyond the profile's boot interval. No pretrained universal game-playing model is assumed.
@@ -48,8 +48,8 @@ into those fixtures or adding its paths to translator coverage.
 `engine/ppo_profiles.py` declares each game's MAME set, native SYSTEM/P1 polarity and bit assignments, bootstrap,
 RAM ranges, port memory mapping and supported cheats. It uses the existing verified ROM preparation paths for
 1943, Trojan, R-Type and Double Dragon. R-Type starts after its existing 400-frame snapshot offset. The profile
-is shared by training, native MAME repeatability and Hatari replay. Galaga never substitutes blank MCU ROMs for
-real gameplay. The existing R-Type preparation uses stand-ins only for PROMs/PALs that its driver never reads.
+is shared by training, native MAME repeatability and Hatari replay. Galaga's MAME runs need its real `namco51.zip` /
+`namco54.zip`; blank stand-ins never stand in for gameplay. The existing R-Type preparation uses stand-ins only for PROMs/PALs that its driver never reads.
 
 The shared model reads two successive RAM observations, stratified to at most 1,024 bytes each. This bounds RAM,
 model size and checkpoint storage. Actor and critic each use two 64-unit hidden layers on CPU. Actions are fixed

@@ -225,7 +225,7 @@ def main():
         results=[]
         for g in games:
             if g=="galaga":
-                print("galaga: deferred by user (real 51xx/54xx MCU ROMs required)")
+                print("galaga: no PPO profile yet (engine/ppo_profiles.py)")
                 results.append(dict(game=g,status="deferred"))
                 if a[1]!="all":return 2
                 continue
