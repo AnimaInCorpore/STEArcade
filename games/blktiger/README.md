@@ -255,6 +255,24 @@ The logic in play: 80.7k -> 65.3k Musashi cycles a tick (-19%), the start screen
 border events.  (Like stedaimakaimura, which runs the arcade's 68000 code as it is and
 handles the few special accesses by their faulting PC: the common path pays nothing, the exceptions are enumerated.)
 
+### Roots and block copies from F030Arcade's replays (2026-10-23)
+
+F030Arcade's Falcon port runs this translation and replays a recorded MARP game (all eight stages) against MAME.
+That replay and its PPO plays found code and accesses the coverage here never reached; both are now in this port:
+
+- **87 roots** (`docs/translation-roots.json`): 14 handlers named by bank 5's 8-byte object tables (a hand-played
+  game crashed into bank 2 `$B8C0`), object-script handlers (`00 lo hi` records in banks 0-4), and task starts
+  (`ld bc,entry / call $00F6`: `$275D`, `$2778`, bank 6 `$A9E8`).  The translation: 19,273 -> 24,628 instructions,
+  none unsupported.
+- **Every block copy guarded** (`gen.py`: each `ldir`/`lddr` is a window site): bank 0's `ldir` at `$AC71` was not
+  a coverage site and copied zeros for the 32-byte object template at `$AF06`, so the player's attack object had no
+  type, timer or script (MARP game, frame 6,832).  2,426 -> 2,577 guarded sites.
+
+`port.py test blktiger` passes; Hatari (`tools/bench.sh`): 58.0 -> 57.9 game ticks and 29.5 -> 29.3 frames a second
+(noise), 2,436,385 -> 2,471,966 bytes.  Not taken over: F030Arcade's Z80 cycle budget (`CYCLES=1`), which a
+recorded game needs to stay in step with MAME (without it the game's tasks finish in zero frames and the random
+generator runs ahead) but which costs the STE logic time.
+
 ## Whole sprites at borders (2026-10-11)
 
 Removed the final side-band masking pass. Background restoration still prepares its margin cells before

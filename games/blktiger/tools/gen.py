@@ -405,7 +405,11 @@ def generate(extra_roots=()):
         sites = indirect & set(json.loads(sites_file.read_text()))
     else:
         sites = indirect
-    joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
+    # Every block copy is guarded, seen by the coverage or not: the guard tests HL at run time, so a copy outside the
+    # window costs only a compare.  Unguarded, bank 0's ldir at $AC71 copied zeros for the 32-byte object template
+    # at $AF06 (found by F030Arcade's MARP replay, 2026-10-21: the player's attack object had no type or script).
+    sites |= {pc for pc, ins in code.items() if ins.mn in ('ldir', 'lddr')}
+    joins = set(roots)                       # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
     em = compile_code(code, joins, cfg, {IDLE}, emitter=BTEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
