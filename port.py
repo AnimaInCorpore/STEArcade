@@ -28,10 +28,10 @@ ROOT = Path(__file__).resolve().parent
 PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python").exists() else sys.executable
 
 # the registered ports, in README order (other entries are work in progress), and their programs (run/<game>/<program>)
-GAMES = {"dkong": "DKONG.PRG", "galaga": "GALAGA.PRG", "bublbobl": "BUBBLE.PRG", "1942": "1942.PRG", "1943": "1943.PRG",
-         "blktiger": "BLKTIGER.PRG", "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "rtype": "RTYPE.PRG",
-         "kungfum": "KUNGFUM.PRG", "trojan": "TROJAN.PRG", "ddragon": "DDRAGON.PRG", "gauntlet": "GAUNTLET.PRG",
-         "gyruss": "GYRUSS.PRG"}
+GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blktiger": "BLKTIGER.PRG",
+         "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "gauntlet": "GAUNTLET.PRG", "kungfum": "KUNGFUM.PRG",
+         "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
+         "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/

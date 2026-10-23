@@ -29,20 +29,13 @@ GAMES = [
      "full speed (50 frames a second), sound (the 8035 board as DMA sound, walk/jump/stomp on the YM)",
      "jump: Space, Control, Alternate, joystick fire, pad A/B/C.  One player at a time: both joysticks and both\n"
      "  pads move Mario.  One coin slot (5, Option)."),
+    ("1942", "1942.PRG", "1942 (Capcom 1984)",
+     "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
+     "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
     ("galaga", "GALAGA.PRG", "Galaga (Namco 1981)",
      "a game frame per VBL; 33 frames a second drawn on average, 17-21 with the full formation; sound on the YM (square waves)",
      "fire: Space, Control, Alternate, joystick fire, pad A/B/C; left and right only.  Players take turns: both\n"
      "  joysticks and both pads move the fighter.  One coin key (5, Option)."),
-    ("bublbobl", "BUBBLE.PRG", "Bubble Bobble (Taito 1986)",
-     "playable, but slow: about 45% of the arcade's speed and 12 pictures a second in play (Hatari\n"
-     "  measurements); exact logic and picture; music and effects on the YM",
-     "jump: Space, Control, joystick fire, pad A.  bubble: Alternate, joystick up, pad B, pad up."),
-    ("1942", "1942.PRG", "1942 (Capcom 1984)",
-     "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
-     "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
-    ("1943", "1943.PRG", "1943: The Battle of Midway (Capcom 1987)",
-     "86% of the arcade's speed, 8 frames a second; music and effects on the YM",
-     "fire: Space, Control, joystick fire, pad A.  button 2: Alternate, pad B."),
     ("blktiger", "BLKTIGER.PRG", "Black Tiger (Capcom 1987)",
      "92% of the arcade's speed, 26 frames a second; music and effects on the YM",
      "fire: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
@@ -53,10 +46,12 @@ GAMES = [
      "83% of the arcade's speed, 23 frames a second, 16 colours; music and effects on the YM",
      "shoot left / straight / right: Control / Space / Alternate, or Z / X / C; pad A / B / C.\n"
      "  The joystick's fire shoots straight."),
-    ("rtype", "RTYPE.PRG", "R-Type (Irem 1987)",
-     "playable, but slow: about 30% of the arcade's speed and 6 pictures a second in play (Hatari); exact logic,\n"
-     "  the centred 320 of the 384 pixels; no sound yet",
-     "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
+    ("gauntlet", "GAUNTLET.PRG", "Gauntlet (Atari Games 1985)",
+     "the arcade's own 68010 program, natively: a game frame every VBL (83% of the arcade's 60 Hz), 14-20 pictures a\n"
+     "  second (Hatari); 320 of the 336 pixels (the side panel moved left), 16 colours; music, effects and speech.\n"
+     "  Needs the whole 4 MB: Esc resets the STE",
+     "fire: Space, Control, Z, joystick fire, pad A.  magic (and the start): Alternate, X, pad B / C.  coins 1-4:\n"
+     "  5-8 (players 1-4; pads: Option).  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
     ("kungfum", "KUNGFUM.PRG", "Kung-Fu Master (Irem 1984)",
      "92% of the arcade's speed, 20-34 pictures a second in play (Hatari); exact logic, all 256 x 256 pixels;\n"
      "  the sound board's driver translated: music and effects on the YM (three of the six AY channels), the voices\n"
@@ -66,21 +61,26 @@ GAMES = [
      "90% of the arcade's speed, 10-18 pictures a second (Hatari); exact logic, all 256 x 240 pixels; music and\n"
      "  effects on the YM, no ADPCM voices",
      "attack: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
-    ("ddragon", "DDRAGON.PRG", "Double Dragon (Technos 1987)",
-     "playable, but slow: about 38% of the arcade's speed and 4 pictures a second in play (Hatari); exact logic,\n"
-     "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
-     "punch: Space, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  jump: Control, C, pad C."),
-    ("gauntlet", "GAUNTLET.PRG", "Gauntlet (Atari Games 1985)",
-     "the arcade's own 68010 program, natively: a game frame every VBL (83% of the arcade's 60 Hz), 14-20 pictures a\n"
-     "  second (Hatari); 320 of the 336 pixels (the side panel moved left), 16 colours; music, effects and speech.\n"
-     "  Needs the whole 4 MB: Esc resets the STE",
-     "fire: Space, Control, Z, joystick fire, pad A.  magic (and the start): Alternate, X, pad B / C.  coins 1-4:\n"
-     "  5-8 (players 1-4; pads: Option).  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
     ("gyruss", "GYRUSS.PRG", "Gyruss (Konami 1983)",
      "playable, but slower than the arcade: about half its speed and 7-12 pictures a second in play (Hatari);\n"
      "  exact logic of both CPUs, the turned 224 x 256 picture; music and effects on the YM (three of the fifteen\n"
      "  AY channels), the sampled effects on the DMA sound",
      "fire: Space, Control, Z, joystick fire, pad A.  The joystick moves the ship around the circle."),
+    ("1943", "1943.PRG", "1943: The Battle of Midway (Capcom 1987)",
+     "86% of the arcade's speed, 8 frames a second; music and effects on the YM",
+     "fire: Space, Control, joystick fire, pad A.  button 2: Alternate, pad B."),
+    ("bublbobl", "BUBBLE.PRG", "Bubble Bobble (Taito 1986)",
+     "playable, but slow: about 45% of the arcade's speed and 12 pictures a second in play (Hatari\n"
+     "  measurements); exact logic and picture; music and effects on the YM",
+     "jump: Space, Control, joystick fire, pad A.  bubble: Alternate, joystick up, pad B, pad up."),
+    ("rtype", "RTYPE.PRG", "R-Type (Irem 1987)",
+     "playable, but slow: about 30% of the arcade's speed and 6 pictures a second in play (Hatari); exact logic,\n"
+     "  the centred 320 of the 384 pixels; no sound yet",
+     "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
+    ("ddragon", "DDRAGON.PRG", "Double Dragon (Technos 1987)",
+     "playable, but slow: about 38% of the arcade's speed and 4 pictures a second in play (Hatari); exact logic,\n"
+     "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
+     "punch: Space, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  jump: Control, C, pad C."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"
