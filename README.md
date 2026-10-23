@@ -1,5 +1,7 @@
 # Arcade games on the Atari STE
 
+**Note: this project is AI-assisted.** Much of its code and documentation was written by AI coding agents
+(Claude Code) under the author's direction; if you prefer to avoid AI-assisted work, this project is not for you.
 Static translation of Z80, 6809-family and NEC V30 arcade programs to 68000 code, with a Blitter based renderer, running on an unexpanded
 8 MHz Atari STE (4 MB).  Each port is a reference machine written from the MAME driver, a whole-program translation
 checked against it in lock-step, and a runtime that delivers the arcade's interrupts at the vertical blank and draws the
