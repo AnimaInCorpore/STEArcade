@@ -1,8 +1,8 @@
 ; Gun.Smoke for Atari STE; translated main CPU (fixed ROM and four banks), sound omitted.
 MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
 	ifnd MAX_SKIP
-MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
-	endc
+MAX_SKIP = 3				; frames that are not drawn in a row while the game is behind (2 -> 3, 2026-10-24:
+	endc				; the game 89% -> 92% of the arcade's speed in play, the pictures a second as before)
 
 BUSY = %10000000
 HOG = %01000000
@@ -123,6 +123,7 @@ start:
 	bsr	init_render
 	stage	$00f
 	bsr	init_dispatch
+	st	g_bank			; (no bank yet: gs_latch sets the window)
 	bsr	gs_latch
 	bsr	cs_init
 
@@ -229,10 +230,11 @@ scatter:
 gs_latch:
 	move	sr,-(sp)
 	movem.l	d0/a0,-(sp)
-	moveq	#0,d0
-	move.b	Z_LATCH,d0
+	moveq	#$0c,d0
+	and.b	Z_LATCH,d0
 	lsr.b	#2,d0
-	and.w	#3,d0
+	cmp.b	g_bank,d0		; (the game stores C804 and D806 often: mostly the same bank)
+	beq.s	.same
 	move.b	d0,g_bank
 	lea	gs_dispatch_targets,a0
 	lsl.w	#2,d0
@@ -242,7 +244,7 @@ gs_latch:
 	lea	bank_rom+$8000,a0
 	add.l	d0,a0
 	move.l	a0,g_winbase
-	movem.l	(sp)+,d0/a0
+.same:	movem.l	(sp)+,d0/a0
 	move	(sp)+,sr
 	rts
 
@@ -546,15 +548,29 @@ pb_inputs:
 ; C806 (005F, gen config write hook) latches the sprite list: the first four bytes of each of the 128 entries of 32
 ; bytes at F000-FFFF (code, attribute, y, x).  Keeps every register and the condition codes.
 buffer_sprites:
-	movem.l	d0/a0-a1,-(sp)
+	ifnd SIM
+	; (not for a picture that will be skipped: a VBL pending now is pending at the tick's end too, where the idle hook
+	; skips it unless MAX_SKIP were skipped in a row; the game latches every frame, the next drawn tick does it again)
+	move	sr,-(sp)
+	tst.b	vbl_pending
+	beq.s	.copy
+	cmp.b	#MAX_SKIP,render_skips
+	bhs.s	.copy
+	move	(sp)+,ccr
+	rts
+.copy:	move	(sp)+,ccr
+	endc
+	move.l	a0,-(sp)
+	move.l	a1,-(sp)
 	lea	G_Z80-$1000,a0
 	lea	sprite_buffer,a1
-	moveq	#127,d0
-.loop:
-	move.l	(a0),(a1)+
-	lea	32(a0),a0
-	dbf	d0,.loop
-	movem.l	(sp)+,d0/a0-a1
+BS_N	set	0
+	rept	128			; (unrolled: 20 cycles an entry, the loop took 38)
+	move.l	BS_N*32(a0),(a1)+
+BS_N	set	BS_N+1
+	endr
+	move.l	(sp)+,a1
+	move.l	(sp)+,a0
 	rts
 
 	borders_handlers

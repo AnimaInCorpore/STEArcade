@@ -700,8 +700,28 @@ tile_twice:
  tst.b strip_mode
  beq.s .whole
  bsr part_blit
- bra.s .out
+ bra .out
 .whole:
+ moveq #15,d0			; window and tile on 16-pixel groups (nearly always): a tile across the window's edge
+ and.w cur_wx,d0		; is drawn as its inner chunk only, nothing in the side bar (it stays black)
+ bne.s .full
+ move.w dest_x,d0
+ moveq #15,d1
+ and.w d0,d1
+ bne.s .full
+ sub.w cur_wx,d0		; x - wx
+ cmp.w #-16,d0
+ beq.s .right_chunk
+ cmp.w #224-16,d0
+ bne.s .full
+ moveq #0,d0			; the left chunk (the right one is in the right bar)
+ bsr draw_tile_chunk
+ bra .out
+.right_chunk:
+ moveq #1,d0			; the right chunk (the left one is in the left bar)
+ bsr draw_tile_chunk
+ bra .out
+.full:
  bsr draw_tile
  bsr destination_line
  move.w dest_x,d4		; the left bar: [max(x, wx - 48), wx)
@@ -846,6 +866,39 @@ draw_tile:
  dbf d3,.plane
  rts
 
+; Chunk d0 (0: the left, 1: the right) of the tile a1 (4 planes x 32 rows x 2 words) at dest_x / dest_y, both on
+; 16-pixel groups: a copy pass a plane, a word a line.
+draw_tile_chunk:
+ move.w #$ffff,BLT_END1.w
+ move.w #$ffff,BLT_END2.w
+ move.w #$ffff,BLT_END3.w
+ move.w #2,BLT_SRC_XINC.w
+ move.w #4,BLT_SRC_YINC.w	; (the row's other word skipped)
+ move.w #8,BLT_DST_XINC.w
+ move.w #STRIDE,BLT_DST_YINC.w
+ move.w #$0203,BLT_HOP_OP.w
+ clr.b BLT_SKEW.w
+ move.w d0,-(sp)
+ bsr destination
+ move.w (sp)+,d0
+ move.l a1,a0
+ tst.w d0
+ beq.s .left
+ addq.l #2,a0
+ addq.l #8,d2
+.left:
+ moveq #3,d3
+.plane:
+ move.l a0,BLT_SRC_ADDR.w
+ move.l d2,BLT_DST_ADDR.w
+ move.w #1,BLT_COUNT.w
+ move.w #32,BLT_COUNT+2.w
+ bsr blit_go
+ lea 128(a0),a0
+ addq.l #2,d2
+ dbf d3,.plane
+ rts
+
 ; d2 = the destination chunk of dest_x (buffer pixels) / dest_y.
 destination:
  bsr.s destination_line
@@ -945,10 +998,24 @@ add_damage:
 ; ------------------------------------------------------------------------------
 
 draw_sprites:
- lea sprite_buffer+127*4,a0
+ lea sprite_buffer+128*4,a0
+ moveq #127,d7
+.scan:				; (the culling in registers: most entries are off the screen)
+ subq.l #4,a0
+ move.b 2(a0),d4		; visible lines: raw y 1-239 (x = raw y - 16 in -15..223)
+ subq.b #1,d4
+ cmp.b #238,d4
+ bhi.s .skip
+ btst #5,1(a0)			; the top row: 240 - raw x (bit 5 clear: -15..240), 496 - raw x (set: visible
+ beq.s .visible			; below 256, raw x 241-255)
+ cmp.b #240,3(a0)
+ bhi.s .visible
+.skip:
+ dbf d7,.scan
+ rts
+.visible:
  move.l a0,spr_ptr
-.loop:
- move.l spr_ptr,a0
+ move.w d7,spr_left
  moveq #0,d1
  move.b 1(a0),d1
  moveq #0,d3			; the top row: 240 - raw x
@@ -1028,10 +1095,9 @@ draw_sprites:
  moveq #16,d1
  bsr clear_span
 .next:
- subq.l #4,spr_ptr
- cmp.l #sprite_buffer,spr_ptr
- bhs .loop
- rts
+ move.l spr_ptr,a0
+ move.w spr_left,d7
+ bra .skip
 
 ; a1 = the baked sprite at dest_x / dest_y: its damage, then the generated routine of its shape and shift (spritegen.py)
 ; or, for the shapes without one, the generic path.
@@ -1482,6 +1548,10 @@ draw_foreground:
  lea fg_pieces,a0
  add.l d0,a0
  movem.l d6-d7,-(sp)
+ move.w d6,d2			; the row's shifted end masks (fg_smasks)
+ mulu #SMASK_ROW,d2
+ lea fg_smasks,a2
+ add.l d2,a2
  move.w d7,d0			; the skew
  move.w (a0)+,d7
  move.w (a0)+,d1
@@ -1501,21 +1571,21 @@ draw_foreground:
  move.b d0,d2
  or.b #$40,d2
  move.b d2,BLT_SKEW.w
- moveq #16,d3
- sub.w d0,d3
+ move.w 2(sp),d2		; (the row) its masks shifted for this skew already?
+ lea fg_sskew,a1
+ cmp.b (a1,d2.w),d0
+ beq.s .fp_cached
+ move.b d0,(a1,d2.w)
+ bsr fg_shift_masks
+.fp_cached:
  subq.w #1,d7
  bmi.s .fp_s_ones
  move.w #3,BLT_COUNT.w
  move.w #-14,BLT_DST_YINC.w
 .fp_s_two:
- move.l (a0)+,d2		; mask words 1, 2
- move.w d2,d4
- lsr.l d0,d2
- move.w d2,2(a5)		; END2: (1:2) >> shift
- swap d2
- move.w d2,(a5)			; END1: 1 >> shift
- lsl.w d3,d4
- move.w d4,4(a5)		; END3: 2 << (16 - shift)
+ move.l (a2)+,(a5)		; END1, END2 (fg_shift_masks)
+ move.w (a2)+,4(a5)		; END3
+ addq.l #4,a0
  add.w (a0)+,a4
  move.l a4,(a6)
  move.w d5,(a3)
@@ -1527,11 +1597,9 @@ draw_foreground:
  move.w #2,BLT_COUNT.w
  move.w #-6,BLT_DST_YINC.w
 .fp_s_one:
- move.l (a0)+,d2		; mask word, 0
- lsr.l d0,d2
- move.w d2,4(a5)		; END3
- swap d2
- move.w d2,(a5)			; END1
+ move.w (a2)+,(a5)		; END1
+ move.w (a2)+,4(a5)		; END3
+ addq.l #4,a0
  add.w (a0)+,a4
  move.l a4,(a6)
  move.w d5,(a3)
@@ -1634,13 +1702,48 @@ fg_compose:
  move.b d5,32(a0,d6.w)
  bra fg_pieces_build
 
+; fg_shift_masks: a row's end masks for skew d0 (1-15) at a2 (fg_smasks), from its pieces' mask words at a0 (d7.w
+; two-chunk pieces, then d1.w one-chunk ones): END1 = 1 >> s, END2 = (1:2) >> s, END3 = 2 << (16 - s) (6 bytes); a
+; one-chunk piece END1, END3 (4 bytes).  draw_foreground keeps them per row while the skew stays (fg_sskew).  Keeps
+; all registers.
+fg_shift_masks:
+ movem.l d1-d4/d7/a0/a2,-(sp)
+ moveq #16,d3
+ sub.w d0,d3
+ subq.w #1,d7
+ bmi.s .ones
+.two:
+ move.l (a0)+,d2		; mask words 1, 2
+ move.w d2,d4
+ lsr.l d0,d2			; END1 (high word), END2 (low)
+ move.l d2,(a2)+
+ lsl.w d3,d4
+ move.w d4,(a2)+		; END3
+ addq.l #2,a0			; (the step)
+ dbf d7,.two
+.ones:
+ subq.w #1,d1
+ bmi.s .done
+.one:
+ move.l (a0)+,d2		; mask word, 0
+ lsr.l d0,d2			; END1 (high), END3 (low)
+ move.l d2,(a2)+
+ addq.l #2,a0
+ dbf d1,.one
+.done:
+ movem.l (sp)+,d1-d4/d7/a0/a2
+ rts
+
 ; fg_pieces_build: row d6's strip (fg_compose; chunks fg_rows .. 32+fg_rows) as stefastbobs2's bob pieces in
 ; fg_pieces + d6 * PIECE_ROW: a line's opaque chunks in pieces of two (or one) from the left, an entry n2, n1, the
 ; two-chunk pieces (mask words 1, 2, destination step), the one-chunk ones (mask word, 0, destination step), then the
 ; pieces' planes in pass order (plane 0's words, plane 1's ...).  A step from the row's first chunk (plane 0, line 0;
 ; chunk j lands on destination words j and j + 1) and from the last piece.  Keeps d6.
 PIECE_ROW = 1600			; at most 8 x 14 chunks: 112 x (8 + 6) + 4
+SMASK_ROW = 112*6			; fg_smasks: a row's end masks for the window's skew (fg_shift_masks)
 fg_pieces_build:
+ lea fg_sskew,a0		; (its shifted masks are old now)
+ clr.b (a0,d6.w)
  movem.l d6,-(sp)
  move.w d6,d0
  mulu #STRIP_ROW,d0
@@ -2282,6 +2385,10 @@ dest_x: ds.w 1
 dest_y: ds.w 1
 tile_ctrl: ds.w 1
 spr_ptr: ds.l 1
+fg_sskew: ds.b 32		; a row's skew of its fg_smasks (0: none)
+	even
+fg_smasks: ds.b 32*SMASK_ROW
+spr_left: ds.w 1		; (draw_sprites: the entries left to scan)
 spr_shape_n: ds.w 1
 spr_sx: ds.w 1
 spr_pcode: ds.w 1

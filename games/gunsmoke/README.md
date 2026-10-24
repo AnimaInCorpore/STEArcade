@@ -146,6 +146,32 @@ masked foreground passes now run in pieces of 16 words), so the top border inter
 (DEBUG + AUTOPLAY, 6000 VBLs, sound on): 50.6 -> 48.9 game ticks and 24.2 -> 23.0 drawn frames a second; no border
 event started late in that run.
 
+## Speed on the recorded play (2026-10-24)
+
+`tools/perf_test.py` (new): Musashi CPU + Blitter on the recorded play (`play_search.py`, `-D PLAYBACK=1`), the logic
+and a picture a tick; `profile` / `logic` by routine (absolute symbols left out, `blit_go`'s passes charged to their
+caller as `caller>blit_go`, the generated sprite routines as one line), `PERF_PCS=name` by instruction.
+
+- **Sprite scan** (`draw_sprites`): the 128 entries were culled in memory variables, ~230 cycles each, ~29k a
+  picture for ~7 drawn sprites.  Now a register loop with the two tests reduced: raw y 1-239, and attribute bit 5
+  clear (top row 240 - x) or x above 240 (bit 5 set: 496 - x, rows 241-255).  ~50 cycles an entry.
+- **Edge tiles**: a tile across the window's edge was drawn whole and its part in the side bar cleared again.  With
+  the window and the tile on 16-pixel groups (nearly always) only the inner chunk is drawn (`draw_tile_chunk`);
+  nothing touches the bar, which stays black.
+- **Text masks**: the end masks shifted by the window's skew are kept per row (`fg_shift_masks`, `fg_sskew`) while
+  the skew stays (the D802 slides); unshifted rows as before.
+- **Sprite latch** (`buffer_sprites`): unrolled (20 instead of 38 cycles an entry) and skipped for a tick whose
+  picture will be skipped (the game latches every frame: 2,996 of 3,000 in the reference).
+- **Bank latch** (`gs_latch`): returns at once when the bank bits did not change (C804 / D806 are stored often).
+- **MAX_SKIP 2 -> 3**: the game keeps more of its speed in heavy scenes (Commando's choice).
+
+Musashi, ticks 1000-3000 of the play: a picture 159.2k -> 133.0k cycles (mean; median 143.9k -> 122.8k), the logic
+37.5k -> 35.4k a tick.  Hatari (`PLAY=1 tools/bench.sh`, 6000 VBLs; 2-second windows from the first tick): 22.9 ->
+25.8 pictures a second (median 19 -> 22.5, 10th percentile 14 -> 16.5), the game 84% -> 92% of the arcade's speed.
+`port.py test gunsmoke` and `render_test.py 200 seq` (seeds 1 and 9) pass.  Left: the text pieces (~17-23k a picture,
+mostly their passes) and the damage restore (~25k), both near what the method allows; the sound player (~9k a tick,
+`engine/rt/capsnd.s`, shared with 1943 and Trojan).
+
 ## Text drawn like sprites (2026-10-24)
 
 The text rows were drawn with an AND pass (the strip's opaque plane) and an OR pass (the planes) per plane. Now
