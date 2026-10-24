@@ -1470,65 +1470,104 @@ draw_foreground:
  addq.w #2,d0
  dbf d5,.burst
  movem.l (sp)+,d0/d2-d3
- moveq #-1,d0			; the Blitter: end masks (the first word: the bits from the strip), increments, skew
- lsr.w d7,d0
- move.w d0,BLT_END1.w
- move.w #$ffff,BLT_END2.w
- move.w #$ffff,BLT_END3.w
+ ; the Blitter as stefastbobs2 draws its bobs (fg_pieces): copy passes (HOP 2, OP 3) whose end masks are the opaque
+ ; pixels, a piece of one or two chunks a line, its four planes in one pass (destination X increment 8, Y count 4, the Y
+ ; increment back to the next plane), the planes stored in pass order (the source runs on), the skew the window's.
+ move.w #2,BLT_SRC_XINC.w
+ move.w #2,BLT_SRC_YINC.w
  move.w #8,BLT_DST_XINC.w
- move.w d3,d0
- lsl.w #3,d0
- neg.w d0
- add.w #STRIDE,d0
- move.w d0,BLT_DST_YINC.w
- move.w d3,d0
- addq.w #1,d0
- move.w d0,BLT_COUNT.w
- move.b d7,BLT_SKEW.w
- move.w d6,d0			; the row's strip
- mulu #STRIP_ROW,d0
- lea fg_strips,a2
- add.l d0,a2
- move.w #2,BLT_SRC_XINC.w	; the mask: NOT mask AND screen, each plane
- move.w d3,d0
- add.w d0,d0
- neg.w d0
- add.w #STRIP_WORDS*2,d0
- move.w d0,BLT_SRC_YINC.w
- move.w #$0204,BLT_HOP_OP.w
- move.w d4,d0
- add.w d0,d0
- lea STRIP_MASK(a2),a1
- add.w d0,a1
- move.l a4,a0
- moveq #3,d5
-.mask:
- move.l a1,BLT_SRC_ADDR.w
- move.l a0,BLT_DST_ADDR.w
- move.w #8,BLT_COUNT+2.w
- bsr blit_go
+ move.w #$0203,BLT_HOP_OP.w
+ move.w d6,d0
+ mulu #PIECE_ROW,d0
+ lea fg_pieces,a0
+ add.l d0,a0
+ movem.l d6-d7,-(sp)
+ move.w d7,d0			; the skew
+ move.w (a0)+,d7
+ move.w (a0)+,d1
+ move.w d7,d2
+ add.w d1,d2
+ mulu #6,d2
+ lea (a0,d2.w),a1
+ move.l a1,BLT_SRC_ADDR.w	; (it runs on from piece to piece)
+ lea BLT_END1.w,a5		; END1, END2 at 2(a5), END3 at 4(a5)
+ lea BLT_DST_ADDR.w,a6
+ lea BLT_COUNT+2.w,a3		; Y count, start at 4(a3)
+ moveq #4,d5			; the four planes
+ moveq #$ffffffc0,d6		; BUSY + HOG
+ tst.w d0
+ beq .fp_aligned
+ ; shifted: a piece of c chunks covers c + 1 destination words, NFSR (c words read), its masks shifted here
+ move.b d0,d2
+ or.b #$40,d2
+ move.b d2,BLT_SKEW.w
+ moveq #16,d3
+ sub.w d0,d3
+ subq.w #1,d7
+ bmi.s .fp_s_ones
+ move.w #3,BLT_COUNT.w
+ move.w #-14,BLT_DST_YINC.w
+.fp_s_two:
+ move.l (a0)+,d2		; mask words 1, 2
+ move.w d2,d4
+ lsr.l d0,d2
+ move.w d2,2(a5)		; END2: (1:2) >> shift
+ swap d2
+ move.w d2,(a5)			; END1: 1 >> shift
+ lsl.w d3,d4
+ move.w d4,4(a5)		; END3: 2 << (16 - shift)
+ add.w (a0)+,a4
+ move.l a4,(a6)
+ move.w d5,(a3)
+ move.b d6,4(a3)
+ dbf d7,.fp_s_two
+.fp_s_ones:
+ subq.w #1,d1
+ bmi .fp_drawn
+ move.w #2,BLT_COUNT.w
+ move.w #-6,BLT_DST_YINC.w
+.fp_s_one:
+ move.l (a0)+,d2		; mask word, 0
+ lsr.l d0,d2
+ move.w d2,4(a5)		; END3
+ swap d2
+ move.w d2,(a5)			; END1
+ add.w (a0)+,a4
+ move.l a4,(a6)
+ move.w d5,(a3)
+ move.b d6,4(a3)
+ dbf d1,.fp_s_one
+ bra.s .fp_drawn
+.fp_aligned:
+ clr.b BLT_SKEW.w
+ subq.w #1,d7
+ bmi.s .fp_a_ones
+ move.w #2,BLT_COUNT.w
+ move.w #-6,BLT_DST_YINC.w
+.fp_a_two:
+ move.w (a0)+,(a5)
+ move.w (a0)+,4(a5)
+ add.w (a0)+,a4
+ move.l a4,(a6)
+ move.w d5,(a3)
+ move.b d6,4(a3)
+ dbf d7,.fp_a_two
+.fp_a_ones:
+ subq.w #1,d1
+ bmi.s .fp_drawn
+ move.w #1,BLT_COUNT.w
+ move.w #2,BLT_DST_YINC.w
+.fp_a_one:
+ move.w (a0)+,(a5)
  addq.l #2,a0
- dbf d5,.mask
- move.w #8,BLT_SRC_XINC.w	; the planes: OR
- move.w d3,d0
- lsl.w #3,d0
- neg.w d0
- add.w #STRIP_WORDS*8,d0
- move.w d0,BLT_SRC_YINC.w
- move.w #$0207,BLT_HOP_OP.w
- move.w d4,d0
- lsl.w #3,d0
- lea (a2,d0.w),a1
- move.l a4,a0
- moveq #3,d5
-.planes:
- move.l a1,BLT_SRC_ADDR.w
- move.l a0,BLT_DST_ADDR.w
- move.w #8,BLT_COUNT+2.w
- bsr blit_go
- addq.l #2,a1
- addq.l #2,a0
- dbf d5,.planes
+ add.w (a0)+,a4
+ move.l a4,(a6)
+ move.w d5,(a3)
+ move.b d6,4(a3)
+ dbf d1,.fp_a_one
+.fp_drawn:
+ move.w #$ffff,BLT_END2.w	; (as the other passes expect it)
+ movem.l (sp)+,d6-d7
 .no_row:
  addq.w #1,d6
  cmp.w #32,d6
@@ -1593,6 +1632,132 @@ fg_compose:
  lea fg_rows,a0
  move.b d4,(a0,d6.w)
  move.b d5,32(a0,d6.w)
+ bra fg_pieces_build
+
+; fg_pieces_build: row d6's strip (fg_compose; chunks fg_rows .. 32+fg_rows) as stefastbobs2's bob pieces in
+; fg_pieces + d6 * PIECE_ROW: a line's opaque chunks in pieces of two (or one) from the left, an entry n2, n1, the
+; two-chunk pieces (mask words 1, 2, destination step), the one-chunk ones (mask word, 0, destination step), then the
+; pieces' planes in pass order (plane 0's words, plane 1's ...).  A step from the row's first chunk (plane 0, line 0;
+; chunk j lands on destination words j and j + 1) and from the last piece.  Keeps d6.
+PIECE_ROW = 1600			; at most 8 x 14 chunks: 112 x (8 + 6) + 4
+fg_pieces_build:
+ movem.l d6,-(sp)
+ move.w d6,d0
+ mulu #STRIP_ROW,d0
+ lea fg_strips,a2
+ add.l d0,a2			; the strip
+ move.w d6,d0
+ mulu #PIECE_ROW,d0
+ lea fg_pieces,a6
+ add.l d0,a6			; the entry
+ lea fg_rows,a0
+ moveq #0,d4
+ move.b (a0,d6.w),d4		; the first chunk
+ moveq #0,d2
+ move.b 32(a0,d6.w),d2		; the last
+ clr.w fg_n2
+ clr.w fg_n1
+ lea fg_tmp,a5			; the pieces: c, mask 1, mask 2, the plane words' offset in the strip, destination offset
+ cmp.b #$ff,d4
+ beq .listed
+ lea STRIP_MASK(a2),a1		; line 0's mask words
+ moveq #0,d3			; the line
+.line:
+ move.w d4,d5			; the chunk
+.chunk:
+ cmp.w d2,d5
+ bhi.s .line_end
+ move.w d5,d0
+ add.w d0,d0
+ move.w (a1,d0.w),d1
+ beq.s .empty
+ cmp.w d2,d5
+ beq.s .single
+ tst.w 2(a1,d0.w)
+ beq.s .single
+ move.w #2,(a5)+
+ move.w d1,(a5)+
+ move.w 2(a1,d0.w),(a5)+
+ addq.w #1,fg_n2
+ bra.s .place
+.single:
+ move.w #1,(a5)+
+ move.w d1,(a5)+
+ clr.w (a5)+
+ addq.w #1,fg_n1
+.place:
+ move.w d3,d1			; the plane words: line * STRIP_WORDS * 8 + chunk * 8
+ mulu #STRIP_WORDS*8,d1
+ move.w d5,d0
+ lsl.w #3,d0
+ add.w d0,d1
+ move.w d1,(a5)+
+ move.w d3,d1			; destination: line * STRIDE + (chunk - first) * 8
+ mulu #STRIDE,d1
+ move.w d5,d0
+ sub.w d4,d0
+ lsl.w #3,d0
+ add.w d0,d1
+ move.w d1,(a5)+
+ add.w -10(a5),d5
+ bra.s .chunk
+.empty:
+ addq.w #1,d5
+ bra.s .chunk
+.line_end:
+ lea STRIP_WORDS*2(a1),a1
+ addq.w #1,d3
+ cmp.w #8,d3
+ blo.s .line
+.listed:
+ move.l a5,fg_tmp_end
+ move.w fg_n2,(a6)+
+ move.w fg_n1,(a6)+
+ move.w fg_n2,d0			; the data after the pieces
+ add.w fg_n1,d0
+ mulu #6,d0
+ lea (a6,d0.w),a3
+ moveq #0,d7			; the last piece's destination
+ moveq #2,d4			; two-chunk pieces, then one-chunk ones
+.kind:
+ lea fg_tmp,a5
+.piece:
+ cmp.l fg_tmp_end,a5
+ bhs.s .kind_end
+ cmp.w (a5),d4
+ bne.s .other
+ move.w 2(a5),(a6)+		; mask words
+ move.w 4(a5),(a6)+
+ move.w 8(a5),d1
+ move.w d1,d5
+ sub.w d7,d1
+ move.w d1,(a6)+		; destination step
+ move.w d5,d7
+ move.l a2,a0			; the planes: interleaved in the strip, chunk after chunk
+ add.w 6(a5),a0
+ move.w (a0),(a3)+
+ move.w 2(a0),(a3)+
+ move.w 4(a0),(a3)+
+ move.w 6(a0),(a3)+
+ cmp.w #2,d4
+ bne.s .other
+ ; two chunks: plane p's two words together
+ lea -8(a3),a3
+ move.w (a0),(a3)+
+ move.w 8(a0),(a3)+
+ move.w 2(a0),(a3)+
+ move.w 10(a0),(a3)+
+ move.w 4(a0),(a3)+
+ move.w 12(a0),(a3)+
+ move.w 6(a0),(a3)+
+ move.w 14(a0),(a3)+
+.other:
+ lea 10(a5),a5
+ bra.s .piece
+.kind_end:
+ subq.w #1,d4
+ bne.s .kind
+ movem.l (sp)+,d6
  rts
 
 ; d6 = the cell: fg_ptr[cell] = its baked character or 0 (blank, or outside the window).  Keeps d6.
@@ -2073,6 +2238,11 @@ fg_ptr: ds.l 1024
 fg_rows: ds.b 64
 fg_row_dirty: ds.b 32
 fg_strips: ds.b 32*STRIP_ROW
+fg_pieces: ds.b 32*PIECE_ROW		; the rows' strips as bob pieces (fg_pieces_build)
+fg_tmp: ds.b 8*14*10
+fg_tmp_end: ds.l 1
+fg_n2: ds.w 1
+fg_n1: ds.w 1
 ring_valid: ds.b 4
 ring_bg: ds.b 4
 ring_top: ds.w 3

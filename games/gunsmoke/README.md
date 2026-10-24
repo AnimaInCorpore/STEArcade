@@ -146,6 +146,16 @@ masked foreground passes now run in pieces of 16 words), so the top border inter
 (DEBUG + AUTOPLAY, 6000 VBLs, sound on): 50.6 -> 48.9 game ticks and 24.2 -> 23.0 drawn frames a second; no border
 event started late in that run.
 
+## Text drawn like sprites (2026-10-24)
+
+The text rows were drawn with an AND pass (the strip's opaque plane) and an OR pass (the planes) per plane. Now
+`fg_compose` cuts each changed row's strip into stefastbobs2's bob pieces (`fg_pieces_build`): per line the chunks
+with opaque pixels, two (or one) from the left, their mask words, destination steps and planes in pass order. A
+picture draws a piece as one copy pass (HOP 2, OP 3, the four planes in the pass: destination X increment 8, Y count 4)
+whose end masks are the mask words shifted by the window's skew (with a skew: one destination word more, NFSR).
+`render_test.py 200 seq --first 1500` (Musashi CPU + Blitter): median 135.8k -> 110.5k cycles a picture (-19%); every
+test of `port.py test gunsmoke` passes.
+
 ## Sprites clipped at the window's sides (2026-10-12)
 
 Where the window's left and right edges lie on 16-pixel groups (`cur_wx & 15 = 0`, D802 0, 16, 32, 48 ...), a sprite
