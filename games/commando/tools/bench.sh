@@ -46,6 +46,11 @@ if os.path.exists('run/commando/RATE.BIN'):            # the timeline: per 100 V
     rows = [((b[0] - a[0]) & 0xffff, (b[1] - a[1]) & 0xffff) for a, b in zip(pts, pts[1:])]
     rows = [r for r in rows]
     print("per 100 VBLs (ticks/s, pictures/s):", " ".join("%d/%d" % (t2 / 2, p2 / 2) for t2, p2 in rows))
+    play = rows[9:]                                     # (PLAY=1: the recorded play runs from game tick 780, ~VBL 900)
+    if play:
+        print("VBL 900 on: game ticks %.1f /s (%.0f%%), pictures %.1f /s; the slowest 100 VBLs: %d ticks/s, %d pictures/s" % (
+              sum(r[0] for r in play) / len(play) / 2, sum(r[0] for r in play) / len(play) / 2 / 59.6 * 100,
+              sum(r[1] for r in play) / len(play) / 2, min(r[0] for r in play) / 2, min(r[1] for r in play) / 2))
     live = [r for r in rows if r[0]]
     if live:
         print("from the first tick: game ticks %.1f /s (%.0f%%), pictures %.1f /s" % (sum(r[0] for r in live) / len(live) / 2,

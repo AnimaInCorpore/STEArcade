@@ -1,6 +1,6 @@
 """Translate Commando's complete fixed ROM, retaining separate operand bytes."""
 from pathlib import Path
-import sys,pickle,json
+import sys,os,pickle,json
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'engine'))
 import z80x,z80dis
 from translate import compile_code
@@ -63,6 +63,11 @@ class Emitter(z80x.Emitter):
         else:super()._incdec(ins,op)
 
 
+# calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves;
+# COMMANDO_NO_INLINE=1: none).  The whole program ROM (0000-BFFF) is fixed.
+INLINE = 0 if os.environ.get('COMMANDO_NO_INLINE') else int(os.environ.get('COMMANDO_INLINE', 32))
+
+
 def generate():
     img=Program()
     baseline=json.loads((Path(__file__).resolve().parents[1]/'docs/coverage.json').read_text())
@@ -73,7 +78,7 @@ def generate():
     cfg=z80x.Config(prefix='Z',table='z80_dispatch',token_sym='z80_irq_ret',mode='signed',
                     block=65536,iyaddr=0xc7f0,fshadow=0xc7f2,io_read_redirect={},
                     write_hooks=[],nmi_token=TOKEN,table_entries=0xc000,rst28_tables=False,
-                    bit_s=True,**z80x.FAST)
+                    bit_s=True,inline_leaves=INLINE,inline_limit=0xc000,inline_rst=True,inline_jumps=True,**z80x.FAST)
     tables=set()
     code=discover(img,[0,8,16]+sorted(known),known,tables)
     # All direct stores to the sprite buffer latch, plus indirect sites from coverage.

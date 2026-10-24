@@ -100,6 +100,10 @@ def main():
         resume();lc+=run_to({wait},step=prof and logic_prof and f>=first,into=by_logic)
         if f>=first:logic.append(lc);frames.append(rc)
     n=len(logic)
+    if os.environ.get('PERF_SPANS'):            # (PERF_SPANS=1: the means of every 100 ticks)
+        for k in range(0,n,100):
+            print(f'ticks {first+k}-{first+min(n,k+100)-1}: logic {sum(logic[k:k+100])//len(logic[k:k+100])}, '
+                  f'picture {sum(frames[k:k+100])//len(frames[k:k+100])}')
     print(f'{n} ticks: logic mean {sum(logic)//n} max {max(logic)}; frame (CPU + Blitter) mean {sum(frames)//n} max {max(frames)}')
     print(f'at 8 MHz: {8e6/(sum(logic)/n+sum(frames)/n):.1f} ticks+frames a second (Musashi cycles)')
     fs=sorted(frames);q=lambda p:fs[min(n-1,int(p*n))]

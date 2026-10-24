@@ -75,13 +75,17 @@ class Config:
                  block=0x8000, ram_sym=None, iyaddr=IYADDR, fshadow=FSHADOW, io_read_redirect=None,
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
                  table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
-                 alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0, cpu030=None):
+                 alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0, cpu030=None,
+                 inline_limit=0x8000, inline_rst=False, inline_jumps=False):
         self.prefix = prefix
         # the 68030 forms (F030Arcade's Falcon ports; default: the STE_XCPU environment variable, the tests): the high
         # byte of a pair moved with shifts in registers, not through the 68000 stack.  The 68000 pays 6 + 2n cycles a
         # shift, the 030 shifts in a few and pays for every bus access (the stack is ST-RAM on the Falcon).
         self.cpu030 = int(os.environ.get("STE_XCPU", "68000")) >= 68020 if cpu030 is None else cpu030
         self.inline_leaves = inline_leaves  # calls of leaf functions of up to this many instructions emitted in place
+        self.inline_limit = inline_limit    # only functions below this address (the fixed code: no bank there)
+        self.inline_rst = inline_rst        # rst calls too
+        self.inline_jumps = inline_jumps    # functions with jumps inside them too (local labels)
         self.alt_af = alt_af            # "a3" | "upper" (see the module docs)
         self.alt_regs = alt_regs        # "areg" | "upper"
         self.iy_reg = iy_reg            # None (the block) | "a0".."a2"
@@ -587,6 +591,9 @@ class Emitter:
         self.lines.append("\t" + s)
 
     def label_of(self, pc):
+        imap = self.__dict__.get("_imap")
+        if imap and pc in imap:                 # (a jump inside a leaf function emitted in place: its local label)
+            return imap[pc]
         self.refs.add(pc)
         return "%s%04X" % (self.cfg.prefix, pc)
 
@@ -1995,7 +2002,7 @@ class Emitter:
         cache[t] = None
         n = self.cfg.inline_leaves
         natives = getattr(self, "natives", {})
-        if not n or t not in self.code or t >= 0x8000 or t in natives:
+        if not n or t not in self.code or t >= self.cfg.inline_limit or t in natives:
             return None
         pcs, pc = [], t
         while len(pcs) < n:
@@ -2005,9 +2012,14 @@ class Emitter:
                 return None
             pcs.append(pc)
             if ins.mn == "ret" and not ins.ops:
+                # (jumps stay inside the body: Config.inline_jumps; they get local labels there, emit_inline)
+                if any(self.code[p].flow in ("jmp", "jcc") and self.code[p].target not in pcs for p in pcs):
+                    return None
                 cache[t] = pcs
                 return pcs
-            if not (ins.flow == "seq" or (ins.mn == "ret" and ins.flow == "cret")):
+            if not (ins.flow == "seq" or (ins.mn == "ret" and ins.flow == "cret")
+                    or (self.cfg.inline_jumps and ins.flow in ("jmp", "jcc") and ins.mn in ("jr", "jp", "djnz")
+                        and ins.ops[-1][0] == "addr" and ins.target is not None)):
                 return None
             pc += ins.length
         return None
@@ -2015,7 +2027,12 @@ class Emitter:
     def emit_inline(self, body, nxt):
         cur, lo = self.cur, self.lo
         cont = self.label_of(nxt)
+        targets = {self.code[p].target for p in body if self.code[p].flow in ("jmp", "jcc")}
+        self._imap = {p: self.new_label() for p in body if p in targets}
+        self.e("; (inline)")                # (the tests: this call's return address is not written, a dead stack word)
         for pc in body:
+            if pc in self._imap:
+                self.lines.append(self._imap[pc] + ":")
             ins = self.code[pc]
             if ins.mn == "ret":
                 if ins.ops:
@@ -2023,6 +2040,7 @@ class Emitter:
                     self.branch(ins.ops[0][1], cont)
                 continue
             self.emit_ins(pc, with_label=False)
+        self._imap = None
         self.jmp_to(nxt)                    # (dropped when the return point follows)
         self.cur, self.lo = cur, lo
 
@@ -2043,5 +2061,10 @@ class Emitter:
     x_reti = x_retn
 
     def x_rst(self, ins):
+        if self.cfg.inline_rst and self.transfer is None:
+            body = self.inline_body(ins.ops[0][1])
+            if body:
+                self.emit_inline(body, ins.pc + ins.length)
+                return
         self.push_ret(ins.pc + ins.length)
         self.jmp_to(ins.ops[0][1])

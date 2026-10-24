@@ -3,7 +3,7 @@
 MAX_PENDING = 3				; ticks that may be waiting (the game catches up with the 60 Hz of the arcade after a slow frame)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 2				; frames that are not drawn in a row while the game is behind
+MAX_SKIP = 3				; frames that are not drawn in a row while the game is behind
 	endc
 
 BUSY = %10000000
@@ -95,6 +95,8 @@ start:
 	trap	#1
 	addq	#6,sp
 	move.l	d0,old_ssp
+	move	usp,a0			; (draw_sprites borrows the USP; quit, which the VBL may start, puts it back)
+	move.l	a0,old_usp
 	lea	own_stack_top,sp
 	lea	own_stack_top-4096,a0	; (the unused part of the stack is marked: the crash dump shows how deep it went)
 	move	#1024-1,d0
@@ -267,6 +269,8 @@ restore_hardware:
 	rts
 
 quit:
+	move.l	old_usp,a0
+	move	a0,usp
 	ifd DEBUG
 	bsr	dbg_counters
 	endc
@@ -475,17 +479,14 @@ buffer_sprites:
 	blo.s .skip
 .copy:
 	endc
-	movem.l d0-d1/a0-a1,-(sp)
+	movem.l d0-d7/a0-a5,-(sp)
 	lea G_Z80-$0200,a0
 	lea sprite_buffer,a1
-	moveq #23,d0
-.loop:
-	move.l (a0)+,(a1)+
-	move.l (a0)+,(a1)+
-	move.l (a0)+,(a1)+
-	move.l (a0)+,(a1)+
-	dbf d0,.loop
-	movem.l (sp)+,d0-d1/a0-a1
+	rept 8				; (384 bytes: 8 x 48)
+	movem.l (a0)+,d0-d7/a2-a5
+	movem.l d0-d7/a2-a5,REPTN*48(a1)
+	endr
+	movem.l (sp)+,d0-d7/a0-a5
 .skip:
 	rts
 
@@ -912,6 +913,7 @@ g_block:	incbin	"maincpu.rom",$8000,$4000
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
+old_usp:	ds.l	1
 old_ssp:	ds.l	1
 old_screen:	ds.l	1
 old_palette:	ds.l	8

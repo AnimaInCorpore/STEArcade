@@ -132,6 +132,12 @@ class Driver:
                 sys.path.insert(0, str(ROOT / "games/commando/ref"))
                 from cover import inputs
                 self.cover = inputs
+                if os.environ.get("PLAY"):                  # (PLAY=1: the recorded play, as perf_test.py / bench.sh PLAY=1)
+                    import playbot
+                    play = playbot.load(build_dir("commando") / "play_inputs.bin")
+                    self.cover = lambda f, rnd: (play[f][0], play[f][1], 255)
+            if os.environ.get("PLAY") and self.f >= 780:
+                self.mem.w8(self.block + 0xEDA0 - 0x8000, 3)
             for a, v in zip((0xC000, 0xC001, 0xC002), self.cover(self.f, self.rnd)):
                 self.mem.w8(self.block + a - 0x8000, v)
         if self.game == "1943" and pc == self.sym["sim_wait"]:
@@ -262,6 +268,10 @@ class Prof:
                 fh.write("prog,form,cycles,count\n")
                 for (p, f), v in self.by_form.most_common():
                     fh.write('%s,"%s",%d,%d\n' % (p, f, v, self.n_form[(p, f)]))
+            with open(csv.replace(".csv", "") + "_pcs.csv", "w") as fh:     # (and by instruction: <out>_pcs.csv)
+                fh.write("prog,pc,text,cycles,count\n")
+                for o, v in self.by_pc.most_common():
+                    fh.write('%s,%d,"%s",%d,%d\n' % (o[0], o[1], o[2], v, self.n_pc[o]))
         return tr / n
 
 

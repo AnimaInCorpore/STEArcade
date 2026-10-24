@@ -41,7 +41,8 @@ def main():
     mem.w16(ret, 0x4E71)
     buf = sym['sprite_buffer']
 
-    def draw(ring, code, x):
+    def draw(ring, code, x, ring_addr=0x400000):
+        mem.w32(sym['ring_addr'], ring_addr)            # (the buffer's line 0: the twin boundary is RING_H lines below)
         mem.w32(sym['draw_base'], ring)
         mem.w16(sym['cur_top'], 0)
         mem.w32(sym['dmg_ptr'], dmg)
@@ -63,8 +64,8 @@ def main():
         rects = []
         p = dmg
         while p < mem.r32(sym['dmg_ptr']):
-            rects.append((mem.r32(p) - ring, mem.r16(p + 8), mem.r16(p + 10)))   # (offset, words, lines)
-            p += 12
+            rects.append((mem.r32(p) - ring, mem.r16(p + 8), mem.r16(p + 10), mem.r32(p + 4) - mem.r32(p)))
+            p += 12                                 # (offset, words, lines, source - destination)
         return pic, rects
 
     codes = []
@@ -91,13 +92,34 @@ def main():
                         if 0 <= x + i < 224:
                             want[:, 48 + x + i] = whole[:, i]
                     assert np.array_equal(got, want), (hex(ring), code, sh, x, int((got != want).sum()))
-                    for off, words, lines in rects:  # (the damage: inside the window's chunks only)
+                    for off, words, lines, _ in rects:  # (the damage: inside the window's chunks only)
                         c0 = (off & 255) - 24
                         assert 0 <= c0 and c0 + 2 * words <= 112, (hex(ring), code, sh, x, rects)
                     cases += 1
                     clipped += x < 0 or x > 208
-    print(f'PASS: {cases} edge cases ({clipped} clipped across an edge; {len(codes)} sprites with holes, 16 shifts, '
-          f'a 64 KB crossing): exact, side bands untouched, damage inside the window')
+    # The damage across the twin boundary (buffer line RING_H = ring_addr + RING_H lines): split there, each piece's
+    # source its twin (RING_H lines below the boundary's upper side, above on its lower side); the same rows as drawn
+    # away from it.
+    ring_h, splits = 320, 0
+    for code in codes:
+        for sh in (0, 5):
+            _, plain = draw(0x600000, code, 96 + sh, ring_addr=0x600000 - 100 * 256)
+            want = {(o & 255, (o >> 8) + i) for o, w, n, _ in plain for i in range(n)}
+            for k in range(-2, 24):                 # (the window's line 0 at buffer line RING_H - k)
+                base = 0x700000
+                got, rects = draw(base, code, 96 + sh, ring_addr=base - (ring_h - k) * 256)
+                rows = set()
+                for o, w, n, d in rects:
+                    first = (o >> 8) + ring_h - k       # (buffer lines)
+                    assert first + n <= ring_h or first >= ring_h, (code, sh, k, rects)
+                    assert d == (ring_h * 256 if first < ring_h else -ring_h * 256), (code, sh, k, rects)
+                    rows |= {(o & 255, (o >> 8) + i) for i in range(n)}
+                assert rows == want, (code, sh, k, rects, plain)
+                splits += len(rects) > (1 if sh == 0 else 1)
+                cases += 1
+    print(f'PASS: {cases} cases ({clipped} clipped across an edge, {splits} damaged across the twin boundary; {len(codes)} '
+          f'sprites with holes, 16 shifts, a 64 KB crossing): exact, side bands untouched, damage inside the window and '
+          f'split at the twin boundary')
 
 
 if __name__ == '__main__':

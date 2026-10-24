@@ -4,36 +4,70 @@
 ; The driver: four IRQs an arcade frame; each reads the latch (0076: a new command != $FF starts its effect in its
 ; slot, 092E; command 0 / $1C-$1F clear every slot, 00E6), then per chip (two YM2203) steps only the highest active of
 ; its four slots (0537 / 0564) and outputs that slot's SSG registers, or the idle values (0955 / 0A27).  An effect's
-; output after n steps is in sfx_data.s: phase 0 as runs, phases 1-3 (the IRQ counter $4000 & 3 when the effect
-; steps: 05F8 works every 4th) as exceptions to it.  sfx_irq is one IRQ of that; sfx_tick runs the four of an arcade
-; tick and writes the YM2149, which plays one chip: the one whose effect started last (the STE has 3 channels, the
-; arcade 2 x 3); the music (music.s) takes the channels the effect does not sound on.  The decoder is
-; tools/sound_sfx.py's Decoded, step for step.
+; output at step n and phase (the IRQ counter $4000 & 3 when the effect steps: 05F8 works every 4th) is in sfx_data.s:
+; a table per phase of offsets into sfx_dict (every distinct output once).  sfx_irq is one IRQ of that; sfx_tick runs
+; the four of an arcade tick and writes the YM2149, which plays one chip: the one whose effect started last (the STE
+; has 3 channels, the arcade 2 x 3); the music (music.s) takes the channels the effect does not sound on.  The
+; reference is tools/sound_sfx.py's Decoded (the same outputs from runs and exceptions), step for step.
 ; ------------------------------------------------------------------------------
 
 ; a slot (2 chips x 4)
 SL_ENT = 0				; .l  its sfx_table entry, 0: inactive
-SL_POS = 4				; .l  the next run record
-SL_LOOPPOS = 8				; .l  the run record of the loop's index
-SL_EXC = 12				; .l  the next exception of its phase
-SL_N = 16				; .w  steps done (the stream index of the next one)
-SL_SERIAL = 18				; .w  the start order (the YM plays the chip whose effect started last)
-SL_LEFT = 20				; .b  steps left in the current run
-SL_PHASE = 21				; .b
-SL_EXCPH = 22				; .b  the phase SL_EXC belongs to, $FF: none
-SL_REGS = 24				; 11 bytes (+1): the registers of phase 0 (even: copied as longs)
-SL_OUT = 36				; 11 bytes (+1): the output of the last step
-SL_SIZE = 48
+SL_OUTP = 4				; .l  the output of the last step (in sfx_dict)
+SL_REGP = 8				; .l  the last step's output at phase 0 (a slot started, not stepped, outputs it)
+SL_N = 12				; .w  steps done (the stream index of the next one)
+SL_SERIAL = 14				; .w  the start order (the YM plays the chip whose effect started last)
+SL_PHASE = 16				; .b
+SL_IDX = 17				; .b  the slot in its chip (its bit in sfx_act)
+SL_SIZE = 18
 
 ; sfx_table entries (sfx_data.s)
 SE_CHIP = 0				; .b  0 / 1, $FE: clear every slot, $FF: nothing
 SE_SLOT = 1
 SE_LENGTH = 2				; .w
 SE_LOOP = 4				; .w  -1: none
-SE_RUNS = 6				; .l
-SE_EXC = 10				; .l x 3
+SE_TAB = 8				; .l x 4  per phase: the steps' outputs (offsets in sfx_dict, words)
 
 LATCH = G_Z80-$3800			; C800 (the main CPU's sound latch)
+
+; Chip \1 in an IRQ: its highest active slot (sfx_act: a bit per active slot) steps; its output (or the next active
+; slot's, when it ended; or the idle values) is the chip's (sfx_chip_out, sfx_chip_slot).
+sfx_chip	macro
+	moveq	#0,d0
+	move.b	sfx_act+\1,d0
+	beq.s	.idle\@
+	lea	sfx_hioff,a1
+	moveq	#0,d1
+	move.b	(a1,d0.w),d1
+	lea	sfx_slots+\1*4*SL_SIZE,a0
+	add.w	d1,a0
+	move.b	sfx_count,d0		; phase = (count - n) & 3 (a paused slot resumes with another phase)
+	sub.b	SL_N+1(a0),d0
+	and.b	#3,d0
+	move.b	d0,SL_PHASE(a0)
+	bsr	sfx_step
+	bne.s	.out\@
+	clr.l	SL_ENT(a0)		; ended
+	move.b	SL_IDX(a0),d0
+	bclr	d0,sfx_act+\1
+	moveq	#0,d0
+	move.b	sfx_act+\1,d0
+	beq.s	.idle\@
+	lea	sfx_hioff,a1
+	moveq	#0,d1
+	move.b	(a1,d0.w),d1
+	lea	sfx_slots+\1*4*SL_SIZE,a0
+	add.w	d1,a0
+.out\@:	move.l	SL_OUTP(a0),a1
+	tst.w	SL_N(a0)
+	bne.s	.set\@
+	move.l	SL_REGP(a0),a1		; (started, not stepped: the driver outputs the slot's old registers)
+	bra.s	.set\@
+.idle\@:	lea	sfx_idle+11*\1,a1
+	sub.l	a0,a0			; (no slot: serial 0)
+.set\@:	move.l	a1,sfx_chip_out+4*\1
+	move.l	a0,sfx_chip_slot+4*\1
+	endm
 
 ; one IRQ of the driver; uses d0-d7 / a0-a4
 sfx_irq:
@@ -41,10 +75,10 @@ sfx_irq:
 	and.b	#3,sfx_count
 	move.b	LATCH,d0
 	cmp.b	sfx_last,d0
-	beq.s	.stepping
+	beq	.stepping
 	move.b	d0,sfx_last
 	cmp.b	#$FF,d0
-	beq.s	.stepping
+	beq	.stepping
 	and.w	#$3F,d0
 	mulu	#SFX_ENTRY,d0
 	lea	sfx_table,a1
@@ -52,181 +86,65 @@ sfx_irq:
 	move.b	SE_CHIP(a1),d1
 	cmp.b	#$FE,d1
 	beq.s	.clear
-	bhi.s	.stepping
+	bhi	.stepping
 	ext.w	d1			; the slot: (chip * 4 + slot) * SL_SIZE
+	moveq	#0,d2
+	move.b	SE_SLOT(a1),d2
+	lea	sfx_act,a0		; (active: its bit in the chip's mask)
+	bset	d2,(a0,d1.w)
 	lsl.w	#2,d1
-	add.b	SE_SLOT(a1),d1
+	add.b	d2,d1
 	mulu	#SL_SIZE,d1
 	lea	sfx_slots,a0
 	add.w	d1,a0
+	move.b	d2,SL_IDX(a0)
 	move.l	a1,SL_ENT(a0)
-	move.l	SE_RUNS(a1),SL_POS(a0)
 	clr.w	SL_N(a0)
-	clr.b	SL_LEFT(a0)
 	move.b	sfx_count,SL_PHASE(a0)
-	st	SL_EXCPH(a0)
 	addq.w	#1,sfx_serial
 	move.w	sfx_serial,SL_SERIAL(a0)
-	bra.s	.stepping
+	bra	.stepping
 .clear:
 	lea	sfx_slots,a0
 	moveq	#8-1,d1
 .cl:	clr.l	SL_ENT(a0)
 	lea	SL_SIZE(a0),a0
 	dbf	d1,.cl
+	clr.w	sfx_act
 .stepping:
-	moveq	#0,d7			; the chip
-.chip:
-	bsr	sfx_top
-	beq.s	.idle
-	move.b	sfx_count,d0		; phase = (count - n) & 3 (a paused slot resumes with another phase)
-	sub.b	SL_N+1(a0),d0
-	and.b	#3,d0
-	move.b	d0,SL_PHASE(a0)
-	bsr	sfx_step
-	bne.s	.out
-	clr.l	SL_ENT(a0)		; ended
-	bsr	sfx_top
-	beq.s	.idle
-.out:
-	lea	SL_OUT(a0),a1
-	tst.w	SL_N(a0)
-	bne.s	.set
-	lea	SL_REGS(a0),a1		; (started, not stepped: the driver outputs the slot's old registers)
-	bra.s	.set
-.idle:
-	lea	sfx_idle,a1
-	tst.w	d7
-	beq.s	.idle0
-	lea	11(a1),a1
-.idle0:
-	sub.l	a0,a0			; (no slot: serial 0)
-.set:
-	move.w	d7,d0
-	lsl.w	#2,d0
-	lea	sfx_chip_out,a2
-	move.l	a1,(a2,d0.w)
-	lea	sfx_chip_slot,a2
-	move.l	a0,(a2,d0.w)
-	addq.w	#1,d7
-	cmp.w	#2,d7
-	blo.s	.chip
+	sfx_chip	0
+	sfx_chip	1
 	rts
 
-; a0 = the highest active slot of chip d7 (Z clear), or Z set
-sfx_top:
-	lea	sfx_slots+3*SL_SIZE,a0
-	tst.w	d7
-	beq.s	.c0
-	lea	4*SL_SIZE(a0),a0
-.c0:	moveq	#4-1,d0
-.t:	tst.l	SL_ENT(a0)
-	bne.s	.found
-	lea	-SL_SIZE(a0),a0
-	dbf	d0,.t
-	moveq	#0,d0			; (Z set)
-	rts
-.found:
-	moveq	#1,d0			; (Z clear)
-	rts
-
-; one step of slot a0: Z set when it ended.  Uses d0-d6 / a1-a4.
+; one step of slot a0 (its phase in SL_PHASE): Z set when it ended.  Uses d0 / d2 / a1-a2.
 sfx_step:
 	move.l	SL_ENT(a0),a1
 	move.w	SL_N(a0),d2
 	cmp.w	SE_LENGTH(a1),d2
 	blo.s	.in
 	move.w	SE_LOOP(a1),d2		; at the end: the loop, or the end
-	bmi	.ended
-	move.w	d2,SL_N(a0)
-	move.l	SL_LOOPPOS(a0),SL_POS(a0)
-	clr.b	SL_LEFT(a0)
-	st	SL_EXCPH(a0)
-.in:
-	tst.b	SL_LEFT(a0)
-	bne.s	.in_run
-	cmp.w	SE_LOOP(a1),d2
-	bne.s	.no_loop
-	move.l	SL_POS(a0),SL_LOOPPOS(a0)
-.no_loop:
-	move.l	SL_POS(a0),a2		; a run record: steps, mask, the registers that change
-	move.b	(a2)+,SL_LEFT(a0)
-	move.b	(a2)+,d0
-	lsl.w	#8,d0
-	move.b	(a2)+,d0
-	rept	11			; (the mask's bits: the registers that change)
-	lsr.w	#1,d0
-	bcc.s	*+6
-	move.b	(a2)+,SL_REGS+REPTN(a0)
-	endr
-	move.l	a2,SL_POS(a0)
-.in_run:
-	subq.b	#1,SL_LEFT(a0)
-	move.b	SL_PHASE(a0),d3
-	cmp.b	SL_EXCPH(a0),d3
-	beq.s	.seeked
-	bsr	sfx_seek
-.seeked:
-	move.l	SL_REGS(a0),SL_OUT(a0)	; the output: phase 0's registers
-	move.l	SL_REGS+4(a0),SL_OUT+4(a0)
-	move.l	SL_REGS+8(a0),SL_OUT+8(a0)
-	tst.b	d3
-	beq.s	.done
-	move.l	SL_EXC(a0),a2		; this phase's exception at this index
-	move.b	(a2),d0
-	lsl.w	#8,d0
-	move.b	1(a2),d0
-	cmp.w	#$FFFF,d0
-	beq.s	.done
-	cmp.w	d2,d0
-	bne.s	.done
-	addq.l	#2,a2
-	move.b	(a2)+,d0
-	lsl.w	#8,d0
-	move.b	(a2)+,d0
-	rept	11
-	lsr.w	#1,d0
-	bcc.s	*+6
-	move.b	(a2)+,SL_OUT+REPTN(a0)
-	endr
-	move.l	a2,SL_EXC(a0)
-.done:
+	bmi.s	.ended
+.in:	add.w	d2,d2
+	moveq	#0,d0
+	move.b	SL_PHASE(a0),d0
+	lsl.w	#2,d0
+	move.l	SE_TAB(a1,d0.w),a2	; the output at this index and phase
+	move.w	(a2,d2.w),d0
+	lea	sfx_dict,a2
+	add.w	d0,a2
+	move.l	a2,SL_OUTP(a0)
+	move.l	SE_TAB(a1),a2		; and at phase 0
+	move.w	(a2,d2.w),d0
+	lea	sfx_dict,a2
+	add.w	d0,a2
+	move.l	a2,SL_REGP(a0)
+	lsr.w	#1,d2
 	addq.w	#1,d2
 	move.w	d2,SL_N(a0)
 	moveq	#1,d0			; (Z clear: it goes on)
 	rts
 .ended:
 	moveq	#0,d0
-	rts
-
-; SL_EXC for SL_PHASE (d3) at index d2: the first exception at or after it.  Uses d0, d1, d4, a2.
-sfx_seek:
-	move.b	d3,SL_EXCPH(a0)
-	tst.b	d3
-	beq.s	.none
-	moveq	#0,d0
-	move.b	d3,d0
-	lsl.w	#2,d0
-	move.l	SE_EXC-4(a1,d0.w),a2
-.s:	move.b	(a2),d0
-	lsl.w	#8,d0
-	move.b	1(a2),d0
-	cmp.w	#$FFFF,d0
-	beq.s	.at
-	cmp.w	d2,d0
-	bhs.s	.at
-	move.b	2(a2),d0		; skip it: 4 + the bits of its mask
-	lsl.w	#8,d0
-	move.b	3(a2),d0
-	addq.l	#4,a2
-	moveq	#11-1,d1
-.b:	lsr.w	#1,d0
-	bcc.s	.b0
-	addq.l	#1,a2
-.b0:	dbf	d1,.b
-	bra.s	.s
-.at:	move.l	a2,SL_EXC(a0)
-.none:
 	rts
 
 ; The four IRQs of an arcade tick and the music's tick, then the YM2149: the chip whose shown effect started last (or
@@ -274,11 +192,22 @@ sfx_tick:
 
 ; At the start: the YM's shadow made different from everything, so the first tick writes all eleven registers.
 sfx_init:
+	clr.w	sfx_act
+	lea	sfx_slots,a0		; (a slot never used: its old registers are 0, sfx_dict's first output)
+	moveq	#8-1,d0
+.r:	move.l	#sfx_dict,SL_REGP(a0)
+	lea	SL_SIZE(a0),a0
+	dbf	d0,.r
 	lea	sfx_ym,a0
 	moveq	#11-1,d0
 .i:	st	(a0)+
 	dbf	d0,.i
 	rts
+
+sfx_hioff:				; the highest bit of a slot mask (1-15) * SL_SIZE
+	dc.b	0,0*SL_SIZE,1*SL_SIZE,1*SL_SIZE,2*SL_SIZE,2*SL_SIZE,2*SL_SIZE,2*SL_SIZE
+	dcb.b	8,3*SL_SIZE
+	even
 
 	include	"sfx_data.s"
 
@@ -287,6 +216,7 @@ sfx_slots:	ds.b	8*SL_SIZE
 sfx_chip_out:	ds.l	2		; per chip: its output registers this IRQ
 sfx_chip_slot:	ds.l	2		; per chip: the slot shown, 0: idle
 sfx_serial:	ds.w	1
+sfx_act:	ds.b	2		; per chip: its active slots (bit n: slot n)
 sfx_last:	ds.b	1		; the driver's $4001: the last latch value seen (0 at boot)
 sfx_count:	ds.b	1		; the driver's $4000 & 3
 sfx_ym:		ds.b	11		; the YM2149's registers 0-10 as written

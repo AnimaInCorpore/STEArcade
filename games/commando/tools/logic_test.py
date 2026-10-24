@@ -32,9 +32,22 @@ def main():
                 raise RuntimeError(f'CPU stopped at {pc-s.base:06x}, d7={cpu.r_reg(R.D7):08x}, log={s.log[-3:]}')
             if pc==TRAP1:s.gemdos()
         raise RuntimeError(f'CPU timeout at {cpu.r_pc()-s.base:06x}')
+    # Calls of short leaf functions are emitted in place (gen.INLINE): the return address such a call (or rst) writes
+    # below SP in the reference is a dead stack word, not compared until another instruction writes it.
+    lines=(BUILD/'code_commando.s').read_text().splitlines()
+    inline={int(l[1:5],16) for l,n in zip(lines,lines[1:]) if l.startswith('Z') and n.strip()=='; (inline)'}
+    dead=set();site=[None];step0,write0=m.cpu.step,m.wr8
+    def step():
+        site[0]=m.cpu.pc
+        try:return step0()
+        finally:site[0]=None
+    def write(a,v):
+        (dead.add if site[0] in inline else dead.discard)(a)
+        return write0(a,v)
+    m.cpu.step=step;m.wr8=m.cpu.wr8=write
     def compare(f):
         want=bytes(m.mem[0xd000:]);got=bytes(mem.r_block(addr(0xd000),len(want)))
-        differences=[i for i in range(len(want)) if want[i]!=got[i]]
+        differences=[i for i in range(len(want)) if want[i]!=got[i] and 0xd000+i not in dead]
         if differences:
             raise RuntimeError(f'frame {f}: {len(differences)} RAM differences '+str([(hex(0xd000+i),hex(got[i]),hex(want[i])) for i in differences[:10]]))
         for a,v in list(zip(range(0xc808,0xc80c),m.scroll))+[(0xc804,m.control)]:

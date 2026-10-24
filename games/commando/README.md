@@ -26,7 +26,7 @@ buses, including ordinary CB/ED prefixes and the data-bus indexed-CB tail. The
 MAME IRQ PROM supplies RST 08 and RST 10. The runtime delivers both interrupts at
 `8001` when the foreground work queue at `ED82` is empty. It preserves the Z80
 and native task stacks and drains queued work before drawing. The STE schedules
-six arcade ticks per five VBLs, skips up to two pictures to catch up, and caps
+six arcade ticks per five VBLs, skips up to three pictures to catch up, and caps
 pending ticks (the speed is measured below).
 
 `C806` latches all 96 sprites explicitly. The three display buffers are virtual
@@ -126,6 +126,51 @@ streams. The generator reuses the existing 1942 Oklab and sprite-code tools.
 `--sim` produces `run/commando_sim/COMMANDO.PRG`; `--debug` enables diagnostic
 files, `--frames N` exits after N VBLs, and `-D AUTOPLAY=1` supplies coin/start,
 movement and fire according to the arcade tick counter for Hatari checks.
+
+## Full speed in play (2026-10-23)
+
+Goal: the game at 100% (60 ticks a second) with 25+ pictures a second.  Measured on the recorded play
+(`play_search.py 9000`, `bench.sh PLAY=1`, pinned Hatari, 6000 VBLs; "play" = VBL 900 on, the slowest = the worst
+100 VBLs):
+
+| | game speed (play) | pictures/s (play) | slowest 100 VBLs |
+|---|---|---|---|
+| before | 95% (whole run) | 24.7 (whole run); ~21 in play | 49 ticks / 18 pictures |
+| after | 100% | 26.5 | 54 ticks / 19 pictures |
+
+Musashi (`PLAY=1 perf_test.py 2400 1200`): a tick 55.8k -> ~51k cycles, a picture 167.8k -> ~158k; the heaviest
+stretch (ticks 4900-4999, scrolling) 59.6k / 205.3k -> 57.3k / 191.4k.  25 pictures a second at full speed are
+reached on average, not in every scene: about a third of the 100-VBL windows of the play stay at 19-24 pictures.
+What was done:
+
+* **Leaf functions in place** (`gen.INLINE` = 32; `COMMANDO_INLINE`, `COMMANDO_NO_INLINE=1`): the engine's
+  `inline_leaves`, extended (`z80x.Config` `inline_limit` 0xC000: the whole ROM is fixed; `inline_rst`; `inline_jumps`:
+  jumps inside the body get local labels).  -2.7k cycles a tick, +19 KB of code.  An inlined call does not write its
+  return address below SP: `logic_test.py` ignores such dead stack bytes (the sites are marked `; (inline)`).
+* **Sound effects as tables**: every distinct output once (`sfx_dict`, 2,515 x 12 bytes) and per effect and phase a
+  word per step (84 KB in all, was runs + exceptions); a step is two lookups.  Active slots are bit masks per chip.
+  -1.7k (typical) to -4.2k (busy) cycles a tick.  A cache of the music mix was tried and dropped (no hits in play:
+  the effect registers change every tick).
+* **Sprite loop**: a slot per entry (24 bytes, walked beside the entry) keeps the decoded shape, the y table half,
+  the opaque rows' offset and the damage words / lines; y through a table (`ytab`: (y + 16) * 256 or -1); the window
+  base in the USP during the loop (the quit path puts the program's USP back); the damage split at the twin boundary
+  by addresses.  ~680 -> ~560 cycles a drawn sprite.  `sprite_test.py` now also checks the damage across the twin
+  boundary (a bug there wrote over program code in Hatari only).
+* **Damage restore**: the Blitter's registers through address registers.  ~-2k a picture.
+* **Tiles**: with a horizontal scroll that is a multiple of 16 (always in play) a tile copy is two HOG passes of 8
+  rows x 4 planes (32 words, 256 bus cycles each: the source X increment steps through the planes), the Blitter set up
+  once per `ring_update`.  -13k a picture while scrolling.
+* **Scheduling**: `MAX_SKIP` 2 -> 3 (a picture after at most 3 skipped): the game keeps its speed in heavy scenes, at
+  the same picture rate (Hatari: 99% / 26.6 -> 100% / 26.5; with `MAX_SKIP=4 MAX_PENDING=4` 100% / 26.5, slowest 17).
+* The sprite list copy uses `movem` (-0.3k a copy).
+
+Tried and dropped: a native for $A498 (the four sprite entries of an object): the same cycles as its translation
+(the translated straight code is already ~14 cycles a Z80 instruction).  The logic is spread over ~2,900 Z80
+instructions a tick (the top routine 12%): natives would have to replace most of it.  `engine/xprof.py` takes
+`PLAY=1` and writes `<csv>_pcs.csv` (per instruction); `perf_test.py` `PERF_SPANS=1` gives the means of every 100 ticks.
+
+Note: the simulator does not raise address errors; a byte variable in the BSS moved later longs to odd addresses and
+only Hatari crashed.  Keep BSS flags as words (or `even` after them).
 
 ## Translator speed (2026-10-09)
 
