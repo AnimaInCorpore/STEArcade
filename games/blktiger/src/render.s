@@ -8,7 +8,7 @@
 STRIDE = 384
 RING_LINES = 544
 TEXT_RUNS = 8                    ; runs a text row (at most 7: four blanks split a run)
-TEXT_ROW_POOL = 2048             ; strip bytes a text row (at most about 2000)
+TEXT_ROW_POOL = 2048             ; a text row's pieces (at most 1824 bytes: 128 words of 8 bytes, 6 a piece, 4 a run)
 RECTS = 128+TEXT_RUNS*28         ; rectangles a ring restores at its next use: the sprites, and the text when it is redone
 RING_SIZE = STRIDE*RING_LINES
 GUARD = 16*STRIDE
@@ -2647,7 +2647,7 @@ text_row_build:
     move.w row_y,(a0)+
     move.w d0,(a0)+
     move.w d1,(a0)+
-    move.l pool_next,a4
+    lea tx_scratch,a4            ; (composed here; text_run_pieces puts the pieces in the pool)
     move.l a4,(a0)+
     move.l a0,run_next
     addq.w #1,run_count
@@ -2659,9 +2659,7 @@ text_row_build:
 .clear:
     clr.w (a0)+
     dbf d0,.clear
-    move.l a0,pool_next
     move.w (a1),run_x0
-    clr.b run_planes
 .char:
     move.w 2(a1),object_code
     move.w 4(a1),object_colour
@@ -2671,14 +2669,6 @@ text_row_build:
     lsr.w #3,d0                  ; byte in the line
     move.l a1,-(sp)
     bsr char_get                 ; a1 = planes (pixels in the high bytes), +128 masks
-    move.w object_colour,d2      ; the planes its pens can set
-    lsl.w #2,d2
-    lea pen_map+$300,a2
-    add.w d2,a2
-    move.b (a2)+,d2
-    or.b (a2)+,d2
-    or.b (a2),d2
-    or.b d2,run_planes
     lea 128(a1),a3
     lea 2(a4,d0.w),a0
     moveq #7,d4
@@ -2701,8 +2691,7 @@ text_row_build:
     addq.l #6,a1
     subq.w #1,run_chars
     bne .char
-    move.l run_next,a0
-    move.b run_planes,-8(a0)     ; (the high byte of the run's N: the planes to draw)
+    bsr text_run_pieces
     move.w chars_left,d5
     bra .run
 .next_row:
@@ -2716,13 +2705,13 @@ text_row_build:
 character_pass:
     btst #7,g_control
     bne .off
+    ; the runs as stefastbobs2 draws its bobs: copy passes (HOP 2, OP 3) whose end masks are the opaque pixels, a
+    ; piece of one or two words a line, its four planes in one pass (destination X increment 8, Y count 4, the Y
+    ; increment back to the next plane), the planes in pass order (the source runs on), the shift as the skew
     move.w #2,$ffff8a20.w
     move.w #2,$ffff8a22.w
-    move.w #-1,$ffff8a28.w
-    move.w #-1,$ffff8a2a.w
-    move.w #-1,$ffff8a2c.w
     move.w #8,$ffff8a2e.w
-    move.b #2,$ffff8a3a.w
+    move.w #$0203,$ffff8a3a.w
     move.w run_count,d7
     subq.w #1,d7
     bmi .done
@@ -2802,63 +2791,97 @@ character_pass:
     lsl.w #3,d5
     add.l d5,d4
     add.l work_base,d4           ; plane 0 of the first word
-    and.w #15,d0
-    or.w #$80,d0                 ; FXSR
-    move.b d0,$ffff8a3d.w
-    moveq #0,d5
-    move.b d2,d5                 ; N
-    lsl.w #3,d5
-    neg.w d5
-    add.w #STRIDE,d5
-    move.w d5,$ffff8a30.w
-    moveq #0,d5
-    move.b d2,d5
-    addq.w #1,d5                 ; the words a line
-    move.w d5,$ffff8a36.w
-    lea bd_lines_d,a0            ; (engine/rt/borders.s: the lines a piece of a pass reading the screen)
-    moveq #0,d6
-    move.b (a0,d5.w),d6
-    bne.s .fits
-    moveq #1,d6
-.fits:
-    lsr.w #8,d2                  ; the planes to draw
-    lsl.w #3,d3                  ; bytes a block
-    move.l a2,a1
-    add.w d3,a1                  ; plane 0
-    moveq #3,d0
-.plane:
-    move.l a2,$ffff8a24.w
-    move.l d4,$ffff8a32.w
-    move.b #4,$ffff8a3b.w        ; NOT mask AND screen
-    bsr.s .pieces
-    lsr.w #1,d2
-    bcc.s .next_plane            ; (no pixel of the run in this plane)
-    move.l a1,$ffff8a24.w
-    move.l d4,$ffff8a32.w
-    move.b #7,$ffff8a3b.w        ; pixels OR screen
-    bsr.s .pieces
-.next_plane:
-    add.w d3,a1
-    addq.l #2,d4
-    dbf d0,.plane
+    movem.l d7/a3,-(sp)
+    move.l a2,a0                 ; the run's pieces (text_run_pieces): n2, n1, the pieces, their planes
+    move.w (a0)+,d7
+    move.w (a0)+,d1
+    move.w d7,d2
+    add.w d1,d2
+    mulu #6,d2
+    lea (a0,d2.w),a1
+    move.l a1,$ffff8a24.w        ; (it runs on from piece to piece)
+    lea $ffff8a28.w,a5           ; END1, END2 at 2(a5), END3 at 4(a5)
+    lea $ffff8a32.w,a6
+    lea $ffff8a38.w,a3           ; Y count, start at 4(a3)
+    move.l d4,a4
+    moveq #4,d5                  ; the four planes
+    moveq #$ffffffc0,d6          ; BUSY + HOG
+    and.w #15,d0                 ; the shift
+    beq .aligned
+    ; shifted: a piece of c words covers c + 1 destination words, NFSR (c words read), its masks shifted here
+    move.b d0,d2
+    or.b #$40,d2
+    move.b d2,$ffff8a3d.w
+    moveq #16,d3
+    sub.w d0,d3
+    subq.w #1,d7
+    bmi.s .s_ones
+    move.w #3,$ffff8a36.w
+    move.w #-14,$ffff8a30.w
+.s_two:
+    move.l (a0)+,d2              ; mask words 1, 2
+    move.w d2,d4
+    lsr.l d0,d2
+    move.w d2,2(a5)              ; END2: (1:2) >> shift
+    swap d2
+    move.w d2,(a5)               ; END1: 1 >> shift
+    lsl.w d3,d4
+    move.w d4,4(a5)              ; END3: 2 << (16 - shift)
+    add.w (a0)+,a4
+    move.l a4,(a6)
+    move.w d5,(a3)
+    move.b d6,4(a3)
+    dbf d7,.s_two
+.s_ones:
+    subq.w #1,d1
+    bmi .drawn
+    move.w #2,$ffff8a36.w
+    move.w #-6,$ffff8a30.w
+.s_one:
+    move.l (a0)+,d2              ; mask word, 0
+    lsr.l d0,d2
+    move.w d2,4(a5)              ; END3
+    swap d2
+    move.w d2,(a5)               ; END1
+    add.w (a0)+,a4
+    move.l a4,(a6)
+    move.w d5,(a3)
+    move.b d6,4(a3)
+    dbf d1,.s_one
+    bra.s .drawn
+.aligned:
+    clr.b $ffff8a3d.w
+    subq.w #1,d7
+    bmi.s .a_ones
+    move.w #2,$ffff8a36.w
+    move.w #-6,$ffff8a30.w
+.a_two:
+    move.w (a0)+,(a5)
+    move.w (a0)+,4(a5)
+    add.w (a0)+,a4
+    move.l a4,(a6)
+    move.w d5,(a3)
+    move.b d6,4(a3)
+    dbf d7,.a_two
+.a_ones:
+    subq.w #1,d1
+    bmi.s .drawn
+    move.w #1,$ffff8a36.w
+    move.w #2,$ffff8a30.w
+.a_one:
+    move.w (a0)+,(a5)
+    addq.l #2,a0
+    add.w (a0)+,a4
+    move.l a4,(a6)
+    move.w d5,(a3)
+    move.b d6,4(a3)
+    dbf d1,.a_one
+.drawn:
+    movem.l (sp)+,d7/a3
 .skip:
     dbf d7,.run
-    bra.s .done
-.pieces:
-    ; the eight lines in HOG pieces of d6 (at most ~256 bus cycles each, engine/rt/borders.s)
-    moveq #8,d1
-.piece:
-    move.w d6,d5
-    cmp.w d1,d5
-    bls.s .lines
-    move.w d1,d5
-.lines:
-    move.w d5,$ffff8a38.w
-    move.b #$c0,$ffff8a3c.w
-    sub.w d5,d1
-    bne.s .piece
-    rts
 .done:
+    move.w #-1,$ffff8a2a.w       ; (END2 as the other passes expect it)
     tst.b text_keep
     bne.s .kept
     move.w ring_index,d1         ; the ring's text record: what it shows (the rectangles it covers: cur_text)
@@ -2872,6 +2895,117 @@ character_pass:
     move.l d0,(a0,d1.w)
 .kept:
 .off:
+    rts
+
+; text_run_pieces: the run text_row_build just composed in tx_scratch (five blocks: the mask, planes 0-3; a line of
+; N + 2 words, the first and the last 0) as stefastbobs2's bob pieces, into the row's pool: a line's opaque words in
+; pieces of two words (or one) from the left, an entry n2, n1, the two-word pieces (mask words 1, 2, destination
+; step), the one-word ones (mask word, 0, destination step), then the pieces' planes in pass order (plane 0's words,
+; plane 1's ... : the source runs on).  A step from the run's first destination word (plane 0; data word j lands on
+; destination words j - 1 and j) and from the last piece.  The run's record points to the entry.  Keeps every register.
+text_run_pieces:
+    movem.l d0-d7/a0-a6,-(sp)
+    move.l run_next,a6
+    moveq #0,d2
+    move.w -8(a6),d2             ; N
+    move.w -6(a6),d3             ; bytes a line
+    move.w d3,d6
+    lsl.w #3,d6                  ; bytes a block
+    ; the pieces: tx_tmp (c, mask 1, mask 2, the line's offset in a block + 2j, destination offset)
+    lea tx_tmp,a5
+    lea tx_scratch,a1
+    moveq #0,d4                  ; the line's offset in a block
+    sub.l a3,a3                  ; its destination offset
+    clr.w tx_n2
+    clr.w tx_n1
+    moveq #7,d7
+.line:
+    moveq #1,d5                  ; data word j
+.word:
+    cmp.w d2,d5
+    bhi.s .line_end
+    move.w d5,d0
+    add.w d0,d0
+    move.w (a1,d0.w),d1
+    beq.s .empty
+    cmp.w d2,d5
+    beq.s .single
+    tst.w 2(a1,d0.w)
+    beq.s .single
+    move.w #2,(a5)+
+    move.w d1,(a5)+
+    move.w 2(a1,d0.w),(a5)+
+    addq.w #1,tx_n2
+    bra.s .place
+.single:
+    move.w #1,(a5)+
+    move.w d1,(a5)+
+    clr.w (a5)+
+    addq.w #1,tx_n1
+.place:
+    move.w d4,d1
+    add.w d0,d1
+    move.w d1,(a5)+
+    lsl.w #2,d0
+    subq.w #8,d0                 ; (word j: destination word j - 1)
+    add.w a3,d0
+    move.w d0,(a5)+
+    add.w -10(a5),d5
+    bra.s .word
+.empty:
+    addq.w #1,d5
+    bra.s .word
+.line_end:
+    add.w d3,d4
+    add.w d3,a1
+    lea STRIDE(a3),a3
+    dbf d7,.line
+    ; the entry
+    move.l a5,tx_tmp_end
+    move.l pool_next,a4
+    move.l a4,-4(a6)             ; (the record's pointer)
+    move.l a4,a6
+    move.w tx_n2,(a6)+
+    move.w tx_n1,(a6)+
+    move.w tx_n2,d0              ; the data after the pieces
+    add.w tx_n1,d0
+    mulu #6,d0
+    lea (a6,d0.w),a3
+    moveq #0,d7                  ; the last piece's destination
+    moveq #2,d4                  ; two-word pieces, then one-word ones
+.kind:
+    lea tx_tmp,a5
+.piece:
+    cmp.l tx_tmp_end,a5
+    bhs.s .kind_end
+    cmp.w (a5),d4
+    bne.s .other
+    move.w 2(a5),(a6)+           ; mask words
+    move.w 4(a5),(a6)+
+    move.w 8(a5),d1
+    move.w d1,d5
+    sub.w d7,d1
+    move.w d1,(a6)+              ; destination step
+    move.w d5,d7
+    lea tx_scratch,a0            ; the planes: plane p's block at (p + 1) * bytes a block
+    add.w 6(a5),a0
+    moveq #3,d5
+.plane:
+    add.w d6,a0
+    move.w (a0),(a3)+
+    cmp.w #2,d4
+    bne.s .next_plane
+    move.w 2(a0),(a3)+
+.next_plane:
+    dbf d5,.plane
+.other:
+    lea 10(a5),a5
+    bra.s .piece
+.kind_end:
+    subq.w #1,d4
+    bne.s .kind
+    move.l a3,pool_next
+    movem.l (sp)+,d0-d7/a0-a6
     rts
 
 ; text_key2: d0 = text_gen, view_flip, 1 (what a ring's text was drawn from; the low byte: a record, keepable)
@@ -3221,13 +3355,17 @@ text_rows_dirty: ds.b 64          ; (set by the translated stores: rows 0-31 cod
     even
 row_tmp: ds.w 3*32
 text_pool: ds.b TEXT_ROW_POOL*28
+tx_scratch: ds.b 5*8*36         ; a run composed (text_row_build): five blocks of 8 lines of up to 18 words
+tx_tmp: ds.b 8*9*10              ; its pieces (text_run_pieces)
+tx_tmp_end: ds.l 1
+tx_n2: ds.w 1
+tx_n1: ds.w 1
 pool_next: ds.l 1
 run_next: ds.l 1
 run_count: ds.w 1
 run_chars: ds.w 1
 chars_left: ds.w 1
 run_x0: ds.w 1
-run_planes: ds.b 1
     even
 row_y: ds.w 1
 text_row: ds.w 1

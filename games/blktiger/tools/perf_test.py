@@ -23,7 +23,8 @@ import os
 EVERY=int(os.environ.get('PERF_EVERY','1'))
 CPU_ONLY=os.environ.get('PERF_CPU')   # (profile: the 68000's cycles only, without the Blitter's bus cycles charged to the pass starts)
 PLAY=os.environ.get('PERF_PLAY')   # (the recorded play build/blktiger/play_inputs.bin, e.g. marp_inputs.py's, lives kept at 3 from tick 1000)
-SEL=os.environ.get('PERF_SEL')   # (map / nomap: profile only the frames after a background write, or the others)
+SEL=os.environ.get('PERF_SEL')   # (map / nomap: profile only the frames after a background write, or the others;
+                                 #  moved / still: the frames whose scroll differs from the last frame drawn, or the others)
 
 
 REGS=[getattr(R,f'D{i}') for i in range(8)]+[getattr(R,f'A{i}') for i in range(8)]
@@ -73,7 +74,7 @@ def main():
     # render_frame is patched out while the game runs (sim_wait / sim_frame_done are loops the CPU stops in) and called at each
     # sim_frame_done with sim_render_ret (a loop too) as its return address, as in render_test.py.
     word=mem.r16(render);mem.w16(render,0x4e75);run_to({wait})
-    logic,frames=[],[];totals=collections.Counter()
+    logic,frames=[],[];totals=collections.Counter();last_scroll=None
     if PLAY:
         import playbot;play=playbot.load(build_dir('blktiger')/'play_inputs.bin')
     for f in range(ticks):
@@ -92,7 +93,9 @@ def main():
             continue
         pc_done=cpu.r_pc();sp=cpu.r_reg(R.A7);regs=[cpu.r_reg(r) for r in REGS]   # (render_frame keeps no registers: the hook saved them)
         mem.w16(render,word);mem.set_trace_mode(True);cpu.w_reg(R.A7,sp-4);mem.w32(sp-4,ret);cpu.w_pc(render)
-        sel=SEL is None or (SEL=='map')==bool(mem.r8(sym['map_dirty']))
+        scroll=bytes(mem.r_block(sym['g_scroll'],4));moved=scroll!=last_scroll;last_scroll=scroll
+        sel=(SEL is None or SEL in('moved','still') and (SEL=='moved')==moved
+             or SEL in('map','nomap') and (SEL=='map')==bool(mem.r8(sym['map_dirty'])))
         try:rc=run_to({ret},step=prof and f>=first and sel)
         except Exception:print(f'render_frame failed at tick {f}');raise
         mem.set_trace_mode(False);mem.w16(render,0x4e75);cpu.w_pc(pc_done)

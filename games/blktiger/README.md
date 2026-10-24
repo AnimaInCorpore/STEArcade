@@ -59,11 +59,13 @@ they draw whole, as described below. Per frame
 * **Front pens** (the background's priority half) are in the clean tiles; they
   are drawn again only over the cells sprites touched (a mask per cell).
 * **The text layer** is a list of runs (characters on one row, gaps of up to
-  three blanks), composed into planar strips when the text RAM or the flip
-  changes; a frame draws each run with the Blitter, shifted, two passes a plane
-  (the OR pass only for the planes the run's pens can set). A ring keeps its
-  text while the scroll and the text are the same; else the runs' rectangles
-  are restored and the text drawn whole.
+  three blanks), composed when the text RAM or the flip changes and drawn like
+  stefastbobs2's bobs (`text_run_pieces`, `character_pass`): each line's opaque
+  words in pieces of two (or one), a copy pass a piece (HOP 2, OP 3) with the
+  opaque pixels as end masks and all four planes in the pass, the planes stored
+  in pass order, the shift as the pass's skew (no AND + OR passes). A ring
+  keeps its text while the scroll and the text are the same; else the runs'
+  rectangles are restored and the text drawn whole.
 * **The black side margins** (32 pixels each side of the 320-pixel window) are
   a mask per cell and ring, changed only where the window moved; the two word
   columns the fine scroll masks in part are copied whole by the Blitter (the
@@ -272,6 +274,27 @@ That replay and its PPO plays found code and accesses the coverage here never re
 (noise), 2,436,385 -> 2,471,966 bytes.  Not taken over: F030Arcade's Z80 cycle budget (`CYCLES=1`), which a
 recorded game needs to stay in step with MAME (without it the game's tasks finish in zero frames and the random
 generator runs ahead) but which costs the STE logic time.
+
+## Text drawn like sprites (2026-10-24)
+
+The text runs were drawn with an AND pass (the mask) and an OR pass (the pixels) per plane, eight passes over the
+run's 8 lines. They are now cut once, when the run is composed, into stefastbobs2's bob pieces: per line the words
+with opaque pixels, two (or one) from the left; an entry holds each piece's two mask words and its destination step,
+then the pieces' planes in pass order. A frame draws a piece as one copy pass (HOP 2, OP 3; destination X increment 8,
+Y count 4 = the planes, Y increment back to the next plane) whose end masks are the mask words shifted by the run's
+shift; with a shift the pass covers one destination word more and reads its words with NFSR (the skew in the pass),
+so the source runs on from piece to piece and nothing is shifted in advance. Two intermediate versions were measured
+and dropped: pieces cut in destination words with the masks and the shifted planes prepared per run and shift in a
+64 KB pool (the preparation cost 16k a scrolling picture: the timer and the score change the text every second), and
+the same with only the masks prepared (the source address written per piece).
+
+Measured on the MARP game's inputs (`PERF_PLAY=1 PERF_EVERY=3 perf_test.py 9000 1000`, 8000 ticks, Musashi CPU +
+Blitter; `PERF_SEL=moved` the 768 pictures whose window moved): `character_pass` 83.7k -> 57.3k cycles a scrolling
+picture (the Blitter's part 45k -> 18.5k, the CPU's 38.7k -> 38.8k), a scrolling picture 347k -> 322k, every picture
+195.4k -> 185.7k (-5%). Hatari (`PLAY=1 EXTRA="--frames 30000" WAIT=640 tools/bench.sh`, the MARP inputs from
+`marp_inputs.py`, 30,000 VBLs): 24.6 -> 25.5 pictures a second (98% game speed both), the median 2-second stretch
+22 -> 23, stretches under 15 pictures a second 60 -> 55 of 196. `port.py test blktiger` passes (the render sweep covers
+all 16 shifts).
 
 ## Whole sprites at borders (2026-10-11)
 
