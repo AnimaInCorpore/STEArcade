@@ -21,6 +21,18 @@ These rules apply to every game port and every sprite fallback path.
   preparation (opaque runs, chains, mask order, reordered source, generated code per
   shift) and each port's result are in `docs/sprite-preparation.md`: prototype it and
   measure, do not decide from estimates; add your port's result there.
+- Mandatory (user, 2026-10-24): no AND + OR Blitter pass pairs (a mask pass with OP 1 or 4,
+  then an OR pass with OP 7) for anything drawn over a background: sprites, text,
+  front layers. Draw masked graphics the stefastbobs2 way: HOP 2 / OP 3 copy passes
+  whose end masks are the opaque pixels, pieces of one or two destination words, all
+  four planes in one pass (destination X increment 8, Y count 4, the destination Y
+  increment back to the next plane), the planes stored in pass order so the source
+  address runs on, the shift in the pass (skew, NFSR: a piece of c words covers c + 1
+  destination words) and only the registers that change written between passes.
+  Prepare per image (or text run) when it changes, at build time or on first use.
+  Text is drawn like sprites (Black Tiger, Gun.Smoke: `text_run_pieces`,
+  `fg_pieces_build`). The M72 front layer still uses AND + OR and is to be converted;
+  see `docs/sprite-preparation.md`.
 - Use short HOG Blitter passes, at most 256 bus cycles, with the shared early,
   synchronized border handlers. Verify timer timing in the pinned Hatari build.
 - Verify sprites at every edge (clipped or whole), all 16 horizontal shifts, transparent holes,
