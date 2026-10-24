@@ -61,6 +61,9 @@ start:
     move.b #$ff,in_sys
     move.b #$ff,in_p1
     move.b #$ff,in_p2
+    ifd CYCLES
+    move.l #CYC_FRAME,z80_cyc     ; (the first frame's budget)
+    endc
     moveq #0,d0
     bsr bt_out_01
     lea G_Z80,a6
@@ -114,6 +117,10 @@ bt_dispatch:                    ; d7.w = the Z80 address (kept for z80_badpc); a
     move.l -4(a0),a0
     jmp (a0,d5.l)
 .bad:
+    ifd CYCLES
+    cmp.w #CYC_TOKEN,d7
+    beq cyc_ret                  ; (the interrupt handler's ret back to cyc_poll)
+    endc
     jmp z80_badpc
 
 ; The scheduler has scanned all sixteen task records with no ready task.
@@ -152,8 +159,16 @@ z80_hook:
     bsr bt_snd_load
     movem.l (sp)+,d0-d3/a0-a3
 .loaded:
+    ifd CYCLES
+    ifd SIM
+    bra.s .deliver               ; (the board's idle loop runs to the next frame interrupt: Musashi has no host clock)
+    endc
+    tst.b vbl_pending
+    bgt.s .deliver               ; (signed: ticks cyc_poll took mid-task while the host was behind count against it)
+    else
     tst.b vbl_pending
     bne.s .deliver
+    endc
     ifd SIM
     jsr sim_wait
     bra.s .check
@@ -163,6 +178,19 @@ z80_hook:
     rts
     endc
 .deliver:
+    bsr tick_begin
+    st isr_stage
+    lea own_stack_top,sp
+    ifd CYCLES
+    move.l #CYC_FRAME-CYC_IRQ,z80_cyc   ; (the board's idle loop spent the rest of the frame)
+    endc
+    clr.b g_iff
+    move.w #$d400,-(a5)          ; real return address $00d4, exact kernel stack data
+    jmp Z0038
+
+; An arcade tick starts (the idle hook, or cyc_poll mid-task): the counters, the scripted inputs, the sprite latch.
+; All registers kept.
+tick_begin:
     subq.b #1,vbl_pending
     addq.w #1,cnt_ticks
     ifd AUTOPLAY
@@ -204,7 +232,6 @@ z80_hook:
     bsr pb_inputs
     endc
     st frame_dirty
-    st isr_stage
     ; The sprite RAM as the VBL latches it, for this tick's frame: not when that frame will be skipped (VBLs still
     ; pending now are pending at its end too, and .normal then skips it unless MAX_SKIPS were skipped already).
     ifnd SIM
@@ -225,10 +252,49 @@ z80_hook:
     dbf d0,.spr
     movem.l (sp)+,d0-d7/a0-a2
 .no_sprites:
-    lea own_stack_top,sp
-    clr.b g_iff
-    move.w #$d400,-(a5)          ; real return address $00d4, exact kernel stack data
+    rts
+
+    ifd CYCLES
+; The Z80 cycle budget (tools/cycle_budget.py, build.py --cycles; from F030Arcade).  z80_cyc: the cycles left of the
+; 6 MHz main CPU's frame (100,000 at 60 Hz).  The translation charges each block's original cycles and calls cyc_poll
+; at a block start when the counter is negative: with interrupts on, the frame interrupt is taken there, mid-task, as
+; on the board (irq0_line_hold, IM 1: 13 cycles); the handler's ret pops the token and comes back through bt_dispatch
+; / cyc_ret.  A block start's scratch registers (d5 d7 a0 a3) are free; the caller keeps the CCR where it must.
+CYC_FRAME = 100000
+CYC_IRQ = 13
+CYC_TOKEN = $fffe
+cyc_poll:
+.again:
+    tst.l z80_cyc
+    bpl.s .done
+    tst.b g_iff
+    beq.s .done                  ; (interrupts off: it stays pending until ei)
+    bsr tick_begin
+    add.l #CYC_FRAME-CYC_IRQ,z80_cyc
+    sf g_iff
+    bsr.s .irq                   ; (back here at the handler's ret)
+    bra.s .again                 ; (a long ldir owes more than one: the board took one a frame)
+.done:
+    rts
+.irq:
+    move.w #(CYC_TOKEN>>8)|((CYC_TOKEN&$ff)<<8),-(a5)
     jmp Z0038
+cyc_ret:
+    rts
+
+; ei: interrupts on.  Frames that passed under di leave one interrupt pending, not one each (the line is held).
+cyc_ei:
+    move sr,-(sp)
+    st g_iff
+.drop:
+    cmp.l #-CYC_FRAME,z80_cyc
+    bgt.s .ok
+    add.l #CYC_FRAME,z80_cyc
+    bra.s .drop
+.ok:
+    move (sp)+,ccr
+    rts
+    endc
 
 ; Main CPU ports. Handlers keep all game registers and the Z80 flags image.
 bt_out_00:
@@ -455,12 +521,14 @@ pb_inputs:
     move.b pb_sys,bt_inputs
     move.b pb_p1,bt_inputs+1
     move.b #$ff,bt_inputs+2
+    ifnd MARP                    ; (a MARP recording plays its own game: build.py --cycles -D PLAYBACK=1 -D MARP=1)
     moveq #0,d0
     move.w cnt_ticks,d0
     subq.l #1,d0
     cmp.w #PB_PLAY,d0
     blo.s .out
     move.b #3,G_Z80+$f3a0-$10000
+    endc
 .out:
     movem.l (sp)+,d0/a0
     rts
@@ -503,7 +571,11 @@ vbl:
     movem.l (sp)+,a1-a4
     endc
     cmp.b #32,vbl_pending
+    ifd CYCLES
+    bge.s .cap                   ; (signed: cyc_poll's ticks may run ahead of the host)
+    else
     bhs.s .cap
+    endc
     addq.b #1,vbl_pending
     ; Six arcade ticks per five 50 Hz fields (60 Hz average).
     addq.b #1,tick_phase
@@ -630,7 +702,11 @@ sim_render_ret:
     section data,data
     ifd PLAYBACK
 pb_data:
+    ifd MARP
+    incbin "marp_inputs.bin"     ; (tools/marp_replay.py: a MARP recording's inputs, tools/marp_inputs.py)
+    else
     incbin "play_inputs.bin"
+    endc
     even
     endc
 bt_inputs:
@@ -731,6 +807,9 @@ dbg_tl_n: ds.w 1
 dbg_tl_p: ds.l 1
 dbg_tl: ds.l 200                ; (20000 VBLs)
 dbg_tl_end:
+    endc
+    ifd CYCLES
+z80_cyc: ds.l 1                  ; the main Z80's cycles left of the frame (cyc_poll)
     endc
     ifd PLAYBACK
 pb_ptr: ds.l 1

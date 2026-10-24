@@ -275,6 +275,38 @@ That replay and its PPO plays found code and accesses the coverage here never re
 recorded game needs to stay in step with MAME (without it the game's tasks finish in zero frames and the random
 generator runs ahead) but which costs the STE logic time.
 
+### MARP replay with the cycle budget (2026-10-24)
+
+F030Arcade's budget is now a test build here (the normal build is unchanged): `tools/cycle_budget.py` and
+`tools/z80_cycles.py` (MAME 0.184's Z80 tables) are taken over from F030Arcade, `gen.py` uses them with
+`BT_CYCLES=1`, and `src/blktiger.s` has `cyc_poll` / `cyc_ei` under `ifd CYCLES` (the tick start is `tick_begin`,
+shared by the idle hook and `cyc_poll`).  `build.py --sim --cycles` also guards every indirect access.
+
+    venv/bin/python games/blktiger/tools/marp_replay.py fw666_blktiger_2006700_wolf184.zip --shift 1
+
+`marp_replay.py` decodes the recording (`marp_inputs.py`, with its DIP switches: fw666 has DSW1 `$2F`, continue off,
+where the port's default is `$6F`), builds `--sim --cycles -D PLAYBACK=1 -D MARP=1` (no lives kept) and plays it on
+Musashi, logic only, about 8,500 ticks a second.  MARP lists the final score: a port that follows the recorded game
+reaches it.  Port tick n takes the recording's frame n + 1 (`--shift 1`; shifts 0, 2, 3, 4 lose the first stage).
+
+Result on fw666 (2,006,700 points, 240,662 frames, WolfMAME 0.184):
+
+- Without the budget the game leaves the recording 30 frames after the start (F030Arcade's finding).
+- With it the port plays the expert's game through seven of the eight stages: stage 2 at tick 7,837, stage 3 at
+  15,763 ... stage 7 at 129,364, about 1.2 million points.  The 68030 forms (`STE_XCPU=68030`, F030Arcade's) give the
+  same game.
+- In stage 7 it leaves: from tick 162,519 the player loses a life every 7,664 ticks (the stage timer), the game ends
+  in stage 8 at 1,766,650.  F030Arcade's port, the same translation, followed this game to the end against a
+  WolfMAME 0.184 dump; the cause here is not found yet.
+
+The ground truth for locating it is a WolfMAME 0.184 RAM dump (F030Arcade's `scripts/mame_inp_dump.py`, Windows
+build): `marp_replay.py --out x.npz --ram first-last` saves the port's state at each idle point for that comparison.
+MAME 0.289 cannot play the recording (its blktiger screen is 384 x 262 lines, 59.63 Hz, and the playback stops as
+out of sync after frame 1).  `tools/marp_reference.py --mame184 --dsw1 0x2f` plays it on the reference board with
+0.184's timing (100,000 cycles a frame, the interrupt from the end of frame 0): it equals the port at every idle point
+to tick 16,409, then leaves (the port takes the interrupt at a block start, the reference at the instruction, and
+the random generator's task then runs a different number of times); 78 frames a second.
+
 ## Text drawn like sprites (2026-10-24)
 
 The text runs were drawn with an AND pass (the mask) and an OR pass (the pixels) per plane, eight passes over the

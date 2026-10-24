@@ -412,8 +412,14 @@ def generate(extra_roots=()):
     joins = set(roots)                       # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
-    em = compile_code(code, joins, cfg, {IDLE}, emitter=BTEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
-    report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'indirect':len(indirect),
+    emitter = BTEmitter
+    if os.environ.get('BT_CYCLES') == '1':
+        # the Z80 cycle budget (tools/cycle_budget.py, build.py --cycles): the original's time charged per block, the
+        # frame interrupt taken mid-task as on the board (for MARP replays; the normal build has none)
+        import cycle_budget
+        emitter = cycle_budget.emitter(sys.modules[__name__], rom)
+    em = compile_code(code, joins, cfg, {IDLE}, emitter=emitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
+    report = {'cycles': os.environ.get('BT_CYCLES') == '1', 'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'indirect':len(indirect),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']
     # The dispatch tables (bt_dispatch), built here as data: a word per Z80 address, (the entry - the region's base) / 2,

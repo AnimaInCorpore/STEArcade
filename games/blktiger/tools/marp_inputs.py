@@ -30,11 +30,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'engine'))
 from paths import build_dir  # noqa: E402
 
 PORT_IN0 = 4            # the fifth of blktiger's seven ports (tag order; IN1 the sixth): fw666 presses coin and start here
+PORT_DSW0 = 1          # (the second: DSW0, then DSW1)
 COIN1, START1 = 0x40, 0x01
 
 
-def inp_inputs(path):
-    """IN0 and IN1 a frame from a format 3.5 .inp (or a .zip holding one)."""
+def inp_records(path):
+    """The frame records of a format 3.5 .inp (or a .zip holding one): uint8 [frames, record bytes]."""
     if path.suffix.lower() == '.zip':
         with zipfile.ZipFile(path) as z:
             name, = [n for n in z.namelist() if n.lower().endswith('.inp')]
@@ -46,10 +47,25 @@ def inp_inputs(path):
     z = zlib.decompress(data[0x40:])
     rec = next(n for n in range(24, 200, 8)
                if len(z) % n == 0 and int.from_bytes(z[n + 4:n + 12], 'little') in (16666666666666666, 16666666666666667))
-    r = np.frombuffer(z, np.uint8).reshape(-1, rec)
+    return np.frombuffer(z, np.uint8).reshape(-1, rec)
+
+
+def _port(r, k):
     word = lambda o: r[:, o:o + 4].copy().view('<u4')[:, 0]
-    port = lambda k: (word(16 + 8 * k) ^ word(20 + 8 * k)) & 0xff
-    return np.stack([port(PORT_IN0), port(PORT_IN0 + 1)], 1)
+    return (word(16 + 8 * k) ^ word(20 + 8 * k)) & 0xff
+
+
+def inp_inputs(path):
+    """IN0 and IN1 a frame from a format 3.5 .inp (or a .zip holding one)."""
+    r = inp_records(path)
+    return np.stack([_port(r, PORT_IN0), _port(r, PORT_IN0 + 1)], 1)
+
+
+def inp_dsw(path):
+    """DSW0, DSW1 as recorded (the first frame; ports in tag order: COIN_LOCKOUT, DSW0, DSW1, FREEZE, IN0-IN2).
+    fw666: $FF, $2F (no continue), where the port's default DSW1 is $6F."""
+    r = inp_records(path)[:1]
+    return int(_port(r, PORT_DSW0)[0]), int(_port(r, PORT_DSW0 + 1)[0])
 
 
 def dump_inputs(folder):
