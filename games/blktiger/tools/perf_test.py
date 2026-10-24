@@ -7,6 +7,7 @@ with logic_test.py's inputs (coin, start, then walking right and attacking: the 
                                                            front cells, text runs drawn, text rectangles restored, full checks, sprite
                                                            rectangles, margin cells restored and blacked, text kept, text rows rebuilt)
     PERF_EVERY=n: a frame drawn every n-th tick only (Hatari draws about every 2.6th: MAX_SKIPS), the means per frame drawn
+    PERF_PLAY=1: the recorded play's inputs (build/blktiger/play_inputs.bin) instead of the walk
     PERF_CPU=1: profile the 68000's own cycles (the Blitter's bus cycles are charged to the instructions starting the passes)
 
 Musashi counts the 68000's own cycles: Hatari takes about 1.35 times as many (bus alignment, interrupts, the Blitter's bus).
@@ -21,6 +22,7 @@ from logic_test import inputs
 import os
 EVERY=int(os.environ.get('PERF_EVERY','1'))
 CPU_ONLY=os.environ.get('PERF_CPU')   # (profile: the 68000's cycles only, without the Blitter's bus cycles charged to the pass starts)
+PLAY=os.environ.get('PERF_PLAY')   # (the recorded play build/blktiger/play_inputs.bin, e.g. marp_inputs.py's, lives kept at 3 from tick 1000)
 SEL=os.environ.get('PERF_SEL')   # (map / nomap: profile only the frames after a background write, or the others)
 
 
@@ -72,9 +74,14 @@ def main():
     # sim_frame_done with sim_render_ret (a loop too) as its return address, as in render_test.py.
     word=mem.r16(render);mem.w16(render,0x4e75);run_to({wait})
     logic,frames=[],[];totals=collections.Counter()
+    if PLAY:
+        import playbot;play=playbot.load(build_dir('blktiger')/'play_inputs.bin')
     for f in range(ticks):
         values=inputs(f)
         if f>=1000:values=values[0],255^1^16^(32 if f%90<15 else 0),255   # (logic_test --walk)
+        if PLAY:
+            values=(*play[f],255)
+            if f>=1000:mem.w8(sym['g_block']+0xf3a0-0x8000,3)
         for i,v in enumerate(values):mem.w8(sym['bt_inputs']+i,v)
         mem.w8(sym['vbl_pending'],1);resume()
         lc=run_to({done},step=lprof and f>=first)
