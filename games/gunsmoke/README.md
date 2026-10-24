@@ -6,7 +6,7 @@ See the [cross-port measurements](../../docs/virtual-scroll-performance.md#imple
 ![Gun.Smoke on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `gunsmoke`. The main Z80 program (fixed ROM and four 16 KB banks) is
-statically translated to 68000 code and runs on an unexpanded 8 MHz, 4 MB Atari STE
+statically translated to 68000 code and runs on an 8 MHz Atari STE with 4 MB of RAM and no accelerator
 with keyboard and joystick input. Graphics use a fixed 16-colour Oklab palette; the sound
 driver's effects and music play on the STE's YM2149 (see "Sound").
 

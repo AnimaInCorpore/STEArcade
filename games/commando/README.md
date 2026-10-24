@@ -6,7 +6,7 @@
 ![Commando on the STE (Hatari)](docs/screenshot.png)
 
 The main Z80 program is statically translated to 68000 code and runs with keyboard
-and joystick input on an unexpanded 8 MHz, 4 MB Atari STE. Graphics use a fixed
+and joystick input on an 8 MHz Atari STE with 4 MB of RAM and no accelerator. Graphics use a fixed
 16-colour Oklab palette. The sound effects and the music play on the STE's YM2149 (see "Sound effects" and "Music").
 
     python3 port.py build commando
