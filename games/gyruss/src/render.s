@@ -8,7 +8,7 @@
 ; Buffers of BL lines x 160 bytes: buffer line = PIC_TOP + Y (the display starts PIC_TOP lines above the picture),
 ; screen x = 48 + X; lines below the picture are guard lines for whole sprites.  Three display buffers and a clean
 ; screen.  The clean screen holds the tiles: a cell the video RAM changes (render_tiles: only the rows the program
-; marked, tile_rows) is drawn there with movep.l and listed for each display buffer.  A buffer is brought to the new
+; listed, cell_list) is drawn there with movep.l and listed for each display buffer.  A buffer is brought to the new
 ; picture from the clean screen: its last sprites' rectangles (short HOG Blitter copies, blit_go), its listed cells
 ; (movep.l); then the sprites are drawn (the 48th entry first: the first on top) and the front tiles (colour bit 4,
 ; MAME's group 0: opaque) copied back over the cells the sprites covered, and the buffer is published for the next VBL.
@@ -36,7 +36,7 @@ NBUF = 3
 PIC0 = PIC_TOP*LB			; the picture's line 0 in a buffer
 LEFT = 48				; the picture's left edge (screen x)
 SC_SLOTS = 1024				; sprite cache slots
-SC_SIZE = 2+8*4+8*8			; n, (row * 160, mask) a row, the 4 plane words a row
+SC_SIZE = 8+2+8*4+8*8			; the shape record, the plane words' address, n, (row * 160, mask) a row, the 4 plane words a row
 DMG_MAX = 48+160				; the entries and their logged old contents (sub.s SEG_MAX)
 
 B_HT = $ffff8a00
@@ -82,6 +82,7 @@ init_render:
 	move.w	#-1,prev_idx
 	clr.b	frame_ready
 	st	tiles_full
+	move.l	#cell_list,cell_ptr
 	bsr	cache_flush
 	lea	gy_pal,a0		; the palettes: the picture's, black around it
 	lea	shown_pal,a1
@@ -139,6 +140,23 @@ init_render:
 .lo:	move.l	d0,(a0)+
 	add.l	#LB,d0
 	dbf	d1,.lo
+	lea	rowmask8,a0		; per picture Y: the cell rows an 8-line sprite there covers (bits past 31 dropped)
+	moveq	#0,d0
+.rm:	move.w	d0,d1
+	lsr.w	#3,d1
+	moveq	#7,d2
+	and.w	d0,d2
+	sne	d2
+	and.w	#1,d2
+	addq.w	#1,d2			; rows: 1, or 2 when not on a row's start
+	moveq	#1,d3
+	lsl.l	d2,d3
+	subq.l	#1,d3
+	lsl.l	d1,d3
+	move.l	d3,(a0)+
+	addq.w	#1,d0
+	cmp.w	#256,d0
+	bne.s	.rm
 	lea	key_b1,a0		; the cache key's parts: byte 1 (bank, code bits 0-6), the attributes
 	lea	key_attr,a1
 	moveq	#0,d0
@@ -177,7 +195,7 @@ init_render:
 
 cache_flush:
 	lea	sc_index,a0
-	move.w	#32768/8-1,d0
+	move.w	#32768/4-1,d0
 .c:	clr.l	(a0)+
 	clr.l	(a0)+
 	clr.l	(a0)+
@@ -256,39 +274,58 @@ render_frame:
 ; front flag set, listed for each display buffer.  The first time: every cell.
 ; ----------------------------------------------------------------------------------------------------------------------
 render_tiles:
-	lea	Z_RAM+$8000,a2		; the colours
-	lea	Z_RAM+$8400,a5		; the codes
-	lea	tile_copy,a3
-	lea	tile_copy+$400,a6
-	lea	tile_rows,a4
-	moveq	#0,d6			; the row (ty)
-.row:	tst.b	tiles_full
-	bne.s	.all
-	tst.b	(a4,d6.w)
-	beq	.nrow
-.all:	clr.b	(a4,d6.w)
-	move.w	d6,d7
-	lsl.w	#5,d7			; the row's first cell
-	moveq	#31,d5
-.cell:	move.b	(a2,d7.w),d0		; colour
-	move.b	(a5,d7.w),d1		; code
-	tst.b	tiles_full
+	tst.b	tiles_full		; (the first time, or after a block copy: every cell)
+	bne	.full
+	tst.b	tiles_all
+	bne	.full
+	move.l	cell_ptr,a4
+	lea	cell_list,a3
+	cmp.l	a3,a4
+	beq.s	.out
+	move.l	a3,cell_ptr
+	lea	cell_dirty,a2
+	lea	Z_RAM+$8000,a5
+	lea	Z_RAM+$8400,a0
+	lea	tile_copy,a6
+	lea	tile_copy+$400,a1
+.cell:	move.w	(a3)+,d7		; a written cell: changed?
+	clr.b	(a2,d7.w)
+	move.b	(a5,d7.w),d0		; colour
+	move.b	(a0,d7.w),d1		; code
+	cmp.b	(a6,d7.w),d0
 	bne.s	.chg
-	cmp.b	(a3,d7.w),d0
-	bne.s	.chg
-	cmp.b	(a6,d7.w),d1
+	cmp.b	(a1,d7.w),d1
 	beq.s	.same
-.chg:	move.b	d0,(a3,d7.w)
-	move.b	d1,(a6,d7.w)
-	movem.l	d5-d7/a2-a6,-(sp)
+.chg:	move.b	d0,(a6,d7.w)
+	move.b	d1,(a1,d7.w)
+	movem.l	a0-a6,-(sp)
 	bsr	tile_changed
-	movem.l	(sp)+,d5-d7/a2-a6
-.same:	addq.w	#1,d7
-	dbf	d5,.cell
-.nrow:	addq.w	#1,d6
-	cmp.w	#32,d6
-	bne.s	.row
-	sf	tiles_full
+	movem.l	(sp)+,a0-a6
+.same:	cmp.l	a4,a3
+	blo.s	.cell
+.out:	rts
+.full:	sf	tiles_full
+	sf	tiles_all
+	lea	cell_dirty,a0		; (the list emptied)
+	move.w	#1024/4-1,d0
+.cd:	clr.l	(a0)+
+	dbf	d0,.cd
+	move.l	#cell_list,cell_ptr
+	moveq	#0,d7
+.fc:	lea	Z_RAM+$8000,a5
+	lea	tile_copy,a6
+	move.b	(a5,d7.w),d0
+	move.b	d0,(a6,d7.w)
+	lea	$400(a5),a5
+	lea	$400(a6),a6
+	move.b	(a5,d7.w),d1
+	move.b	d1,(a6,d7.w)
+	move.w	d7,-(sp)
+	bsr	tile_changed
+	move.w	(sp)+,d7
+	addq.w	#1,d7
+	cmp.w	#1024,d7
+	blo.s	.fc
 	rts
 
 ; tile_changed: d7.w = the cell (ty * 32 + tx), d0.b = its colour, d1.b = its code byte.  Drawn into the clean screen,
@@ -467,7 +504,7 @@ restore_damage:
 	move.w	(a0,d1.w),d7
 	beq	.out
 	clr.w	(a0,d1.w)
-	mulu	#DMG_MAX*6,d0
+	mulu	#DMG_MAX*8,d0
 	lea	dmg_list,a0
 	add.l	d0,a0
 	move.l	buf_base+NBUF*4,a2
@@ -482,11 +519,11 @@ restore_damage:
 	clr.b	B_SKEW.w
 	lea	B_YC.w,a4
 	lea	B_CTRL.w,a5
-	moveq	#4,d3
 	moveq	#-1,d4			; (the words of the last rectangle)
 	subq.w	#1,d7
 .r:	move.l	(a0)+,d0		; the offset
 	move.w	(a0)+,d1		; the words a line (4 or 8)
+	move.w	(a0)+,d5		; the lines
 	cmp.w	d1,d4
 	beq.s	.same
 	move.w	d1,d4
@@ -496,14 +533,20 @@ restore_damage:
 	sub.w	d1,d2			; the Y increments
 	move.w	d2,B_SYI.w
 	move.w	d2,B_DYI.w
+	moveq	#32,d3			; the lines a pass: 32 words (~256 bus cycles)
+	divu	d1,d3
 .same:	lea	(a2,d0.l),a1
 	move.l	a1,B_SRC.w
 	lea	(a3,d0.l),a1
 	move.l	a1,B_DST.w
-	move.w	d3,(a4)			; two HOG passes of 4 lines (at most 32 words each; the addresses run on)
+.p:	move.w	d3,d6			; (HOG passes; the addresses run on)
+	cmp.w	d6,d5
+	bge.s	.p4
+	move.w	d5,d6
+.p4:	move.w	d6,(a4)
 	move.b	#$C0,(a5)
-	move.w	d3,(a4)
-	move.b	#$C0,(a5)
+	sub.w	d6,d5
+	bgt.s	.p
 	dbf	d7,.r
 .out:	rts
 
@@ -554,7 +597,7 @@ front_cells:
 ; ======================================================================================================================
 draw_sprites:
 	move.w	draw_idx,d0
-	mulu	#DMG_MAX*6,d0
+	mulu	#DMG_MAX*8,d0
 	lea	dmg_list,a0
 	add.l	d0,a0
 	move.l	a0,dmg_ptr
@@ -563,20 +606,99 @@ draw_sprites:
 	clr.w	spr_n
 	move.w	#-1,last_mode
 	move.w	#$0203,B_HOP.w
-	move.w	#$BC,spr_offs
-.ent:	move.w	spr_offs,d0
-	lsr.w	#1,d0			; (the entry * 2)
-	lea	seg_head,a0
-	move.w	(a0,d0.w),d1		; its bands (machine.GyrussPort: the multiplexing)
-	bne.s	.segs
+	lea	front_cols,a0		; (the rows with a front cell in some column: draw_fast)
+	moveq	#0,d0
+	moveq	#27,d1
+.fa:	or.l	(a0)+,d0
+	dbf	d1,.fa
+	move.l	d0,front_any
 	sf	clip_on
 	move.w	#-1000,clip_lo
 	move.w	#1000,clip_hi
-	lea	sub_ram+$40,a0
-	add.w	spr_offs,a0
-	bsr	draw_entry
-	bra.s	.next
-.segs:	st	clip_on
+	bsr	held_regs
+SPRENT	macro				; \1 = the entry (47 first: the first on top)
+	move.w	seg_head+2*\1,d0	; its bands (machine.GyrussPort: the multiplexing): the row path, cut to them
+	beq.s	.e\@
+	move.w	#4*\1,spr_offs
+	bsr	draw_segs
+	bra.s	.n\@
+.e\@:	lea	sub_ram+$40+4*\1,a0
+	bsr	draw_one
+.n\@:
+	endm
+	SPRENT	47
+	SPRENT	46
+	SPRENT	45
+	SPRENT	44
+	SPRENT	43
+	SPRENT	42
+	SPRENT	41
+	SPRENT	40
+	SPRENT	39
+	SPRENT	38
+	SPRENT	37
+	SPRENT	36
+	SPRENT	35
+	SPRENT	34
+	SPRENT	33
+	SPRENT	32
+	SPRENT	31
+	SPRENT	30
+	SPRENT	29
+	SPRENT	28
+	SPRENT	27
+	SPRENT	26
+	SPRENT	25
+	SPRENT	24
+	SPRENT	23
+	SPRENT	22
+	SPRENT	21
+	SPRENT	20
+	SPRENT	19
+	SPRENT	18
+	SPRENT	17
+	SPRENT	16
+	SPRENT	15
+	SPRENT	14
+	SPRENT	13
+	SPRENT	12
+	SPRENT	11
+	SPRENT	10
+	SPRENT	9
+	SPRENT	8
+	SPRENT	7
+	SPRENT	6
+	SPRENT	5
+	SPRENT	4
+	SPRENT	3
+	SPRENT	2
+	SPRENT	1
+	SPRENT	0
+	move.w	draw_idx,d0
+	add.w	d0,d0
+	lea	dmg_n,a0
+	move.w	spr_n,(a0,d0.w)
+	rts
+
+; held_regs: the generated code's registers, kept from entry to entry (draw_one): a1 END1, a6 END3, a3 DYI,
+; a5 Y count, a4 the destination's low word, a2 control, d1 = 4, d2 = $C0, d4 = 160
+held_regs:
+	lea	B_END1.w,a1
+	lea	B_END3.w,a6
+	lea	B_DYI.w,a3
+	lea	B_YC.w,a5
+	lea	B_DST+2.w,a4
+	lea	B_CTRL.w,a2
+	moveq	#4,d1
+	moveq	#-$40,d2
+	move.w	#LB,d4
+	rts
+
+; draw_segs: d0 = the entry's first band (seg_head), spr_offs = its offset: each old content on the lines above its
+; line, the final content below the last (draw_entry, clip_on: the row path); the held registers again after
+draw_segs:
+	move.w	d0,d1
+	st	clip_on
 	move.w	#1000,clip_hi		; each old content on the lines above its line (X >= 239 - line)
 .sg:	subq.w	#1,d1
 	lsl.w	#3,d1
@@ -595,12 +717,122 @@ draw_sprites:
 	lea	sub_ram+$40,a0
 	add.w	spr_offs,a0
 	bsr	draw_entry
-.next:	sub.w	#4,spr_offs
-	bpl	.ent
-	move.w	draw_idx,d0
+	sf	clip_on
+	move.w	#-1000,clip_lo
+	move.w	#1000,clip_hi
+	bra	held_regs
+
+; draw_one: a0 = an entry (raw x, code / bank, attributes, y) not cut to bands: the generated path
+; (tools/assets.py sprite_programs, engine/sprite_programs.py) with the held registers; shapes without generated code,
+; entries near front tiles and 64 KB crossings go to draw_cell (the row path).  d0 d3 d5-d7 a0 used.
+draw_one:
+	moveq	#0,d3
+	move.b	3(a0),d3
+	sub.w	#17,d3			; picture X
+	cmp.w	#-16,d3
+	ble	.out
+	cmp.w	#224,d3
+	bge	.out
+	moveq	#0,d5
+	move.b	(a0),d5			; picture Y
+	moveq	#0,d6
+	move.b	1(a0),d6
+	moveq	#0,d7
+	move.b	2(a0),d7
+	add.w	d6,d6
+	lea	key_b1,a0
+	move.w	(a0,d6.w),d6
+	add.w	d7,d7
+	lea	key_attr,a0
+	or.w	(a0,d7.w),d6		; the key: bank << 14 | code << 6 | flip x << 5 | flip y << 4 | colour
+	move.w	d6,cell_key
+	move.w	d3,cell_x
+	moveq	#0,d0
+	move.w	d6,d0
+	lsl.l	#2,d0
+	lea	sc_index,a0
+	move.l	(a0,d0.l),d7		; the slot (rec.l, src.l, n, rows, planes)
+	beq	.slow
+	move.l	d7,a0
+	move.l	(a0),d6			; its shape's record (0: no generated code)
+	beq	.slow
+	move.w	d5,d0			; front tiles in its rows?  (rowmask8, front_any: draw_sprites)
 	add.w	d0,d0
-	lea	dmg_n,a0
-	move.w	spr_n,(a0,d0.w)
+	add.w	d0,d0
+	lea	rowmask8,a0
+	move.l	(a0,d0.w),d0
+	and.l	front_any,d0
+	bne	.slow
+	add.w	#LEFT,d3		; screen x
+	moveq	#15,d0
+	and.w	d3,d0			; the shift
+	move.w	d0,cell_mode
+	beq.s	.in
+	cmp.w	#LEFT,d3		; across a side edge: the clipped variants (one word)
+	blt.s	.cl
+	cmp.w	#LEFT+224-16,d3
+	blt.s	.in
+	add.w	#32,d0
+	bra.s	.in
+.cl:	add.w	#16,d0
+.in:	lsl.w	#2,d0			; (the variant: (clip * 16 + shift) * 12)
+	move.w	d0,a0
+	add.w	d0,d0
+	add.w	a0,d0
+	add.l	d0,d6
+	lsr.w	#4,d3
+	lsl.w	#3,d3			; the first word's byte in the line
+	move.w	d5,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	lea	line_off,a0
+	move.l	(a0,d0.w),d0
+	add.w	d3,d0			; the offset in the buffer
+	move.l	draw_base,d3
+	add.l	d0,d3			; the destination
+	cmp.w	#$FFFF-7*LB-16,d3	; (the code steps the low word: no 64 KB crossing)
+	bhi	.slow
+	move.l	d6,a0
+	move.w	10(a0),d5		; the damage: words a line << 8 | lines (0: nothing drawn)
+	beq	.out
+	add.w	8(a0),d0
+	cmp.w	#DMG_MAX,spr_n
+	bhs.s	.draw
+	addq.w	#1,spr_n
+	move.l	dmg_ptr,a0
+	move.l	d0,(a0)+
+	moveq	#0,d0
+	move.b	d5,d0
+	lsr.w	#8,d5
+	move.w	d5,(a0)+
+	move.w	d0,(a0)+
+	move.l	a0,dmg_ptr
+.draw:	move.l	d3,B_DST.w		; (the high word; the code writes the low word)
+	move.l	d7,a0
+	move.l	4(a0),B_SRC.w		; (the slot's plane words)
+	cmp.w	#16,last_mode
+	beq.s	.set
+	move.w	#16,last_mode
+	clr.w	B_SXI.w			; (source X increment 0, Y increment 2: every pass type)
+	move.w	#2,B_SYI.w
+	move.w	#8,B_DXI.w
+.set:	move.l	d6,a0			; the variant: its code, its stream
+	move.l	(a0)+,-(sp)
+	move.l	(a0),a0
+	move.w	cell_mode,d7		; the skew: alone (d7), with NFSR (d5), with FXSR (d6)
+	moveq	#NFSR,d5
+	or.b	d7,d5
+	moveq	#FXSR,d6
+	or.b	d7,d6
+	move.w	d3,d0			; (the destination's low word)
+	rts				; (into the code; it returns to draw_one's caller)
+.out:	rts
+.slow:	movem.l	d1-d2/d4/a1-a6,-(sp)	; the row path (it lists its damage and front cells itself)
+	move.w	cell_key,d2
+	move.w	cell_x,d3
+	move.w	d5,d4
+	bsr	draw_cell
+	movem.l	(sp)+,d1-d2/d4/a1-a6
 	rts
 
 ; draw_entry: a0 = a sprite entry (raw x, code / bank, attributes, y); clip_lo / clip_hi: the picture columns
@@ -628,12 +860,14 @@ draw_entry:
 	bra	draw_cell
 .out:	rts
 
+
 ; draw_cell: d2 = the key, d3 = picture X (-15 .. 223), d4 = picture Y.  Bakes it on a miss, clips it at the edges,
 ; draws it, lists its damage.
 draw_cell:
 	move.w	d3,cell_x
 	move.w	d4,cell_y
 	bsr	sprite_baked		; a0 = the slot
+	addq.l	#8,a0			; (its header: the shape record, the plane words' address)
 	tst.b	clip_on
 	beq.s	.ncl
 	move.w	clip_lo,d0		; a band's columns: the slot's masks cut to them (clip_slot)
@@ -682,6 +916,7 @@ draw_cell:
 	move.l	dmg_ptr,a1
 	move.l	d1,(a1)+
 	move.w	d4,(a1)+
+	move.w	#8,(a1)+
 	move.l	a1,dmg_ptr
 	; over a front tile?  (front_cols: a long of the front rows per cell column)
 	move.w	cell_x,d2
@@ -928,13 +1163,10 @@ sprite_baked:
 	lea	sc_index,a0
 	moveq	#0,d0
 	move.w	d2,d0
-	add.l	d0,d0
-	move.w	(a0,d0.l),d1
+	lsl.l	#2,d0
+	move.l	(a0,d0.l),d1
 	beq.s	.bake
-	subq.w	#1,d1
-	mulu	#SC_SIZE,d1
-	lea	sc_data,a0
-	add.l	d1,a0
+	move.l	d1,a0
 	rts
 .bake:	move.w	sc_used,d1
 	cmp.w	#SC_SLOTS,d1
@@ -943,14 +1175,12 @@ sprite_baked:
 	bsr	cache_flush
 	movem.l	(sp)+,d0/d2/d5-d7
 	moveq	#0,d1
-.room:	addq.w	#1,d1
-	move.w	d1,sc_used
-	lea	sc_index,a0
-	move.w	d1,(a0,d0.l)
-	subq.w	#1,d1
+.room:	addq.w	#1,sc_used
 	mulu	#SC_SIZE,d1
 	lea	sc_data,a0
 	add.l	d1,a0
+	lea	sc_index,a1
+	move.l	a0,(a1,d0.l)
 	movem.l	d2-d7/a0-a6,-(sp)
 	bsr	bake_sprite
 	movem.l	(sp)+,d2-d7/a0-a6
@@ -1039,67 +1269,54 @@ bake_sprite:
 	addq.w	#1,d7
 	cmp.w	#8,d7
 	bne	.row
-	; the slot: the opaque rows
-	lea	bake_rows,a3
+	; the slot: the shape's record (gy_shapes), the plane words' address, the opaque rows in gy_order's order
+	; (grouped by mask: the generated code's order), their plane words
+	move.w	a5,d0			; shape = the key >> 4
+	lsr.w	#4,d0
+	move.w	d0,d1
+	add.w	d1,d1
+	add.w	d1,d1
+	lea	gy_shapes,a4
+	move.l	(a4,d1.w),(a0)+
+	move.l	a0,a5			; (the plane words' address: below)
+	addq.l	#4,a0
+	lsl.w	#3,d0			; (gy_order: 8 bytes a shape)
+	lea	gy_order,a4
+	add.w	d0,a4
 	moveq	#0,d0			; n
-	moveq	#7,d1
-.cnt:	tst.w	(a3)
-	beq.s	.c0
+.cnt:	cmp.w	#8,d0
+	beq.s	.cn
+	tst.b	(a4,d0.w)
+	bmi.s	.cn
 	addq.w	#1,d0
-.c0:	lea	10(a3),a3
-	dbf	d1,.cnt
-	move.w	d0,(a0)+
-	lsl.w	#2,d0
+	bra.s	.cnt
+.cn:	move.w	d0,(a0)+
+	move.w	d0,d1
+	lsl.w	#2,d0			; (4 bytes a row)
 	lea	(a0,d0.w),a2		; the plane words' place
+	move.l	a2,(a5)
+	subq.w	#1,d1
+	bmi.s	.none
+.ord:	moveq	#0,d0
+	move.b	(a4)+,d0		; the row: (row * 160, mask), its planes
+	move.w	d0,d3
+	mulu	#10,d3
 	lea	bake_rows,a3
-	moveq	#0,d1			; the row
-	if REN_ORDER
-	clr.l	bake_used		; (REN_ORDER: each row not placed yet, then the later rows with the same mask)
-	clr.l	bake_used+4
-	endc
-.ord:
-	if REN_ORDER
-	lea	bake_used,a4
-	tst.b	(a4,d1.w)
-	bne.s	.e
-	endc
-	move.w	(a3),d3
-	beq.s	.e
-	bsr.s	.emit
-	if REN_ORDER
-	move.w	d1,d4			; the later rows with this mask
-	move.l	a3,a5
-.same:	addq.w	#1,d4
-	lea	10(a5),a5
-	cmp.w	#8,d4
-	bhs.s	.e
-	cmp.w	(a5),d3
-	bne.s	.same
-	st	(a4,d4.w)
-	movem.l	d1/a3,-(sp)
-	move.w	d4,d1
-	move.l	a5,a3
-	bsr.s	.emit
-	movem.l	(sp)+,d1/a3
-	bra.s	.same
-	endc
-.e:	lea	10(a3),a3
-	addq.w	#1,d1
-	cmp.w	#8,d1
-	bne.s	.ord
-	rts
-.emit:	move.w	d1,d0			; row d1 (its record at a3): (row * 160, mask), its planes
+	add.w	d3,a3
 	mulu	#LB,d0
 	move.w	d0,(a0)+
 	move.w	(a3),(a0)+
 	move.l	2(a3),(a2)+
 	move.l	6(a3),(a2)+
-	rts
+	dbf	d1,.ord
+.none:	rts
 
 	section data,data
 	include	"gy_assets.s"
 gy_spr:		incbin	"gy_spr.bin"
 gy_tiles:	incbin	"gy_tiles.bin"
+gy_order:	incbin	"gy_order.bin"
+gy_sstream:	incbin	"gy_sstream.bin"
 	even
 
 	section bss,bss
@@ -1119,6 +1336,7 @@ spr_offs:	ds.w	1
 cell_x:		ds.w	1
 cell_y:		ds.w	1
 cell_mode:	ds.w	1
+cell_key:	ds.w	1
 clip_lo:	ds.w	1
 last_mode:	ds.w	1
 front_n:	ds.w	1
@@ -1129,8 +1347,10 @@ dl_n:		ds.w	NBUF
 frame_ready:	ds.b	1
 tiles_full:	ds.b	1
 	even
-dmg_list:	ds.b	NBUF*DMG_MAX*6		; per buffer: (offset.l, words a line.w) a sprite
+dmg_list:	ds.b	NBUF*DMG_MAX*8		; per buffer: (offset.l, words a line.w, lines.w) a sprite
 frontq:		ds.b	DMG_MAX*6		; the sprites over front cells: (cell column, cell row, columns - 1 | rows - 1 << 8)
+rowmask8:	ds.l	256			; per picture Y: the cell rows of a sprite there
+front_any:	ds.l	1
 front_cols:	ds.l	32			; per cell column (picture X / 8): bit (picture Y / 8) set for a front cell
 line_off:	ds.l	256			; the offset of picture line Y in a buffer
 key_b1:		ds.w	256			; the cache key's part of the entry's byte 1 (bank << 14 | code bits 0-6 << 6)
@@ -1145,10 +1365,9 @@ dl_list:	ds.w	NBUF*1024
 rev8:		ds.b	256
 bake_rows:	ds.w	8*5
 bake_px:	ds.b	16
-bake_used:	ds.b	8
 	even
 clip_tmp:	ds.b	2+8*4+8*8+8*8
-sc_index:	ds.w	32768
+sc_index:	ds.l	32768			; per key: its slot (0: not baked)
 sc_data:	ds.b	SC_SLOTS*SC_SIZE
 	cnop	0,256
 buffers:	ds.b	(NBUF+1)*BUFSZ

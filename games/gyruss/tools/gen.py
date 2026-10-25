@@ -9,7 +9,7 @@ Memory-mapped I/O: the static reads of $C000-$C1FF read io_in + (address - $C000
 DSW3: the runtime keeps them); the stores there are plain stores into the block (the runtime reads the latch bytes
 $C180 (NMI mask) and $C185 (flip) and the sound latch $C100 from it), and `ld ($C080),a` (the sound IRQ) calls
 gy_sound.  The stores to the video RAM ($8000-$87FF, the coverage's write sites) mark the 32-byte row they hit in
-tile_rows (32 bytes: the colour and code halves of a row share a mark) through gy_mark_* routines that keep the
+cell_list (once each, cell_dirty: the colour and code bytes of a cell share it) through gy_mark_* routines that keep the
 flags; the renderer compares only the marked rows with its copy.
 `rst $30` is a jump through the word table behind it (0030: pop hl; rst $10; ex de,hl; jp (hl)): the table is data
 (no fall-through: decode gives it the flow of a computed jump), its entries code (RST30_TABLES: the index's bound from
@@ -120,9 +120,9 @@ def tile_marks(code, writes):
         if ins.mn in ('push', 'call', 'rst') or dst is None:
             raise RuntimeError('video RAM write by %04X %s' % (pc, ins.text))
         if dst[0] == 'ind16':
-            out[pc] = 'st tile_rows+%d' % ((dst[1] & 0x3ff) >> 5)
+            out[pc] = 'pea %d.w\n\tbsr gy_mark_n\n\taddq.l #4,a7' % (dst[1] & 0x3ff)
             if ins.mn == 'ld' and ins.ops[1][0] == 'r16':          # (ld (nn),rr: two bytes)
-                out[pc] += '\n\tst tile_rows+%d' % (((dst[1] + 1) & 0x3ff) >> 5)
+                out[pc] += '\n\tpea %d.w\n\tbsr gy_mark_n\n\taddq.l #4,a7' % ((dst[1] + 1) & 0x3ff)
         elif dst[0] == 'ind' and dst[1] in ('hl', 'de', 'bc', 'ix', 'iy') and ins.mn in (
                 'ld', 'inc', 'dec', 'set', 'res', 'rlc', 'rrc', 'rl', 'rr', 'sla', 'sra', 'srl', 'sll', 'rld', 'rrd'):
             if dst[1] in ('ix', 'iy'):

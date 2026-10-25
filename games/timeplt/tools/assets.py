@@ -26,6 +26,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine import Video
 from paths import build_dir
 import importlib.util
+import sprite_programs as sp
 
 _spec = importlib.util.spec_from_file_location('gy_assets', Path(__file__).resolve().parents[2] / 'gyruss' / 'tools' /
                                                'assets.py')
@@ -145,15 +146,6 @@ def shape_masks(v, code, fx, fy):
     return [sum(1 << (15 - c) for c in range(16) if t[r, c]) for r in range(16)]
 
 
-def shape_order(masks):
-    """the opaque rows grouped by their mask (the order bake_sprite stores the rows in): [[rows of a mask], ...]"""
-    groups = {}
-    for r, m in enumerate(masks):
-        if m:
-            groups.setdefault(m, []).append(r)
-    return sorted(groups.values(), key=lambda g: g[0])
-
-
 def coverage_shapes():
     seen = collections.Counter()
     for f in sorted(BUILD.glob('cover[0-9]*.pkl')):
@@ -162,134 +154,19 @@ def coverage_shapes():
     return sorted(seen)
 
 
-FXSR, NFSR = 0x80, 0x40
-
-
-def pass_of(mask, s):
-    """(type, END1, END3, X count, DYI, control) of a 16-pixel row shifted by s: 'A' two words, 'L' the first word
-    only, 'R' the second only (source X increment 0, Y increment 2 for all)"""
-    if s == 0:
-        return 'L', mask, 0, 1, 2, 0xC000
-    left, right = mask >> s, (mask << (16 - s)) & 0xFFFF
-    if not right:
-        return 'L', left, 0, 1, 2, 0xC000 | s
-    if not left:
-        return 'R', right, 0, 1, 2, 0xC000 | FXSR | s
-    return 'A', left, right, 2, -6, 0xC000 | NFSR | s
-
-
-def clipped_pass(mask, s, clip):
-    """pass_of for a sprite across a side edge (s > 0): clip 1 draws only the second word (the first is in the left
-    band), clip 2 only the first; None: nothing of the row in the drawn word"""
-    left, right = mask >> s, (mask << (16 - s)) & 0xFFFF
-    if clip == 1:
-        return ('R', right, 0, 1, 2, 0xC000 | FXSR | s) if right else None
-    return ('L', left, 0, 1, 2, 0xC000 | s) if left else None
-
-
 def sprite_programs(v):
-    """tp_shapes: per shape (code << 2 | flip x << 1 | flip y) 0 or a record of 48 variants (clip 0-2 x 16 shifts):
-    the code, the stream, the damage (offset from the destination, words a line << 8 | lines).
-    The rows are grouped by their mask (tp_order); at a shift every group has a pass type (pass_of: two words, the left
-    word, the right word; clipped_pass at the side edges: one word, rows without pixels there skipped).  The code, per
-    shape and pattern of types (shared by content), writes the Y increment, the X count and the skew byte only where
-    the type changes, the destination steps as immediates; the stream (shared by content) holds only the end masks:
-    END1 per group, END3 too for two-word passes.  Registers: d0 the destination's low word (row 0, the sprite's first
-    word), d1 = 4, d2 = $C0, d4 = 160, d5 / d6 / d7 the skew byte with NFSR / with FXSR / alone, a0 the stream, a1 END1,
-    a6 END3, a3 DYI, a5 Y count, a4 the destination's low word, a2 control."""
-    code, stream = [], bytearray()
-    recs = {}
-    codes, streams = {}, {}
-    nroutine = 0
-    for code_, fx, fy in coverage_shapes():
-        masks = shape_masks(v, code_, fx, fy)
-        groups = shape_order(masks)
-        if not groups:
-            continue
-        sid = code_ << 2 | fx << 1 | fy
-        variants = []
-        for clip in range(3):
-            for sh in range(16):
-                if clip and sh:
-                    passes = [clipped_pass(masks[g[0]], sh, clip) for g in groups]
-                else:
-                    passes = [pass_of(masks[g[0]], sh) for g in groups]
-                body, blk = [], bytearray()
-                prev_dst, prev_t, prev_dyi, prev_xc = 0, None, None, None
-                skipped = 0
-                words, rows = set(), []
-                for g, ps in zip(groups, passes):
-                    if ps is None:
-                        skipped += len(g)
-                        continue
-                    t, e1, e3, xc, dyi, ctl = ps
-                    if skipped:
-                        body.append('\tadd.l #%d,B_SRC.w' % (8 * skipped))
-                        skipped = 0
-                    words |= {'A': {0, 1}, 'L': {0}, 'R': {1}}[t]
-                    rows += g
-                    dst = g[0] * 160 + (8 if t == 'R' else 0)
-                    d = dst - prev_dst
-                    body.append('\tadd d4,d0' if d == 160 else '\tadd #%d,d0' % d)
-                    body.append('\tmove d0,(a4)')
-                    if t != prev_t:
-                        if dyi != prev_dyi:
-                            body.append('\tmove #%d,(a3)' % dyi)
-                        if xc != prev_xc:
-                            body.append('\tmove #%d,B_XC.w' % xc)
-                        body.append('\tmove.b %s,1(a2)' % {'A': 'd5', 'R': 'd6', 'L': 'd7'}[t])
-                        prev_t, prev_dyi, prev_xc = t, dyi, xc
-                    body.append('\tmove (a0)+,(a1)')
-                    blk += e1.to_bytes(2, 'big')
-                    if t == 'A':
-                        body.append('\tmove (a0)+,(a6)')
-                        blk += e3.to_bytes(2, 'big')
-                    body += ['\tmove d1,(a5)', '\tmove.b d2,(a2)']
-                    for a, b in zip(g, g[1:]):
-                        d = (b - a) * 160
-                        body.append('\tadd d4,d0' if d == 160 else '\tadd #%d,d0' % d)
-                        body += ['\tmove d0,(a4)', '\tmove d1,(a5)', '\tmove.b d2,(a2)']
-                    prev_dst = dst + (g[-1] - g[0]) * 160
-                body.append('\trts')
-                key = tuple(body)
-                if key not in codes:
-                    codes[key] = 'shp_%d' % nroutine
-                    nroutine += 1
-                    code += [codes[key] + ':'] + body
-                blk = bytes(blk)
-                if blk not in streams:
-                    streams[blk] = len(stream)
-                    stream += blk
-                if rows:              # the damage: the lines of the drawn rows, the words drawn
-                    r0, r1 = min(rows), max(rows)
-                    off = r0 * 160 + (8 if words == {1} else 0)
-                    dmg = ((8 if len(words) == 2 else 4) << 8) | (r1 - r0 + 1)
-                else:
-                    off, dmg = 0, 0
-                variants.append((codes[key], streams[blk], off, dmg))
-        recs[sid] = variants
-    print('generated code: %d routines (%d lines) for %d shapes x 16 shifts x 3 clips; stream blocks %d, %d bytes' % (
-        len(codes), sum(len(k) + 1 for k in codes), len(recs), len(streams), len(stream)))
-    lines = ['\tsection data,data', 'tp_shapes:']
-    for sid in range(1024):
-        lines.append('\tdc.l %s' % ('shr_%03x' % sid if sid in recs else '0'))
-    for sid, variants in sorted(recs.items()):
-        lines.append('shr_%03x:' % sid)
-        for lab, off, doff, dmg in variants:
-            lines.append('\tdc.l %s,tp_sstream+%d\n\tdc.w %d,$%04x' % (lab, off, doff, dmg))
-    lines.append('\tsection text,code')
-    return code + lines, bytes(stream), len(recs)
+    """engine/sprite_programs.py for the coverage's shapes (code << 2 | flip x << 1 | flip y): tp_shapes, the
+    generated code (shp_*), the records (shr_*); the end mask streams -> tp_sstream"""
+    shapes = {code << 2 | fx << 1 | fy: shape_masks(v, code, fx, fy) for code, fx, fy in coverage_shapes()}
+    lines, stream, stats = sp.programs(shapes, 1024)
+    print('generated code: %(routines)d routines (%(code_lines)d lines) for %(shapes)d shapes x 16 shifts x 3 clips; '
+          'stream blocks %(stream_blocks)d, %(stream_bytes)d bytes' % stats)
+    return lines, stream, stats['shapes']
 
 
 def row_orders(v):
     """tp_order: per shape 16 bytes: the opaque rows in bake order (grouped by mask), $FF after the last"""
-    out = bytearray()
-    for code in range(256):
-        for fx in (0, 1):
-            for fy in (0, 1):
-                rows = [r for g in shape_order(shape_masks(v, code, fx, fy)) for r in g]
-                out += bytes(rows) + bytes([0xFF] * (16 - len(rows)))
-    return bytes(out)
+    return sp.order_table([shape_masks(v, code, fx, fy) for code in range(256) for fx in (0, 1) for fy in (0, 1)], 16)
 
 
 def build():

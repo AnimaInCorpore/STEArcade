@@ -93,7 +93,11 @@ def main():
 
     import bisect
     import collections
-    labels = sorted((v, k) for k, v in sym.items() if not k.startswith('Z') and not k.startswith('L'))
+    import re as _re
+    _map = args.mapfile.read_text()
+    absolute = {m[1] for m in _re.finditer(r'\s0x[0-9a-f]{8} (\S+?): \S+ abs', _map)}
+    labels = sorted((v, k) for k, v in sym.items() if not k.startswith('Z') and not k.startswith('L') and
+                    k not in absolute)
     lv = [x for x, _ in labels]
     prof = collections.Counter()
 
@@ -207,7 +211,13 @@ def main():
     n = max(1, cyc['n'])
     if args.prof:
         tot = sum(prof.values())
-        for k, c in prof.most_common(30):
+        grouped = collections.Counter()
+        for k, c in prof.items():
+            grouped[_re.sub(r'^kshp_\w+', 'kshp_*', k)] += c
+        if 'cnt_gen' in sym:
+            print('cells: generated %.1f, row path %.1f (clipped %.1f, 64 KB %.1f, no code %.1f) a picture' % tuple(
+                mem.r32(sym[k]) / n for k in ('cnt_gen', 'cnt_rows', 'cnt_clip', 'cnt_64k', 'cnt_nocode')))
+        for k, c in grouped.most_common(30):
             print('%-24s %8d cycles a picture %5.1f%%' % (k, c // n, 100 * c / tot))
     print('%s: %d frames checked (seed %d), %d differ; a picture: render_frame %d CPU cycles + %d Blitter bus cycles; '
           'the logic %d cycles a frame (Musashi)' % ('PASS' if not bad_frames else 'FAIL', checked, args.seed, bad_frames,

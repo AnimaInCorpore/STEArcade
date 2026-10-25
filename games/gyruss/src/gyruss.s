@@ -439,19 +439,22 @@ gy_sound:
 	move	(sp)+,ccr
 	rts
 
-; The video RAM's stores (gen.py tile_marks): mark the 32-byte row (colours $8000-$83FF, codes $8400-$87FF share it)
-; the address hits.  Keep everything but d7 (a translator scratch register), the flags too.
+; The video RAM's stores (gen.py tile_marks): the cell (address & $3FF: colour $8000-$83FF and code $8400-$87FF
+; share it) listed once in cell_list (cell_dirty: its flag) for the renderer.  Keep everything but d7 and a0 (the
+; translator's scratch registers), the flags too.
 gy_mark_hl:
 	move	sr,-(sp)
 	move.w	d3,d7
 gy_mark_d7:
-	lsr.w	#5,d7
-	and.w	#31,d7
-	move.l	a0,-(sp)
-	lea	tile_rows,a0
+	and.w	#$3FF,d7
+	lea	cell_dirty,a0
+	tst.b	(a0,d7.w)
+	bne.s	.out
 	st	(a0,d7.w)
-	move.l	(sp)+,a0
-	move	(sp)+,ccr
+	move.l	cell_ptr,a0
+	move.w	d7,(a0)+
+	move.l	a0,cell_ptr
+.out:	move	(sp)+,ccr
 	rts
 gy_mark_de:
 	move	sr,-(sp)
@@ -472,15 +475,12 @@ gy_mark_iy:
 	move.w	a2,d7
 	add.w	8(sp),d7
 	bra.s	gy_mark_d7
-gy_mark_all:
+gy_mark_n:				; (a static address: the cell on the stack)
 	move	sr,-(sp)
-	move.l	a0,-(sp)
-	lea	tile_rows,a0
-	rept	8
-	move.l	#-1,(a0)+
-	endr
-	move.l	(sp)+,a0
-	move	(sp)+,ccr
+	move.w	8(sp),d7
+	bra.s	gy_mark_d7
+gy_mark_all:
+	st	tiles_all
 	rts
 
 ; `ld a,r` (the refresh register): a pseudo random byte; the reference (machine.GyrussPort.rnd) has the same.
@@ -845,7 +845,11 @@ sub_booted:	ds.b	1
 io_in:		ds.b	16		; what the reads of $C000-$C1FF give: DSW2, -, -, -, SYSTEM, P1, P2, DSW1, DSW3
 snd_head:	ds.b	1
 	even
-tile_rows:	ds.b	32		; the video RAM rows written since the renderer looked (gy_mark_*)
+cell_ptr:	ds.l	1		; the end of cell_list (render_tiles empties it)
+cell_list:	ds.w	1024		; the video RAM cells written since the renderer looked (gy_mark_*), once each
+cell_dirty:	ds.b	1024		; their flags
+tiles_all:	ds.b	1		; (a block copy into the video RAM: every cell)
+	even
 snd_ring:	ds.b	256		; the sound commands (the last 256)
 	ikbd_vars
 joy0_state:	ds.b	1

@@ -63,6 +63,16 @@ costs on Musashi in play: the main CPU ~56k cycles, the sub CPU ~55k (its hottes
 driver ~52k, the YM mix-down ~8k, a picture ~110k CPU cycles and ~27k Blitter bus cycles.  Without the sound
 (`EXTRA="-D NOSOUND=1"`) the logic ran at 38.7 frames a second before the sub's natives.
 
+**The sprites' generated path** (2026-10-25, `engine/sprite_programs.py`, as Time Pilot's; docs/sprite-preparation.md):
+the coverage's 1,381 shapes (bank, code, raw flips) get code per pass-type pattern and end-mask streams (4,510
+routines, 441 KB of masks), a one-word pass for a row whose pixels stay in one word after the shift (most stars and
+shots); the entries an unrolled loop with the Blitter registers held (`draw_one`), the entries cut to multiplexing bands,
+near front tiles or across a 64 KB boundary still the row path (`draw_cell`); the damage the drawn lines and words; the
+tile writers list their cells (`cell_list`, no row scans).  `tools/render_test.py 1600 --start 1000` (seed 1's play,
+600 pictures, exact): 116.1k CPU + 28.4k Blitter -> 75.4k + 12.7k cycles a picture.  Hatari (`bench.sh 6000`,
+AUTOPLAY): 54% -> 55% of the arcade's speed, 11.6 -> 12.1 pictures a second: Gyruss's three translated CPUs, not
+its picture, limit it.  Load size ~3.03 MB (the limit 3.7 MB).
+
 ## The schedule (machine.GyrussPort, src/gyruss.s, src/sub.s)
 
 * **Main CPU**: its foreground is a task loop (05F4-0601: a queue at ([$5865] << 8) + [$9433], an empty entry has

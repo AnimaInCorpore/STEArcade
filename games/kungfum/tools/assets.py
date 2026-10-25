@@ -23,6 +23,7 @@ import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / 'ref'),
                 str(Path(__file__).resolve().parents[3] / 'engine')]
 from machine import KungFuPort, Video, load
+import sprite_programs as sp
 from paths import build_dir
 
 BUILD = build_dir('kungfum')
@@ -180,6 +181,54 @@ def check_gfx(tiles, cells):
             assert px == v.sprites[c, r].tolist(), (c, r)
 
 
+def cell_masks(cells, code, fx):
+    """a sprite cell's 16 opaque row masks (pen 0 transparent; flip x: the bits reversed)"""
+    out = []
+    for r in range(16):
+        o = code * 96 + r * 6
+        m = int.from_bytes(cells[o:o + 2], 'big') | int.from_bytes(cells[o + 2:o + 4], 'big') | \
+            int.from_bytes(cells[o + 4:o + 6], 'big')
+        if fx:
+            m = int('{:016b}'.format(m)[::-1], 2)
+        out.append(m)
+    return out
+
+
+SHAPE_SHARE = 0.99                      # the cells with generated code: the most drawn ones, this share of the draws
+
+
+def coverage_cells(share=SHAPE_SHARE):
+    """the cells (code, flip x, flip y) of the sprites the coverage drew (ref/cover.py: the first code, the cells),
+    the most drawn first up to `share` of the cell draws (the rest: the row path)"""
+    seen = collections.Counter()
+    for f in sorted(BUILD.glob('cover[0-9]*.pkl')):
+        for (code, n, fx, fy), k in pickle.loads(f.read_bytes())['sprites'].items():
+            for i in range(n):
+                seen[((code + i) % 1024, bool(fx), bool(fy))] += k
+    total, acc, out = sum(seen.values()), 0, []
+    for cell, k in sorted(seen.items(), key=lambda e: (-e[1], e[0])):
+        if acc >= share * total:
+            break
+        out.append(cell)
+        acc += k
+    return sorted(out)
+
+
+def sprite_programs(cells):
+    """engine/sprite_programs.py for the coverage's cells: shape = code << 2 | flip x << 1 | flip y (render.s's slot
+    is baked per (code, colour, flip x) in kf_order's order; flip y maps row r to 15 - r when drawing)"""
+    shapes = {}
+    for code, fx, fy in coverage_cells():
+        m = cell_masks(cells, code, fx)
+        shapes[code << 2 | fx << 1 | fy] = (m, [15 - r for r in range(16)]) if fy else m
+    lines, stream, stats = sp.programs(shapes, 4096, line=424, prefix='kshp', table='kf_shapes', record='kshr',
+                                       stream_sym='kf_sstream', stream_mode=True, long_dst=True)
+    print('generated code: %(routines)d routines (%(code_lines)d lines) for %(shapes)d shapes x 16 shifts x 3 clips; '
+          'stream blocks %(stream_blocks)d, %(stream_bytes)d bytes' % stats)
+    order = sp.order_table([cell_masks(cells, code, fx) for code in range(1024) for fx in (0, 1)], 16)
+    return lines, stream, order
+
+
 def build(again=False):
     tiles, cells = gfx()
     check_gfx(tiles, cells)
@@ -201,8 +250,12 @@ def build(again=False):
         out.append('\tdc.b ' + ','.join(str(int(x)) for x in pmap[i:i + 32]))
     out.append('kf_height:')
     out.append('\tdc.b ' + ','.join(str(b) for b in load('b-5f-.bin')))
-    out += ['\teven', 'kf_tiles:\tincbin\t"kf_tiles.bin"', 'kf_spr:\tincbin\t"kf_spr.bin"', '\teven',
-            '\tsection text,code']
+    out += ['\teven', 'kf_tiles:\tincbin\t"kf_tiles.bin"', 'kf_spr:\tincbin\t"kf_spr.bin"', '\teven']
+    progs, stream, order = sprite_programs(cells)
+    (BUILD / 'kf_sstream.bin').write_bytes(stream)
+    (BUILD / 'kf_order.bin').write_bytes(order)
+    out += progs + ['\tsection data,data', 'kf_order:\tincbin\t"kf_order.bin"', 'kf_sstream:\tincbin\t"kf_sstream.bin"',
+                    '\teven', '\tsection text,code']
     (BUILD / 'kf_assets.s').write_text('\n'.join(out) + '\n')
     (BUILD / 'kf_palettes.pkl').write_bytes(pickle.dumps({'cols': cols, 'maps': maps, 'panel': pc, 'panel_map': pmap}))
     return cols, maps, pc, pmap

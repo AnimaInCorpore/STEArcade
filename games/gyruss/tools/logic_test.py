@@ -6,7 +6,7 @@
 Compared every frame: the main CPU's video RAM and RAM $8000-$87FF, $9000-$A7FF (the shared RAM too; the stack bytes
 only a merged `push rr; pop rr'` would have written are dead below SP and left out), the latch bytes the runtime
 reads ($C180 the NMI mask, $C185 the flip), the sub CPU's RAM $4000-$47FF (the sprite RAM), the sound commands of the
-frame.  Every changed video RAM row must be marked (gen.py tile_marks, tile_rows).  Reports the 68000 cycles of the
+frame.  Every changed video RAM cell must be listed (gen.py tile_marks, cell_list).  Reports the 68000 cycles of the
 logic a frame (Musashi; the drawing is switched off: render_frame returns at once).
 """
 from pathlib import Path
@@ -122,15 +122,20 @@ def main():
 
     def rows(f):
         now = bytes(mem.r_block(addr(0x8000), 0x800))
-        marks = bytes(mem.r_block(sym['tile_rows'], 32))
-        if last[0] is not None:
+        marks = bytes(mem.r_block(sym['cell_dirty'], 1024))
+        listed = sorted(mem.r16(sym['cell_list'] + 2 * k) for k in range((mem.r32(sym['cell_ptr']) - sym['cell_list']) // 2))
+        if listed != sorted(i for i in range(1024) if marks[i]):
+            raise RuntimeError('frame %d: cell_list and cell_dirty disagree' % f)
+        if last[0] is not None and not mem.r8(sym['tiles_all']):
             for i in range(0x800):
-                if now[i] != last[0][i] and not marks[(i & 0x3ff) >> 5]:
-                    raise RuntimeError('frame %d: %04x changed, its row not marked (a writer missing in gen.py)' % (
+                if now[i] != last[0][i] and not marks[i & 0x3ff]:
+                    raise RuntimeError('frame %d: %04x changed, its cell not listed (a writer missing in gen.py)' % (
                         f, 0x8000 + i))
         last[0] = now
-        for i in range(32):
-            mem.w8(sym['tile_rows'] + i, 0)
+        for i in range(1024):
+            mem.w8(sym['cell_dirty'] + i, 0)
+        mem.w32(sym['cell_ptr'], sym['cell_list'])
+        mem.w8(sym['tiles_all'], 0)
 
     run_to({wait})
     m.frame = -1

@@ -24,6 +24,7 @@ import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
 from machine import Video
 from paths import build_dir
+import sprite_programs as sp
 
 BUILD = build_dir('gyruss')
 
@@ -141,6 +142,40 @@ def turned_tiles(v):
     return bytes(out)
 
 
+def shape_masks(v, bank, code, fx, fy):
+    """the turned sprite's 8 row masks (16 bits) for the raw flips (flip x: the rows reversed, flip y: the bits)"""
+    t = np.rot90(v.sprites[bank][code], -1)
+    if fx:
+        t = t[::-1]
+    if fy:
+        t = t[:, ::-1]
+    return [sum(1 << (15 - c) for c in range(16) if t[r, c]) for r in range(8)]
+
+
+def coverage_shapes():
+    """the shapes (bank, code, raw flip x, raw flip y) the coverage drew"""
+    seen = set()
+    for f in sorted(BUILD.glob('cover[0-9]*.pkl')):
+        d = pickle.loads(f.read_bytes())
+        if d.get('seed', 0) < 90:
+            for bank, code, colour, fx, fy in d['sprites']:
+                seen.add((bank, code, bool(fx), bool(fy)))
+    return sorted(seen)
+
+
+def sprite_programs(v):
+    """engine/sprite_programs.py for the coverage's shapes (shape = the cache key >> 4: bank << 10 | code << 2 |
+    flip x << 1 | flip y): gy_shapes, the generated code, the records; the end mask streams -> gy_sstream.bin"""
+    shapes = {b << 10 | c << 2 | fx << 1 | fy: shape_masks(v, b, c, fx, fy) for b, c, fx, fy in coverage_shapes()}
+    lines, stream, stats = sp.programs(shapes, 2048, prefix='gshp', table='gy_shapes', record='gshr',
+                                       stream_sym='gy_sstream')
+    print('generated code: %(routines)d routines (%(code_lines)d lines) for %(shapes)d shapes x 16 shifts x 3 clips; '
+          'stream blocks %(stream_blocks)d, %(stream_bytes)d bytes' % stats)
+    order = sp.order_table([shape_masks(v, b, c, fx, fy) for b in (0, 1) for c in range(256) for fx in (0, 1)
+                            for fy in (0, 1)], 8)
+    return lines, stream, order
+
+
 def build():
     v = Video()
     cols, pmap = palette(v)
@@ -153,6 +188,10 @@ def build():
     lines += ['gy_tpen:']
     lines += ['\tdc.b ' + ','.join(str(int(x)) for x in pmap[256 + i:256 + i + 16]) for i in range(0, 64, 16)]
     lines += ['\teven']
+    progs, stream, order = sprite_programs(v)
+    (BUILD / 'gy_sstream.bin').write_bytes(stream)
+    (BUILD / 'gy_order.bin').write_bytes(order)
+    lines += progs + ['\tsection data,data']
     (BUILD / 'gy_assets.s').write_text('\n'.join(lines) + '\n')
     (BUILD / 'gy_penmap.bin').write_bytes(bytes(int(x) for x in pmap))
     err = np.abs(np.array(cols, float)[pmap] - v.pens.astype(float))

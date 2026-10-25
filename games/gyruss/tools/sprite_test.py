@@ -100,8 +100,7 @@ class Harness:
     def render(self):
         """render_frame once (returning to sim_render_ret), then the VBL's part; -> the buffer drawn"""
         sym, mem, cpu = self.sym, self.mem, self.cpu
-        for i in range(32):
-            mem.w8(sym['tile_rows'] + i, 0xFF)
+        mem.w8(sym['tiles_all'], 0xFF)        # (the tile map as poked: every cell)
         a7 = cpu.r_reg(R.A7)
         sp = a7 - 64
         mem.w32(sp, sym['sim_render_ret'])

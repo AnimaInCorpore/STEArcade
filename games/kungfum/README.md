@@ -65,6 +65,8 @@ and the pictures a second, separately; per 100 VBLs in RATE.BIN.
 
 | run | logic | pictures |
 |---|---|---|
+| recorded play (`PLAY=1`), the whole run, 2026-10-25 (the generated sprite path, below) | 52.6 /s (93%) | 33.2 /s |
+| the same before (measured the same day) | 52.1 /s (93%) | 27.4 /s |
 | recorded play (`PLAY=1`), the whole run | 51.9 /s (92%) | 27.1 /s |
 | recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 20-34 /s |
 | AUTOPLAY script (attract, coin, random play) | 48.0 /s (85%) | 27.6 /s |
@@ -79,6 +81,17 @@ drawn again) and the window's jumps at the 512-pixel wrap (the ring's whole wind
 1,504,648 bytes without the sound (text 68 KB, data 454 KB: the dispatch table, the ROM and the graphics; BSS 982 KB:
 the four playfield buffers, the caches); the sound adds 127 KB (the voices 46 KB, the driver's translation, its 64 KB
 memory image): 1,631,532 bytes.
+
+**The sprites' generated path** (2026-10-25, `engine/sprite_programs.py` in stream mode with whole destination
+addresses; docs/sprite-preparation.md): the cells drawn in 99% of the coverage's draws (598 of 935 code / flip
+combinations) get one routine each (their row structure, 365 shared) and per shift a stream of the values that change
+(the destination step, END1, END3, the Y increment, the X count, the control word: a one-word pass for a row whose
+pixels stay in one word); flip y maps the rows when drawing (the slot keeps the unflipped order); the destination's
+whole address is stepped, so the rings' 64 KB boundaries need no fallback.  Clipped cells and the rare rest keep the row
+loop.  A blank cell (no opaque row) is now skipped before its damage is listed: before, it widened the sprite's
+damage rectangle and with it the span copies and the front tiles drawn again.  `tools/render_test.py 1200 --seed 4
+--start 600` (Musashi, exact): 131.3k CPU + 25.1k Blitter -> 89.0k + 20.0k cycles a picture; seed 7 95.4k + 20.4k.
+The streams take 978 KB (the program 1.63 -> 2.8 MB, the limit 3.7 MB).
 
 ## The schedule (src/kungfum.s)
 

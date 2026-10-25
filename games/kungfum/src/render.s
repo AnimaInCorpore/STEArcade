@@ -41,6 +41,9 @@
 	ifnd REN_ORDER
 REN_ORDER = 0
 	endc
+	ifnd REN_GEN
+REN_GEN = 1				; 1: the generated path (tools/assets.py sprite_programs, engine/sprite_programs.py)
+	endc
 
 LB = 424				; bytes a buffer line (53 words: the window's 21 from any Wx < 512)
 RL = 304				; buffer lines: arcade lines -16 .. 287 (cells from line 33 to 255 on)
@@ -55,7 +58,7 @@ TC_SLOTS = 2048				; tile cache slots (32 bytes: 8 rows of movep.l data)
 	ifnd REN_SHIFTS
 REN_SHIFTS = 0
 	endc
-SC_BASE = 2+16*4+16*8			; n, (row * 2, mask) a row, the 4 plane words a row
+SC_BASE = 12+2+16*4+16*8		; the shape records (flip y 0, 1), the plane words' address, n, (row * 2, mask) a row, the 4 plane words a row
 	if REN_SHIFTS
 SC_SLOTS = 400				; sprite cache slots
 SC_SIZE = SC_BASE+2+16*16*4		; + the shifts made (bits), the rows' END1:END3 longs for each shift
@@ -75,6 +78,7 @@ B_END2 = $ffff8a2a
 B_END3 = $ffff8a2c
 B_DXI = $ffff8a2e
 B_DYI = $ffff8a30
+BLT_DYI = B_DYI				; (engine/sprite_programs.py's name)
 B_DST = $ffff8a32
 B_XC = $ffff8a36
 B_YC = $ffff8a38
@@ -1170,6 +1174,8 @@ draw_cell:
 	beq.s	.nf
 	addq.w	#1,d2
 .nf:	bsr	sprite_baked		; a0 = the slot
+	tst.w	12(a0)			; (a blank cell: nothing to draw, no damage)
+	beq	.out
 	; the destination words and the mode: 0 two words, 1 one word (no shift), 2 left clipped, 3 right clipped
 	move.w	cell_x,d0
 	moveq	#15,d5
@@ -1229,6 +1235,62 @@ draw_cell:
 	add.l	d0,d1
 	move.l	draw_base,a1
 	add.l	d1,a1
+	if REN_GEN
+	; the generated path (tools/assets.py sprite_programs: the shape's code, the shift's stream): not clipped, the
+	; shape made (the most drawn)
+	cmp.w	#8,cell_mode
+	ifd SIM
+	bhs	.rclip
+	else
+	bhs	.rows
+	endc
+	move.l	(a0),d6			; the shape's record (flip y: the second)
+	tst.b	spr_flip+1
+	bpl.s	.gy
+	move.l	4(a0),d6
+.gy:	tst.l	d6
+	ifd SIM
+	beq	.rnoc
+	addq.l	#1,cnt_gen
+	else
+	beq	.rows
+	endc
+	move.l	d6,a2
+	move.w	d5,d6			; the variant: shift * 12 (clip 0)
+	lsl.w	#2,d6
+	add.w	d6,a2
+	add.w	d6,d6
+	add.w	d6,a2
+	move.l	(a2)+,d6		; its code
+	beq	.rows
+	move.l	a1,B_DST.w		; (the high word; the code writes the low word)
+	move.l	8(a0),B_SRC.w		; (the slot's plane words)
+	clr.w	B_SXI.w			; (source X increment 0, Y increment 2: every pass type)
+	move.w	#2,B_SYI.w
+	move.w	#8,B_DXI.w
+	move.l	d6,-(sp)
+	move.l	(a2),a0			; its stream
+	move.l	a1,a3			; (the destination: the code steps the whole address, 64 KB crossings too)
+	lea	B_END1.w,a1
+	lea	B_END3.w,a6
+	lea	B_YC.w,a5
+	lea	B_DST.w,a4
+	lea	B_CTRL.w,a2
+	moveq	#4,d1
+	moveq	#-$40,d2
+	move.w	#LB,d4
+	rts				; (into the code; it returns to draw_cell's caller)
+	ifd SIM
+.rclip:	addq.l	#1,cnt_clip
+	bra.s	.rows
+.rnoc:	addq.l	#1,cnt_nocode
+	endc
+.rows:
+	endc
+	ifd SIM
+	addq.l	#1,cnt_rows
+	endc
+	lea	12(a0),a0		; (the slot's header)
 	lea	rowoff_n,a2
 	tst.b	spr_flip+1
 	bpl.s	.fn
@@ -1460,64 +1522,55 @@ bake_sprite:
 .empty:	addq.w	#8,a0
 	subq.w	#1,bake_n
 	bpl	.row
-	; the order: each row not placed yet, then (REN_ORDER) the later rows with the same mask
+	; the slot: the shape's records for flip y 0 and 1 (kf_shapes), the plane words' address, the opaque rows in
+	; kf_order's order (grouped by mask: the generated code's order), their plane words
 	move.l	(sp)+,a0
-	lea	bake_rows,a1
+	move.w	bake_flip,d0		; (the key: code << 6 | colour << 1 | flip x)
+	move.w	d0,d1
+	lsr.w	#6,d0			; code
+	and.w	#1,d1			; flip x
+	add.w	d0,d0
+	or.w	d1,d0			; code << 1 | flip x
+	move.w	d0,d1
+	lsl.w	#3,d1			; (code << 2 | flip x << 1) * 4
+	lea	kf_shapes,a4
+	move.l	(a4,d1.w),(a0)+		; flip y 0
+	move.l	4(a4,d1.w),(a0)+	; flip y 1
+	move.l	a0,a5			; (the plane words' address: below)
+	addq.l	#4,a0
+	lsl.w	#4,d0			; (kf_order: 16 bytes a code and flip x)
+	lea	kf_order,a4
+	add.w	d0,a4
 	moveq	#0,d0			; n
-	moveq	#15,d1
-.cnt:	tst.w	(a1)
-	beq.s	.c0
+.cnt:	cmp.w	#16,d0
+	beq.s	.cn
+	tst.b	(a4,d0.w)
+	bmi.s	.cn
 	addq.w	#1,d0
-.c0:	lea	10(a1),a1
-	dbf	d1,.cnt
+	bra.s	.cnt
+.cn:
 	if REN_SHIFTS
 	clr.w	SC_BASE(a0)		; (no shift's masks made yet)
 	endc
 	move.w	d0,(a0)+
-	lsl.w	#2,d0
+	move.w	d0,d1
+	lsl.w	#2,d0			; (4 bytes a row)
 	lea	(a0,d0.w),a2		; the plane words' place
-	lea	bake_used,a3
-	clr.l	(a3)
-	clr.l	4(a3)
-	clr.l	8(a3)
-	clr.l	12(a3)
+	move.l	a2,(a5)
 	lea	bake_rows,a1
-	moveq	#0,d1			; the row
-.ord:	tst.b	(a3,d1.w)
-	bne.s	.onx
-	move.w	d1,d2
+	subq.w	#1,d1
+	bmi.s	.none
+.ord:	moveq	#0,d0
+	move.b	(a4)+,d0		; the row: (row * 2, mask), its planes
+	move.w	d0,d2
 	mulu	#10,d2
-	move.w	(a1,d2.w),d3		; its mask
-	beq.s	.onx
-	bsr.s	.emit
-	if REN_ORDER
-	move.w	d1,d4			; the later rows with this mask
-.same:	addq.w	#1,d4
-	cmp.w	#16,d4
-	bhs.s	.onx
-	tst.b	(a3,d4.w)
-	bne.s	.same
-	move.w	d4,d2
-	mulu	#10,d2
-	cmp.w	(a1,d2.w),d3
-	bne.s	.same
-	exg	d1,d4
-	bsr.s	.emit
-	exg	d1,d4
-	bra.s	.same
-	endc
-.onx:	addq.w	#1,d1
-	cmp.w	#16,d1
-	blo.s	.ord
-	rts
-.emit:	st	(a3,d1.w)		; row d1 (its bake_rows entry at d2): (row * 2, mask), its planes
-	move.w	d1,d0
 	add.w	d0,d0
 	move.w	d0,(a0)+
 	move.w	(a1,d2.w),(a0)+
 	move.l	2(a1,d2.w),(a2)+
 	move.l	6(a1,d2.w),(a2)+
-	rts
+	dbf	d1,.ord
+.none:	rts
 
 ; ======================================================================================================================
 ; draw_fronts: the front cells (colours 26-31: over the sprites) under this picture's sprites copied back from the
@@ -1609,6 +1662,13 @@ draw_base:	ds.l	1
 clean_base:	ds.l	1
 pen_map:	ds.l	1
 dmg_ptr:	ds.l	1
+	ifd SIM
+cnt_gen:	ds.l	1
+cnt_rows:	ds.l	1
+cnt_clip:	ds.l	1
+cnt_64k:	ds.l	1
+cnt_nocode:	ds.l	1
+	endc
 ring_wx:	ds.w	NRING		; the window each ring shows (-1: none: all again)
 pub_wx:		ds.w	NRING
 pub_scene:	ds.w	1

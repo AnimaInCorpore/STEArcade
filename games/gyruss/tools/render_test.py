@@ -95,7 +95,7 @@ class Harness:
                 self.prof[self.labels[i][1] if i >= 0 else '?'] += n
             pc = cpu.r_pc()
             if pc in targets:
-                if count is not None:
+                if count is not None and self.f >= self.prof_start:
                     self.cyc[count] += total
                 return pc
             if pc in self.bad or s.terminated:
@@ -132,8 +132,9 @@ class Harness:
         self.resume()
         b0 = self.s.blitter.cycles
         self.run_to({sym['sim_frame_done']}, 'render')
-        self.cyc['blit'] += self.s.blitter.cycles - b0
-        self.cyc['n'] += 1
+        if self.f >= self.prof_start:
+            self.cyc['blit'] += self.s.blitter.cycles - b0
+            self.cyc['n'] += 1
         ready = mem.r8(sym['frame_ready'])            # (vbl_video's bookkeeping: the published buffer shown)
         mem.w16(sym['prev_idx'], mem.r16(sym['shown_idx']))
         if ready:
@@ -185,7 +186,11 @@ def main():
     if args.prof:
         n = max(1, args.frames - args.start)
         tot = sum(h.prof.values())
-        for k, c in h.prof.most_common(30):
+        import re as _re
+        g = collections.Counter()
+        for k, c in h.prof.items():
+            g[_re.sub(r'^gshp_\w+', 'gshp_*', k)] += c
+        for k, c in g.most_common(30):
             print('%-24s %8d cycles a picture %5.1f%%' % (k, c // n, 100 * c / tot))
     print('%s: %d frames checked (seed %d), %d differ; a picture: render_frame %d CPU cycles + %d Blitter bus cycles; '
           'the logic %d cycles a frame (Musashi)' % ('PASS' if not bad_frames else 'FAIL', checked, args.seed,
