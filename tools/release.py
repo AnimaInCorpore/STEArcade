@@ -33,14 +33,16 @@ GAMES = [
      "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
      "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
     ("galaga", "GALAGA.PRG", "Galaga (Namco 1981)",
-     "a game frame per VBL; 33 frames a second drawn on average, 17-21 with the full formation; sound on the YM (square waves)",
+     "a game frame per VBL; the real 51XX MCU's program (translated), the 54XX's explosion simulated; 31 frames a second\n"
+     "  drawn on average in the attract mode (Hatari); sound on the YM (square waves)",
      "fire: Space, Control, Alternate, joystick fire, pad A/B/C; left and right only.  Players take turns: both\n"
      "  joysticks and both pads move the fighter.  One coin key (5, Option)."),
     ("blktiger", "BLKTIGER.PRG", "Black Tiger (Capcom 1987)",
      "92% of the arcade's speed, 26 frames a second; music and effects on the YM",
      "fire: Space, Control, joystick fire, pad A.  jump: Alternate, pad B."),
     ("commando", "COMMANDO.PRG", "Commando (Capcom 1985)",
-     "playable, 55 ticks and 25-27 frames a second, 16 colours; the sound effects and the music on the YM",
+     "the arcade's full speed in play (60 ticks a second), 26.5 pictures a second on average in play (Hatari),\n"
+     "  16 colours; the sound effects and the music on the YM",
      "fire: Space, Control, joystick fire, pad A.  grenade: Alternate, pad B."),
     ("gunsmoke", "GUNSMOKE.PRG", "Gun.Smoke (Capcom 1985)",
      "83% of the arcade's speed, 23 frames a second, 16 colours; music and effects on the YM",
@@ -114,7 +116,8 @@ Verification status
 No port is certified Complete by this release.  1942 and Donkey Kong passed assisted ending/loop replay
 regressions in native Hatari; natural complete playability, ordinary controls and sound remain unverified
 by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 / 318.
-Galaga is experimental/deferred pending real MCU ROMs.  See the source README for the five-color status
+Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
+simulated); its full-game verification is pending.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.
 
