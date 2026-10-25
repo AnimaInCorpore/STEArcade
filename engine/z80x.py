@@ -1649,7 +1649,8 @@ class Emitter:
     # ---- block ops --------------------------------------------------------------------------
     def x_ldir(self, ins):
         """BC bytes (hl)+ -> (de)+, on two address registers: a fill (de = hl + 1) writes the byte by longs, a copy of
-        the same parity that does not overlap forward goes by longs, anything else by bytes (8 a turn).  A copy
+        the same parity (in the 68030 forms: any copy) that does not overlap forward goes by longs, anything else by
+        bytes (8 a turn).  A copy
         across the ends of the 68000 block (the $8000 split of the "signed" mode, the $FFFF wrap) and BC = 0 go
         the indexed way, a byte a turn."""
         regs = self.free_aregs()
@@ -1679,11 +1680,14 @@ class Emitter:
         e("addq.w #1,d7")
         e("cmp.w d5,d7")
         e("blo.s %s" % L["bytes"])              # the destination inside the source's range: bytes, in order
-        e("move.w d3,d7")
-        e("eor.w d2,d7")
-        e("btst #0,d7")
-        e("bne.s %s" % L["bytes"])              # different parity: bytes
-        e("btst #0,d3")
+        if self.cfg.cpu030:                     # (the 030 moves a long at any address: the destination aligned,
+            e("btst #0,d2")                     # the source as it comes; Bubble Bobble's object list, $E1CD -> $DD00)
+        else:
+            e("move.w d3,d7")
+            e("eor.w d2,d7")
+            e("btst #0,d7")
+            e("bne.s %s" % L["bytes"])          # different parity: bytes
+            e("btst #0,d3")
         e("beq.s %s" % L["even"])
         e("move.b (%s)+,(%s)+" % (s, d))        # both odd: a byte first
         e("subq.w #1,d5")
