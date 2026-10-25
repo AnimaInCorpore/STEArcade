@@ -5,6 +5,7 @@
 #   games/blktiger/tools/bench.sh [hatari items ...]        e.g. shot@60 shot@100;  EXTRA="-D ..." extra build.py options,
 #                                                          WAIT=140: seconds before Hatari is stopped; PLAY=1: the
 #                                                          recorded play (build/blktiger/play_inputs.bin) instead
+#                                                          MEM=14: the STE's memory in MB (default 4; larger for prototypes)
 # Hatari is started here, not by tools/hatari.sh (that one stops every running "hatari" first, other benchmarks too):
 # HATARI may name a renamed copy of the pinned build.  Screenshots: $OUT (default /tmp/hrun_blktiger).
 #
@@ -18,7 +19,7 @@ rm -f run/blktiger/COUNTERS.BIN run/blktiger/RATE.BIN run/blktiger/CRASH.TXT
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
 OUT=${OUT:-/tmp/hrun_blktiger}; mkdir -p "$OUT"; rm -f "$OUT/cmd.fifo"
-(cd run/blktiger && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+(cd run/blktiger && exec "$HATARI" --machine ste --memsize ${MEM:-4} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --cmd-fifo "$OUT/cmd.fifo" --log-file "$OUT/hatari.log" BLKTIGER.PRG) &
 HP=$!
 for i in $(seq 50); do [ -p "$OUT/cmd.fifo" ] && break; sleep 0.2; done

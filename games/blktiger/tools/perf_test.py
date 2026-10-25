@@ -8,6 +8,7 @@ with logic_test.py's inputs (coin, start, then walking right and attacking: the 
                                                            rectangles, margin cells restored and blacked, text kept, text rows rebuilt)
     PERF_EVERY=n: a frame drawn every n-th tick only (Hatari draws about every 2.6th: MAX_SKIPS), the means per frame drawn
     PERF_PLAY=1: the recorded play's inputs (build/blktiger/play_inputs.bin) instead of the walk
+    PERF_HASH=file: each frame drawn's work screen hashed, a line each (two builds compare picture by picture: diff)
     PERF_CPU=1: profile the 68000's own cycles (the Blitter's bus cycles are charged to the instructions starting the passes)
 
 Musashi counts the 68000's own cycles: Hatari takes about 1.35 times as many (bus alignment, interrupts, the Blitter's bus).
@@ -23,6 +24,7 @@ import os
 EVERY=int(os.environ.get('PERF_EVERY','1'))
 CPU_ONLY=os.environ.get('PERF_CPU')   # (profile: the 68000's cycles only, without the Blitter's bus cycles charged to the pass starts)
 PLAY=os.environ.get('PERF_PLAY')   # (the recorded play build/blktiger/play_inputs.bin, e.g. marp_inputs.py's, lives kept at 3 from tick 1000)
+HASH=os.environ.get('PERF_HASH')   # (a file: each frame drawn's work screen (544 lines) hashed, one line each: compare builds)
 SEL=os.environ.get('PERF_SEL')   # (map / nomap: profile only the frames after a background write, or the others;
                                  #  moved / still: the frames whose scroll differs from the last frame drawn, or the others)
 
@@ -74,6 +76,7 @@ def main():
     # render_frame is patched out while the game runs (sim_wait / sim_frame_done are loops the CPU stops in) and called at each
     # sim_frame_done with sim_render_ret (a loop too) as its return address, as in render_test.py.
     word=mem.r16(render);mem.w16(render,0x4e75);run_to({wait})
+    hashes=[]
     logic,frames=[],[];totals=collections.Counter();last_scroll=None
     if PLAY:
         import playbot;play=playbot.load(build_dir('blktiger')/'play_inputs.bin')
@@ -98,6 +101,8 @@ def main():
              or SEL in('map','nomap') and (SEL=='map')==bool(mem.r8(sym['map_dirty'])))
         try:rc=run_to({ret},step=prof and f>=first and sel)
         except Exception:print(f'render_frame failed at tick {f}');raise
+        if HASH:
+            import hashlib;hashes.append(f"{f} {hashlib.md5(bytes(mem.r_block(mem.r32(sym['work_base']),544*384))).hexdigest()}")
         mem.set_trace_mode(False);mem.w16(render,0x4e75);cpu.w_pc(pc_done)
         for r,v in zip(REGS,regs):cpu.w_reg(r,v);mem.w8(sym['frame_ready'],0)
         resume();lc+=run_to({wait},step=lprof and f>=first)
@@ -108,6 +113,7 @@ def main():
             counts={c:mem.r32(sym[c])-before[c] for c in COUNTERS};totals.update(counts)
             print(f,'map',dirty,'epoch',ep,'bakes',mem.r32(sym['bake_calls'])-bk,'frame',rc,'scroll',bytes(mem.r_block(sym['g_scroll'],4)).hex(),
                   ' '.join(f"{c.replace('dbg_','').replace('bake_n_','bake_')} {v}" for c,v in counts.items() if v))
+    if HASH:open(HASH,'w').write('\n'.join(hashes)+'\n')
     n=len(logic);nf=len(frames);fs=sorted(frames)
     print(f'{n} ticks: logic mean {sum(logic)//n} max {max(logic)}; {nf} frames (CPU + Blitter) mean {sum(frames)//nf} median {fs[nf//2]} max {max(frames)}')
     print(f'at 8 MHz: {8e6/(sum(logic)/n+sum(frames)/n):.1f} ticks a second (Musashi cycles)')
