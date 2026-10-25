@@ -31,11 +31,12 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blktiger": "BLKTIGER.PRG",
          "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "gauntlet": "GAUNTLET.PRG", "kungfum": "KUNGFUM.PRG",
          "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
-         "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG"}
+         "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "timeplt": [("ref/cover.py", list(range(1, 13)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
                ("ref/cover_sound.py", [1, 2, 3], 30000)],          # random commands
@@ -61,6 +62,14 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "timeplt": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),
+                ("tools/logic_test.py", ["8000", "--seed", "4"], None),    # play, infinite lives, every era
+                ("tools/logic_test.py", ["6000", "--seed", "9"], None),    # invincible: many stages
+                ("tools/render_test.py", ["3000", "--start", "1000", "--every", "3"], None),
+                ("tools/render_test.py", ["4000", "--seed", "8", "--start", "1000", "--every", "5"], None),
+                ("tools/sprite_test.py", [], None)],               # edges, 16 shifts, holes, bands, 64 KB crossings
     "gyruss": [("tools/prepare.py", [], None),
                ("tools/build.py", ["--sim"], None),
                ("tools/logic_test.py", ["{n}"], 3000),

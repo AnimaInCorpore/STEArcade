@@ -81,6 +81,10 @@ GAMES = [
      "playable, but slow: about 38% of the arcade's speed and 4 pictures a second in play (Hatari); exact logic,\n"
      "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
      "punch: Space, Z, joystick fire, pad A.  kick: Alternate, X, pad B.  jump: Control, C, pad C."),
+    ("timeplt", "TIMEPLT.PRG", "Time Pilot (Konami 1982)",
+     "work in progress: the arcade's full speed, 24-33 pictures a second in play (Hatari); exact logic, the turned\n"
+     "  224 x 256 picture in 16 fitted colours; no sound yet",
+     "fire: Space, Control, Z, joystick fire, pad A.  The joystick turns the plane."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

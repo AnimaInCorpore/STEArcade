@@ -1,0 +1,68 @@
+[
+ {
+  "name": "tm1",
+  "size": 8192,
+  "crc32": "1551f1b9",
+  "sha1": "c72f30988ac00cbe6549b71c3bcb414511e8b997"
+ },
+ {
+  "name": "tm2",
+  "size": 8192,
+  "crc32": "58636cb5",
+  "sha1": "ab517efa93ae7be780af55faea82a6e83edd828c"
+ },
+ {
+  "name": "tm3",
+  "size": 8192,
+  "crc32": "ff4e0d83",
+  "sha1": "ef98a1abb45b22d7498a0aca520f43bbee248b22"
+ },
+ {
+  "name": "tm4",
+  "size": 8192,
+  "crc32": "7e437c3e",
+  "sha1": "cbe2ccd2cd503af62f009cd5aab73aa7366230b1"
+ },
+ {
+  "name": "tm5",
+  "size": 8192,
+  "crc32": "e8ca87b9",
+  "sha1": "5dd30d3fb9fd8cf9e6a8e37e7ea858c7fd038a7e"
+ },
+ {
+  "name": "tm6",
+  "size": 8192,
+  "crc32": "c2507f40",
+  "sha1": "07221875e3f81d9def67c57a7ccd82d52ce65e01"
+ },
+ {
+  "name": "tm7",
+  "size": 4096,
+  "crc32": "d66da813",
+  "sha1": "408fca4515e8af84211df3e204c8776b2f8adb23"
+ },
+ {
+  "name": "timeplt.b4",
+  "size": 32,
+  "crc32": "34c91839",
+  "sha1": "f62e279e21fce171231d3139be7adabe1f4b8c2e"
+ },
+ {
+  "name": "timeplt.b5",
+  "size": 32,
+  "crc32": "463b2b07",
+  "sha1": "9ad275365eba4869f94749f39ff8705d92056a10"
+ },
+ {
+  "name": "timeplt.e9",
+  "size": 256,
+  "crc32": "4bbb2150",
+  "sha1": "678433b21aae1daa938e32d3293eeed529a42ef9"
+ },
+ {
+  "name": "timeplt.e12",
+  "size": 256,
+  "crc32": "f7b7663e",
+  "sha1": "151bd2dff4e4ef76d6438c1ab2cae71f987b9dad"
+ }
+]

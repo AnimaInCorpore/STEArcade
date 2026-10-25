@@ -105,7 +105,10 @@ class Blitter:
                         # Each fetch shifts the source buffer, including the fetch after FXSR.
                         self.upper = self.lower
                         self.lower = r16(src & 0xFFFFFF)
-                        src = (src + (sxi if x < xcount - 1 else syi)) & 0xFFFFFF
+                        # (the last read of a line, or the one before a read NFSR skips: the Y increment, as
+                        # Hatari's blitter.c, "as on real blitter")
+                        last = x == xcount - 1 or (nfsr and x == xcount - 2)
+                        src = (src + (syi if last else sxi)) & 0xFFFFFF
                         self.cycles += 4
                     s = (((self.upper << 16) | self.lower) >> skew) & 0xFFFF
                 else:

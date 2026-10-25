@@ -66,6 +66,11 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
 * Branch-out-of-range and `lea` displacement warnings in vasm are normal at this size; real errors stop the build.
 * **A macro must not be named like a vasm directive** (Gyruss 2026-10-17): a macro called `LIST` expanded to nothing
   (vasm took the listing directive), silently; two of four natives were wrong until the listing (`vasm -L`) showed it.
+* **The simulator's Blitter and NFSR** (Time Pilot, 2026-10-25): with NFSR the last source read of a line is skipped,
+  and the read before it is the line's last: Hatari (`blitter.c`, "as on real blitter") adds the source **Y** increment
+  after it.  `engine/sim.py` added the X increment there until then; every earlier port used equal increments, so
+  nothing changed for them.  A sprite path with source X increment 0 (one source word a row, one or two destination
+  words) depends on it.
 * **Odd-sized BSS variables before word / long ones**: Musashi accepts the odd access, Hatari takes an address error
   (Gyruss's `snd_ym_new` after a 5-byte array).  Pad the arrays; look at the map for odd addresses of word data.
 * **Sprite multiplexers that race the beam** (Gyruss): a CPU that reads the beam's line and reuses the sprite entries
