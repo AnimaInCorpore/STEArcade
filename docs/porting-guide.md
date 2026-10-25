@@ -405,6 +405,17 @@ the rules its runtime must keep:
 * **Unforeseen entries stop loudly**: a computed jump to a pc the analysis did not count as an entry (joins: entries,
   return points, jump table targets, code addresses held as numbers) now ends at `z80_badpc` with the pc in d7 when the
   pc is inside a merge.  The cure is the same as for the CCR analysis: make it a join (a table root or a hook).
+* **A native that hands back to the translation needs its own flag check.**  `em.live_in` is not that check: the
+  liveness takes a `ret` whose return points `ret_targets` cannot prove as reading every flag, and every routine
+  reached from a coverage seed is one of those, so nearly every pc shows live flags whether or not anything reads
+  them.  For a native's exits (where it jumps into the translation, and where a translated routine it called comes
+  back), redo the liveness over `em.code` with a `ret` that reads nothing and ends the path, a call followed into its
+  callee and on at its return point, and `push af` / `pop af` carrying F; check the continuations' real return pcs as
+  well as the targets, and stop the build if one reads a flag.  Test the check on a pc that does read one.  F030Arcade
+  `games/bublbobl/scripts/generate.py` (`tick_liveness`, 2026-10-25) does this for 20 exits of its sound driver's
+  natives; its one real read (`call nc` after `$0CED`) shows C.  F030Arcade `PORTING.md` ("Callouts") has the rest
+  of that pattern: a token return address whose dispatch entry is the native's continuation, so a native can call
+  a rare translated routine and get control back.
 * **Check a change of the translator** with `engine/xbench.py` (all opcodes and random sequences in every memory layout),
   the ports' lock-step tests, and for Galaga `engine/xdiff.py` against the build before the change.  `engine/xprof.py
   <game>` says where the cycles go per Z80 instruction form.
@@ -618,6 +629,15 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   `render_test.py`); a negative run (the guard restore disabled) shows that the check bites.
 * **Before/after in Hatari**: a DEBUG + AUTOPLAY build that replays the simulator profile's input script by VBL and
   writes counters every 300 VBLs (Bubble Bobble's `tools/bench.sh`) gives windows comparable with `profile.py`'s.
+* **A scripted run is a fixed workload only if the game's course does not follow the CPU budget.**  Where the game
+  gets whatever time the frame leaves (a foreground that runs between interrupts, rounds dropped or delayed when
+  late), a faster build plays a different game from the same inputs.  F030Arcade's Bubble Bobble (2026-10-25): a
+  build that behaved the same and ran one more instruction sent 121 sound commands instead of 151 and drew 16.5
+  pictures a second instead of 10.6; one binary repeated three runs in four exactly, the fourth went another way.
+  Before comparing frames or pictures a second, compare the logic's own counters (rounds, sound commands, a RAM
+  checksum at fixed rounds) of both runs; if they differ, the runs played different games.  Price a change on a
+  deterministic harness (a gate over a fixed schedule timed by the 200 Hz counter, or cycles per unit of work inside
+  one profile), and quote scripted figures as a range over repeats.
 
 ## What the Namco System 1 work added (Splatterhouse, 2026-10-12)
 
