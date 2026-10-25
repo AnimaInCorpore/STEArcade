@@ -117,7 +117,8 @@ No port is certified Complete by this release.  1942 and Donkey Kong passed assi
 regressions in native Hatari; natural complete playability, ordinary controls and sound remain unverified
 by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 / 318.
 Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
-simulated); its full-game verification is pending.  See the source README for the five-color status
+simulated); its full-game verification is pending.  Time Pilot is new and incomplete: it has no sound
+yet.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.
 
