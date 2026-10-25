@@ -86,13 +86,19 @@ row. The user's points (2026-10-25), which every port should follow:
 * **Rows reordered** so equal end masks follow each other: END1 / END3 are not reloaded inside a group. The order is
   per shape (`order_table`); the port bakes the plane words in that order, so the source address runs on.
 * **The 16-pixel case as stefastbobs2 does it** (not as stedaimakaimura's `sprite_compiler.js`): per row and shift a
-  row whose pixels stay in one destination word is a one-word pass, the left word plainly, the right word with FXSR
-  (its destination one group further); only a row that straddles the border is a two-word pass with NFSR. Source X
-  increment 0 and Y increment 2 serve all three types, so a type change writes only the X count, the destination Y
-  increment and the skew byte.
+  row whose pixels stay in one destination word is a one-word pass (the left word, or the right word with the
+  destination one group further); only a row that straddles the border is a two-word pass with NFSR. **The rows are
+  stored aligned** (stefastbobs2's `draw_bob_1` runs rows with skew 9 at bob shift 1: their source moved within the
+  word): every row's plane words are baked shifted left by its empty columns (`align_of`), and the row's skew is
+  (shift + empty columns) & 15, its destination word the next one when that sum reaches 16. So no pass needs FXSR: a
+  one-word pass reads the source once a plane (3 bus accesses a plane against 4 with FXSR's pre-read; a two-word NFSR
+  pass 5). Only a straddling row cut at the left edge (clip 1) keeps FXSR. Until 2026-10-25 (afternoon) the right-word
+  rows were FXSR passes over unaligned data. Source X increment 0 and Y increment 2 serve every type; the control word
+  (skew, NFSR / FXSR; its write starts the pass) comes from the stream at each group, so the code still depends only
+  on the pattern of pass types.
 * **Masks from an address, not as immediates** (stedaimakaimura's generated code: `move (a0)+,(a1)`): the code per
   shape and *pattern of pass types* is shared by every shift with the same pattern; a stream per shape and shift holds
-  only the end masks. That is a compression of code: Time Pilot's 358 shapes x 16 shifts x 3 clip cases need 4,085
+  the end masks and each group's control word. That is a compression of code: Time Pilot's 358 shapes x 16 shifts x 3 clip cases need 4,085
   routines and 217 KB of masks.
 * **Shared by content** (`create_sprite_code.js` hashes): identical routines and identical stream blocks are stored
   once.
@@ -107,7 +113,9 @@ contract. What the port's draw routine must do (Time Pilot's `src/render.s` `dra
   row path, which keeps working on the same baked slot (it is in the generated order);
 * list as damage only the drawn lines and words (the record's damage), and restore with passes sized to the width
   (one group: 8 lines a pass, two: 4; at most 32 words, `BLIT_STATS=256`);
-* keep slot headers (the shape's record, the plane words' address) so the per-sprite setup has no lookups.
+* keep slot headers (the shape's record, the plane words' address) so the per-sprite setup has no lookups;
+* bake the aligned plane words for the generated code; Time Pilot, Gyruss and Kung-Fu Master keep a second, unaligned
+  copy in the slot for their row paths (which take a sprite-wide skew), +64-128 KB of slots.
 
 **The simulator**: with NFSR the last source read of a line is skipped and the read before it is the line's last:
 Hatari adds the source Y increment after it. `engine/sim.py` follows Hatari since 2026-10-25 (it added X before;
@@ -131,6 +139,17 @@ in one word after the shift measured, savings marked *est.* estimated):
 | Trojan | a stream interpreter, ~60 cycles a row | ~30% (mostly bookkeeping: saves, `sprite_cells`) | the bookkeeping; the kernel *est.* 10-15k of ~580k |
 | Double Dragon | a row loop, ~92 cycles a row with groups | ~26% | *est.* 26k of 576k, but the logic (191k a frame) limits it and 64 KB are free |
 | Bubble Bobble | a row loop with runtime shifts, 151 a row with setup | ~24% | *est.* 17k (~10% of the median picture); shapes are composed at run time (code on bake), 40 KB free |
+
+**Aligned rows instead of FXSR, measured 2026-10-25** (exact in every port's `sprite_test.py` and `render_test.py`;
+Musashi CPU + Blitter a picture; Time Pilot and Gyruss against the commit before built with its screen buffers padded
+to the same address modulo 64 KB, since the buffers' place decides which sprites cross 64 KB and take the row path):
+Time Pilot (`render_test.py 1600 --start 1000`) 72.9k + 30.6k -> 73.3k + 30.1k (-0.05%); Gyruss (`render_test.py 3000
+--start 1000`) 76.9k + 13.2k -> 77.1k + 12.6k (-0.45%); Kung-Fu Master (`render_test.py --seed 4`, stream mode: its
+code wrote every control word before) 110.9k + 33.0k -> 110.9k + 32.1k (-0.6%). The Blitter saves 0.5-0.85k a
+picture; in Time Pilot and Gyruss the control word from the stream at every group (12 cycles against an 8-cycle byte
+start) takes most of it back. Writing it only where it changes saves that CPU but splits the code by the rows'
+alignments (Gyruss: +320 KB of code, over the load budget). Program sizes: Time Pilot 2.18 -> 2.47 MB, Gyruss 3.03
+-> 3.46 MB, Kung-Fu Master 3.09 -> 3.16 MB (load budget 3.7 MB).
 
 Lesson from Gyruss and Kung-Fu Master: the kernel is part of the gain; the per-sprite setup and what the damage list
 drives (span copies, front tiles drawn again, restores) are as large. Kung-Fu Master's blank cells widened every
@@ -167,7 +186,7 @@ still required by `AGENTS.md`; a cost estimate or an untried stage is not a comp
 
 | Port | Result |
 |---|---|
-| Donkey Kong, Galaga | The executed generated mask-reuse path is measured in `engine/sprite_blit_test.py`. `engine/sprite_reorder_audit.py` only estimates the cost of source seeks while retaining original-order assets; its predicted lack of a win is not a measured reordered-source prototype. They keep the generated path and generic 64 KB fallback; the full preparation experiment remains outstanding. |
+| Donkey Kong, Galaga | The executed generated mask-reuse path is measured in `engine/sprite_blit_test.py`. `engine/sprite_reorder_audit.py` only estimates the cost of source seeks while retaining original-order assets; its predicted lack of a win is not a measured reordered-source prototype. They keep the generated path and generic 64 KB fallback; the full preparation experiment remains outstanding. **Galaga, 2026-10-25**: the full preparation measured with `engine/sprite_programs.py` (prototype, not kept): per (code, flip y) the rows grouped by mask and baked in that order per colour quad, each row aligned in its word (512 KB), flip x as the mirrored row map over the same data, a one- or two-word pass per row and shift, no clipped variants (edge_blits stays): 492 shapes, 3,678 routines (~700 KB of code), 171 KB of streams; the per-part setup from tables (the shape's record, its line 0 offset, the aligned data per (code, flip y)), the Blitter registers kept in data registers around the call. Exact (`sprite_test.py` 2664 edge cases; `perf_test.py compare` 1201 pictures identical) but not faster: `perf_test.py` (attract VBL 2400-3600, Musashi) draw_sprites 94.1k -> 95.6k CPU + Blitter a picture; in the first 300 pictures the generated code 14.3k CPU + 20.5k Blitter -> 15.7k + 18.3k, the per-part setup +3.0k. A first try with FXSR passes for the second-word rows over unaligned data saved only 1.1k of Blitter (98.2k in all; Hatari with a 14 MB STE, the program needing 4.8 MB: 31.1 -> 31.0 pictures a second). Why: Galaga's 16-line shapes have 12.2 opaque rows in 10.5 mask groups (few repeats, so few END writes saved, and the destination jumps between groups cost), and its old generated code already writes END1 / END3 only on change and uses one-word passes for first-word rows. The remaining cost is the per-part setup (draw_part ~42k CPU) and the restores. |
 | Commando, 1942, 1943, Gun.Smoke, Black Tiger, Bubble Bobble | Use reordered source data (see `docs/architecture.md`). |
 | Splatterhouse | 2026-10-13: row-order drawing with mask reuse (a repeated row mask only restarts the Blitter; passes over the non-zero words only). Prototype of the method (`-D REN_GEN=1`, `REN_GSORT=1`; code in the README): code generated on first use per image x shift x flip into a 96 KB pool, one pass per row, Blitter state written only on change, the source address only where rows are not consecutive; exact, but slower: BENCH 612k -> 714k cycles a picture (Musashi), Hatari 13.96 -> 12.54 arcade frames/s. Sprite images and their colours change too often: ~6 new image x shift combinations a picture, a hit rate of 57% (75% with a 2 MB pool), ~22k to generate each against ~42k a picture saved. Opaque-run splitting was not built (rows are at most 32 pixels). Dropped; the prepared data from the hard disk (above) could change the balance, since generation would move to build time. |
 | Galaga '88 | 2026-10-13: row-order drawing (a HOG pass a row: X count 3, the row's shifted mask as end masks). Prototype `-D REN_SB2=1` (`games/galaga88/src/render.s`, `ren_sb2_draw` / `ren_sb2_make`): per converted image (code, part, flips, colour) and shift a plan made on first use into a 96 KB pool: a piece per row with pixels (rows are at most 32 pixels: the row is the chain, its holes zero mask bits), the pieces sorted by their pre-shifted end masks, their 4 plane words in that order (the source address runs on), and generated code (an end mask written only when it changes, `addi.w #delta` to the destination's low word, Y count, start; shift 0 in 2-word passes); clipped sprites, the arcade-order pictures and 64 KB crossings take the row path. Exact (`render_test.py --edges`: 240 pictures of sprites across both edges, all fine positions, flips, sizes, the guards, 64 KB crossings; the BENCH game's 500 pictures). Measured on the BENCH game (arcade frames 600-1600, every 2nd, Musashi CPU + Blitter): 622M cycles both; CPU per picture 1170k both: the draws 62k -> ~29k (15k + ~14k generated code), the plans 33k a picture. Hatari BENCH: 9.74 -> 9.78 arcade frames/s (render VBLs 4322 -> 4279, ~1%), for 96 KB. Not kept on (`REN_SB2` stays an option): generating on first use eats the saving; with the plans made at build time (the shapes do not depend on the colour: code per (code, part, flips, shift), data per colour) the draws would save ~3% of a picture. |

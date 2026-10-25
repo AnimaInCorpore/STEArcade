@@ -58,7 +58,7 @@ TC_SLOTS = 2048				; tile cache slots (32 bytes: 8 rows of movep.l data)
 	ifnd REN_SHIFTS
 REN_SHIFTS = 0
 	endc
-SC_BASE = 12+2+16*4+16*8		; the shape records (flip y 0, 1), the plane words' address, n, (row * 2, mask) a row, the 4 plane words a row
+SC_BASE = 12+2+16*4+16*8+16*8	; the shape records (flip y 0, 1), the aligned plane words' address, n, (row * 2, mask) a row, the 4 plane words a row (the row path), the same aligned (the generated code)
 	if REN_SHIFTS
 SC_SLOTS = 400				; sprite cache slots
 SC_SIZE = SC_BASE+2+16*16*4		; + the shifts made (bits), the rows' END1:END3 longs for each shift
@@ -1556,7 +1556,10 @@ bake_sprite:
 	move.w	d0,d1
 	lsl.w	#2,d0			; (4 bytes a row)
 	lea	(a0,d0.w),a2		; the plane words' place
-	move.l	a2,(a5)
+	move.w	d1,d0
+	lsl.w	#3,d0
+	lea	(a2,d0.w),a6		; the aligned copy's place (after them)
+	move.l	a6,(a5)
 	lea	bake_rows,a1
 	subq.w	#1,d1
 	bmi.s	.none
@@ -1569,6 +1572,19 @@ bake_sprite:
 	move.w	(a1,d2.w),(a0)+
 	move.l	2(a1,d2.w),(a2)+
 	move.l	6(a1,d2.w),(a2)+
+	move.w	(a1,d2.w),d3		; the aligned copy (engine/sprite_programs.py align_of): shifted left by the row's
+	moveq	#0,d5			; empty columns (0 in every plane there, so a long shift of two planes is exact)
+.lz:	tst.w	d3
+	bmi.s	.al
+	add.w	d3,d3
+	addq.w	#1,d5
+	bra.s	.lz
+.al:	move.l	2(a1,d2.w),d4
+	move.l	6(a1,d2.w),d6
+	lsl.l	d5,d4
+	lsl.l	d5,d6
+	move.l	d4,(a6)+
+	move.l	d6,(a6)+
 	dbf	d1,.ord
 .none:	rts
 

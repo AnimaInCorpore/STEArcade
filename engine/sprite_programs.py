@@ -4,27 +4,30 @@ the measurements are in docs/sprite-preparation.md ("Generated code per shape an
 
 A shape is a sprite image's opaque masks, one 16-bit word a row (bit 15 the leftmost pixel), as the port draws it
 (turned, flipped).  Its rows are grouped by mask (shape_order: the order the port bakes the plane words in, so the
-Blitter's source address runs on).  At a shift s every group has a pass type (pass_of):
+Blitter's source address runs on).  Every row is baked aligned at the left border of its source word (its plane words
+shifted left by the row's empty columns, lz = align_of(mask)), as stefastbobs2 stores its <= 16-pixel rows: the row's
+skew is then (shift + lz) & 15, and a row whose pixels lie in the second destination word only is a plain one-word
+pass there (one source read a plane, no FXSR).  At a shift s every group has a pass type (pass_of):
     'A'  two destination words, NFSR (the row straddles a word border after the shift): END1, END3
     'L'  the first word only: END1 = mask >> s
-    'R'  the second word only, FXSR: END1 = mask << (16 - s); the destination one group (8 bytes) further
+    'R'  the second word only: END1 = mask << (16 - s); the destination one group (8 bytes) further
 Source X increment 0 and Y increment 2 serve all three (one source word a plane; 4 planes in a pass: Y count 4,
 destination X increment 8, Y increment 2 (one word) or -6 (two)).  At a side edge on a 16-pixel group boundary
 (AGENTS.md) the clipped variants draw one word only (clipped_pass: clip 1 the second word, clip 2 the first; rows
-without pixels there skipped, the source stepped over them).
+without pixels there skipped, the source stepped over them; clip 1 of a straddling row is the one FXSR pass left).
 
 programs() makes per shape 3 x 16 variants (clip 0-2, shift 0-15): the code (per shape and pattern of pass types,
-shared by content) and a stream of end masks (shared by content), plus the damage (the drawn lines and words).  The
-code writes the Y increment, the X count and the skew byte only where the type changes, steps the destination's low
-word by immediates, starts every pass with a byte write; it runs with these registers (the port's draw routine sets
+shared by content) and a stream of end masks and control words (shared by content), plus the damage (the drawn lines
+and words).  The code writes the Y increment and the X count only where the type changes, the control word (skew,
+NFSR / FXSR; the write starts the pass) from the stream at each group's first pass, steps the destination's low word
+by immediates, starts the group's other rows with a byte write; it runs with these registers (the port's draw routine sets
 them, keeping them from sprite to sprite where it can):
     d0  the destination's low word (row 0, the sprite's first word)      a0  the stream (consumed)
     d1  4 (Y count: the planes)    d2  $C0 (start, HOG)    d4  the line's bytes (160)
-    d5 / d6 / d7  the skew byte with NFSR / with FXSR / alone
     a1 END1   a6 END3   a3 destination Y increment   a5 Y count   a4 destination address + 2   a2 control
 and clobbers d0 and a0 only.  The X count is written as BLT_XC (an absolute word: the port defines it).  The caller
-sets the source address (the baked plane words), the destination's high word (a long write), HOP 2 / OP 3 and the
-increments, and rejects 64 KB crossings (the low word steps).
+sets the source address (the baked, aligned plane words), the destination's high word (a long write), HOP 2 / OP 3 and
+the increments, and rejects 64 KB crossings (the low word steps).
 """
 
 FXSR, NFSR = 0x80, 0x40
@@ -39,24 +42,34 @@ def shape_order(masks):
     return sorted(groups.values(), key=lambda g: g[0])
 
 
+def align_of(mask):
+    """the row's empty columns at the left: its plane words are baked shifted left by this"""
+    return 16 - mask.bit_length()
+
+
 def pass_of(mask, s):
-    """(type, END1, END3, X count, destination Y increment, control) of a 16-pixel row shifted by s"""
-    if s == 0:
-        return 'L', mask, 0, 1, 2, 0xC000
+    """(type, END1, END3, X count, destination Y increment, control) of a 16-pixel row shifted by s, its source word
+    aligned (align_of)"""
+    t = s + align_of(mask)
     left, right = mask >> s, (mask << (16 - s)) & 0xFFFF
+    if t >= 16:
+        return 'R', right, 0, 1, 2, 0xC000 | (t - 16)
     if not right:
-        return 'L', left, 0, 1, 2, 0xC000 | s
-    if not left:
-        return 'R', right, 0, 1, 2, 0xC000 | FXSR | s
-    return 'A', left, right, 2, -6, 0xC000 | NFSR | s
+        return 'L', left, 0, 1, 2, 0xC000 | t
+    return 'A', left, right, 2, -6, 0xC000 | NFSR | t
 
 
 def clipped_pass(mask, s, clip):
     """pass_of across a side edge (s > 0): clip 1 the second word only, clip 2 the first; None: no pixels there"""
+    t = s + align_of(mask)
     left, right = mask >> s, (mask << (16 - s)) & 0xFFFF
     if clip == 1:
-        return ('R', right, 0, 1, 2, 0xC000 | FXSR | s) if right else None
-    return ('L', left, 0, 1, 2, 0xC000 | s) if left else None
+        if not right:
+            return None
+        if t >= 16:
+            return 'R', right, 0, 1, 2, 0xC000 | (t - 16)
+        return 'R', right, 0, 1, 2, 0xC000 | FXSR | t      # (straddling: the pre-read is the row's word)
+    return ('L', left, 0, 1, 2, 0xC000 | t) if left and t < 16 else None
 
 
 def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_shapes', record='shr',
@@ -91,7 +104,7 @@ def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_s
                 passes = [(clipped_pass(masks[g[0]], sh, clip) if clip and sh else pass_of(masks[g[0]], sh))
                           for g in groups]
                 body, blk = [], bytearray()
-                prev_dst, prev_t, prev_dyi, prev_xc = 0, None, None, None
+                prev_dst, prev_dyi, prev_xc = 0, None, None
                 skipped = 0
                 words, rows = set(), []
                 for g, ps in zip(groups, passes):
@@ -108,19 +121,23 @@ def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_s
                     d = dst - prev_dst
                     body.append('\tadd d4,d0' if d == line else '\tadd #%d,d0' % d)
                     body.append('\tmove d0,(a4)')
-                    if t != prev_t:
-                        if dyi != prev_dyi:
-                            body.append('\tmove #%d,(a3)' % dyi)
-                        if xc != prev_xc:
-                            body.append('\tmove #%d,%s.w' % (xc, xc_sym))
-                        body.append('\tmove.b %s,1(a2)' % {'A': 'd5', 'R': 'd6', 'L': 'd7'}[t])
-                        prev_t, prev_dyi, prev_xc = t, dyi, xc
+                    if dyi != prev_dyi:
+                        body.append('\tmove #%d,(a3)' % dyi)
+                        prev_dyi = dyi
+                    if xc != prev_xc:
+                        body.append('\tmove #%d,%s.w' % (xc, xc_sym))
+                        prev_xc = xc
                     body.append('\tmove (a0)+,(a1)')
                     blk += e1.to_bytes(2, 'big')
                     if t == 'A':
                         body.append('\tmove (a0)+,(a6)')
                         blk += e3.to_bytes(2, 'big')
-                    body += ['\tmove d1,(a5)', '\tmove.b d2,(a2)']
+                    body.append('\tmove d1,(a5)')
+                    # the control word (skew, NFSR / FXSR; the write starts the pass) from the stream at every group:
+                    # the code then depends on the pass types only and is shared as before (where it does not
+                    # change, a byte write would save 4 cycles, but the code would split by the rows' alignments)
+                    body.append('\tmove (a0)+,(a2)')
+                    blk += ctl.to_bytes(2, 'big')
                     for a, b in zip(g, g[1:]):
                         d = (dr(b) - dr(a)) * line
                         body.append('\tadd d4,d0' if d == line else '\tadd #%d,d0' % d)

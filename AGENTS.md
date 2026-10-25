@@ -22,7 +22,7 @@ These rules apply to every game port and every sprite fallback path.
   shift) and each port's result are in `docs/sprite-preparation.md`: prototype it and
   measure, do not decide from estimates; add your port's result there. For 16-pixel-wide
   rows use `engine/sprite_programs.py` (Time Pilot): rows grouped by mask, a one- or
-  two-word pass per row and shift as stefastbobs2 chooses it (FXSR / NFSR), code per shape
+  two-word pass per row and shift as stefastbobs2 chooses it (each row baked aligned in its source word with its own skew: no FXSR; NFSR for straddling rows), code per shape
   and pass-type pattern with the end masks streamed from an address, both shared by content.
 - Mandatory (user, 2026-10-24): no AND + OR Blitter pass pairs (a mask pass with OP 1 or 4,
   then an OR pass with OP 7) for anything drawn over a background: sprites, text,
