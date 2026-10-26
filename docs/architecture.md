@@ -522,6 +522,13 @@ that holds that page there for good: the page check is `cmpa.l #ctx,a6`, no read
 its port sets `gen.RET_WEIGHTS`).  Double Dragon on the Falcon: 6.76 -> 5.62 ms an arcade frame.  Tested by
 `m6809x_test.py --cpu030` and the games' `logic_test.py` with `STE_XCPU=68030` (Musashi's 68030; `sim.py` follows it).
 
+`Program.fast_forms` (2026-10-26, Double Dragon's STE port) gives the 68000 the forms of these that it runs too: the
+flag-keeping wrapper through d7, `ret_match`, `slot_ctx` page checks and the `ret_weights` order (the word moves stay
+68030 only: the 6809 stack is odd at about 29% of Double Dragon's stack instructions).  With it, a return point in the
+returning instruction's own page needs no page check (`ret_here`: its slot holds that page while that code runs).
+Double Dragon's weights come from `tools/ret_profile.py` (`docs/ret_weights.json`, seeds -1 and 4, frames 5000-12000).
+Musashi, `profile.py 3000 3200 --seed -1`: 191.3k -> 182.7k -> 180.9k cycles a frame; `logic_test.py` identical.
+
 Tests: `engine/m6809x_test.py` (every documented instruction in every mode, random states, against `engine/m6809.py` on
 Musashi; batches of 8 KB pages; `--cpu030`: the 68030 forms on a 68030), the games' `logic_test.py` (frame by frame against the reference's port schedule, with
 `--steplock F`: instruction by instruction inside a frame) and `profile.py` (68000 cycles per 6809 instruction).

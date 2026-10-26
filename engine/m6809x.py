@@ -172,6 +172,9 @@ class Program:
                  inline_calls=None, opcode_reader=None, indirect_slots=None):
         self.name, self.prefix = name, prefix
         self.c030 = CPU >= 68020
+        # fast_forms (set after construction): the 68030 forms the 68000 can run too, for the 68000 (flag fixing through
+        # d7, the return branch taken on the match, page checks against slot_ctx, the return compares by ret_weights)
+        self.fast_forms = False
         # (68030 forms, set after construction like fixed_slots)
         self.ret_weights = None   # {virtual return point: how often it was returned to} (a profile): the order of the
                                   # RTS / PULS PC compares, the most frequent first, and which ones (RET_WEIGHTED)
@@ -1029,7 +1032,7 @@ class Emitter:
         live = self.live_out.get(v, NZVC) & NZVC
         d, u = defs_uses(self.code[v])
         keep = live & ~d & ~ok                  # unchanged by the 6809, spoiled by the 68000 code
-        if keep and self.p.c030:
+        if keep and (self.p.c030 or self.p.fast_forms):
             self.stats["wrapped"] += 1
             at = len(self.lines)
             body()
@@ -1067,7 +1070,7 @@ class Emitter:
     def preserve_all(self, v, body):
         """body() spoils every flag and the 6809 instruction keeps them all"""
         live = self.live_out.get(v, NZVC) & NZVC
-        if live and self.p.c030:
+        if live and (self.p.c030 or self.p.fast_forms):
             self.stats["wrapped"] += 1
             at = len(self.lines)
             body()
@@ -1399,7 +1402,7 @@ class Emitter:
 
     def page_cmp(self, page, slot):
         """the CCR's Z = the slot holds the page (its page number when the runtime keeps them: cheaper than PB)"""
-        ctx = self.p.slot_ctx(page, slot) if self.p.c030 and self.p.slot_ctx else None
+        ctx = self.p.slot_ctx(page, slot) if (self.p.c030 or self.p.fast_forms) and self.p.slot_ctx else None
         if ctx is not None:
             self.e("cmpa.l #%s,a6" % ctx)        # (a6 is that context: no load of the PID word)
         elif self.p.pid_checks:
@@ -1474,12 +1477,12 @@ class Emitter:
         cands = self.ret_cands(v)
         for t in cands:
             pc = self.p.cpu_pc(t)
-            if self.ret_match(t, pc, live):
+            if self.ret_match(t, pc, live, v):
                 continue
             skip = self.new_label()
             self.e("cmp.w #$%04X,d7" % pc)
             self.e("bne.s %s" % skip)
-            if not self.fixed_slot(pc >> 13):
+            if not self.ret_here(v, t, pc):
                 self.page_cmp(t >> 13, pc >> 13)
                 self.e("bne.s %s" % skip)
             if live:
@@ -1490,11 +1493,16 @@ class Emitter:
             self.e("move.w d5,ccr")
         self.dispatch_jump(live)
 
-    def ret_match(self, t, pc, saved):
+    def ret_here(self, v, t, pc):
+        """the return point t (6809 pc) needs no page check: its slot holds one page only, or (fast_forms) t lies in the
+        page of the returning instruction v, which its slot holds while v's code runs"""
+        return self.fixed_slot(pc >> 13) or (self.p.fast_forms and t >> 13 == v >> 13)
+
+    def ret_match(self, t, pc, saved, v=None):
         """(68030) d7 = pc goes to t by a branch taken only on the match: a mismatch costs a compare and a branch not
         taken, where the 68000 form branches round the transfer.  saved: the transfer restores the CCR from d5 first,
         in a stub right before t's code (ret_stubs).  False: not for this target (the slot has other pages)."""
-        if not self.p.c030 or not self.fixed_slot(pc >> 13):
+        if not (self.p.c030 or self.p.fast_forms) or not (self.fixed_slot(pc >> 13) if v is None else self.ret_here(v, t, pc)):
             return False
         self.e("cmp.w #$%04X,d7" % pc)
         if saved:
@@ -1688,12 +1696,12 @@ class Emitter:
                 self.e("move.w sr,d5")
             for t in cands:
                 pc = self.p.cpu_pc(t)
-                if self.ret_match(t, pc, keep):
+                if self.ret_match(t, pc, keep, v):
                     continue
                 skip = self.new_label()
                 self.e("cmp.w #$%04X,d7" % pc)
                 self.e("bne.s %s" % skip)
-                if not self.fixed_slot(pc >> 13):
+                if not self.ret_here(v, t, pc):
                     self.page_cmp(t >> 13, pc >> 13)
                     self.e("bne.s %s" % skip)
                 if keep:
@@ -2290,7 +2298,7 @@ RET_WEIGHTED = 6       # with Program.ret_weights: up to this many, those return
 def ret_order(prog, points):
     """the return points an RTS compares, in order: by address; with a profile (ret_weights, 68030 forms) the ones
     returned to most first, up to RET_WEIGHTED of those seen, filled up to RET_CANDS by address"""
-    w = prog.ret_weights if prog.c030 else None
+    w = prog.ret_weights if prog.c030 or prog.fast_forms else None
     if not w:
         return sorted(points)[:RET_CANDS]
     seen = sorted((p for p in points if w.get(p)), key=lambda p: (-w[p], p))[:RET_WEIGHTED]

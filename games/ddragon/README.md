@@ -182,6 +182,7 @@ Taken so far (logic in mission 1 / over missions 1-4):
 | the bank selectors inline | 203k |
 | `main_bank_w` from a table of contexts | 198k |
 | the MCU's parts in registers, its sort an insertion sort (67k -> 48k, 15k -> 6k at a mission's start) | 193k / 217k |
+| the translator's `fast_forms` (flags kept through d7, return compares by `docs/ret_weights.json`, page checks against the context, none for a return into the same page), 2026-10-26: 191.3k -> 180.9k measured on the current build | 181k |
 
 The picture: 674k -> 619k with pairs of text characters (two neighbours of one colour baked into one 16-pixel
 image, 128 entries), 587k with the solid runs' column heights made once when the text changes (not per picture) and

@@ -12,6 +12,7 @@ main_io_w); every store into the palette, the fg, the sprite RAM or the bg sets 
 renderer's flag (pal_written, fg_written, spr_written, bg_written).
 """
 import collections
+import json
 import glob
 import pickle
 import sys
@@ -75,8 +76,10 @@ def selectors_asm():
     return "\n".join(out) + "\n"
 
 
-# (F030Arcade, 68030 forms: {virtual return point: returns to it} from a profile, m6809x.ret_order)
-RET_WEIGHTS = None
+# {virtual return point: returns to it}, a profile (tools/ret_profile.py -> docs/ret_weights.json; F030Arcade sets its
+# own): m6809x.ret_order compares the most frequent first
+_RW = Path(__file__).resolve().parents[1] / "docs" / "ret_weights.json"
+RET_WEIGHTS = {int(k, 16): n for k, n in json.loads(_RW.read_text()).items()} if _RW.exists() else None
 
 
 def bank_ctx(page, slot):
@@ -215,6 +218,7 @@ def program(cover):
     prog.fixed_slots = (4, 5, 6, 7)
     prog.slot_ctx = bank_ctx
     prog.ret_weights = RET_WEIGHTS
+    prog.fast_forms = True                      # (the 68030 forms the 68000 runs too: m6809x Program.fast_forms)
     return prog
 
 
