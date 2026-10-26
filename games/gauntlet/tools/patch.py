@@ -60,12 +60,48 @@ SITES = [
     (0x4FF00, 6, "slap_a0d0"),               # move.w d0,$38000.l (then a write to (a0,d0.w): its bank)
     (0x4FF0C, 6, "slap_a0"),                 # move.w d0,$38000.l; bra $4fed0 (move.w (a0),(a1): its bank)
     (0x4FF14, 6, "slap_a0d0"),               # (unused so far: reset, $3FB2A, (a0,d0.w))
+    # the playfield's writers (every one, logged on the reference board; tools/logic_test.py checks the marks): the
+    # renderer compares only the columns marked since its last picture.  A 2 x 2 tile block at a2 (the maze cells),
+    # three routines: the stub marks its two columns and does the add.  The clear routine ($42550: count 6(sp), address
+    # 8(sp)): the stub loads them and marks every column when the range starts below the playfield's end.
+    (0x41C44, 6, "pf_blk_d4"),               # addi.l #130,d4 (the block's fourth word next)
+    (0x42884, 6, "pf_blk_d7"),               # addi.l #130,d7
+    (0x42C88, 6, "pf_blk_d6"),               # addi.l #130,d6
+    (0x42550, 8, "mem_clear"),               # move.w (6,a7),d0; movea.l (8,a7),a0 (the stub: (10,a7), (12,a7))
 ]
 
 # the runtime's routines: a table of `jmp routine` at RT_STUBS, entry k at RT_STUBS + 6 * k (src/gauntlet.s rt_stubs)
 RT_BASE = 0x50000
 RT_STUBS = RT_BASE + 0x10
-STUB_ORDER = ["snd_cmd_d0", "snd_cmd_sp10", "snd_reset_d0", "slap_bank0", "slap_bank3", "slap_a0d0", "slap_a0"]
+STUB_ORDER = ["snd_cmd_d0", "snd_cmd_sp10", "snd_reset_d0", "slap_bank0", "slap_bank3", "slap_a0d0", "slap_a0",
+              "pf_blk_d4", "pf_blk_d7", "pf_blk_d6", "mem_clear"]
+HOOKS_AT = (RT_STUBS + 6 * len(STUB_ORDER) + 15) & ~15        # (src/gauntlet.s rt_hooks: checked there)
+
+# the alphanumerics' writers (logged on the reference board in the attract mode and play; tools/logic_test.py checks
+# that every change was marked): an instruction of 6 or 8 bytes before each write loop (absolute or immediate, not
+# PC-relative) becomes a jsr of a generated hook (build/gauntlet/hooks.i, at HOOKS_AT, 16 bytes each): `st al_dirty`,
+# the instruction itself (relocated), rts.  The renderer compares the alphanumerics only after a mark (and one row a
+# picture in turn).
+HOOKS = [
+    (0x02F42, 6),                            # BIOS: lea $905000,a1 (a string: $2F60, $2F92)
+    (0x0307C, 6),                            # BIOS: lea $905000,a1 (a character: $3082)
+    (0x03090, 6),                            # BIOS: lea $905000,a1 ($30EC)
+    (0x03214, 6),                            # BIOS: addi.l #$905000,d0 (the big digits: $324E)
+    (0x03540, 6),                            # BIOS: lea $905000,a0 (the clear: $354E)
+    (0x42F30, 6),                            # movea.l #$905000,a0 ($42F3A)
+    (0x43088, 6),                            # movea.l #$905000,a0 ($43092)
+    (0x430D0, 6),                            # movea.l #$905000,a0 ($430EA, $430FA, $43104)
+    (0x4325C, 6),                            # addi.l #$90503a,d0 ($43276)
+    (0x43664, 6),                            # addi.l #$90503e,d0 ($43694 ... $4369E)
+    (0x43740, 6),                            # movea.l #$9de6,a0 (the high-score entry's rows: $4375E)
+    (0x43784, 6),                            # movea.l #$9e08,a0 ($4378A)
+    (0x437F4, 6),                            # movea.l #$9df6,a0 ($43808)
+    (0x4B618, 6),                            # movea.l #$904b26,a0 (a list of places: $4B622)
+    (0x4B678, 6),                            # movea.l #$905000,a0 ($4B684)
+    (0x4B758, 6),                            # movea.l #$905522,a0 ($4B762)
+    (0x4B9C2, 6),                            # movea.l #$9051ae,a0 ($4B9CC)
+]
+HOOK_SIZE = 16
 
 # the STE's schedule (program_ste.bin only; tools/stemodel.py stops at the same places): where the program waits for
 # the next frame, a trap: TRAP #14 (vector 46) for the main loop's `bra.s $40C22` (the counter was 0: give the frame
@@ -120,6 +156,7 @@ class Disassembler:
         return size, text
 
 
+JUMP_TABLE = re.compile(r"^jmp\s+\(\$2,PC,D\d\.w\)$")   # move.w ($k,PC,Dn.w),Dn; jmp ($2,PC,Dn.w); dc.w ...
 FLOW_END = ("rts", "rte", "rtr", "jmp", "bra", "illegal")
 BRANCH = re.compile(r"^(b(?:ra|sr|hi|ls|cc|cs|ne|eq|vc|vs|pl|mi|ge|lt|gt|le)|db\w+|jsr|jmp)\s+(?:.*,\s*)?\$([0-9a-f]+)(\.[lw])?$")
 
@@ -141,6 +178,18 @@ def discover(rom, seeds, dis):
                 t = int(m.group(2), 16)
                 if populated(t):
                     todo.append(t)
+            if JUMP_TABLE.match(text):                 # (a jump table: the word offsets from the jmp's d8 base,
+                base, end = pc + 4, None              #  up to the first case: every case is code; the base:
+                                                      #  the extension word's address + 2)
+                off = base
+                while end is None or off < end:
+                    w = struct.unpack(">h", rom[off:off + 2])[0]
+                    t = base + w
+                    if w <= 0 or t & 1 or not populated(t):
+                        break
+                    todo.append(t)
+                    end = t if end is None else min(end, t)
+                    off += 2
             if mn in FLOW_END:
                 break
             pc += size
@@ -211,6 +260,27 @@ def build(report=False):
         words = [op, (RT_STUBS + 6 * k) >> 16, (RT_STUBS + 6 * k) & 0xFFFF] + [0x4E71] * ((n - 6) // 2)
         rom[pc:pc + n] = b"".join(struct.pack(">H", w) for w in words)
     out = build_dir("gauntlet")
+    hooks = []
+    for k, (pc, n) in enumerate(HOOKS):
+        a, texts = pc, []
+        while a < pc + n and a in code:
+            texts.append(code[a][1])
+            a += code[a][0]
+        if a != pc + n or any("pc" in t for t in texts):
+            sys.exit("%06X: hook length %d does not end on an instruction or is PC-relative (%s)" % (
+                pc, n, "; ".join(texts)))
+        words = struct.unpack(">%dH" % (n // 2), rom[pc:pc + n])            # (relocated)
+        hooks.append((pc, n, "; ".join(texts), words))
+        target = HOOKS_AT + HOOK_SIZE * k
+        rom[pc:pc + n] = b"".join(struct.pack(">H", w) for w in [0x4EB9, target >> 16, target & 0xFFFF] +
+                                  [0x4E71] * ((n - 6) // 2))
+    with open(out / "hooks.i", "w") as f:
+        f.write("; generated by games/gauntlet/tools/patch.py: the alphanumerics' writers' hooks (HOOKS)\n")
+        f.write("HOOKS_AT = $%06X\n" % HOOKS_AT)
+        for k, (pc, n, text, words) in enumerate(hooks):
+            f.write("hook_%d:\t\t\t\t; $%05X %s\n\tst\tal_dirty\n\tdc.w\t%s\n\trts\n\tcnop\t0,%d\n" % (
+                k, pc, text, ",".join("$%04x" % w for w in words), HOOK_SIZE))
+    (out / "hooks.json").write_text(json.dumps([[pc, n, list(w)] for pc, n, _, w in hooks]))
     (out / "program.bin").write_bytes(bytes(rom))
     ste = bytearray(rom)
     for pc, old, new in SCHEDULE:

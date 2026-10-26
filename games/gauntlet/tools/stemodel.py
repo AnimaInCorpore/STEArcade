@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "engine"))
 import m68kmame as M
 from machine import main_rom, mirrors, SLAPSTIC_104, SLAPSTIC_BANKS, SLAPSTIC_START, BANK_COPY
-from patch import MAP, IMAGE_END
+from patch import MAP, IMAGE_END, HOOKS, HOOKS_AT, HOOK_SIZE
 from paths import build_dir
 
 STUBS = 0x50000                      # (the STE runtime's routines; here: an rts each, the work done in Python)
@@ -79,6 +79,8 @@ class PortModel:
         self.frame = 0
         self.inputs = [0xFFFF] * 4
         self.sound = SoundModel()
+        self.pf_marks = set()               # the playfield quarter columns (32 bytes) the patched program's writers marked
+        self.al_marked = False              # the alphanumerics' writers ran (patch.HOOKS, mem_clear)
         self.stopped = None
         self.leak = None
         inst = (1 if patched else 0) if instance is None else instance
@@ -103,6 +105,14 @@ class PortModel:
                 self.stub_names[name] = a
                 cpu.hook(a, lambda pc, name=name: self.stub(name))
             self.link_sites()
+            # the hooks (patch.HOOKS): the instruction and rts at the STE's address, the mark taken in Python
+            import json
+            for k, (pc, n, words) in enumerate(json.loads((build_dir("gauntlet") / "hooks.json").read_text())):
+                a = HOOKS_AT + HOOK_SIZE * k
+                for i, w in enumerate(list(words) + [0x4E75]):
+                    self.mem[a + 2 * i] = w >> 8
+                    self.mem[a + 2 * i + 1] = w & 0xFF
+                cpu.hook(a, self.al_hook)
             # everything else: an arcade address the patcher missed
             for p in range(4096):
                 if self.cpu.modes[p] == M.UNMAPPED:
@@ -125,8 +135,9 @@ class PortModel:
             cpu.hook(pc, self.idle)
         from patch import SITES
         excl = [a for pc, n, _ in SITES for a in range(pc, pc + n, 2)]
+        excl += [a for pc, n in HOOKS for a in range(pc, pc + n, 2)]
         if patched:
-            excl += list(range(STUBS, STUBS + 0x100, 2))
+            excl += list(range(STUBS, STUBS + 0x1000, 2))
         else:
             excl += list(range(0x4FED0, 0x4FF26, 2))         # (the slapstic's routines: the STE's replace them)
         cpu.budget(0, excl)
@@ -236,6 +247,25 @@ class PortModel:
                 self.load_window(b)
             a1 = c.a(1) & 0xFFFFFE
             self.mem[a1:a1 + 2] = v
+        elif name.startswith("pf_blk_"):                 # addi.l #130,dN; the block at a2: its two columns marked
+            r = int(name[-1])
+            c.set(r, c.d(r) + 130)
+            o = c.a(2) - self.win["vram"]                    # (each word's quarter column: 32 bytes)
+            self.pf_marks |= {((o + d) >> 5) & 255 for d in (0, 2, 128, 130)}
+        elif name == "mem_clear":                        # move.w (6,a7),d0; movea.l (8,a7),a0 (+4: the jsr)
+            sp = c.a(7)
+            w = (int(self.mem[sp + 10]) << 8) | int(self.mem[sp + 11])
+            c.set(0, (c.d(0) & 0xFFFF0000) | w)
+            a0 = int.from_bytes(bytes(self.mem[sp + 12:sp + 16]), "big")
+            c.set(8, a0)
+            if a0 < self.win["vram"] + 0x2000:
+                self.pf_marks |= set(range(256))
+            n = w - 0x10000 if w & 0x8000 else w
+            if a0 < self.win["vram"] + 0x5F00 and a0 + 2 * n > self.win["vram"] + 0x5000:
+                self.al_marked = True
+
+    def al_hook(self, pc):
+        self.al_marked = True
 
     # ---- the sound replies -------------------------------------------------------------------
     def irq6_taken(self, pc):

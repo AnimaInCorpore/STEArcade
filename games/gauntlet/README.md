@@ -1,5 +1,10 @@
 # Gauntlet (Atari Games, 1985) for the Atari STE
 
+2026-10-26: the game runs at the arcade's 60 frames a second (it ran one frame a VBL: 83%); the playfield and the
+alphanumerics are compared only where the game's writers marked them (the patched program calls the runtime), the
+picture 18-26% cheaper in play; the patcher follows jump tables (88 window addresses it had missed: a bus error in
+level 12).  Hatari: 32.6 pictures a second in light play (was 23.4).
+
 2026-10-19: incoming playfield strips use the full-word copy dispatcher, and shifted panel/shadow copies
 look up piece sizes. The renderer harness now generates its fixed map without program coverage.
 See [measurements](../../docs/virtual-scroll-performance.md#implementation-results).
@@ -8,8 +13,8 @@ See [measurements](../../docs/virtual-scroll-performance.md#implementation-resul
 
 STE port of MAME set `gauntlet` (rev 14; driver `atari/gauntlet.cpp`).  Unlike the other ports nothing is translated:
 the arcade's main CPU is a 68010, and its own program runs on the STE's 68000, patched in place.  The game's logic
-runs every VBL (50 frames a second: 83% of the arcade's 60), the picture 14-20 times a second in Hatari (more in the
-attract mode); 320 of the 336 pixels (the side panel moved left), all 240 lines, 16 colours; music, effects and
+runs at the arcade's speed (60 frames a second: six for every five VBLs), the picture 16 times a second in Hatari in
+the attract mode, 33 in light play (busy scenes cost up to twice as much); 320 of the 336 pixels (the side panel moved left), all 240 lines, 16 colours; music, effects and
 speech.  Needs a 4 MB STE and the whole machine: the program takes TOS's memory, so **Esc resets** the STE (there is
 no return to the desktop and no CRASH.TXT; a crash turns the screen red and keeps its record at $3C1000).
 
@@ -17,7 +22,7 @@ no return to the desktop and no CRASH.TXT; a crash turns the screen red and keep
 python games/gauntlet/tools/prepare.py       # verify assets/roms/gauntlet.zip, unpack to assets/roms/extracted/gauntlet/
 python port.py cover gauntlet                # the coverage the patcher starts from (~10 minutes)
 python games/gauntlet/tools/build.py         # run/gauntlet/GAUNTLET.PRG (--sim: run/gauntlet_sim/ for the tests)
-python games/gauntlet/tools/logic_test.py 8000 --seed 12   # the patched program against the original, VBL for VBL
+python games/gauntlet/tools/logic_test.py 8000 --seed 12 [--level 9]   # the patched program against the original
 python games/gauntlet/tools/render_test.py --seed 1 [--level 7]   # the pictures against the reference renderer
 python games/gauntlet/tools/sprite_test.py   # objects at every edge, 16 shifts, holes, shadows, 64 KB crossings
 python games/gauntlet/tools/sound_test.py player|driver|mame|hatari   # the sound player against its model, the driver, MAME
@@ -52,16 +57,28 @@ Jaguar pad / PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** mag
   BIOS's tables), and not two `movea.l #$800002` that are packed constants.  The few I/O sites become calls of the
   runtime (the sound command, the sound CPU's reset bit) or plain RAM (inputs, status, watchdog, IRQ acknowledge);
   the slapstic's bank switch routines become calls that copy the selected 8 KB bank into the window $38000-$3FFFF
-  (rare: a few dozen times in 15,000 frames).  An address the patcher missed is above 4 MB on the STE: a bus error,
+  (rare: a few dozen times in 15,000 frames).  The descent follows the program's jump tables (`move.w (d8,pc,dn.w),dn;
+  jmp (2,pc,dn.w)`: 7 of them, their cases 88 window addresses the coverage had not reached; level 12 ended in a bus
+  error before).  An address the patcher missed is above 4 MB on the STE: a bus error,
   never a silent wrong access.  The runtime is linked at $50000, behind the program (`src/loader.s` moves it there
   out of the .PRG); the MFP's vectors are at $280 ($100-$27F is the BIOS's jump table the game calls).
+* **The writers' marks**: the playfield's writers (three routines writing a maze cell's 2 x 2 tiles, the clear
+  routine) call runtime stubs (`SITES` pf_blk_*, mem_clear) that mark the quarter columns (16 tile rows) they write;
+  the alphanumerics' 17 writing routines (the BIOS's text, the panel, the high-score entry; logged on the reference
+  board) each have one instruction replaced by a call of a generated hook (`HOOKS`, build/gauntlet/hooks.i: the
+  mark, the instruction's own bytes, rts).  The renderer compares only what was marked (the playfield: the window's
+  quarters of a marked column), and one playfield column and one alphanumerics row a picture in turn, so a writer
+  the lists miss would show within about a second, not never.  `tools/logic_test.py` checks that every change was
+  marked by the time the game waits.
 * **The boot**: the STE starts where the BIOS hands the game over (`jmp $40000`, frame 378: the self-tests, whose ROM
   checksums would fail on the patched image, and six seconds of waiting are behind it), from the state the reference
   board has there (`tools/boot.py`: memory, registers, slapstic bank; the BIOS's own pointers relocated).
 * **The schedule**: two threads.  The picture is the foreground; at each VBL the runtime delivers the game's IRQ 4 (its
   handler at $34A) and switches to the game's own thread, which runs until it waits for the next frame: its two wait
   loops are TRAPs (#14 at $40C28 in the main loop, #13 at $40F88), which switch back.  A VBL that comes while the
-  game still runs only delivers the IRQ 4, as the arcade does.  The VBL's own work (the picture's flip, the inputs,
+  game still runs only delivers the IRQ 4, as the arcade does.  The arcade's 60 Hz: every fifth VBL a sixth IRQ 4 is
+  due, given when the game next waits at TRAP #14 (its next frame then follows at once; the main loop takes one frame
+  per IRQ 4 while it waits and loses one that comes while it runs, as on the arcade; `-D TICK50`: one a VBL).  The VBL's own work (the picture's flip, the inputs,
   the sound) runs on its own stack: the game's lives among its variables in the video RAM.
 * **The sound board** (`src/sound.s`, `tools/sound_hle.py`): the 6502 does not run.  The main CPU only needs four
   replies: the coin counts ($03, 2-bit counters per slot, one count a key press), the sound watchdog's ping ($07: 0),
@@ -72,9 +89,12 @@ Jaguar pad / PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** mag
   the patched one (the STE's map) run on the STE's schedule on two instances of the 68010 core, VBL for VBL (a VBL
   after a fixed number of the program's instructions, not counting the patched sites): the video RAM, palette, work
   RAM, EEPROM and the sound commands equal (a pointer and its STE form count as equal; the dead stack below SP is
-  left out).  Attract mode and random plays of 1-4 players, 8,000-15,000 VBLs each.  The coverage
+  left out), and every change of the playfield and the alphanumerics marked (above).  Attract mode and random plays
+  of 1-4 players, 8,000-15,000 VBLs each, and in levels 3-30 (`--level`).  The coverage
   (`ref/cover.py`) runs on the same schedule, plus the BIOS's boot on the reference board.
-* **Speed** (Hatari): the game's frame every VBL; in play its logic needs ~20-40% of a VBL.
+* **Speed** (Hatari, 2026-10-26, a scripted game in level 1 and the attract mode): the game's 60 frames a second
+  (98-100%); in play its logic needs ~25-50% of a VBL.  Pictures: attract 16.0 a second, play 32.6 (before: one
+  frame a VBL, 15.8 and 23.4).
 
 ### The picture (`src/render.s`, `tools/assets.py`)
 
@@ -82,8 +102,8 @@ Jaguar pad / PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** mag
 alphanumerics' columns 30-41, the arcade's x 240-335) at 224-319.
 
 * **Playfield**: the 512 x 512 torus kept as a bitmap in STE planes, P, and P' in the shadow colours (pens $200-$27F);
-  a tile is drawn into both when the game changes it in the visible window (compared with a copy each picture) or
-  when its colours map to other STE colours.  Two display rings of 56 words x 880 lines, drawn in turn, shown with
+  a tile is drawn into both when the game changes it in the visible window (compared with a copy where the game's
+  writers marked it) or when its colours map to other STE colours.  Two display rings of 56 words x 880 lines, drawn in turn, shown with
   the hardware scroll (base address, $ffff8265, $ffff820f); every ring position shows a fixed place of the torus, so
   moving the window copies only the strip a ring has never held, and a ring copies from P only the damage (objects,
   characters, the panel's old place).
@@ -108,10 +128,12 @@ alphanumerics' columns 30-41, the arcade's x 240-335) at 224-319.
   pixel (attract mode, play in any level with `--level`, consecutive pictures in both rings: 4,950 pictures, 0
   differ); `tools/sprite_test.py`: objects at every edge, all 16 shifts, both flips, 1-8 tiles wide, holes and
   shadows, priority, partial band lists, the transparent panel, 64 KB crossings (305 pictures, 0 differ).
-* **Speed** (Musashi, CPU + Blitter): 160k-430k cycles a picture in play (median by scenario), about 10-12k an
+* **Speed** (Musashi, CPU + Blitter): 115k-390k cycles a picture in play (median by scenario), about 10-12k an
   object with its restore; the attract mode's title (about 260 fading objects, baked again each picture) is the
-  slowest.  Per picture in a busy level: panel and restores 83k, object rows 69k, shadow rows 63k, change detection
-  (the window's tiles, the alphanumerics, the palette: `cmpm.l`) 54k, new tiles 43k, the object list 27k, baking 26k.
+  slowest.  The writers' marks (2026-10-26; `render_test.py --first 1300 --frames 1600 --every 1`, 300 pictures):
+  level 5 with three players 230.2k -> 189.8k a picture (median 208.8k -> 167.3k), level 2 with one 179.2k ->
+  138.1k (median 157.2k -> 115.6k); the comparisons 52k -> 16k.  Per picture in level 5 now: object rows 32k, the
+  object list 29k, shadow rows 27k, baking 18k, Blitter copies (restores, the panel) 18k, comparisons 16k.
 
 ### The sound (`tools/sound.py`, `src/sound_out.s`, `tools/sound_test.py`)
 

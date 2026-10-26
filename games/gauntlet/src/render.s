@@ -7,7 +7,8 @@
 ; The playfield bitmap P (PFB): the 512 x 512 torus in STE planes (32 words x 512 lines), every tile drawn with the
 ; fixed palette; P' (PFS) the same in the shadow colours (pens $200-$27F: what a motion object's pen 1 shows).  A tile
 ; is drawn into P / P' when the game changes it inside the visible window (the window's tiles are compared with a
-; copy each picture), or when its colours map to other STE colours (lists of the positions per playfield palette).
+; copy where the game's writers marked them: pf_dirty, al_dirty; gauntlet.s), or when its colours map to other STE
+; colours (lists of the positions per playfield palette).
 ;
 ; Two display rings (RING0 / RING1, drawn in turn): 56 word columns x 880 lines, STRIDE bytes a line.  Ring column c
 ; shows P's column (c - MCOL) & 31, ring line l P's line (l - GUARD) & 511: every ring position shows a fixed place of
@@ -141,6 +142,8 @@ init_video:
 	not.l	d1
 	move.l	d1,(a1)+
 	dbf	d0,.pf
+	bsr	pf_mark_all
+	st	al_dirty
 	lea	ARC_VRAM+$5000,a0
 	lea	al_shadow,a1
 	move.w	#30*128/4-1,d0
@@ -592,36 +595,61 @@ pf_update:
 	not.l	d1
 	move.l	d1,(a1)+
 	dbf	d0,.inv
-.same:	move.w	sx,d7
+	bsr	pf_mark_all
+.same:	move.w	sy,d0			; the quarters (16 tile rows) the window shows: q0 .. q0 + nq - 1 (mod 4)
+	move.w	d0,d1
+	lsr.w	#7,d0
+	move.w	d0,pf_q0
+	add.w	#239,d1
+	lsr.w	#7,d1
+	sub.w	d0,d1
+	move.w	d1,pf_nq		; (nq - 1: 1 or 2)
+	move.w	sx,d7
 	lsr.w	#3,d7			; the first column
 	moveq	#29-1,d6		; (the maze: the arcade's x 8-231)
 	tst.w	panel_open
-	beq	.col
+	beq	.sw
 	moveq	#42-1,d6		; (and the panel's playfield: 240-335)
+.sw:	move.w	pf_sweep,d0		; one visible column in turn compared anyway (a writer the marks miss shows
+	addq.w	#1,d0			; within 29 pictures)
+	cmp.w	d6,d0
+	bls.s	.sw1
+	moveq	#0,d0
+.sw1:	move.w	d0,pf_sweep
+	add.w	d7,d0
+	and.w	#63,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	lea	pf_dirty,a0
+	moveq	#-1,d1
+	move.l	d1,(a0,d0.w)
 .col:	and.w	#63,d7
+	move.w	d7,d5
+	add.w	d5,d5
+	add.w	d5,d5
+	lea	pf_dirty,a4
+	add.w	d5,a4			; (the column's four quarters)
+	tst.l	(a4)
+	beq	.ncol			; (not written since it was compared)
+	move.w	pf_q0,d5
+	move.w	pf_nq,d2
+.q:	and.w	#3,d5
+	tst.b	(a4,d5.w)
+	beq	.nq
+	sf	(a4,d5.w)		; (cleared first: a write meanwhile marks it again)
 	move.w	d7,d0
 	lsl.w	#7,d0			; (128 bytes a column)
+	move.w	d5,d1
+	lsl.w	#5,d1			; (32 bytes a quarter)
+	add.w	d1,d0
 	lea	ARC_VRAM,a0
 	add.w	d0,a0
 	lea	pf_shadow,a1
 	add.w	d0,a1
-	move.l	a0,col_base
-	move.w	sy,d5
-	lsr.w	#4,d5			; the first long (two rows)
-	moveq	#32,d4
-	sub.w	d5,d4			; longs before the column wraps
-	cmp.w	#16,d4
-	bls	.w
-	moveq	#16,d4
-.w:	moveq	#16,d3
-	sub.w	d4,d3
-	move.w	d3,col_rest		; (then from the column's start)
-	lsl.w	#2,d5
-	add.w	d5,a0
-	add.w	d5,a1
-.run:	bsr	cmp_run
-	beq	.end
-	movem.l	d4/d6-d7/a0-a1,-(sp)
+	moveq	#8,d4			; (8 longs)
+.run:	bsr	cmp_run		; (uses d3/a2/a3)
+	beq	.nq
+	movem.l	d2/d4-d7/a0-a1/a4,-(sp)
 	move.l	-4(a0),-4(a1)
 	move.l	a0,d3
 	sub.l	#ARC_VRAM+4,d3
@@ -631,18 +659,25 @@ pf_update:
 	move.w	(sp)+,d3
 	addq.w	#1,d3
 	bsr	pf_tile_new
-	movem.l	(sp)+,d4/d6-d7/a0-a1
+	movem.l	(sp)+,d2/d4-d7/a0-a1/a4
 	tst.w	d4
 	bne	.run
-.end:	move.w	col_rest,d4
-	beq	.ncol
-	clr.w	col_rest
-	move.l	col_base,a0
-	move.l	a0,a1
-	add.l	#pf_shadow-ARC_VRAM,a1
-	bra	.run
+.nq:	addq.w	#1,d5
+	dbf	d2,.q
 .ncol:	addq.w	#1,d7
 	dbf	d6,.col
+	rts
+
+; pf_mark_all: every playfield column to be compared
+pf_mark_all:
+	lea	pf_dirty,a0
+	moveq	#-1,d1
+	moveq	#64/4-1,d0
+.m:	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	dbf	d0,.m
 	rts
 
 ; cmp_run: d4.w longs at a0 / a1: Z clear at the first that differs (a0 / a1 past it, d4 the longs after it), Z set
@@ -902,6 +937,15 @@ pf_recolour:
 	not.w	d0
 	lea	pf_shadow,a0
 	move.w	d0,(a0,d3.w)
+	move.w	d3,d0			; (and its quarter column marked)
+	lsr.w	#5,d0
+	and.w	#3,d0
+	lsr.w	#7,d3
+	add.w	d3,d3
+	add.w	d3,d3
+	add.w	d0,d3
+	lea	pf_dirty,a0
+	st	(a0,d3.w)
 .next:	dbf	d7,.ent
 	movem.l	(sp)+,d7/a4
 	rts
@@ -911,9 +955,25 @@ pf_recolour:
 ; 0 nothing drawn, 1 opaque (every pixel; the panel's characters always), 2 transparent with pixels (the maze).
 RR_SIZE = 42				; a row's runs of opaque characters: the count, (c0, c1) pairs
 
-; alpha_update: the rows' words against their copy (longs: columns 0-41); a changed character drawn into AIMG
+; alpha_update: the rows' words against their copy (longs: columns 0-41); a changed character drawn into AIMG.
+; Every row after the game's writers marked the alphanumerics (al_dirty: gauntlet.s's hooks, tools/patch.py HOOKS),
+; else one row in turn (a writer the hooks miss shows within 30 pictures)
 alpha_update:
 	moveq	#0,d7			; the row
+	moveq	#30,d0
+	tst.b	al_dirty
+	bne.s	.all
+	move.w	al_sweep,d7
+	move.w	d7,d0
+	addq.w	#1,d0
+	moveq	#0,d1
+	cmp.w	#30,d0
+	bhs.s	.sw
+	move.w	d0,d1
+.sw:	move.w	d1,al_sweep
+	bra.s	.go
+.all:	sf	al_dirty		; (cleared first: a write meanwhile marks it again)
+.go:	move.w	d0,al_end
 .row:	move.w	d7,d0
 	lsl.w	#7,d0
 	lea	ARC_VRAM+$5000,a0
@@ -938,7 +998,7 @@ alpha_update:
 	tst.w	d4
 	bne	.cmp
 .nr:	addq.w	#1,d7
-	cmp.w	#30,d7
+	cmp.w	al_end,d7
 	blo	.row
 	bra	runs_update
 ; arcade column d0.w of row d7.w: the character drawn again (columns 0 and 29 are not shown)
@@ -3535,7 +3595,6 @@ nz4:		incbin	"nz4.bin"		; per byte of four 2-bit pixels: the pixels not 0 (the f
 shown_pal:	ds.w	16
 black_pal:	ds.w	16
 cur_ring:	ds.l	1
-col_base:	ds.l	1
 rf_vbls:	ds.l	1
 snap_vbls:	ds.l	1
 mo_pool:	ds.l	1
@@ -3549,7 +3608,6 @@ work_base:	ds.l	1
 flip_addr:	ds.l	1
 al_counter:	ds.l	1
 ring_index:	ds.w	1
-col_rest:	ds.w	1
 snap_tries:	ds.w	1
 runs_version:	ds.w	1
 ob_runs_v:	ds.w	1
@@ -3629,6 +3687,15 @@ row_t2:		ds.b	30
 pen_map:	ds.b	768
 pal_shadow:	ds.w	768
 pf_shadow:	ds.w	4096
+al_dirty:	ds.b	1		; the alphanumerics written since they were compared (gauntlet.s's hooks)
+	even
+al_sweep:	ds.w	1
+al_end:		ds.w	1
+pf_sweep:	ds.w	1
+pf_q0:		ds.w	1
+pf_nq:		ds.w	1
+pf_dirty:	ds.b	64*4		; per playfield column and quarter (16 tile rows): written since it was compared
+					; (gauntlet.s pf_mark; the render test's harness)
 pf_listed:	ds.b	4096
 al_shadow:	ds.w	30*64
 al_type:	ds.b	AL_N

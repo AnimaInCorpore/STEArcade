@@ -9,7 +9,9 @@
 ; runs from the VBL: the VBL delivers the game's IRQ 4 (its handler at $34A, as an interrupt) and switches to the
 ; game's own thread, which runs on its own stack until it waits for the next frame (TRAP #14 at $40C28, TRAP #13 at
 ; $40F88: tools/patch.py SCHEDULE); the trap switches back and the VBL's RTE resumes the picture.  A VBL that comes
-; while the game still runs (its frame took longer than one) delivers only the IRQ 4, as the arcade does.
+; while the game still runs (its frame took longer than one) delivers only the IRQ 4, as the arcade does.  The
+; arcade's 60 Hz: every fifth VBL a sixth tick is due, given when the game next waits (TRAP #14: its IRQ 4 at once,
+; the next frame follows); -D TICK50: one tick a VBL (83% of the arcade's speed).
 ;
 ; Registers the game's thread owns: all (its stack: the arcade's at $904F00, here ARC_VRAM + $4F00).  The picture's
 ; thread: own_stack.
@@ -89,6 +91,20 @@ rt_stubs:				; (jmp xxx.l spelled out: the assembler would shorten a jmp)
 	dc.l	slap_a0d0
 	dc.w	$4ef9
 	dc.l	slap_a0
+	dc.w	$4ef9
+	dc.l	pf_blk_d4
+	dc.w	$4ef9
+	dc.l	pf_blk_d7
+	dc.w	$4ef9
+	dc.l	pf_blk_d6
+	dc.w	$4ef9
+	dc.l	mem_clear
+	cnop	0,16
+rt_hooks:				; the alphanumerics' writers' hooks (tools/patch.py HOOKS)
+	include	"hooks.i"
+	if	(rt_hooks-rt_entry)<>(HOOKS_AT-RT_BASE)
+	fail	"rt_hooks is not at tools/patch.py's HOOKS_AT"
+	endif
 
 start:
 	move	#$2700,sr
@@ -112,6 +128,68 @@ render_loop:
 	bsr	render_frame
 	addq.l	#1,pictures
 	bra.s	render_loop
+
+; ---- the playfield's writers (tools/patch.py SITES): the columns written marked for the picture (render.s pf_dirty)
+pf_blk_d4:				; addi.l #130,d4: a 2 x 2 tile block at a2
+	bsr.s	pf_mark
+	addi.l	#130,d4
+	rts
+pf_blk_d7:
+	bsr.s	pf_mark
+	addi.l	#130,d7
+	rts
+pf_blk_d6:
+	bsr.s	pf_mark
+	addi.l	#130,d6
+	rts
+pf_mark:				; the quarter column (32 bytes: 16 rows) of each of the block's words a2, +2, +128,
+	movem.l	d0-d1/a0,-(sp)		; +130 (a2's low word: the offset in the video RAM)
+	lea	pf_dirty,a0
+	move.w	a2,d0
+	move.w	d0,d1
+	lsr.w	#5,d1
+	and.w	#255,d1
+	st	(a0,d1.w)
+	addq.w	#2,d0
+	move.w	d0,d1
+	lsr.w	#5,d1
+	and.w	#255,d1
+	st	(a0,d1.w)
+	add.w	#128,d0
+	move.w	d0,d1
+	lsr.w	#5,d1
+	and.w	#255,d1
+	st	(a0,d1.w)
+	subq.w	#2,d0
+	lsr.w	#5,d0
+	and.w	#255,d0
+	st	(a0,d0.w)
+	movem.l	(sp)+,d0-d1/a0
+	rts
+mem_clear:				; the clear routine's move.w (6,a7),d0; movea.l (8,a7),a0 (+4: the jsr): the
+	movea.l	12(sp),a0		; playfield's columns or the alphanumerics marked when the range meets them
+	move.w	10(sp),d0
+	cmpa.l	#ARC_VRAM+$5F00,a0
+	bhs.s	.n
+	movem.l	d0-d1/a0,-(sp)
+	ext.l	d0			; (the words: a positive count)
+	add.l	d0,d0
+	add.l	a0,d0			; (the end)
+	cmp.l	#ARC_VRAM+$5000,d0
+	bls.s	.pf
+	st	al_dirty
+.pf:	cmpa.l	#ARC_VRAM+$2000,a0
+	bhs.s	.p
+	lea	pf_dirty,a0
+	moveq	#-1,d1
+	moveq	#64/4-1,d0
+.m:	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	move.l	d1,(a0)+
+	dbf	d0,.m
+.p:	movem.l	(sp)+,d0-d1/a0
+.n:	rts
 
 ; Esc: the STE's reset (TOS's reset vector: $0-$7 read the ROM)
 reset_ste:
@@ -247,6 +325,15 @@ vbl:
 	lea	vbl_stack_top,sp	; little room below the program's variables)
 	movem.l	d0-d7/a0-a6,-(sp)
 	addq.l	#1,vbl_count
+	ifnd TICK50
+	subq.b	#1,tick_phase		; the arcade's 60 Hz: a sixth tick every fifth VBL, given when the game waits
+	bpl.s	.ph
+	move.b	#4,tick_phase
+	tst.b	extra_tick		; (at most one waiting: a game behind loses ticks, as the arcade does)
+	bne.s	.ph
+	st	extra_tick
+.ph:
+	endc
 	bsr	vbl_video
 	bsr	vbl_inputs
 	bsr	snd_out_vbl
@@ -305,6 +392,14 @@ trap_main:
 	move.w	#$2700,-(sp)
 	bra	irq6_chain
 .go:	addq.l	#1,frames_done
+	ifnd TICK50
+	tst.b	extra_tick		; the sixth tick of five VBLs due: the game's IRQ 4 now (as a VBL that comes while
+	beq.s	yield			; it waits), its next frame at once
+	sf	extra_tick
+	addq.l	#1,extra_ticks
+	move	#$2400,sr
+	jmp	ARC_IRQ4
+	endc
 	bra.s	yield
 
 ; TRAP #13 in place of bne.s $40F80 at $40F88 (after jsr $4802; tst.l d0): wait while d0 is not 0
@@ -585,6 +680,10 @@ vbl_count:	ds.l	1
 frames_done:	ds.l	1
 frames_drawn:	ds.l	1
 pictures:	ds.l	1
+extra_ticks:	ds.l	1		; (the sixth ticks given)
+tick_phase:	ds.b	1
+extra_tick:	ds.b	1
+	even
 boot_regs:	ds.l	18
 vbl_sp:		ds.l	1
 		ds.b	1024

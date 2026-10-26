@@ -142,6 +142,16 @@ class Harness:
 
     def put_raw(self, vram, palette, xscroll):
         mem = self.sim.mem
+        pf = bytes(vram[:0x2000])
+        old = getattr(self, "last_pf", None)
+        for q in range(256):                                 # (the game's writers mark the quarter columns they
+            if old is None or pf[q * 32:q * 32 + 32] != old[q * 32:q * 32 + 32]:   # change: gauntlet.s pf_mark)
+                mem.w8(self.sym["pf_dirty"] + q, 0xFF)
+        self.last_pf = pf
+        al = bytes(vram[0x5000:0x5F00])
+        if al != getattr(self, "last_al", None):              # (the alphanumerics' writers: gauntlet.s hooks)
+            mem.w8(self.sym["al_dirty"], 0xFF)
+        self.last_al = al
         mem.w_block(self.map["ARC_VRAM"], bytes(vram))
         mem.w_block(self.map["ARC_PALETTE"], bytes(palette))
         mem.w16(self.map["ARC_XSCROLL"], xscroll & 0xFFFF)
