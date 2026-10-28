@@ -55,8 +55,9 @@ GAMES = [
      "shoot left / straight / right: Control / Space / Alternate, or Z / X / C; pad A / B / C.\n"
      "  The joystick's fire shoots straight."),
     ("gauntlet", "GAUNTLET.PRG", "Gauntlet (Atari Games 1985)",
-     "the arcade's own 68010 program, natively: a game frame every VBL (83% of the arcade's 60 Hz), 14-20 pictures a\n"
-     "  second (Hatari); 320 of the 336 pixels (the side panel moved left), 16 colours; music, effects and speech.\n"
+     "the arcade's own 68010 program, natively, at the arcade's 60 frames a second (six for every five VBLs);\n"
+     "  16 pictures a second in the attract mode, 33 in light play (Hatari); 320 of the 336 pixels (the side panel\n"
+     "  moved left), 16 colours; music, effects and speech.\n"
      "  Needs the whole 4 MB: Esc resets the STE",
      "fire: Space, Control, Z, joystick fire, pad A.  magic (and the start): Alternate, X, pad B / C.  coins 1-4:\n"
      "  5-8 (players 1-4; pads: Option).  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),

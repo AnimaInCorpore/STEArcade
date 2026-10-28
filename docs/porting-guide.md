@@ -577,6 +577,16 @@ Bubble Bobble's own players).  Regenerating Commando's data with it gives Comman
     their masks from `engine/rt/penmasks.s` (its sprites keep theirs: their bakes cost the 99th percentile tick 12%);
   - shared row orders and Blitter routines of an image and its mirror image, equal plans stored once, the caches of
     baked graphics sized to their measured use (1942), the 68000 stack to what it uses (1943: 8 KB).
+* **Floppy disks** (2026-10-28): `tools/release.py` packs each program with LZ4 (`tools/lz4prg.py`, `lz4 -12`; the
+  frame holds the text, the data and the relocation table) behind a 0.9 KB stub (`tools/lz4stub.s`) and puts it in
+  the AUTO folder of a bootable 720 or 800 KB image (`tools/stdisk.py`) when it fits: 12 ports, not Black Tiger,
+  1943 or Double Dragon (0.99-1.26 MB packed).  The stub unpacks in place: the packer simulates the depacker byte for
+  byte and moves the frame only as far up as the output never overtakes it, so a packed program needs ~920 bytes
+  more than the program (`tools/lz4prg_test.py` runs the stub on Musashi for every port and compares with a TOS
+  load).  4.4-12.7 s at 8 MHz; a VBL handler draws the progress bar from the depacker's output pointer (a1 in the
+  interrupted registers), so the depacker runs at full speed.  Long zero runs exist (matches over 64 KB in four
+  ports): the depacker's lengths are longs.  From a floppy's AUTO folder TOS 2.06 leaves 4,108,870 bytes
+  (`tools/memfree.sh`), so R-Type (3.85 MB) starts there.
 
 * **Pitfalls met**: Musashi does not fault a word access at an odd address (`clr.w` at `bb_ssg+9`; Hatari did), so
   start every BSS block of new code with `even`; a recording of a few seconds says nothing about a game whose attract

@@ -21,7 +21,7 @@ has three parts, and the first two are checked against each other with a lock-st
 
 Layout (the conventions are in the README's "Layout"): `engine/` (shared), `games/<game>/{src,tools,ref,docs}`,
 `build/<game>/`, `run/<game>/` and `release/` (generated, not in git), `assets/roms/` (the archives; `extracted/<game>/`
-unpacked by `port.py prepare`, not in git), `tools/` (`hatari.sh`, `release.py`, `windows/`), `port.py` (the front end
+unpacked by `port.py prepare`, not in git), `tools/` (`hatari.sh`, `release.py`, `lz4prg.py` + `lz4stub.s` and `stdisk.py` for the floppy images, `windows/`), `port.py` (the front end
 and the list of the ports), `legacy/` (superseded, not built).  `engine/paths.py` knows where things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment
 variables select the tools).
 
