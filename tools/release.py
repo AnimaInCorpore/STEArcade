@@ -5,6 +5,9 @@ The ROM sets themselves are not part of it (nor of git).
 
     python tools/release.py <version> [--no-build]      -> release/STEArcade-<version>/ and release/STEArcade-<version>.zip
 
+DISKS/ gets a bootable floppy image (.ST, 720 or 800 KB: tools/stdisk.py) for every port whose program, packed
+with LZ4 into a self-unpacking program (tools/lz4prg.py), fits on one; it starts from the disk's AUTO folder.
+
 Each port is built with its default settings (no DEBUG, no AUTOPLAY, no SIM: python port.py build <game>).  A .PRG
 must be a TOS program and must not carry a debug build's file names (COUNTERS.BIN, DEBUG.BIN, ...).
 """
@@ -21,6 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import port                                         # noqa: E402  (port.GAMES: the ports and their programs)
+sys.path.insert(0, str(ROOT / "tools"))
+import lz4prg                                       # noqa: E402
+import stdisk                                       # noqa: E402
 PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python").exists() else sys.executable
 
 # game, program, title, state, buttons (keyboard Space/Control, Alternate; joystick fire; pad A, B, C)
@@ -110,6 +116,11 @@ the desktop from a hard disk or a GEMDOS drive. Every program is self-contained:
 code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.90 MB);
 if TOS says there is not enough, start without accessories and AUTO folder programs.
 
+Floppy disks: DISKS holds a bootable disk image (.ST) for each game that fits on a floppy: write it to a disk or
+put it on a floppy emulator (Gotek, GoEX, HxC ...) and boot the STE from it with no hard disk.  The game starts
+from the disk's AUTO folder, unpacks itself (a bar shows the progress: 4-13 seconds) and runs.  720 KB images are
+80 tracks, 9 sectors; 800 KB images 80 tracks, 10 sectors.  Too large for a disk: {nodisk}.
+
 Verification status
 -------------------
 
@@ -190,7 +201,13 @@ def main():
     if dirty:
         commit += " + local changes"
 
-    sums = []
+    # The files in the archive carry the commit's date (reproducible, and the date the programs were built from)
+    stamp = int(subprocess.run(["git", "log", "-1", "--format=%ct"], cwd=ROOT, capture_output=True,
+                               text=True).stdout.strip() or "0")
+    date_time = time.localtime(stamp)[:6] if stamp else (2026, 1, 1, 0, 0, 0)
+
+    (out / "DISKS").mkdir()
+    sums, disks, nodisk = [], [], []
     for game, prg, *_ in GAMES:
         if not a.no_build:
             r = subprocess.run([PY, str(ROOT / "port.py"), "build", game], cwd=ROOT, capture_output=True, text=True)
@@ -200,19 +217,27 @@ def main():
         data = check(ROOT / "run" / game / prg)
         (out / prg).write_bytes(data)
         sums.append("%s  %s" % (hashlib.sha256(data).hexdigest(), prg))
-        print("%-13s %8d bytes" % (prg, len(data)))
+        packed, info = lz4prg.pack(data)
+        img = stdisk.disk(prg, packed, date_time)
+        if img is None:
+            nodisk.append(prg)
+            note = "packed %d: no disk" % len(packed)
+        else:
+            st = "DISKS/" + prg.replace(".PRG", ".ST")
+            (out / st).write_bytes(img)
+            disks.append(st)
+            sums.append("%s  %s" % (hashlib.sha256(img).hexdigest(), st))
+            note = "packed %d: %s (%d KB)" % (len(packed), st, len(img) // 1024)
+        print("%-13s %8d bytes  %s" % (prg, len(data), note))
 
     text = README.format(version=a.version, underline="=" * (len("STE Arcade ") + len(a.version)), commit=commit,
-                         games=game_text(), sums="\n".join(sums) + "\n")
+                         games=game_text(), sums="\n".join(sums) + "\n",
+                         nodisk=", ".join(p[:-4] for p in nodisk) or "none")
     (out / "README.TXT").write_bytes(text.replace("\n", "\r\n").encode("ascii"))
 
-    # The files in the archive carry the commit's date (reproducible, and the date the programs were built from)
-    stamp = int(subprocess.run(["git", "log", "-1", "--format=%ct"], cwd=ROOT, capture_output=True,
-                               text=True).stdout.strip() or "0")
-    date_time = time.localtime(stamp)[:6] if stamp else (2026, 1, 1, 0, 0, 0)
     archive = ROOT / "release" / (name + ".zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for f in ["README.TXT"] + [g[1] for g in GAMES]:
+        for f in ["README.TXT"] + [g[1] for g in GAMES] + disks:
             info = zipfile.ZipInfo("%s/%s" % (name, f), date_time=date_time)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16

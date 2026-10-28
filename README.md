@@ -97,7 +97,8 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
                        ref/probes/: the numbered one-off experiments of the early ports, kept for the record
       docs/            screenshot.png, rom_manifest.json, notes and reference data (palettes, coverage, captures)
     tools/             hatari.sh (run, press keys, screenshot, dump memory in the F030Arcade Hatari), hddtest.sh (engine/rt/hdd.s
-                       on Hatari's ACSI / IDE disks), release.py, windows/
+                       on Hatari's ACSI / IDE disks), release.py, lz4prg.py + lz4stub.s (self-unpacking programs;
+                       lz4prg_test.py runs the stub on Musashi), stdisk.py (bootable .ST images), windows/
                        (PowerShell helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
     docs/              architecture.md, porting-guide.md, sprite-preparation.md, reference/ (68000 and Z80 manuals)
     assets/roms/       the ROM archives (assets/roms/README.md); extracted/<game>/ is unpacked by port.py prepare (not in git)
@@ -118,7 +119,10 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
 Input: keyboard, the two IKBD joysticks and two Jaguar pads / PowerPads in every port (`docs/architecture.md`,
 "Input").  A release: `python port.py release <version>` builds every port and packs the self-contained programs
 with a README.TXT into `release/STEArcade-<version>.zip` (`tools/release.py`); then tag `v<version>` and attach the
-zip to a GitHub release (`gh release create`).
+zip to a GitHub release (`gh release create`).  The release also gets `DISKS/<GAME>.ST`: a bootable 720 or 800 KB
+floppy image for every port that fits, its program packed with LZ4 (`lz4 -12`, the `lz4` command is needed) into a
+self-unpacking program in the disk's AUTO folder; the stub unpacks in place behind a progress bar (4-13 s at
+8 MHz), needs ~0.9 KB more memory than the program and is checked by `tools/lz4prg_test.py` for every port.
 
 Reading order: `docs/architecture.md` (how a port works), `docs/porting-guide.md` (method, MAME check, lessons),
 then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
