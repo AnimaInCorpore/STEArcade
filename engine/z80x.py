@@ -76,7 +76,8 @@ class Config:
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
                  table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
                  alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0, cpu030=None,
-                 inline_limit=0x8000, inline_rst=False, inline_jumps=False):
+                 inline_limit=0x8000, inline_rst=False, inline_jumps=False,
+                 rst28_counts=None):
         self.prefix = prefix
         # the 68030 forms (F030Arcade's Falcon ports; default: the STE_XCPU environment variable, the tests): the high
         # byte of a pair moved with shifts in registers, not through the 68000 stack.  The 68000 pays 6 + 2n cycles a
@@ -105,6 +106,8 @@ class Config:
         self.nmi_token = nmi_token
         self.table_entries = table_entries
         self.rst28_tables = rst28_tables
+        self.rst28_counts = rst28_counts    # {address after an rst $28: entries}: tables whose end the scan can not see
+                                            # (Donkey Kong Junior $1648: the code after it reads as two more entries)
         self.hl_tables = hl_tables
         self.iff_sym = iff_sym          # a byte the runtime reads for the IRQ gate (ei / di); None: ei / di emit nothing
                                         # (the ports that deliver interrupts only at their idle hook and never read it)

@@ -47,7 +47,8 @@ def generate_program(rom, roots, dyn, cfg, hooks=(), extra_roots=(), emitter=Emi
     """-> (code lines, table lines, report, emitter) of one program.  roots: entry pcs;
     dyn: pcs seen executing (coverage), seeds for the discovery and known code.  emitter / kw: see compile_code."""
     code, tables = discover(rom, list(roots) + sorted(dyn) + list(extra_roots), known=dyn,
-                            rst28_tables=cfg.rst28_tables, hl_tables=cfg.hl_tables)
+                            rst28_tables=cfg.rst28_tables, hl_tables=cfg.hl_tables,
+                            rst28_counts=getattr(cfg, "rst28_counts", None))
     joins = set(roots) | set(hooks)
     for nxt, targets in tables.values():
         joins |= set(targets)
