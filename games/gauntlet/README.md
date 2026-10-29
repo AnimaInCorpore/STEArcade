@@ -56,8 +56,11 @@ Jaguar pad / PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** mag
   instructions and recursive descent from them: 1,904 places), the long words of a few data tables ($D800, $9DE6, the
   BIOS's tables), and not two `movea.l #$800002` that are packed constants.  The few I/O sites become calls of the
   runtime (the sound command, the sound CPU's reset bit) or plain RAM (inputs, status, watchdog, IRQ acknowledge);
-  the slapstic's bank switch routines become calls that copy the selected 8 KB bank into the window $38000-$3FFFF
-  (rare: a few dozen times in 15,000 frames).  The descent follows the program's jump tables (`move.w (d8,pc,dn.w),dn;
+  the slapstic's bank switch routines become calls that copy the selected 8 KB bank into the window's first mirror
+  $38000-$39FFF, the only one the game reads (the others see only the slapstic's own accesses), with the interrupt
+  mask lowered to 5 so the borders' MFP interrupts are not held back (rare: a few dozen times in 15,000 frames, but
+  ~3 in a frame when they come; the old copy into all four mirrors at mask 7 left ~4% of the attract mode's pictures
+  with closed borders).  The descent follows the program's jump tables (`move.w (d8,pc,dn.w),dn;
   jmp (2,pc,dn.w)`: 7 of them, their cases 88 window addresses the coverage had not reached; level 12 ended in a bus
   error before).  An address the patcher missed is above 4 MB on the STE: a bus error,
   never a silent wrong access.  The runtime is linked at $50000, behind the program (`src/loader.s` moves it there

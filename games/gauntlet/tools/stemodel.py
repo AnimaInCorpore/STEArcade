@@ -196,11 +196,10 @@ class PortModel:
 
     # ---- the patched program's runtime calls --------------------------------------------
     def load_window(self, bank):
-        """the STE's bank switch: the bank into all four mirrors of $38000-$3FFFF"""
+        """the STE's bank switch (gauntlet.s load_bank): the bank into the first mirror, $38000-$39FFF, the only one
+        the game reads; the other three keep what they had"""
         self.bank = bank
-        data = np.frombuffer(self.banks[bank], np.uint8)
-        for k in range(4):
-            self.mem[0x38000 + k * 0x2000:0x3A000 + k * 0x2000] = data
+        self.mem[0x38000:0x3A000] = np.frombuffer(self.banks[bank], np.uint8)
 
     def link_sites(self):
         """each site: jsr (or jmp) the runtime's routine, nops to the original length"""

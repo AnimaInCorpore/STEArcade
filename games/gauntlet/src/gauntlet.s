@@ -364,7 +364,10 @@ vbl_nested:				; the game's frame is still running: only its IRQ 4 (the CPU's fr
 	jmp	ARC_IRQ4		; stack)
 
 ; IRQ 6 for each sound reply waiting (the replies, oldest first, through the game's handler), then the frame on the
-; stack (the caller's RTE target).  Interrupts off.
+; stack (the caller's RTE target).  Interrupts off.  The handler runs at mask 5, not the arcade's 6: every interrupt of
+; the game comes through the VBL (level 4), still masked, while the MFP's (level 6: the borders' Timer A and B, the
+; keyboard; none enters the game) are not held back (a few replies at mask 6 kept the top border closed in ~2% of
+; the attract mode's pictures, 2026-10-29).
 irq6_chain:
 	movem.l	d0/a0,-(sp)
 	bsr	snd_pop
@@ -373,7 +376,7 @@ irq6_chain:
 	movem.l	(sp)+,d0/a0
 	move.l	#irq6_chain,-(sp)	; (after the handler: the next one)
 	move.w	#$2700,-(sp)
-	move	#$2600,sr
+	move	#$2500,sr
 	jmp	ARC_IRQ6
 .done:	movem.l	(sp)+,d0/a0
 	rte
@@ -492,24 +495,33 @@ bank_of:
 .no:	moveq	#-1,d0
 	rts
 
-; d0 = bank: its 8 KB into $38000-$3FFFF (all four mirrors)
+; d0 = bank: its 8 KB into $38000-$39FFF, the first of the window's four mirrors: the only one the game reads (the
+; coverage with the mirrors apart, 2026-10-29: the others see only the slapstic's own accesses, $416C0-$416EA and
+; $4FED0, whose reads go nowhere but a write the arcade's ROM loses).  ~43k cycles; the game's caller masks all
+; interrupts (SR $2710), so the copy lowers the mask to 5: the MFP's (the borders' Timer A and B, the keyboard)
+; come on time, the VBL (the game's IRQ 4) still waits as on the arcade.  Uses d0-d1/a0-a2.
 load_bank:
 	cmp.w	cur_bank,d0
 	beq.s	.same
 	move.w	d0,cur_bank
+	move	sr,-(sp)
+	move	(sp),d1
+	and.w	#$0700,d1
+	cmp.w	#$0500,d1
+	bls.s	.ipl
+	move	#$2500,sr
+.ipl:	movem.l	d2-d7,-(sp)
 	lea	slapstic_banks,a0
 	mulu	#$2000,d0
 	add.l	d0,a0
 	lea	$38000,a1
-	moveq	#4-1,d1
-.m:	move.l	a0,a2
-	move	#$2000/16-1,d0
-.c:	move.l	(a2)+,(a1)+
-	move.l	(a2)+,(a1)+
-	move.l	(a2)+,(a1)+
-	move.l	(a2)+,(a1)+
+	move	#$2000/32-1,d0
+.c:	movem.l	(a0)+,d1-d7/a2
+	movem.l	d1-d7/a2,(a1)
+	lea	32(a1),a1
 	dbf	d0,.c
-	dbf	d1,.m
+	movem.l	(sp)+,d2-d7
+	move	(sp)+,sr
 .same:	rts
 
 ; ---- input -------------------------------------------------------------------------------------------------------
