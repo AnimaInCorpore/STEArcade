@@ -57,7 +57,7 @@ def expected(m, pmap):
 class Harness:
     """the simulator build and the reference in lock-step (logic_test.py's schedule), a picture each frame"""
 
-    def __init__(self, seed, prof=False, tag='mrdo_sim'):
+    def __init__(self, seed, prof=False, tag='mrdo_sim', sound=False):
         run = ROOT / 'run' / tag
         self.s = s = Sim(str(run / 'MRDO.PRG'), run_dir=run, ram_kib=16384)
         self.sym = sym = {k: v + s.base for k, v in s.symbols(BUILD / (tag + '.map')).items()}
@@ -66,6 +66,8 @@ class Harness:
         self.a6 = sym['g_block'] + 0x8000
         self.m = m = MrDoPort(*cover.dsw(seed))
         m.cpu.afmask = 0xc1
+        if sound:
+            m.sound_log = []                    # (the SN76489 bytes from the boot on: tools/sound_test.py)
         for a, x in ((IN_P1, 0xFF), (IN_P2, 0xFF), (IN_DSW1, m.dsw1), (IN_DSW2, m.dsw2)):
             self.mem.w8(self.addr(a), x)
         self.seed = seed

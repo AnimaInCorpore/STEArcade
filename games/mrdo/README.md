@@ -11,16 +11,18 @@ mode; the other five differ in a tile column written at the frame's end); the Z8
 the 68000 in lock-step with the reference's port schedule (12 seeds, 144,000 frames exact); the renderer draws every
 picture exact against the reference (32,000 pictures of four seeds: the title's and intermissions' scrolling, every
 scene, two players; 476 made-up pictures of sprites at the edges, every scroll value).  In Hatari the logic keeps the
-arcade's 60 frames a second in most of play with 44-50 pictures a second (about 23 on the title).  No sound yet; not
-registered in `port.py` yet.
+arcade's 60 frames a second in most of play with 40-50 pictures a second (about 22 on the title).  Sound: the two
+SN76489s' tones on the YM2149 (`src/sound.s`).  Not registered in `port.py` yet.
 
 * `src/mrdo.s` the runtime (schedule, IRQ delivery, borders, inputs, sound bytes into a ring, crash dump);
-  `src/render.s` the picture (two tile layers composited per cell, the background scrolled; generated sprite code)
+  `src/render.s` the picture (two tile layers composited per cell, the background scrolled; generated sprite code);
+  `src/sound.s` the sound (the SN76489s' registers, their tones on the YM)
 * `tools/prepare.py` the ROMs; `tools/machine.py` the reference machine (`MrDo`) and the port's schedule (`MrDoPort`);
   `tools/gen.py` the translation; `tools/assets.py` the graphics, colours and sprite code; `tools/build.py`;
   `tools/logic_test.py` the lock-step test; `tools/render_test.py` the pictures against the reference;
-  `tools/sprite_test.py` made-up pictures (edges, shifts, 64 KB crossings, scroll values); `tools/bench.sh` Hatari's
-  speed (macOS; `AVI=1`: stills), `tools/hatari.ps1` the same run on Windows (counters, AVI)
+  `tools/sprite_test.py` made-up pictures (edges, shifts, 64 KB crossings, scroll values); `tools/sound.py` the
+  sound player's model, `tools/sound_test.py` the player against it; `tools/bench.sh` Hatari's speed (macOS;
+  `AVI=1`: stills, `SOUND=1`: the sound, also as a WAV), `tools/hatari.ps1` the same run on Windows (counters, AVI)
 * `ref/cover.py` coverage; `ref/pens.py` the pens shown (the palette fit); `ref/mame_cmp_mrdo.py` the reference
   against MAME's picture
 
@@ -167,10 +169,29 @@ Measured (`tools/render_test.py`, Musashi, CPU + Blitter bus cycles a picture, e
 border event; per 2 s the logic 59-60 arcade frames a second in 33 of 40 windows (the first one boots; 38-55 in six
 others: scene starts and long maze searches), pictures 44-50 in play, 22-24 on the title.
 
+## Sound (src/sound.s, tools/sound.py)
+
+The board's two SN76489s (4.1 MHz each, written by the main Z80 at $9801 / $9802; MAME `sn76496.cpp`) go to the
+STE's YM2149.  The runtime puts the game's bytes into a ring (`md_sound*`); once an arcade frame, before the IRQ,
+`snd_frame` writes them into two register files as MAME does (a latch byte selects a register and writes its low 4
+bits; a data byte writes a tone period's bits 4-9, or a volume's low 4 bits; after reset every volume is the loudest
+and every period 0, which counts as 1024), then puts the voices on the YM:
+
+* the three loudest audible of the six tone voices (ties: the lower voice), a YM channel that holds a chosen voice
+  keeping it (Pooyan's and Gyruss's method); in play 0-5 voices sound at once, 1.3-1.5 on average;
+* periods N -> N * 40 / 41 (the SN's 4.1 MHz / (32 N) against the YM's 2 MHz / (16 P)); attenuation a (2 dB a step)
+  -> the YM's fixed level 15 - round(2 a / 3) (~3 dB a step), 15 -> silent; only the changed registers written;
+* the noise is left out: the game never programs it (no write to register 6 in any of the coverage's seeds).
+
+`tools/sound_test.py` (the game in lock-step as `render_test.py`, the reference logging the bytes from the boot on):
+the register files, latches, the YM's channel choice and registers equal to `tools/sound.py` every frame: seeds 1,
+7, 10, 12 (3,000-8,000 frames, ~400,000 SN bytes).  Hatari (`SOUND=1 AVI=1 tools/bench.sh 2500`): the attract mode
+silent as on the reference, the music and effects from the coin on, pitches 270-1,500 Hz.  The sound costs ~2-3k
+68000 cycles a frame: `tools/bench.sh 4000` 3,237 -> 3,048 pictures (-6%), the logic's pace unchanged.
+
 ## Next steps
 
 1. Hatari: the logic's pace with the long search frames (the dips to 38-55 frames a second); yield points if they
    show in play.  The title's scroll compositing (~180k a picture) could use the Blitter for rows without foreground.
 2. Per-scene palettes (exact colours).
-3. The sound: the two SN76489s on the YM2149 (three tone voices and noise each).
-4. Registration in `port.py` (GAMES, COVER, TESTS) and `tools/release.py`.
+3. Registration in `port.py` (GAMES, COVER, TESTS) and `tools/release.py`.

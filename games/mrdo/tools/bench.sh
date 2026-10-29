@@ -4,7 +4,8 @@
 #
 #   games/mrdo/tools/bench.sh [VBLs]      default the AUTOPLAY script (a coin, start, play from the VBL);
 #                                         EXTRA="-D ...": more build.py options; AVI=1: the picture recorded
-#                                         (run/mrdo_bench/mrdo.avi) and a still every EVERY VBLs (ffmpeg)
+#                                         (run/mrdo_bench/mrdo.avi) and a still every EVERY VBLs (ffmpeg); SOUND=1:
+#                                         Hatari's sound on (in the AVI too: mrdo.wav)
 #
 # Its own Hatari, killed by its PID only (other sessions run Hatari too).  Reports the logic (arcade frames a second;
 # the arcade: 59.94) and the pictures a second separately, from the first arcade frame on.  After Time Pilot's.
@@ -17,9 +18,10 @@ $PY games/mrdo/tools/build.py --debug -D AUTOPLAY=1 --frames $FRAMES --tag mrdo_
 rm -f $BENCH/COUNTERS.BIN $BENCH/RATE.BIN $BENCH/CRASH.TXT $BENCH/mrdo.avi $BENCH/still_*.png
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
+SND=off; [ -n "$SOUND" ] && SND=44100
 REC=(); [ -n "$AVI" ] && REC=(--borders true --avirecord true --avi-vcodec bmp --avi-file mrdo.avi)
 (cd $BENCH && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
-  --sound off --confirm-quit off --statusbar false --fast-forward true --log-file hatari.log "${REC[@]}" MRDO.PRG) \
+  --sound $SND --confirm-quit off --statusbar false --fast-forward true --log-file hatari.log "${REC[@]}" MRDO.PRG) \
   > /dev/null 2>&1 &
 HP=$!
 for i in $(seq ${WAIT:-900}); do sleep 1; [ -f $BENCH/COUNTERS.BIN ] || [ -f $BENCH/CRASH.TXT ] && break; kill -0 $HP 2>/dev/null || break; done
@@ -47,4 +49,5 @@ P
 if [ -n "$AVI" ] && [ -f $BENCH/mrdo.avi ]; then
   ffmpeg -v error -i $BENCH/mrdo.avi -vf "select=not(mod(n\,${EVERY:-300}))" -fps_mode passthrough $BENCH/still_%03d.png
   echo "stills: $(ls $BENCH/still_*.png | wc -l)"
+  [ -n "$SOUND" ] && ffmpeg -v error -y -i $BENCH/mrdo.avi -vn $BENCH/mrdo.wav && echo "audio: $BENCH/mrdo.wav"
 fi

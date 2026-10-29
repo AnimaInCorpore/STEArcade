@@ -27,7 +27,7 @@ def main():
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'prepare.py')], check=True)
     (build / 'mrdo.rom').write_bytes(gen.image()[:0x8000])
     try:
-        import assets                         # (the renderer's graphics; none yet: render.s is a stand-in)
+        import assets                         # (the renderer's graphics, colours and sprite code)
     except ImportError:
         assets = None
     if assets and (args.assets or not (build / 'md_assets.s').exists()):
@@ -38,8 +38,6 @@ def main():
     print('main:', {k: v for k, v in report.items() if k not in ('unsupported', 'tables', 'io')},
           len(report['unsupported']), 'unsupported')
     defs = list(args.defines)
-    if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')              # (no sound driver yet)
     tag = args.tag or ('mrdo_sim' if args.sim else "mrdo")
     out = ROOT / 'run' / tag / 'MRDO.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

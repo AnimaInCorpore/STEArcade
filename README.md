@@ -39,7 +39,7 @@ reference renderer and MAME.
 |  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 | <a href="games/pooyan/README.md"><img src="games/pooyan/docs/screenshot.png" width="160" alt="Pooyan"></a> | [Pooyan](games/pooyan/README.md) | Z80 (translated) + Z80 sound (Time Pilot's board; not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed, 50 pictures a second in most of play |
-| <a href="games/mrdo/README.md"><img src="games/mrdo/docs/screenshot.png" width="160" alt="Mr. Do!"></a> | [Mr. Do!](games/mrdo/README.md) | Z80 (translated; two SN76489s: not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed in most of play, 44-50 pictures a second |
+| <a href="games/mrdo/README.md"><img src="games/mrdo/docs/screenshot.png" width="160" alt="Mr. Do!"></a> | [Mr. Do!](games/mrdo/README.md) | Z80 (translated; two SN76489s on the YM) | ![Incomplete](docs/status/incomplete.svg)<br>Not registered yet; full speed in most of play, 40-50 pictures a second |
 
 Port status (2026-10-22; based on the linked port reports):
 
