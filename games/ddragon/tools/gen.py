@@ -219,6 +219,7 @@ def program(cover):
     prog.slot_ctx = bank_ctx
     prog.ret_weights = RET_WEIGHTS
     prog.fast_forms = True                      # (the 68030 forms the 68000 runs too: m6809x Program.fast_forms)
+    prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
     return prog
 
 

@@ -83,6 +83,7 @@ def program(cover):
                           after=lambda v, ins: AFTER.get(v), indirect_slots=ind,
                           natives={v: l for v, l in NATIVES.items() if '%04X' % v not in os.environ.get('GY_NO_NATIVES', '')},
                           opcode_reader=lambda rd: konami1_opcode(rd))
+    prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
     return prog
 
 

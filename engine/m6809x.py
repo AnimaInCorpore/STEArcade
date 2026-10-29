@@ -172,6 +172,9 @@ class Program:
                  inline_calls=None, opcode_reader=None, indirect_slots=None):
         self.name, self.prefix = name, prefix
         self.c030 = CPU >= 68020
+        # call_summaries (set after construction): a direct call's live flags from its callees' summaries (what they
+        # read first, what they pass through) instead of the union of every caller's needs at their returns
+        self.call_summaries = False
         # fast_forms (set after construction): the 68030 forms the 68000 can run too, for the 68000 (flag fixing through
         # d7, the return branch taken on the match, page checks against slot_ctx, the return compares by ret_weights)
         self.fast_forms = False
@@ -342,6 +345,56 @@ def function_returns(prog, code):
     return out
 
 
+def pass_through(prog, code, ret_points):
+    """{v: the flags that may reach a return of the function v belongs to without being defined} (call_summaries):
+    the liveness with no instruction reading a flag and every return reading all; a call passes what its callee passes
+    and its return point passes on; computed jumps, RTI and the like count as passing everything (conservative)"""
+    succ, calls = {}, {}
+    for v, ins in code.items():
+        nv = next_virtual(prog, v, ins)
+        s = []
+        if ins.flow in ("seq", "jcc") and nv is not None:
+            s.append(nv)
+        if ins.flow in ("jmp", "jcc") and ins.target is not None:
+            s += branch_targets(prog, v, ins)
+        if ins.flow in ("call", "icall"):
+            calls[v] = call_targets(prog, code, v, ins)
+        succ[v] = s
+    live = {v: 0 for v in code}
+    order = sorted(code, reverse=True)
+    changed = True
+    while changed:
+        changed = False
+        for v in order:
+            ins = code[v]
+            fl = ins.flow
+            if v in prog.hooks or fl in ("ret", "rti", "ijmp", "swi", "wait", "halt"):
+                out = NZVC
+            elif fl in ("call", "icall"):
+                nv = next_virtual(prog, v, ins)
+                after = live.get(nv, NZVC) if nv is not None else NZVC
+                tg = calls[v]
+                if not tg or fl == "icall":
+                    out = after                  # (an unknown callee: taken as passing everything)
+                else:
+                    through = 0
+                    for t in tg:
+                        through |= live.get(t, NZVC)
+                    out = through & after
+            else:
+                out = 0
+                for t in succ[v]:
+                    out |= live.get(t, NZVC)
+                if fl in ("seq", "jcc") and next_virtual(prog, v, ins) is None:
+                    out = NZVC
+            d, u = defs_uses(ins)
+            li = out & ~d
+            if li != live[v]:
+                live[v] = li
+                changed = True
+    return live
+
+
 def liveness(prog, code, ret_points=None, intrinsic=False):
     """live_out[v] = flags read after the instruction at v.  A call's are its callee's (the flags the callee does not
     define reach its returns, whose live sets are what the return points of its callers read: `ret_points`, a
@@ -351,6 +404,12 @@ def liveness(prog, code, ret_points=None, intrinsic=False):
     returns (intrinsic: the liveness with returns reading nothing and calls passing everything on: entry_reads)."""
     if ret_points is None:
         ret_points = function_returns(prog, code)
+    # call_summaries: a direct call's live flags are what its callees read before defining them (the liveness with
+    # returns reading nothing) and, of what is live at its return point, what they may pass through unchanged
+    summaries = None
+    if getattr(prog, "call_summaries", False) and not intrinsic:
+        reads0, _ = liveness(prog, code, ret_points, intrinsic=True)
+        summaries = (reads0, pass_through(prog, code, ret_points))
     entry_reads = None
     if prog.indirect_live and not intrinsic:
         li0, _ = liveness(prog, code, ret_points, intrinsic=True)
@@ -412,6 +471,13 @@ def liveness(prog, code, ret_points=None, intrinsic=False):
                     out |= live_in[t]
             elif fl in ("rti", "ijmp", "swi", "wait", "halt"):
                 out = NZVC
+            elif fl == "call" and summaries is not None and calls[v]:
+                reads0, through = summaries
+                nv = next_virtual(prog, v, ins)
+                after = live_in.get(nv, NZVC) if nv is not None else NZVC
+                out = 0
+                for t in calls[v]:
+                    out |= reads0.get(t, NZVC) | (through.get(t, NZVC) & after)
             elif fl in ("call", "icall"):
                 tg = calls[v]
                 if not tg or fl == "icall" and v not in prog.targets:
@@ -1989,12 +2055,25 @@ class Emitter:
             self.e("bsr m6809_daa")
             return
         if mn in ("andcc", "orcc"):
-            # the CC byte: N Z V C in the CCR, the others in the context
-            self.cc_byte_d7()
-            self.e("%s.b #$%02X,d7" % ("and" if mn == "andcc" else "or", ins.arg))
-            self.e("move.b d7,%d(a6)" % CCHI_OFF)
-            self.e("and.w #$0F,d7")
-            self.e("move.w d7,ccr")
+            # the CC byte: N Z V C in the CCR (the 6809's bit positions), E F H I in the context byte (its low nibble
+            # is never read): each part changed in place, only when the immediate touches it (the CCR's X kept)
+            hi, lo = ins.arg & 0xF0, ins.arg & 0x0F
+            ctx = None
+            if mn == "andcc" and hi != 0xF0:
+                ctx = "and.b #$%02X,%d(a6)" % (hi | 0x0F, CCHI_OFF)
+            elif mn == "orcc" and hi:
+                ctx = "or.b #$%02X,%d(a6)" % (hi, CCHI_OFF)
+            if ctx:
+                keep = self.live_flags(v) & NZVC     # (the op on the context byte spoils N Z V C: kept when live)
+                if keep:
+                    self.e("move.w sr,d7")
+                self.e(ctx)
+                if keep:
+                    self.e("move.w d7,ccr")
+            if mn == "andcc" and lo != 0x0F:
+                self.e("andi #$%02X,ccr" % (lo | 0xF0))
+            elif mn == "orcc" and lo:
+                self.e("ori #$%02X,ccr" % lo)
             return
         raise Unsupported(ins.text)
 
