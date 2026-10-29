@@ -4,7 +4,8 @@
 
 MAME set `pooyan` (the Konami parent; the zip also holds the clones `pooyans` and `pootan`).  Started 2026-10-29:
 the reference board, its check against MAME, coverage, the translation, the runtime and the renderer, all exact
-against the reference; full speed in Hatari.  No sound yet.  The board is Time Pilot's sibling (MAME: "very similar
+against the reference; full speed in Hatari.  Sound (2026-10-29): the sound board's Z80 driver translated too, its
+two AY-3-8910 mixed onto the STE's YM2149.  The board is Time Pilot's sibling (MAME: "very similar
 to Time Pilot"), so the port follows `games/timeplt`: a 3.072 MHz Z80 statically translated to 68000 code and checked
 in lock-step, a runtime that delivers the NMI at the game's idle point, a Blitter renderer.
 
@@ -18,6 +19,10 @@ python games/pooyan/tools/build.py         # -> run/pooyan/POOYAN.PRG (--sim: ru
 python games/pooyan/tools/logic_test.py 6000 --seed 4  # the translation in lock-step with the reference
 python games/pooyan/tools/render_test.py 3000 --start 1000 --every 3   # the STE picture against the reference
 python games/pooyan/tools/sprite_test.py   # made-up pictures: both edges at every shift, holes, 64 KB crossings
+python games/pooyan/ref/sound_cmp.py 1 8000            # the STE's sound schedule against the MAME-timed sound board
+python games/pooyan/ref/cover_sound.py <seed> 20000    # sound coverage: seed 0 the game's commands, 1-3 random
+python games/pooyan/tools/build.py --sim --tag pooyan_snd && python games/pooyan/tools/sound_test.py 6000 --seed 1
+games/pooyan/tools/bench.sh 6000           # Hatari speed (its own Hatari; EXTRA="-D NOSOUND=1": without sound)
 powershell -File games/pooyan/tools/hatari.ps1 -Frames 3000   # Hatari: counters, an AVI, stills (DEBUG + AUTOPLAY)
 ```
 
@@ -39,7 +44,8 @@ coin counters, Q7 flip).  Unlike Time Pilot: no beam register (no sprite multipl
 without priority, tiles and sprites 4 bits a pixel (256 tiles, 64 sprite codes), 24 sprites drawn first to last (the
 last on top), a sprite pen transparent where its lookup entry is colour 0.  Colours: one 32 x 8 PROM through
 resistor networks (MAME's `compute_resistor_weights`, `engine/mamegfx.py`): 19 distinct colours, tiles from 16-31,
-sprites from 0-15.  The sound board is Time Pilot's (`timeplt_audio`: a Z80 and two AY-3-8910, ROMs `xx.7a`, `xx.8a`).
+sprites from 0-15.  The sound board is Time Pilot's (`timeplt_audio`: a Z80 and two AY-3-8910, ROMs `xx.7a`, `xx.8a`;
+see Sound).
 
 The foreground is a task loop: `$020F` takes the entry at `$8800 + [$88A1]`; bit 7 set means empty, and the loop
 calls `$0254` (a ROM check of the NMI handler, `$208C`, or the blinking 1UP / 2UP labels rewritten from RAM: the same
@@ -104,6 +110,56 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
   crash, no late border event; in play **60 arcade frames and 50 pictures a second** in most 2-second windows, 28-42
   pictures at a round's start (many new tiles baked); 57.9 frames and 46.3 pictures a second over the whole run with
   the boot and the attract mode.
-* Not done: sound (Time Pilot's board: none of the ports has it yet), the cocktail flip, a recorded play
+* Not done: the sound board's RC filters (see Sound), the cocktail flip, a recorded play
   (`PLAYBACK`), registration in `port.py`, `tools/release.py` and the README table's screenshot; full-game Hatari
   verification.
+
+## Sound
+
+The board (MAME 0.286 `shared/timeplt_a.cpp`, the authoritative source tree of `AGENTS.md`; `tools/sound.py`): a Z80 at
+14.318181 MHz / 8 = 1.789772 MHz, ROM $0000-$2FFF (Pooyan's 8 KB at $0000-$1FFF), RAM $3000-$33FF (mirrored to
+$3FFF), AY #1 data $4000 / address $5000, AY #2 data $6000 / address $7000 (mirrored over $0FFF), stores to $8000-$FFFF
+set six RC low-pass filters (the address bits).  Both AYs at 1.789772 MHz; AY #1's port A reads the command latch,
+its port B the timer (`timeplt_timer[(cycles / 512) % 10]`: bit 7 rises every 5120 cycles, 349.6 a second).  The main
+CPU's latch Q1 rising edge raises the IRQ (HOLD_LINE, IM 1).  The AY details follow `devices/sound/ay8910.cpp`: an
+address write with a non-zero upper nibble deselects the chip, reads are masked to the register's width, a port read
+puts the port's value into its register.  Q2 (the amplifier's mute) is never written by the game (the coverage).
+
+Pooyan's driver: the loop's head $00CB (`ei`), the waits for the timer's edge, then six slots ($3000-$300B: an effect
+and its state; slot k drives AY (k-1)/3's voice (k-1)%3), each followed by an `ei; nop; nop; di` window; the IRQ handler
+$0038 reads the latch and puts the command into a slot ($00-$2A; bit 7: stop it).  It uses no noise, no envelope and
+none of the RAM's mirrors; the timer is read only in the waits.  The main CPU's commands: 0-$2A and stops.
+
+* **Reference** (`MameBoard`): the sound CPU at its clock, each command at the main CPU's cycle in MAME's schedule
+  (`TimedPooyan`), the IRQ taken at the first instruction with interrupts enabled.  **The STE's schedule**
+  (`TickBoard`, Gyruss's): each arcade frame the commands of the frame before each run the IRQ handler, then the frame's
+  5.768 ticks (16.16 fixed point) run the loop from $00DA (after the waits) to $00CB.  `ref/sound_cmp.py` feeds both
+  with the same game: every channel's audible states (period and volume while not silent) in order, the time left out,
+  equal for **99.96%** (seed 1, 8,000 frames, 29,049 states) and 97.1% (seed 5, 8,000 frames); the rest is an effect
+  that, started up to a frame later, lands on another free slot (another AY channel) or its first tick a tick later:
+  the same notes.  The STE delays a command by up to an arcade frame (16.5 ms) against MAME.
+* **Coverage** (`ref/cover_sound.py`): seed 0 the game's commands of `ref/cover.py`'s seeds 1, 5, 9, 12 (12,000 frames
+  each), seeds 1-3 random commands (20,000 frames): 1,319 pcs, 71 computed-jump targets; no unexpected access.
+* **Translation** (`tools/sndgen.py`, `engine/z80x.py` FAST, the 64 KB block): 1,349 instructions.  The AYs'
+  memory-mapped accesses are the static `ld (nn),a` / `ld a,(nn)` (the coverage checks it): address writes select a
+  register, data writes go into two 16-byte register files (`snd_ay`), reads come back masked (the latch, the timer 0).
+  The filter stores stay plain stores (the STE has no filters).  The driver's helpers are emitted at their calls,
+  recognised by their code (not by Pooyan's addresses, so Time Pilot's driver can use the same generator): `rst $08` /
+  `$10` (select and read), `rst $18` / `$20` (register B := C, without the dummy read in between), and the `rst $28`
+  jump table, which every caller enters after `ld hl,nn`: a 68000 table per base (the target's label and HL; the flags
+  it leaves, S, Z and C clear, are set).
+* **Player** (`src/sound.s`): `snd_frame` before each NMI: the commands of `py_sound`'s ring through the IRQ handler,
+  then the frame's ticks in one run (the hook at $00CB starts the next tick); `snd_ym` puts the three loudest audible
+  of the six channels on the YM (a channel keeps its YM channel while chosen; Gyruss's and Kung-Fu Master's method),
+  the periods x 2000000 / 1789772 through a 4096-entry table; only changed registers written.
+* **Test** (`tools/sound_test.py`, 2026-10-29): the STE player against `STEBoard` every frame (the sound RAM, both
+  AYs' registers, the YM's registers and its channel choice): seeds 1, 9, 10, 12 6,000 frames, 5 8,000: equal.  The
+  logic and render tests pass with the sound build (State).  Hatari: the AVI's sound track has the music and the
+  effects from the attract mode on.
+* **Speed**: the first translation cost ~31k 68000 cycles an arcade frame in play (Musashi); the helpers at their
+  calls, one run for the ticks, the period table and a faster `snd_ym`: **~21k** (`snd_ym` 3k).  Hatari
+  (`tools/bench.sh 6000`, AUTOPLAY, 6,000 VBLs): without sound (`EXTRA="-D NOSOUND=1"`) 58.6 arcade frames and 47.4
+  pictures a second (median 50.0, 10th percentile 42.0); with sound 58.3 and **43.5** (median 46.5, 10th percentile
+  32.0): the logic keeps its speed, the pictures lose ~8% (Kung-Fu Master's sound costs about as much).
+* Not done: the RC filters ($8000-$FFFF stores: 0.047 / 0.22 uF low-passes per channel), the mute (never used).
+

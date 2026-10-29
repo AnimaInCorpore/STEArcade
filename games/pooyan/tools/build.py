@@ -1,6 +1,8 @@
 """Build POOYAN.PRG for a 4 MB Atari STE (--sim: the Musashi build for the tests).
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
+
+-D NOSOUND=1: without the sound driver (tools/sndgen.py, src/sound.s; it needs ref/cover_sound.py's coverage).
 """
 from pathlib import Path
 import argparse
@@ -36,7 +38,12 @@ def main():
           len(report['unsupported']), 'unsupported')
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')              # (no sound driver yet)
+        import sndgen
+        (build / 'snd.rom').write_bytes(sndgen.image()[:0x2000])
+        stext, srep = sndgen.generate()
+        (build / 'snd_code.s').write_text(stext)
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']))
     tag = args.tag or ('pooyan_sim' if args.sim else 'pooyan')
     out = ROOT / 'run' / tag / 'POOYAN.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)
