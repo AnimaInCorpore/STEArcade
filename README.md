@@ -36,7 +36,7 @@ reference renderer and MAME.
 |  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Track & Field](games/trackfld/) | KONAMI-1 (encrypted 6809) + Z80 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Hyper Sports](games/hyperspt/) | KONAMI-1 (encrypted 6809) + Z80 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
-|  | [Pooyan](games/pooyan/README.md) | Z80 (translated; no runtime yet) + Z80 sound (Time Pilot's board) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Reference equal to MAME; translation generated, STE runtime not started |
+|  | [Pooyan](games/pooyan/README.md) | Z80 (translated) + Z80 sound (Time Pilot's board; not yet) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Logic exact in lock-step and at full speed in Hatari; renderer not written |
 
 Port status (2026-10-22; based on the linked port reports):
 

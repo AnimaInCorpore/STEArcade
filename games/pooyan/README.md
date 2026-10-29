@@ -1,8 +1,9 @@
 # Pooyan (Konami, 1982) for Atari STE
 
 MAME set `pooyan` (the Konami parent; the zip also holds the clones `pooyans` and `pootan`).  Started 2026-10-29:
-the reference board, its check against MAME, coverage and the translation; no STE program yet.  The board is Time Pilot's sibling (MAME: "very similar to Time Pilot"), so the port
-follows `games/timeplt`: a 3.072 MHz Z80 statically translated to 68000 code and checked in lock-step, a runtime
+the reference board, its check against MAME, coverage, the translation and the runtime, exact in lock-step; the
+renderer is a stand-in (a black screen).  The board is Time Pilot's sibling (MAME: "very similar to Time Pilot"), so
+the port follows `games/timeplt`: a 3.072 MHz Z80 statically translated to 68000 code and checked in lock-step, a runtime
 that delivers the NMI at the game's idle point, a Blitter renderer.
 
 ```sh
@@ -11,6 +12,8 @@ python games/pooyan/tools/machine.py       # the reference in the port's schedul
 python games/pooyan/ref/cover.py <seed> 20000          # coverage, seeds 1-12 -> build/pooyan/cover<seed>.pkl
 python games/pooyan/ref/mame_avi_cmp.py [--keep DIR]   # the reference against WolfMAME 0.162, every frame
 python games/pooyan/tools/gen.py           # -> build/pooyan/code_main.s, translation.json (needs the 12 coverage pickles)
+python games/pooyan/tools/build.py         # -> run/pooyan/POOYAN.PRG (--sim: run/pooyan_sim, the Musashi build)
+python games/pooyan/tools/logic_test.py 6000 --seed 4  # the translation in lock-step with the reference
 ```
 
 Supply `assets/roms/pooyan.zip` (MAME's set; `docs/rom_manifest.json` has the 13 files' sizes, CRCs and SHA-1s).
@@ -60,8 +63,19 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
   runs one undocumented `dec iyh`: `engine/z80x.py` got `Config.iaddr` (I as a byte of the block, here $B1F4; a live
   P/V after `ld a,i`, which is IFF2, stops the build) and inc / dec of IYH / IYL.  12 instructions outside the
   coverage stay unsupported (`in`, `out` and P/V readers: data decoded as code; they stop loudly at
-  `z80_unsupported`).  Not assembled yet: the runtime (`py_sound`, `py_mark_*`, `z80_hook`) is still to be written.
-* Not done: the runtime (`src/pooyan.s`, from Time Pilot's), the renderer (4bpp tiles and sprites; sprites through
-  `engine/sprite_programs.py` as Time Pilot's), `logic_test.py` / `render_test.py` / `sprite_test.py`, the STE palette
+  `z80_unsupported`).
+* **Runtime** (`src/pooyan.s`, Time Pilot's without the clouds, the checksum natives and the random byte): the NMI at
+  the hook $021C with the token, the inputs at $B100-$B104 (keyboard, joysticks, Jaguar pads as in Time Pilot), the
+  sound commands into a ring at latch Q1's rising edge (`py_sound`), the written cells listed (`py_mark_*`), six
+  arcade frames to five VBLs.  `src/render.s` is a stand-in: a black screen, the picture count, the cell list emptied.
+* **Logic** (`tools/logic_test.py`, 2026-10-29): exact against the reference's port schedule every frame (RAM
+  $8000-$8FFF, the sprite RAMs, latch Q0, the sound commands, every changed cell marked): seed 1 6,000 frames (attract,
+  coin, play), seeds 4, 5, 7 8,000 each (infinite lives, rounds 3-4), 9 6,000 (the high score), 10 6,000 (two
+  players), 12 6,000 (5 lives, the hardest difficulty, no demo sounds): 48,000 frames.  **The logic: ~44-49k 68000
+  cycles an arcade frame in play** (Musashi, no drawing), against Time Pilot's ~52k: no tuning yet.
+* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06; DEBUG + AUTOPLAY, 3,000 VBLs): no crash, 3,565 arcade frames
+  (59.4 a second with the boot: the arcade's speed), no late border event.  Nothing is drawn yet.
+* Not done: the renderer (4bpp tiles and sprites; sprites through `engine/sprite_programs.py` as Time Pilot's),
+  `render_test.py` / `sprite_test.py`, a Hatari script, the STE palette
   (17 colours seen for 16), sound (Time Pilot's board: none of the ports has it yet), the cocktail flip, registration in
   `port.py`, `tools/release.py` and the README table.
