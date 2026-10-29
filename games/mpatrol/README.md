@@ -8,7 +8,8 @@ python games/mpatrol/tools/prepare.py              # verify assets/roms/mpatrol.
 python games/mpatrol/tools/machine.py 300 2400     # run the reference board, pictures to build/mpatrol/ref<frame>.png
 MAME=<mpatrol.exe> python games/mpatrol/ref/mame_cmp_mpatrol.py [frame ...] [--play] [--keep <absolute dir>]
 for s in $(seq 1 9); do python games/mpatrol/ref/cover.py $s 20000; done   # coverage (~2 min each, in parallel)
-python games/mpatrol/tools/build.py --sim            # the translation -> run/mpatrol_sim/MPATROL.PRG (no STE build yet)
+python games/mpatrol/tools/build.py [--sim]          # -> run/mpatrol/MPATROL.PRG (--sim: run/mpatrol_sim, the tests)
+python games/mpatrol/tools/shots.py 250 1000        # Hatari screenshots at those VBLs (no window: engine/mamewin.py)
 python games/mpatrol/tools/logic_test.py 20000 --seed 1   # the translation in lock-step with MoonPatrolPort
 ```
 
@@ -117,10 +118,31 @@ inputs, cheats and DIP switches: the text RAM, the RAM, the sprite RAM, the six 
 the sound commands are equal every frame, 20,000 frames of each of the nine seeds.  The logic takes 24.6k-29.1k
 68000 cycles a frame (Musashi), a fifth of an STE frame.
 
+## The picture (`src/render.s`, `tools/assets.py`) — in progress
+
+The arcade picture (240 x 252) lies at screen x 32-271, so both side edges are on 16-pixel groups (AGENTS.md's
+clipping applies); the borders are open (engine/rt/borders.s, PIC_TOP 10, PIC_LINES 252).
+
+* **Done: the runtime and the score panel.**  `src/mpatrol.s` runs on the STE: the hardware, the borders, the VBL
+  counting the arcade's 56.7376 frames a second on the STE's 50 (`ARCADE_FRAC`), keyboard, joysticks and Jaguar
+  pads.  The score panel (tile rows 0-6, opaque; picture lines 0-49) is an image of its own with its own 9 colours
+  (BD_HUD + BD_VSWITCH, as Kung-Fu Master's); its cells are drawn with `movep.l` rows when the text RAM changes
+  (`hud_update`).  Hatari (`tools/shots.py`): the panel exact to the eye, the game running.  The playfield is black.
+* **Measured for the playfield** (the reference, every 25th frame of the nine coverage seeds): the sky (picture lines
+  50-107: text and sprites), the mountains (from line 108, their own x), the hills or the city over them (from line
+  142, another x), their fills, the ground (the scrolled text rows, lines 186-249) and the sprites (up to line 234).
+  Up to 18 colours in a frame's playfield, 27 over the hills scene and 22 over the city's, all of them distinct on
+  the STE (4 bits a channel).  Split at picture line 186 or 196, each band of every frame needs at most 15.
+* **The plan for the playfield**: two playfield palettes, switched at a line around 190 by one more Timer B event
+  (borders.s gets a second playfield palette), each computed per frame from the pens the frame shows (cached
+  graphics re-baked through palette stamps, as Bubble Bobble's); the picture drawn into one of three buffers with the
+  Blitter each frame: the mountains as opaque copies from a prepared image twice as wide (any x is one contiguous
+  copy), the hills / city over them as stefastbobs2 copy passes (their crest rows masked, the solid rows plain),
+  the fills, the text (the ground's tiles opaque over the fill colour where it is constant, masked pieces above it)
+  and the sprites through `engine/sprite_programs.py`; then the damage lists and the measured optimisations.
+
 ## Next steps (docs/porting-guide.md)
 
-1. The STE runtime (hardware, borders, IKBD and pads, the VBL's arcade frames: 56.74 Hz on 50) and the renderer:
-   the score panel (picture lines 0-49) from its own image with its own colours, the playfield as three parallax
-   layers (two 256-pixel-wide backgrounds and the ground) plus Blitter sprites prepared the stefastbobs2 way
-   (`engine/sprite_programs.py`, HOP 2 / OP 3 copy passes, no AND + OR pairs; see `AGENTS.md`).
+1. The playfield (the plan above), with `tools/render_test.py` (the STE picture against the reference, every frame)
+   and `tools/sprite_test.py` (edges, all 16 shifts, holes, 64 KB crossings).
 2. Sound from the M6803 driver, after Kung-Fu Master's.

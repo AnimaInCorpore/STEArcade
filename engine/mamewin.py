@@ -128,12 +128,13 @@ def _install():
     subprocess._winapi.CreateProcess = create
 
 
-def popen(args, **kw):
-    """subprocess.Popen on MAME's own desktop (Windows), started minimized."""
+def popen(args, mame=True, **kw):
+    """subprocess.Popen on MAME's own desktop (Windows), started minimized.  mame=False: another program (Hatari),
+    no -video added."""
     if os.name != "nt":
         return subprocess.Popen(args, **kw)
     _ensure_desktop()
-    if "-video" not in args:
+    if mame and "-video" not in args:
         args = list(args) + ["-video", "gdi"]       # (d3d and bgfx crash on a desktop nobody shows; gdi draws there)
     si = _HiddenStartup()
     old = kw.pop("startupinfo", None)
@@ -145,7 +146,7 @@ def popen(args, **kw):
 
 
 def run(args, timeout=None, check=False, capture_output=False, input=None, **kw):
-    """subprocess.run on MAME's own desktop (Windows)."""
+    """subprocess.run on MAME's own desktop (Windows); mame=False as popen."""
     if capture_output:
         kw["stdout"] = kw["stderr"] = subprocess.PIPE
     if input is not None:
