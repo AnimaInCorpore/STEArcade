@@ -85,19 +85,21 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
   no crash, no late border event in 6,000 VBLs.
 * **Colours**: black and 15 fitted in Oklab (`tools/assets.py`): mean error 1.0 a channel, weighted by pixels; the
   worst-matched pens are rare (a pink, a brown).
-* Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (P3_P4);
-  the sprites' reordered-source / generated-code path (`engine/sprite_programs.py`: AGENTS.md asks for it to be
-  prototyped and measured; the row path is used so far).
+* Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (P3_P4).
 
 ## Speed (2026-10-29)
 
-`tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): with the sound **83% of
-the arcade's speed (median 56 arcade frames a second), pictures 23.6 a second on average, median 23, 10th percentile
-8.5**; without it (`EXTRA="-D NOSOUND=1"`): 93% (median 60), 34.6, 34.5, 15 (before the natives: 91%, 31.6, 30, 12;
+`tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): with the sound and the
+generated sprite code **83% of the arcade's speed (median 56 arcade frames a second), pictures 24.6 a second on
+average, median 23.5, 10th percentile 8.5** (every sprite on the row path: 83%, 23.6, 23, 8.5); without the sound (`EXTRA="-D NOSOUND=1"`): 93% (median 60), 34.6, 34.5, 15 (before the natives: 91%, 31.6, 30, 12;
 before the translator's flag work: 89%, 28.4, 26.5, 11.5).  The sound's cost is in Sound: the driver's music in
 attract and in the events (fast ticks) costs up to ~80k cycles an arcade frame.  A picture
-(`tools/render_test.py`, Musashi): ~65-76k CPU + ~39-49k Blitter bus cycles; the renderer is Track & Field's (see its
-README: the playfield, the rows drawn only where their scroll or cells changed or sprites were, the sprites' row path).
+(`tools/render_test.py 1600 --seed 5 --start 1000`, Musashi): 79.8k CPU + 48.0k Blitter bus cycles (every sprite on
+the row path, `-D REN_GEN=0`: 87.6k + 50.4k); the renderer is Track & Field's (see its README: the playfield, the rows
+drawn only where their scroll or cells changed or sprites were, the sprites' generated code and row path).  The
+generated code covers the most drawn shapes up to 98% of the coverage's draws (`tools/assets.py` SHARE: 147 of 405
+shapes, 1,612 routines, 126 KB of streams; 6 transparency classes): code for all of them would need ~1.6 MB and take
+the program over the load budget (4.67 MB against `tools/release.py` MAX_LOAD 3.7 MB); now 3.50 MB.
 
 ## Sound
 

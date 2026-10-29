@@ -6,7 +6,11 @@
   high nibble): 128 bytes a sprite.
 * tf_tiles.bin: the 768 tiles (8 x 8, 4 bpp) unflipped: 8 rows of 4 bytes, two pens a byte: 32 bytes a tile.
 * tf_assets.s: tf_pal (16 STE colours), tf_spen (256 bytes: sprite colour * 16 + pen -> colour index, $FF where the
-  lookup PROM's entry is 0: transparent), tf_tpen (256 bytes: tile colour * 16 + pen -> colour index).
+  lookup PROM's entry is 0: transparent), tf_tpen (256 bytes: tile colour * 16 + pen -> colour index), tf_tclass (per
+  sprite colour its transparency class), the sprite shapes' generated code (engine/sprite_programs.py: a shape is
+  (transparency class, code, flips), the coverage's shapes; docs/sprite-preparation.md).
+* tf_sstream.bin: the end mask streams.  The rows' order (grouped by mask: engine/sprite_programs.py shape_order)
+  is computed again where a sprite is baked (src/render.s bake_sprite), so no table is needed.
 
 Colours: black and 15 fitted by a weighted k-means in Oklab (Gyruss's tools/assets.py) to the reference pictures' pens
 of the coverage runs (ref/cover.py's `pens`), snapped to the STE's 4 bits a gun; every pen maps to the nearest.  The
@@ -21,6 +25,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine import Video
 from paths import build_dir
 import importlib.util
+import sprite_programs as sp
 
 _spec = importlib.util.spec_from_file_location('gy_assets', Path(__file__).resolve().parents[2] / 'gyruss' / 'tools' /
                                                'assets.py')
@@ -32,6 +37,10 @@ if _saved is not None:
     sys.modules['machine'] = _saved
 
 BUILD = build_dir('trackfld')
+CODES = 256                                 # sprite codes (the key: code << 8 | colour << 2 | flip x << 1 | flip y)
+PREFIX = 'tf'
+SHARE = 1.0                                 # code for the most drawn shapes up to this share of the
+                                            # coverage's draws (the load budget: tools/release.py MAX_LOAD)
 
 
 def histogram():
@@ -56,6 +65,62 @@ def nibbles(img):
     return bytes(out)
 
 
+def transparency(v):
+    """-> (per sprite colour its class, per class the transparent pens' set): a pen is transparent where the colour's
+    lookup entry is 0"""
+    sets, cls = [], []
+    for c in range(16):
+        t = frozenset(p for p in range(16) if v.lut[16 * c + p] == 0)
+        if t not in sets:
+            sets.append(t)
+        cls.append(sets.index(t))
+    return cls, sets
+
+
+def shape_masks(v, code, fx, fy, tset):
+    """the sprite's 16 row masks (bit 15 the leftmost pixel) for MAME's flips (flip x: the columns reversed, flip y:
+    the rows), the pens in tset transparent"""
+    t = v.sprites[code % len(v.sprites)]
+    if fx:
+        t = t[:, ::-1]
+    if fy:
+        t = t[::-1]
+    return [sum(1 << (15 - c) for c in range(16) if int(t[r, c]) not in tset) for r in range(16)]
+
+
+def shape_id(k, code, fx, fy):
+    return (k * CODES + code) << 2 | int(fx) << 1 | int(fy)
+
+
+def coverage_shapes(cls, share=1.0):
+    """the coverage's shapes, the most drawn first, up to `share` of the draws"""
+    seen = collections.Counter()
+    for f in sorted(BUILD.glob('cover[0-9]*.pkl')):
+        for (code, colour, fx, fy), n in pickle.loads(f.read_bytes())['sprites'].items():
+            seen[(cls[colour], code % CODES, bool(fx), bool(fy))] += n
+    total, acc, out = sum(seen.values()), 0, []
+    for k, n in seen.most_common():
+        if share < 1 and acc >= share * total:
+            break
+        out.append(k)
+        acc += n
+    return sorted(out), acc / max(total, 1)
+
+
+def sprite_programs(v):
+    """-> (assembler lines: the class table, the generated code and records; the streams)"""
+    cls, sets = transparency(v)
+    keys, got = coverage_shapes(cls, SHARE)
+    shapes = {shape_id(k, code, fx, fy): shape_masks(v, code, fx, fy, sets[k]) for k, code, fx, fy in keys}
+    progs, stream, st = sp.programs(shapes, len(sets) * CODES * 4, table=PREFIX + '_shapes',
+                                    stream_sym=PREFIX + '_sstream')
+    print('transparency classes: %d %s; generated code: %%(routines)d routines (%%(code_lines)d lines) for %%(shapes)d '
+          'shapes x 16 shifts x 3 clips (%.1f%%%% of the draws); stream blocks %%(stream_blocks)d, %%(stream_bytes)d '
+          'bytes' % (len(sets), cls, 100 * got) % st)
+    lines = ['%s_tclass:\tdc.b %s' % (PREFIX, ','.join(str(k) for k in cls)), '\teven'] + progs + ['\tsection data,data']
+    return lines, stream
+
+
 def build():
     v = Video()
     cols, pmap = palette(v)
@@ -70,6 +135,9 @@ def build():
     lines += ['tf_tpen:']
     lines += ['\tdc.b ' + ','.join(str(x) for x in tpen[i:i + 16]) for i in range(0, 256, 16)]
     lines += ['\teven']
+    progs, stream = sprite_programs(v)
+    lines += progs
+    (BUILD / 'tf_sstream.bin').write_bytes(stream)
     (BUILD / 'tf_assets.s').write_text('\n'.join(lines) + '\n')
     (BUILD / 'tf_penmap.bin').write_bytes(bytes(int(x) for x in pmap))
     (BUILD / 'tf_colours.bin').write_bytes(bytes(c for col in cols for c in col))

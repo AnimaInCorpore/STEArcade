@@ -72,28 +72,32 @@ first, what it passes through) instead of every caller's needs, which halved the
   no crash, no late border event in 6,000 VBLs.
 * **Colours**: the arcade shows 24 colours in the coverage; black and 15 fitted in Oklab (`tools/assets.py`): mean
   error 0.8 a channel, weighted by pixels; the worst-matched pens are rare (magenta, a dark grey).
-* Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (IN1);
-  the sprites' reordered-source / generated-code path (`engine/sprite_programs.py`, as Time Pilot's: AGENTS.md asks
-  for it to be prototyped and measured; the row path is used so far, and docs/sprite-preparation.md has no Track &
-  Field result yet).
+* Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (IN1).
 
 ## Speed (2026-10-29)
 
 `tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): **95% of the arcade's speed
-(median 60 arcade frames a second), pictures 40.8 a second on average, median 47.5, 10th percentile 22** with the
-sound (without: `EXTRA="-D NOSOUND=1"`, 95%, 44.0, 49, 30); the dips are the screen changes (a whole new tile map:
+(median 60 arcade frames a second), pictures 41.9 a second on average, median 47.5, 10th percentile 23** with the
+sound and the generated sprite code (with the row path for every sprite: 95%, 40.8, 47.5, 22; without the sound: `EXTRA="-D NOSOUND=1"`, 95%, 44.0, 49, 30); the dips are the screen changes (a whole new tile map:
 ~1,800 cells converted and drawn into the playfield).
 
-A picture (`tools/render_test.py`, Musashi, seed 6's play): ~49k CPU + ~33-40k Blitter bus cycles.
+A picture (`tools/render_test.py 1600 --seed 6 --start 1000`, Musashi, seed 6's play): 62.2k CPU + 33.6k Blitter
+bus cycles (every sprite on the row path, `-D REN_GEN=0`: 69.7k + 36.7k).  Of the CPU's: the tiles ~21.6k
+(`tile_draw`, `render_tiles`), the rows ~11.4k (`draw_rows`), the sprites ~17k (`draw_sprites` 6.6k, `draw_cell`
+6.5k, the generated code 3.9k; 27k on the row path).
 * **The playfield**: the 64 x 32 tilemap in STE planes, 768 pixels wide (the first 256 again at the end: a window at
   any scroll never wraps); a changed cell converted on first use per (code, colour, flips) into a tile cache (a long a
   row) and written with movep.l.
 * **Rows**: a tile row is copied from the playfield into a buffer only when its scroll differs from what that buffer
   holds there, a cell of it changed, or the buffer's last sprites covered it: one HOG pass per plane and line (16
   words, FXSR and the skew for the scroll: 132 bus cycles, the addresses running on to the next plane).
-* **Sprites**: baked on first use per (code, colour, flips) into a cache slot (the opaque rows, their masks, the plane
-  words in pass order); a row is one HOG pass, OP 3 with the opaque pixels as end masks (docs/sprite-preparation.md);
-  clipped at the group-aligned edges (screen x 32 and 288: the inner word only), whole into 16 guard lines above and
+* **Sprites**: baked on first use per (code, colour, flips) into a cache slot (the opaque rows grouped by mask, their
+  masks, the plane words in that order, the same aligned).  The generated path (`tools/assets.py` sprite_programs,
+  `engine/sprite_programs.py`, as Time Pilot's and Pooyan's): a shape is (transparency class, code, flips): 5 classes
+  over the 16 colours (a pen is transparent where the colour's lookup entry is 0); code for the coverage's 414 shapes
+  (3,774 routines, 274 KB of end mask streams), per shift and clip case one- or two-word passes as stefastbobs2
+  chooses them; others and 64 KB crossings the row path (a row one HOG pass, OP 3 with the opaque pixels as end masks;
+  docs/sprite-preparation.md).  The rows' order is computed where a sprite is baked (no table).  Clipped at the group-aligned edges (screen x 32 and 288: the inner word only), whole into 16 guard lines above and
   below (cleared before the buffer's next picture).
 
 ## Sound

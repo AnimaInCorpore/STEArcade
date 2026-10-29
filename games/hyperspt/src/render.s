@@ -22,8 +22,11 @@
 ; square at picture X = x, Y = 225 - y; colour attr & 15, MAME's flip x when bit 6 is clear, flip y bit 7.  Baked on first use
 ; per (code, colour, flips) into a slot of the sprite cache: the opaque rows (the colour's lookup entry not 0) in row
 ; order, each with its row offset and mask, then the rows' four plane words in that order (the source address runs
-; on).  A row is one HOG pass (Y count 4: the planes; X count 2 with NFSR when shifted, 1 when not), OP 3 with the
-; opaque pixels as end masks.  Clipped at the picture's edges (AGENTS.md: group-aligned): across the left edge only
+; on).  The generated path (REN_GEN, engine/sprite_programs.py, docs/sprite-preparation.md): per shape (transparency
+; class, code, flips; the coverage's) and shift the code draws its rows grouped by mask (the slot's rows in that
+; order), one- or two-word passes as stefastbobs2 chooses them, the end masks and control words from a stream, from
+; the slot's aligned plane words.  Shapes without code and 64 KB crossings take the row path: a row is one HOG pass (Y
+; count 4: the planes; X count 2 with NFSR when shifted, 1 when not), OP 3 with the opaque pixels as end masks.  Clipped at the picture's edges (AGENTS.md: group-aligned): across the left edge only
 ; the second word (FXSR, source X increment 0, the mask's second word as END1), across the right edge only the first;
 ; a sprite wholly outside is culled.  Top and bottom: whole into the guard lines (cleared before the buffer's next
 ; picture).
@@ -37,7 +40,11 @@ LEFT = 32				; the picture's left edge (screen x)
 PF_LB = 384				; the playfield's bytes a line
 TC_SLOTS = 2048				; tile cache slots (32 bytes)
 SC_SLOTS = 1024				; sprite cache slots
-SC_SIZE = 2+16*6+16*8			; n, (row * 160, mask << 16) a row, the 4 plane words a row
+CODES = 512				; sprite codes (tools/assets.py CODES: the shape number)
+SC_SIZE = 8+2+16*6+16*8+16*8		; the shape record, the aligned plane words' address, n, (row * 160, mask << 16) a row, the 4 plane words a row (the row path), the same aligned (the generated code)
+	ifnd REN_GEN
+REN_GEN = 1				; 1: the generated shape code (tools/assets.py sprite_programs); 0: every sprite on the row path (to measure)
+	endc
 
 B_HT = $ffff8a00
 B_SXI = $ffff8a20
@@ -628,6 +635,68 @@ draw_cell:
 	bls.s	.rb
 	move.l	d5,spr_rows
 	bsr	sprite_baked		; a0 = the slot
+	if REN_GEN
+	; the generated path (engine/sprite_programs.py): the shape's code for the shift and clip case, the end masks
+	; from its stream, the slot's aligned plane words; 64 KB crossings and shapes without code take the row path
+	move.l	(a0),d6			; the shape's record (0: no generated code)
+	beq	.rp
+	move.w	cell_x,d3
+	add.w	#LEFT,d3		; screen x
+	moveq	#15,d0
+	and.w	d3,d0			; the shift
+	beq.s	.gin
+	cmp.w	#LEFT,d3		; across a side edge: the clipped variants (one word)
+	blt.s	.gcl
+	cmp.w	#LEFT+256-16,d3
+	blt.s	.gin
+	add.w	#32,d0			; (right: clip 2, the first word only)
+	bra.s	.gin
+.gcl:	add.w	#16,d0			; (left: clip 1, the second word only)
+.gin:	lsl.w	#2,d0			; (* 12: a variant's record)
+	move.w	d0,d1
+	add.w	d0,d0
+	add.w	d1,d0
+	add.l	d0,d6
+	lsr.w	#4,d3
+	lsl.w	#3,d3			; the first word's byte in the line
+	move.w	cell_y,d1
+	add.w	#16,d1
+	add.w	d1,d1
+	add.w	d1,d1
+	lea	line_off,a1
+	move.l	(a1,d1.w),d1
+	add.w	d3,d1			; the offset in the buffer
+	move.l	draw_base,d3
+	add.l	d1,d3			; the destination
+	cmp.w	#$FFFF-15*LB-16,d3	; (the code steps the low word: no 64 KB crossing)
+	bhi.s	.rp
+	move.l	d6,a3
+	tst.w	10(a3)			; (the damage size: 0 nothing drawn)
+	beq	.out
+	move.l	d3,B_DST.w		; (the high word; the code writes the low word)
+	move.l	4(a0),B_SRC.w		; (the slot's aligned plane words)
+	cmp.w	#16,last_mode
+	beq.s	.gset
+	move.w	#16,last_mode
+	clr.w	B_SXI.w			; (source X increment 0, Y increment 2: every pass type)
+	move.w	#2,B_SYI.w
+	move.w	#8,B_DXI.w
+.gset:	move.l	(a3)+,-(sp)		; its code
+	move.l	(a3),a0			; its stream
+	move.w	d3,d0			; (the destination's low word)
+	lea	B_END1.w,a1		; (the code's registers)
+	lea	B_END3.w,a6
+	lea	B_DYI.w,a3
+	lea	B_YC.w,a5
+	lea	B_DST+2.w,a4
+	lea	B_CTRL.w,a2
+	moveq	#4,d1
+	moveq	#-$40,d2
+	move.w	#LB,d4
+	rts				; (into the code; it returns to draw_cell's caller)
+.rp:
+	endc
+	addq.l	#8,a0			; (the slot's header: the shape record, the aligned plane words' address)
 	move.w	cell_x,d0
 	add.w	#LEFT,d0		; screen x
 	moveq	#15,d5
@@ -882,43 +951,112 @@ bake_sprite:
 	addq.w	#1,d7
 	cmp.w	#16,d7
 	bne	.row
-	; the slot: n, the opaque rows (row * 160, mask << 16), their plane words
-	lea	bake_rows,a3
-	moveq	#0,d0			; n
-	moveq	#15,d1
-.cnt:	tst.w	(a3)
-	beq.s	.c0
+	; the slot: the shape's record (hs_shapes), the aligned plane words' address, the opaque rows grouped by mask
+	; (the generated code's order), their plane words, the same aligned
+	moveq	#0,d0			; shape = (class * CODES + code) << 2 | flips
+	move.w	d2,d0
+	lsr.w	#2,d0
+	and.w	#15,d0
+	lea	hs_tclass,a4
+	moveq	#0,d1
+	move.b	(a4,d0.w),d1		; the colour's transparency class
+	mulu	#CODES,d1
+	move.w	d2,d0
+	lsr.w	#6,d0		; the code
+	add.l	d1,d0
+	lsl.l	#2,d0
+	moveq	#3,d1
+	and.w	d2,d1
+	or.w	d1,d0
+	move.l	d0,d1
+	lsl.l	#2,d1
+	lea	hs_shapes,a4
+	move.l	(a4,d1.l),(a0)+
+	move.l	a0,a5			; (the aligned plane words' address: below)
+	addq.l	#4,a0
+	; the opaque rows' order (engine/sprite_programs.py shape_order): grouped by mask, the groups in the order of
+	; their first rows -> bake_ord ($FF after the last)
+	lea	bake_ord,a4
+	lea	bake_seen,a6
+	clr.l	(a6)
+	clr.l	4(a6)
+	clr.l	8(a6)
+	clr.l	12(a6)
+	lea	bake_rows,a3		; (10 bytes a row: its mask first)
+	moveq	#0,d0			; the row
+.o1:	move.w	(a3),d4
+	beq.s	.o4
+	tst.b	(a6,d0.w)
+	bne.s	.o4
+	move.l	a3,a2			; the rows from here with its mask
+	move.w	d0,d1
+.o2:	cmp.w	(a2),d4
+	bne.s	.o3
+	move.b	d1,(a4)+
+	st	(a6,d1.w)
+.o3:	lea	10(a2),a2
+	addq.w	#1,d1
+	cmp.w	#16,d1
+	bne.s	.o2
+.o4:	lea	10(a3),a3
 	addq.w	#1,d0
-.c0:	lea	10(a3),a3
-	dbf	d1,.cnt
-	move.w	d0,(a0)+
+	cmp.w	#16,d0
+	bne.s	.o1
+	move.b	#$FF,(a4)
+	lea	bake_ord,a4
+	moveq	#0,d0			; n
+.cnt:	cmp.w	#16,d0
+	beq.s	.cn
+	tst.b	(a4,d0.w)
+	bmi.s	.cn
+	addq.w	#1,d0
+	bra.s	.cnt
+.cn:	move.w	d0,(a0)+
 	move.w	d0,d1
 	add.w	d0,d0
 	add.w	d1,d0
 	add.w	d0,d0			; (6 bytes a row)
 	lea	(a0,d0.w),a2		; the plane words' place
+	move.w	d1,d0
+	lsl.w	#3,d0
+	lea	(a2,d0.w),a6		; the aligned copy's place (after them)
+	move.l	a6,(a5)
+	subq.w	#1,d1
+	bmi.s	.none
+.ord:	moveq	#0,d0
+	move.b	(a4)+,d0		; the row: (row * 160, mask << 16), its planes
+	move.w	d0,d3
+	mulu	#10,d3
 	lea	bake_rows,a3
-	moveq	#0,d1			; the row
-.ord:	move.w	(a3)+,d0
-	beq.s	.skip
-	move.w	d1,d3
-	mulu	#LB,d3
-	move.w	d3,(a0)+
+	add.w	d3,a3
+	mulu	#LB,d0
 	move.w	d0,(a0)+
+	move.w	(a3),(a0)+
 	clr.w	(a0)+
-	move.l	(a3)+,(a2)+
-	move.l	(a3)+,(a2)+
-	bra.s	.nr
-.skip:	addq.l	#8,a3
-.nr:	addq.w	#1,d1
-	cmp.w	#16,d1
-	bne.s	.ord
-	rts
+	move.l	2(a3),(a2)+
+	move.l	6(a3),(a2)+
+	move.w	(a3)+,d3		; the aligned copy (engine/sprite_programs.py align_of): shifted left by the row's
+	moveq	#0,d5			; empty columns (0 in every plane there, so a long shift of two planes is exact)
+.lz:	tst.w	d3
+	bmi.s	.al
+	add.w	d3,d3
+	addq.w	#1,d5
+	bra.s	.lz
+.al:	move.l	(a3)+,d4
+	move.l	(a3),d6
+	lsl.l	d5,d4
+	lsl.l	d5,d6
+	move.l	d4,(a6)+
+	move.l	d6,(a6)+
+	dbf	d1,.ord
+.none:	rts
 
 	section data,data
 	include	"hs_assets.s"
 hs_spr:		incbin	"hs_spr.bin"
 hs_tiles:	incbin	"hs_tiles.bin"
+hs_sstream:	incbin	"hs_sstream.bin"
+	even
 	even
 
 	section bss,bss
@@ -953,6 +1091,9 @@ tile_copy:	ds.b	4096			; the codes and colours the playfield has
 line_off:	ds.l	16+224+16		; the offset of picture line Y (from -16) in a buffer
 key_attr:	ds.w	256			; the cache key's part of the attributes (colour << 2, flips)
 bake_rows:	ds.w	16*5
+bake_ord:	ds.b	18			; bake_sprite: the opaque rows' order ($FF after the last; even: bake_seen is cleared by longs)
+bake_seen:	ds.b	16
+	even
 tc_index:	ds.w	65536			; per tile key: its slot + 1 (0: not converted)
 tc_data:	ds.b	TC_SLOTS*32
 sc_index:	ds.l	32768			; per sprite key: its slot (0: not baked)
