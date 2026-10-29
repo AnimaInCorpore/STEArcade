@@ -160,6 +160,51 @@ class HyperSports:
         return self.video.render_rgb(self.mem, bool(self.latch[0]))
 
 
+class HyperSportsPort(HyperSports):
+    """The STE runtime's schedule (src/hyperspt.s), one call of run_frame_port an arcade frame.
+
+    The foreground is a task loop: $41B1 LDX <$1E; LDD ,X; ASLA; BCS $41B1 (the queue's read pointer at $301E; an
+    entry with bit 7 set is empty); the IRQ handler ($44F5, at the VBLANK while latch Q7 is 1) plays the game and queues
+    the tasks.  The port's idle point is $41B1 with an empty queue: there the IRQ is delivered (while Q7 is 1) with
+    $41B1 as its return address; after its RTI the foreground runs the queued tasks until the queue is empty again.
+    The boot: from the reset to the first idle.  (Track & Field's TrackFieldPort, the same design.)
+    """
+    IDLE = 0x41B1
+    IRQ = 0x44F5
+    QPTR = 0x301E
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.booted = False
+        self.irqs = 0
+
+    def waits(self):
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until the task queue is empty at the idle point"""
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE and self.waits():
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def run_frame_port(self):
+        c = self.cpu
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        if self.latch[7] and not c.cc & 0x10:
+            c.set_irq(True)
+            c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.run_to_idle()
+        self.frame += 1
+
+
 if __name__ == "__main__":
     import time
     m = HyperSports()

@@ -104,6 +104,16 @@ GAMES = [
      "  288 lines (the never or hardly drawn ones left out); the WSG's voices on the YM",
      "the arrows, the joystick or a pad move Pac-Man; no buttons.  One player at a time: both joysticks and both\n"
      "  pads move him."),
+    ("trackfld", "TRACKFLD.PRG", "Track & Field (Konami 1983)",
+     "work in progress: the arcade's full speed, 30-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
+     "  pixels in 16 fitted colours; no sound yet",
+     "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
+     "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
+    ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
+     "work in progress: 93% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
+     "  pixels in 16 fitted colours; no sound yet",
+     "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
+     "  Up, Space, Control, X, joystick up / fire, pad B."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"
@@ -139,8 +149,8 @@ No port is certified Complete by this release.  1942 and Donkey Kong passed assi
 regressions in native Hatari; natural complete playability, ordinary controls and sound remain unverified
 by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 / 318.
 Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
-simulated); its full-game verification is pending.  Time Pilot is new and incomplete: it has no sound
-yet.  See the source README for the five-color status
+simulated); its full-game verification is pending.  Time Pilot, Track & Field and Hyper Sports are new and incomplete: they
+have no sound yet.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.
 

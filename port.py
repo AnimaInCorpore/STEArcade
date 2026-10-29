@@ -32,7 +32,8 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "gauntlet": "GAUNTLET.PRG", "kungfum": "KUNGFUM.PRG",
          "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
-         "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG"}
+         "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
+         "hyperspt": "HYPERSPT.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -41,6 +42,8 @@ COVER = {
                                                                 # 10 rack test, 11-12 levels 20+ / 250+ (split screen)
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
+    "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
+    "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
     "timeplt": [("ref/cover.py", list(range(1, 13)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
@@ -75,6 +78,21 @@ TESTS = {
                ("tools/render_test.py", ["3000", "--seed", "12", "--start", "300", "--every", "5"], None),   # level 250+
                ("tools/sprite_test.py", [], None),                # edges, 16 shifts, holes, bands, wrap, 64 KB
                ("tools/sound_test.py", ["3000"], None)],          # snd_update against tools/sound.py
+    "hyperspt": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["20000", "--seed", "5"], None),   # skeet shooting by MAME's cheats
+                 ("tools/logic_test.py", ["8000", "--seed", "9"], None),    # weightlifting
+                 ("tools/render_test.py", ["3000", "--seed", "5", "--start", "500", "--every", "3"], None),
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/native_test.py", ["2000"], None)],       # src/natives.s against the 6809 (edge cases too)
+    "trackfld": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["20000", "--seed", "6"], None),   # every event by MAME's cheats
+                 ("tools/logic_test.py", ["8000", "--seed", "10"], None),   # two players
+                 ("tools/render_test.py", ["3000", "--seed", "6", "--start", "1000", "--every", "3"], None),
+                 ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, guards, 64 KB crossings
     "timeplt": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
