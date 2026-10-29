@@ -22,6 +22,10 @@
 --                            a write to addr copies srctag's program space start..end (a DMA on a port write, e.g.
 --                            a buffered sprite RAM); the copy at the frame's end and at the previous frame's end
 --   OUT/pens.txt             the palette's pens ("pen rrggbb"), once (PENS_EVERY=1: also f<frame>_pens.txt each time)
+-- Inputs (optional): READS="tag:start:end:mask" (or tag:space:start:end:mask) INPUTS=<file> INPUT_WIDTH=n: a read of
+--   start..end returns byte (offset & mask) of the file's n-byte record for the frames completed so far (record k is
+--   read during frame k + 1, as a reference that sets its inputs before running frame k + 1); an index >= n, or a
+--   frame past the file's end, reads what MAME reads.  Installed at the first frame's end: frame 1 reads MAME's own.
 -- and quits after the last.  Run it in a fresh directory: MAME writes nvram/ and cfg/ there and reads them back.
 local out = assert(os.getenv("OUT"))
 local frames = {}
@@ -63,6 +67,7 @@ end
 local shadow, shadow0 = {}, {}              -- [name] = {[offset] = byte}: now / at the previous frame's end
 local snaps = {}                            -- {cur, prev}
 taps = {}                                   -- (global: the handlers must stay referenced)
+frame_count = 0                             -- (global: frames completed, for the INPUTS read taps)
 local function install_taps()               -- (installed at the first frame's end: earlier ones were lost)
   for spec in string.gmatch(os.getenv("TAPS") or "", "%S+") do
     local tag, sp, a, b = parse(spec)
@@ -87,6 +92,25 @@ local function install_taps()               -- (installed at the first frame's e
         end
       end
     end)
+  end
+  local inputs = os.getenv("INPUTS")
+  if inputs and inputs ~= "" then
+    local f = assert(io.open(inputs, "rb"))
+    local data = f:read("a")
+    f:close()
+    local width = tonumber(os.getenv("INPUT_WIDTH") or "1")
+    for spec in string.gmatch(os.getenv("READS") or "", "%S+") do
+      local p = {}
+      for x in string.gmatch(spec, "[^:]+") do p[#p + 1] = x end
+      local mask = tonumber(table.remove(p))
+      local tag, sp, a, b = parse(table.concat(p, ":"))
+      taps[#taps + 1] = space(tag, sp):install_read_tap(a, b, "in" .. tag .. a, function(offset, value, m)
+        local i = offset & mask
+        local at = frame_count * width + i + 1
+        if i < width and at <= #data then return string.byte(data, at) end
+        return value
+      end)
+    end
   end
   for spec in string.gmatch(os.getenv("SNAPS") or "", "%S+") do
     local trig, src = string.match(spec, "([^=]+)=(.+)")
@@ -133,6 +157,7 @@ local frame = 0
 local pens_done = false
 sub = emu.register_frame_done(function()
   frame = frame + 1
+  frame_count = frame
   if frame == 1 then install_taps() end
   if frames[frame] then
     for _, d in ipairs(dumps) do

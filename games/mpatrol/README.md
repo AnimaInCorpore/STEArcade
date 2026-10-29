@@ -6,7 +6,7 @@ Started 2026-10-29.  Not in `port.py list` yet: the scripts here run on their ow
 ```sh
 python games/mpatrol/tools/prepare.py              # verify assets/roms/mpatrol.zip, unpack to assets/roms/extracted/mpatrol/
 python games/mpatrol/tools/machine.py 300 2400     # run the reference board, pictures to build/mpatrol/ref<frame>.png
-MAME=<mpatrol.exe> python games/mpatrol/ref/mame_cmp_mpatrol.py [frame ...] [--keep <absolute dir>]   # against MAME
+MAME=<mpatrol.exe> python games/mpatrol/ref/mame_cmp_mpatrol.py [frame ...] [--play] [--keep <absolute dir>]
 ```
 
 The authoritative MAME for this port is the 0.286 source in `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`
@@ -51,20 +51,21 @@ that folder.
 * **Reference == MAME 0.286** (`ref/mame_cmp_mpatrol.py`, 2026-10-29): all 780 pens equal; at frames 60, 300, 600,
   900, 1200, 1500, 1800, 2100, 2400, 2700, 3000 and 3600 of the attract mode 0 differing pixels (the reference
   drawing MAME's memory and registers, and drawing its own), and the reference machine from power-on equal to MAME in
-  the text RAM and RAM (4 KB), the sprite RAM, the six video registers and the sound commands.  Not covered yet: the
-  city background (control bit 1 set; the attract mode shows only the hills or no background), play with input.
+  the text RAM and RAM (4 KB), the sprite RAM, the six video registers and the sound commands.
+  With input (`--play`, the same inputs and DIP switches read
+  by MAME through `engine/mame_frames.lua`'s INPUTS read taps and by the reference): coin, start, invulnerable random
+  driving: all equal at frames 420-8400, the city background (control $03) from frame 5488 on included.
 * WolfMAME 0.162 / 0.184 are no substitute for the picture: their m52 video (MAME 0.183's `video/m52.cpp`) puts the
   backgrounds at x + 128 / y + 14 (now + 124 / + 16), the sprites at x + 128 (now + 129) in another order, fills
   with pen 0 and draws hills and city together.
 
 ## Next steps (docs/porting-guide.md)
 
-1. A MAME check with input (coin, start, play to the city sector), e.g. by poking the inputs from the Lua script.
-2. The port schedule (`MoonPatrolPort`: idle hooks of the foreground's wait loops) and coverage (`ref/cover.py`, random
+1. The port schedule (`MoonPatrolPort`: idle hooks of the foreground's wait loops) and coverage (`ref/cover.py`, random
    play over every course and sector: the Sector Selection DIP switch reaches them, plus game over, the high-score
    entry and the continue).
-3. Translation (`tools/gen.py`, `z80x.FAST`), lock-step `logic_test.py`.
-4. Runtime and renderer: the score panel (picture lines 0-49) from its own image with its own colours, the playfield as
+2. Translation (`tools/gen.py`, `z80x.FAST`), lock-step `logic_test.py`.
+3. Runtime and renderer: the score panel (picture lines 0-49) from its own image with its own colours, the playfield as
    three parallax layers (two 256-pixel-wide backgrounds and the ground) plus Blitter sprites prepared the
    stefastbobs2 way (`engine/sprite_programs.py`, HOP 2 / OP 3 copy passes, no AND + OR pairs; see `AGENTS.md`).
-5. Sound from the M6803 driver, after Kung-Fu Master's.
+4. Sound from the M6803 driver, after Kung-Fu Master's.
