@@ -283,7 +283,11 @@ snd_idle:
 	bsr	snd_vlm_pins
 	bsr.s	.rest
 	jmp	X0231
-.slow:	jmp	X024F
+.slow:	ifd	SND_TICK_TRANSLATED
+	jmp	X024F
+	else
+	bra	snd_tick
+	endc
 	else
 	tst.b	$400F(a6)
 	bne.s	.slow
@@ -309,6 +313,144 @@ snd_idle:
 	bpl.s	.r
 	clr.l	snd_busy
 .r:	rts
+
+	ifne	SND_HS
+	ifnd	SND_TICK_TRANSLATED
+; snd_tick: Hyper Sports' tick ($024F-$02D0, after the `di`) in 68000 code where it only keeps books, the translated
+; code where there is work: each channel ($4008 = n; $4001 + 2n - 2 set: $033B with A = $4000 + 2n - 2, which returns
+; at once for 0, else on at $033D; clear: $0328), the DAC envelope ($02D3 when $400B, again after the speech queue when
+; $4010: its counter $400E counted down here, the rest translated from $02D8), the speech queue ($044C: returns at once
+; when $4015 is 0, else on at $0451), the VLM's output pins ($03F4 with A = 0 and C = 0 / 1: the pins' word $402E, its
+; store to the pins), then the tune check ($0231).  A part that runs translated code is entered with a return address
+; on the Z80 stack that the driver never uses ($FFE0-$FFEA, SND_TK*: sndgen.py points their dispatch entries at the
+; continuations here), so its `ret` comes back.  The registers the driver's code would leave: A (d0), B and C (d1:
+; C in bits 8-15, B in 0-7), HL (d3); the flags are written before they are read where each part goes on (the
+; continuations here, $033D, $0328, $0451 and $02D8 write them first).  -D SND_TICK_TRANSLATED=1: the translated tick
+; (to measure).
+SND_TK1 = $E0FF				; ($FFE0 .. $FFEA, byte swapped as the Z80 stack holds them)
+SND_TK2 = $E2FF
+SND_TK3 = $E4FF
+SND_TK4 = $E6FF
+SND_TK5 = $E8FF
+SND_TK6 = $EAFF
+SND_CH	macro				; \1 the channel (1-3), \2 the return token
+	move.b	#\1,$4008(a6)
+	move.b	$4000+2*\1-2(a6),d0	; A
+	tst.b	$4001+2*\1-2(a6)
+	beq.s	.off\@
+	tst.b	d0			; ($033B: or a; ret z)
+	beq.s	.n\@
+	move.w	#\2,-(a5)
+	jmp	X033D
+.off\@:	move.w	#\2,-(a5)
+	jmp	X0328
+.n\@:
+	endm
+
+snd_tick:
+	SND_CH	1,SND_TK1
+snd_tk1:
+	SND_CH	2,SND_TK2
+snd_tk2:
+	move.b	$400B(a6),d0		; ld a,($400B); ld ($4010),a; call nz,$02D3
+	move.b	d0,$4010(a6)
+	beq.s	snd_tk5
+	move.w	#SND_TK5,-(a5)
+	bra	snd_dac
+snd_tk5:
+	SND_CH	3,SND_TK3
+snd_tk3:
+	move.b	$4015(a6),d0		; $044C: ld a,($4015); or a; ret z
+	beq.s	snd_tk4
+	move.w	#SND_TK4,-(a5)
+	jmp	X0451
+snd_tk4:
+	tst.b	$4010(a6)		; ld a,($4010); or a; jr z: the DAC envelope again (after `ld a,($400F)`, counted
+	beq.s	snd_tk6			; down to 0 by `dec a; jr nz`: A = 0)
+	moveq	#0,d0
+	move.w	#SND_TK6,-(a5)
+	bra	snd_dac
+snd_tk6:
+	move.b	$4000(a6),d0		; ($4000) | ($4002) | ($4004) | ($4015): 0 -> C = 1, else C = 0 (C's value
+	or.b	$4002(a6),d0		; in between is written over)
+	or.b	$4004(a6),d0
+	or.b	$4015(a6),d0
+	move.b	$402F(a6),d3		; HL = ($402E)
+	lsl.w	#8,d3
+	move.b	$402E(a6),d3
+	tst.b	d0
+	beq.s	.on
+	and.w	#$F03F,d3		; ($03F4, C = 0: H & $F0, L & $3F)
+	andi.w	#$00FF,d1		; C = 0
+	bra.s	.st
+.on:	or.w	#$01C0,d3		; (C = 1: H | 1, L | $C0)
+	andi.w	#$00FF,d1
+	ori.w	#$0100,d1		; C = 1
+.st:	move.b	d3,$402E(a6)		; ld ($402E),hl
+	move.w	d3,d7
+	lsr.w	#8,d7
+	move.b	d7,$402F(a6)
+	move.b	d3,d0			; A = L; ld (hl),a: the pins
+	move.w	d3,d7
+	bsr	snd_vlm_pins
+	jmp	X0231
+
+; snd_dac: the DAC envelope ($02D3; a call: its return address on the Z80 stack): ld hl,$400E; dec (hl); ret nz, the
+; rest translated
+snd_dac:
+	move.w	#$400E,d3
+	subq.b	#1,$400E(a6)
+	beq.s	.go
+	moveq	#0,d7			; ret: to the token's continuation
+	move.w	(a5)+,d7
+	lsl.l	#2,d7
+	move.l	0(a4,d7.l),a3
+	jmp	(a3)
+.go:	jmp	X02D8
+
+	else
+snd_tk1 = snd_badpc			; (the translated tick: the tokens' dispatch entries unused)
+snd_tk2 = snd_badpc
+snd_tk3 = snd_badpc
+snd_tk4 = snd_badpc
+snd_tk5 = snd_badpc
+snd_tk6 = snd_badpc
+	endc
+
+; snd_note1-3: the channels' note step handlers $0E76 / $0E7E / $0E86 (`ld ix,$407B / $4086 / $4091; call $0C03;
+; ret`, reached through the channel's jump table).  $0C03: ld a,(ix+0); cp a,$FF; ret z; call $0C2E (dec (ix+1); ret
+; nz); xor a,a; ret.  Done here while the note's counter (ix+1) has not run out (the flags as the translated code keeps
+; them, then the handler's own `ret`); when it runs out, the Z80 stack is made as the two calls make it ($0E7D, $0C0C)
+; and the translated code goes on at $0C32.
+snd_note1:
+	move.w	#$407B,d4
+	move.w	#$7D0E,d7		; ($0E7D: the return address of the handler's call, byte swapped)
+	bra.s	snd_note
+snd_note2:
+	move.w	#$4086,d4
+	move.w	#$850E,d7
+	bra.s	snd_note
+snd_note3:
+	move.w	#$4091,d4
+	move.w	#$8D0E,d7
+snd_note:
+	move.b	(a6,d4.w),d0		; ld a,(ix+0)
+	cmp.b	#$FF,d0			; cp a,$FF; ret z
+	move	sr,d6
+	beq.s	.ret
+	subq.b	#1,1(a6,d4.w)		; dec (ix+1); ret nz
+	beq.s	.out
+	eor.b	d0,d0			; xor a,a
+	move	sr,d6
+.ret:	moveq	#0,d7			; (the handler's ret)
+	move.w	(a5)+,d7
+	lsl.l	#2,d7
+	move.l	0(a4,d7.l),a3
+	jmp	(a3)
+.out:	move.w	d7,-(a5)		; (call $0C03 from the handler)
+	move.w	#$0C0C,-(a5)		; (call $0C2E from $0C09)
+	jmp	X0C32
+	endc
 
 ; snd_tune: the native at the tune routine (sound.py TickBoard.tune): the tune $400A's effect, then the loop's head
 snd_tune:

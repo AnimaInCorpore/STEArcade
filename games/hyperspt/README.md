@@ -90,8 +90,9 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
 ## Speed (2026-10-29)
 
 `tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): with the sound and the
-generated sprite code **83% of the arcade's speed (median 56 arcade frames a second), pictures 24.6 a second on
-average, median 23.5, 10th percentile 8.5** (every sprite on the row path: 83%, 23.6, 23, 8.5); without the sound (`EXTRA="-D NOSOUND=1"`): 93% (median 60), 34.6, 34.5, 15 (before the natives: 91%, 31.6, 30, 12;
+generated sprite code and the sound's natives **85% of the arcade's speed (median 57 arcade frames a second),
+pictures 26.9 a second on average, median 28, 10th percentile 9.5** (before the sound's natives: 83%, 24.6, 23.5, 8.5;
+every sprite on the row path too: 83%, 23.6, 23, 8.5); without the sound (`EXTRA="-D NOSOUND=1"`): 93% (median 60), 34.6, 34.5, 15 (before the natives: 91%, 31.6, 30, 12;
 before the translator's flag work: 89%, 28.4, 26.5, 11.5).  The sound's cost is in Sound: the driver's music in
 attract and in the events (fast ticks) costs up to ~80k cycles an arcade frame.  A picture
 (`tools/render_test.py 1600 --seed 5 --start 1000`, Musashi): 79.8k CPU + 48.0k Blitter bus cycles (every sprite on
@@ -135,13 +136,20 @@ tune 0 4.5 s (a game's start; the only one the game's coverage sends), 1-7 4.0, 
 * **Cost**: Musashi, the logic with the sound / without (`logic_test.py`): seed 1 58.3k / 29.8k cycles an arcade
   frame (3,000 frames), seed 5 77.1k / 57.2k (3,000 frames; 20,000 frames: 89.3k / 52.8k).  The driver runs ~2,100 Z80
   instructions an arcade frame on average, ~5,400 with the three channels' music in fast ticks (~186 a tick, 29 ticks
-  a frame); the idle-tick native (`snd_idle`) and the pins' store skipped when unchanged took 15% off.  Hatari: 93% ->
+  a frame); the idle-tick native (`snd_idle`) and the pins' store skipped when unchanged took 15% off.  **Natives**
+  (2026-10-29, `src/sound.s`): the tick (`snd_tick`, $024F-$02D0: the channels' bookkeeping, the DAC envelope's
+  counter, the speech queue's check, the VLM's pins in 68000 code; the translated code entered only where there is
+  work, with return addresses $FFE0-$FFEA on the Z80 stack whose dispatch entries come back: `sndgen.py`
+  TICK_TOKENS) and the channels' note step (`snd_note`: the handlers $0E76 / $0E7E / $0E86 and $0C03 / $0C2E while
+  the note's counter runs).  Seed 5's logic (`logic_test.py 3000 --seed 5`): 77.2k -> 75.2k (the tick) -> 74.0k
+  cycles an arcade frame; `sound_test.py` seeds 1, 5, 9 (6,000 frames) equal; Hatari 83% -> 85%, 24.6 -> 26.9
+  pictures a second.  The rest of the sound (~8.6k cycles a frame in seed 5's play, against ~67k for the game's
+  logic) is spread thinly: the channels' handlers, the runtime's tick loop (`snd_next`, `snd_frame`), the SN writes.  Hatari: 93% ->
   **83%** of the speed, the pictures 34.6 -> **23.6** a second (Speed).  The program grows from 381,843 to 2,154,009
   bytes (the samples 1,344 KB, the dispatch table 256 KB, the 64 KB block): 2,879,340 bytes to load (MAX_LOAD
   3,700,000); packed with LZ4 690,820 bytes: it still fits a 720 KB floppy.
 * Not done: the DAC's pulses outside the tunes (the $400B envelope: 600-8,300 pulses in a 20,000-frame game seed, the
-  attract's most; Track & Field's README), natives for the driver's hot paths (the channels' note step $0C03 / $0C2E,
-  the per-tick skeleton), which the music's cost asks for; the relative levels of the YM and the DMA are a guess.
+  attract's most; Track & Field's README); the relative levels of the YM and the DMA are a guess.
 
 ## Full-game verification status
 

@@ -240,6 +240,8 @@ def translate(game):
     for nxt, targets in tables.values():
         joins |= set(targets)
     natives = {g.tune: 'snd_tune', g.tick: 'snd_idle'}   # (src/sound.s: the tune's effect; an idle tick at once)
+    if game == 'hyperspt':
+        natives.update({0x0E76: 'snd_note1', 0x0E7E: 'snd_note2', 0x0E86: 'snd_note3'})   # (src/sound.s snd_note)
     kw = dict(emitter=SEmitter, ijmp_flags=True, flags_at={g.loop}, natives=natives)
     em = compile_code(code, joins, cfg, {g.loop}, **kw)
     SEmitter.helper = helpers(code, em.live_in, jumps)
@@ -250,7 +252,8 @@ def translate(game):
     missing = sorted(p for p in em.refs if p not in code)
     for p in missing:
         out += ['X%04X:\tmove.w #$%04X,d7' % (p, p), '\tjmp snd_badpc']
-    out += ['\tsection data,data'] + dispatch_table(code, em) + jump_tables(rom_img, em)
+    out += ['\tsection data,data'] + dispatch_table(code, em, TICK_TOKENS if game == 'hyperspt' else {}) + \
+           jump_tables(rom_img, em)
     seen = [u for u in em.unsupported if u[0] in pcs]
     if seen:
         raise RuntimeError('observed sound instructions cannot be translated: %s' % seen)
@@ -260,9 +263,18 @@ def translate(game):
     return '\n'.join(out) + '\n', report
 
 
-def dispatch_table(code, em):
+# Hyper Sports' native tick (src/sound.s snd_tick) enters the translated code with these return addresses on the Z80
+# stack (the driver never uses them: no ROM, RAM or I/O there); their dispatch entries are its continuations.
+TICK_TOKENS = {0xFFE0: 'snd_tk1', 0xFFE2: 'snd_tk2', 0xFFE4: 'snd_tk3', 0xFFE6: 'snd_tk4', 0xFFE8: 'snd_tk5',
+               0xFFEA: 'snd_tk6'}
+
+
+def dispatch_table(code, em, extra=None):
     labels = {p: 'X%04X' % p for p in code if p not in em.no_entry}
     labels[TOKEN] = 'snd_token_ret'
+    for a, label in (extra or {}).items():
+        assert a not in labels, '%04X' % a
+        labels[a] = label
     rows, run = ['\tcnop 0,4', 'snd_dispatch_sw:'], 0
     for swapped in range(65536):
         label = labels.get(((swapped & 255) << 8) | (swapped >> 8))
