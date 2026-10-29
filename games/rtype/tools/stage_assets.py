@@ -162,6 +162,140 @@ def build(stage, png=False):
             print("   ", o)
 
 
+# ---- scenes: the screens told apart by their tile palette (the renderer picks one when the game changes the palette)
+SCENE_RECORDINGS = ["build/rtype/stage_states_1.pkl", "build/rtype/stage_states_8.pkl"]
+SCENE_DIFF = 24             # a frame belongs to the first scene whose tile palette differs in fewer pens
+SCENE_STEP = 5
+SCENE_MATCH = 192           # the renderer switches to the best scene only when it matches this many tile pens
+RES_SHARE = 0.05            # a pen fading in from black over this share of a scene's pixels gets a reserved index
+
+
+def choose_scene(tile_cols, refs, current):
+    """the renderer's choice (src/stage.s st_scene): the scene whose reference tile palette has the most pens equal to
+    the current one (the first of equals); kept unless that one matches SCENE_MATCH pens"""
+    counts = [int((tile_cols == r).sum()) for r in refs]
+    best = max(range(len(refs)), key=lambda k: (counts[k], -k))
+    if current is None or (best != current and counts[best] >= SCENE_MATCH):
+        return best
+    return current
+
+
+def load_scenes():
+    """[(reference tile colours [256], playfield palette [16], status bar palette [16], ctab [4096], hctab [4096],
+    reserved pens)] from build/rtype/stage_scenes.bin"""
+    d = (build_dir("rtype") / "stage_scenes.bin").read_bytes()
+    n = int.from_bytes(d[:2], "big")
+    out, o = [], 2
+    for _ in range(n):
+        ref = np.frombuffer(d[o:o + 512], ">u2").astype(np.int32)
+        o += 512
+        pal = d[o:o + 32]
+        hpal = d[o + 32:o + 64]
+        o += 64
+        ctab = np.frombuffer(d[o:o + 4096], np.uint8).astype(np.int32)
+        htab = np.frombuffer(d[o + 4096:o + 8192], np.uint8).astype(np.int32)
+        o += 8192
+        nres = int.from_bytes(d[o:o + 2], "big")
+        res = [int.from_bytes(d[o + 2 + 2 * j:o + 4 + 2 * j], "big") for j in range(nres)]
+        o += 2 + 2 * SCENE_MAXRES
+        out.append((ref, pal, hpal, ctab, htab, res))
+    return out
+
+
+SCENE_MAXRES = 2
+
+
+def scenes(png=False):
+    """build/rtype/stage_scenes.bin (big-endian): a word, the scenes; per scene 256 words its reference tile colours
+    (12-bit), 16 + 16 words the playfield's and the status bar's STE colours, 4096 + 4096 bytes their colour tables,
+    a word R, SCENE_MAXRES words the reserved pens (indices 16 - R .. 15)"""
+    refs, members = [], []
+    for path in SCENE_RECORDINGS:
+        for i, (_, it) in enumerate(pickle.load(open(path, "rb"))):
+            if i % SCENE_STEP:
+                continue
+            st = pickle.loads(zlib.decompress(it))
+            c = pen_colours(st)[256:]
+            if (c == 0).all():
+                continue
+            for k, r in enumerate(refs):
+                if (c != r).sum() < SCENE_DIFF:
+                    members[k].append(st)
+                    break
+            else:
+                refs.append(c)
+                members.append([st])
+    md = SM.Model()
+    lab_all = MP.lab12(np.arange(4096)).astype(float)
+    data = bytearray(len(refs).to_bytes(2, "big"))
+    for k, (ref, frames) in enumerate(zip(refs, members)):
+        frames = frames[::max(1, len(frames) // 150)]
+        pics = [(st, md.picture(st, SM.Lock())) for st in frames]
+        # reserved: a big tile pen that is black in some frames, not in others (a fade-in)
+        share = collections.Counter()
+        cols = collections.defaultdict(set)
+        total = 0
+        for st, pens in pics:
+            col = pen_colours(st)
+            v, n = np.unique(pens[:SM.HUD_Y][pens[:SM.HUD_Y] < 512], return_counts=True)
+            for p, c in zip(v.tolist(), n.tolist()):
+                share[p] += c
+                total += c
+            for p in range(256, 512):
+                cols[p].add(int(col[p]))
+        res = [p for p, c in share.most_common() if p >= 256 and c >= RES_SHARE * total and 0 in cols[p]
+               and len(cols[p]) > 1][:1]
+        hist, hhist = collections.Counter(), collections.Counter()
+        for st, pens in pics:
+            col = pen_colours(st)
+            for hud, rows, h in ((0, slice(0, SM.HUD_Y), hist), (1, slice(SM.HUD_Y, 256), hhist)):
+                v = pens[rows]
+                for p, n in zip(*np.unique(v[v < 512], return_counts=True)):
+                    if hud or p not in res:
+                        h[int(col[p])] += int(n) * (SPRITE_WEIGHT if p < 256 else 1)
+        pal_tab = []
+        for hud, h in enumerate((hist, hhist)):
+            if not h:
+                h = collections.Counter({0: 1})
+            kk = np.array(sorted(h), np.int32)
+            nfit = 16 - (0 if hud else len(res))
+            cl, _ = medoids(kk, np.array([h[x] for x in kk.tolist()], float), min(nfit, max(2, len(kk) + 1)))
+            pal = np.zeros(16, np.int32)
+            pal[:len(cl)] = cl
+            lab_c = MP.lab12(cl).astype(float)
+            pal_tab.append((pal, np.abs(lab_all[:, None, :] - lab_c[None]).sum(2).argmin(1)))
+        (pal, tab), (hpal, htab) = pal_tab
+        for v in ref:
+            data += int(v).to_bytes(2, "big")
+        for v in list(pal) + list(hpal):
+            data += int(ste12(int(v))).to_bytes(2, "big")
+        data += bytes(int(i) for i in tab) + bytes(int(i) for i in htab)
+        data += len(res).to_bytes(2, "big")
+        for j in range(SCENE_MAXRES):
+            data += (res[j] if j < len(res) else 0).to_bytes(2, "big")
+        print("scene %d: %d frames, reserved %s; playfield %s | bar %s" % (
+            k, len(frames) * max(1, len(members[k]) // 150), res, " ".join("%03X" % v for v in pal),
+            " ".join("%03X" % v for v in hpal)))
+        if png:
+            from PIL import Image
+            rgb4 = lambda c: np.stack([(c >> 8) & 15, (c >> 4) & 15, c & 15], -1) * 17
+            st, pens = pics[len(pics) // 2]
+            col = pen_colours(st)
+            pidx = tab[col]
+            cur = pal.copy()
+            for j, rp in enumerate(res):
+                pidx[rp] = 16 - len(res) + j
+                cur[16 - len(res) + j] = col[rp]
+            p = np.minimum(pens, 511)
+            ste = np.where(np.arange(256)[:, None] >= SM.HUD_Y, hpal[htab[col[p]]], cur[pidx[p]])
+            ste = np.where(pens == 512, 0, ste)
+            arc = m72.pens(st["pal0"], st["pal1"])[np.minimum(pens, 512)]
+            img = np.hstack([rgb4(ste), arc]).astype(np.uint8)
+            o = build_dir("rtype") / ("scene_%d.png" % k)
+            Image.fromarray(img).resize((img.shape[1] * 2, img.shape[0] * 2), Image.NEAREST).save(o)
+    (build_dir("rtype") / "stage_scenes.bin").write_bytes(bytes(data))
+
+
 def tiles():
     """build/rtype/stage_tiles.bin: the FG tiles (rt_b-a*), then the BG tiles (rt_b-b*), 4096 each, 8 rows of 4 bytes
     (8 pens a row, high nibble the left pixel) - the renderer colours them through its tables"""
@@ -179,8 +313,7 @@ def main():
     ap.add_argument("--png", action="store_true")
     args = ap.parse_args()
     tiles()
-    for stage in STAGES:
-        build(stage, args.png)
+    scenes(args.png)
 
 
 if __name__ == "__main__":

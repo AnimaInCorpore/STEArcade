@@ -75,6 +75,8 @@ m72r_init:
 	dbf	d1,.b
 	move.l	d0,st_bar
 	move.l	#st_pool,st_poolp
+	move.l	#st_scenes+2,st_scn
+	move.w	#-1,st_curscn
 	; the definitions' lookup: BW >> 1 -> record (1: drawn as nothing - a star, an empty one)
 	lea	st_defs,a0
 	lea	st_deftab,a1
@@ -372,11 +374,12 @@ st_palette:
 	cmp.l	st_plend,a6
 	beq	.pal
 	; the listed pens' colours, indices
-	lea	st_pcol,a1
-	lea	st_pidx,a2
-	lea	st_ctab,a3
-	lea	st_q4,a5
 	clr.l	st_rowchg		; (rows changed: bits 0-31 = sprite rows 0-15, tile rows 16-31)
+.pens0:	lea	st_pcol,a1
+	lea	st_pidx,a2
+	move.l	st_scn,a3
+	lea	SC_CTAB(a3),a3
+	lea	st_q4,a5
 .pen:	cmp.l	st_plend,a6
 	beq	.pend
 	move.w	(a6)+,d7		; the pen
@@ -405,7 +408,10 @@ st_palette:
 	cmp.w	(a1,d0.w),d1
 	beq	.pen
 	move.w	d1,(a1,d0.w)
-	moveq	#0,d2
+	cmp.w	#256,d7
+	blo.s	.pt
+	st	st_tilechg		; (a tile pen's colour: the scene looked at)
+.pt:	moveq	#0,d2
 	move.b	(a3,d1.w),d2		; the playfield's index
 	cmp.b	(a2,d7.w),d2
 	beq.s	.hud
@@ -417,7 +423,8 @@ st_palette:
 	move.l	d4,st_rowchg
 .hud:	cmp.w	#256,d7
 	blo	.pen
-	lea	st_hctab,a0
+	move.l	st_scn,a0
+	lea	SC_HTAB(a0),a0
 	move.b	(a0,d1.w),d2
 	lea	st_hidx-256,a0
 	cmp.b	(a0,d7.w),d2
@@ -430,9 +437,27 @@ st_palette:
 	bset	d3,d4
 	move.l	d4,st_hrowchg
 	bra	.pen
-.pend:
-	; the reserved pens: their own indices
-	lea	st_respens,a0
+.pend:	tst.b	st_tilechg		; the scene: the best match of the tile palette (st_scene)
+	beq.s	.nosc
+	sf	st_tilechg
+	bsr	st_scene
+	tst.w	d0
+	beq.s	.nosc
+	lea	st_pcol,a1		; (another scene: every pen again with its tables, everything composed again)
+	lea	st_plist,a6
+	move.l	a6,a0
+	moveq	#0,d7
+.al:	move.w	#$FFFF,(a1)+
+	move.w	d7,(a0)+
+	addq.w	#1,d7
+	cmp.w	#512,d7
+	blo.s	.al
+	move.l	a0,st_plend
+	st	st_allnew
+	bra	.pens0
+.nosc:	; the reserved pens: their own indices
+	move.l	st_scn,a0
+	lea	SC_RES(a0),a0
 	move.w	(a0)+,d0
 	beq.s	.rr
 	moveq	#16,d1
@@ -490,14 +515,16 @@ st_palette:
 	cmp.w	#32,d5
 	blo	.row
 .pal:	; the STE palettes: the stage's, the reserved indices their pens' current colours
-	lea	st_pal_file,a0
+	move.l	st_scn,a0
+	lea	SC_PAL(a0),a0
 	lea	st_stepal,a1
 	lea	st_hstepal,a2
 	moveq	#16-1,d0
 .c:	move.w	32(a0),(a2)+
 	move.w	(a0)+,(a1)+
 	dbf	d0,.c
-	lea	st_respens,a0
+	move.l	st_scn,a0
+	lea	SC_RES(a0),a0
 	move.w	(a0)+,d0
 	beq.s	.x
 	moveq	#16,d1
@@ -515,6 +542,48 @@ st_palette:
 	move.w	(a4,d2.w),(a1)+		; (the STE's bit order)
 	dbf	d0,.rc
 .x:	rts
+
+; st_scene: the scene whose reference tile palette has the most pens equal to the current colours (the first of
+; equals; tools/stage_assets.py choose_scene): d0 = 1 when it becomes the scene (st_scn) - the first time, or when it
+; matches SCENE_MATCH pens - else 0
+st_scene:
+	movem.l	d1-d7/a0-a3,-(sp)
+	lea	st_scenes,a0
+	move.w	(a0)+,d7		; the scenes
+	moveq	#-1,d6			; the best's count
+	moveq	#0,d5			; the best
+	moveq	#0,d4
+.s:	lea	st_pcol+512,a1		; (the tile pens' colours)
+	move.l	a0,a3			; (the scene's reference)
+	moveq	#0,d3
+	move.w	#256-1,d2
+.c:	cmpm.w	(a1)+,(a3)+
+	bne.s	.n
+	addq.w	#1,d3
+.n:	dbf	d2,.c
+	cmp.w	d6,d3
+	ble.s	.nb
+	move.w	d3,d6
+	move.w	d4,d5
+.nb:	add.l	#SC_SIZE,a0
+	addq.w	#1,d4
+	cmp.w	d7,d4
+	blo.s	.s
+	moveq	#0,d0
+	cmp.w	st_curscn,d5
+	beq.s	.x
+	tst.w	st_curscn
+	bmi.s	.sw			; (the first)
+	cmp.w	#SCENE_MATCH,d6
+	blo.s	.x
+.sw:	move.w	d5,st_curscn
+	mulu	#SC_SIZE,d5
+	lea	st_scenes+2,a0
+	add.l	d5,a0
+	move.l	a0,st_scn
+	moveq	#1,d0
+.x:	movem.l	(sp)+,d1-d7/a0-a3
+	rts
 
 ; st_rowtables: d5 = a colour row (0-15 sprites, 16-31 tiles): its tables from st_pidx (pen 0: index 0 - transparent
 ; for the tiles over the empty BG, masked for the sprites).  Tiles: st_tt (a byte of 2 pens -> each plane's 2 bits at
@@ -1463,18 +1532,15 @@ st_bartile:
 ; ======================================================================================================================
 	section data,data
 	even
-	ifnd	ST_STAGE
-ST_STAGE	= 2
-	endc
-st_pal_file:				; (tools/stage_assets.py: 16 + 16 STE colours, the colour tables, the reserved pens)
-	if	ST_STAGE=1
-	incbin	"stage1_pal.bin"
-	else
-	incbin	"stage2_pal.bin"
-	endc
-st_ctab		= st_pal_file+64
-st_hctab	= st_pal_file+64+4096
-st_respens	= st_pal_file+64+8192
+st_scenes:	incbin	"stage_scenes.bin"	; (tools/stage_assets.py scenes)
+SC_REF		= 0			; a scene: 256 words its reference tile colours
+SC_PAL		= 512			; 16 + 16 words the playfield's and the status bar's STE colours
+SC_HPAL		= 544
+SC_CTAB		= 576			; 4096 bytes the playfield's index of each 12-bit colour
+SC_HTAB		= 576+4096		; the status bar's
+SC_RES		= 576+8192		; a word R, 2 words the reserved pens (indices 16 - R .. 15)
+SC_SIZE		= SC_RES+6
+SCENE_MATCH	= 192
 st_tiles:	incbin	"stage_tiles.bin"
 st_q4:		; 5-bit channel -> 4 bits (round(pal5bit(v) / 17))
 v	set	0
@@ -1508,6 +1574,7 @@ st_off:		ds.b	1
 st_allnew:	ds.b	1
 st_bardirty:	ds.b	1
 st_hver:	ds.b	1
+st_tilechg:	ds.b	1
 st_barhv:	ds.b	1
 	even
 st_draw:	ds.w	1
@@ -1519,6 +1586,8 @@ st_barx:	ds.w	1
 st_bary:	ds.w	1
 st_barpos:	ds.l	1
 st_rowchg:	ds.l	1
+st_scn:		ds.l	1		; the scene (st_scenes + 2 + n * SC_SIZE)
+st_curscn:	ds.w	1
 st_loghead:	ds.w	1
 st_logstart:	ds.w	1
 st_dmgnp:	ds.l	1

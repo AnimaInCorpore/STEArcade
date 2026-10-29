@@ -1,6 +1,6 @@
 """R-Type's stage renderer (src/stage.s) against tools/stage_model.py, on Musashi (engine/sim.py, its Blitter model).
 
-    venv/bin/python games/rtype/tools/stage_test.py STATES.pkl [--frames A-B] [--every N] [--stage N] [--png F,..]
+    venv/bin/python games/rtype/tools/stage_test.py STATES.pkl [--frames A-B] [--every N] [--png F,..]
                     [--quiet] [--stop N] [-D NAME=V]
 
 STATES.pkl: tools/logic_test.py --record (the video state and the object records the program hands the renderer, every
@@ -9,7 +9,7 @@ v30_vmarks, m72_objs, the scroll registers, the raster line, port $02).  Per sta
 frames) the harness gets the state - the blocks that changed since the last one marked, as the translated stores mark
 them -, m72r_frame draws, m72r_vbl shows; the picture is read back as the Shifter shows it (the published address,
 the fine scroll, 512-byte lines; the status bar's lines from its image) and compared index for index with the model's
-picture through the stage's colour tables (tools/stage_assets.py).  Cycles: m72r_frame's CPU + Blitter bus cycles.
+picture through the colour tables of the scene the renderer picks (tools/stage_assets.py scenes).  Cycles: m72r_frame's CPU + Blitter bus cycles.
 """
 import argparse
 import pickle
@@ -178,27 +178,34 @@ class Harness:
         return out, bot
 
 
-def expected(model, lock, st, pal):
-    """the model's picture in STE indices (the stage's tables at the pens' current colours)"""
-    pens = model.picture(st, lock)
-    p = m72.pens(st["pal0"], st["pal1"])[:512]
-    q = np.round(p.astype(float) / 17).astype(np.int32)
-    col = (q[:, 0] << 8) | (q[:, 1] << 4) | q[:, 2]
-    ctab = np.frombuffer(pal[64:64 + 4096], np.uint8)
-    hctab = np.frombuffer(pal[64 + 4096:64 + 8192], np.uint8)
-    nres = int.from_bytes(pal[64 + 8192:64 + 8194], "big")
-    pidx = ctab[col].astype(np.int32)
-    for j in range(nres):
-        rp = int.from_bytes(pal[64 + 8194 + 2 * j:64 + 8196 + 2 * j], "big")
-        pidx[rp] = 16 - nres + j
-    hidx = hctab[col].astype(np.int32)
-    bar = any(b[0] == SM.HUD_Y for b in st["bands"])
-    pp = np.minimum(pens, 511)
-    want = pidx[pp]
-    if bar:
-        want[SM.HUD_Y:] = hidx[pp[SM.HUD_Y:]]
-    want[pens == 512] = 0
-    return want
+class Expected:
+    """the model's picture in STE indices: the scene the renderer picks (tools/stage_assets.py choose_scene, when a
+    tile pen's colour changed), its colour tables at the pens' current colours, its reserved pens"""
+    def __init__(self):
+        import stage_assets as SA
+        self.SA = SA
+        self.scenes = SA.load_scenes()
+        self.model, self.lock = SM.Model(), SM.Lock()
+        self.cur, self.tiles = None, None
+
+    def __call__(self, st):
+        pens = self.model.picture(st, self.lock)
+        col = self.SA.pen_colours(st)
+        if self.tiles is None or (col[256:] != self.tiles).any():
+            self.cur = self.SA.choose_scene(col[256:], [sc[0] for sc in self.scenes], self.cur)
+            self.tiles = col[256:].copy()
+        ref, pal, hpal, ctab, htab, res = self.scenes[self.cur]
+        pidx = ctab[col].copy()
+        for j, rp in enumerate(res):
+            pidx[rp] = 16 - len(res) + j
+        hidx = htab[col]
+        bar = any(b[0] == SM.HUD_Y for b in st["bands"])
+        pp = np.minimum(pens, 511)
+        want = pidx[pp]
+        if bar:
+            want[SM.HUD_Y:] = hidx[pp[SM.HUD_Y:]]
+        want[pens == 512] = 0
+        return want
 
 
 def main():
@@ -206,7 +213,6 @@ def main():
     ap.add_argument("states")
     ap.add_argument("--frames", default="")
     ap.add_argument("--every", type=int, default=2)
-    ap.add_argument("--stage", type=int, default=2)
     ap.add_argument("--png", default="")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--stop", type=int, default=3)
@@ -217,18 +223,17 @@ def main():
         a, b = (int(x) for x in args.frames.split("-"))
         states = [s for s in states if a <= s[0] <= b]
     states = states[::args.every]
-    pal = (build_dir("rtype") / ("stage%d_pal.bin" % args.stage)).read_bytes()
-    h = Harness(["ST_STAGE=%d" % args.stage] + args.defines)
+    h = Harness(args.defines)
     c0 = h.call("m72r_init")
     print("init: %d cycles" % sum(c0))
-    model, lock = SM.Model(), SM.Lock()
+    expected = Expected()
     pngs = {int(x) for x in args.png.split(",") if x}
     costs, fails = [], 0
     for f, item in states:
         st = pickle.loads(zlib.decompress(item))
         h.put_state(st)
         r = h.frame()
-        want = expected(model, lock, st, pal)
+        want = expected(st)
         if r is None:
             print("%d: no buffer free" % f)
             continue
