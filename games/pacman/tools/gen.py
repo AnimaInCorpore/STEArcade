@@ -27,7 +27,7 @@ import z80x
 import discover
 from translate import compile_code
 from paths import build_dir, require_coverage
-from machine import PacmanPort, load
+from machine import PacmanPort, load, skip_tests
 
 BUILD = build_dir('pacman')
 HOOKS = [PacmanPort.IDLE]
@@ -47,7 +47,8 @@ INLINE = int(os.environ.get('PM_INLINE', '16'))
 
 
 def image():
-    rom = b''.join(load(n) for n in ('pacman.6e', 'pacman.6f', 'pacman.6h', 'pacman.6j'))
+    """the program as the port runs it: the boot's tests patched out (machine.skip_tests)"""
+    rom = skip_tests(b''.join(load(n) for n in ('pacman.6e', 'pacman.6f', 'pacman.6h', 'pacman.6j')))
     return rom + bytes(0x10000 - len(rom))
 
 

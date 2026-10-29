@@ -32,11 +32,13 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "gauntlet": "GAUNTLET.PRG", "kungfum": "KUNGFUM.PRG",
          "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
-         "dkongjr": "DKONGJR.PRG"}
+         "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "pacman": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-6 lives + levels, 7 two players, 8-9 DIPs,
+                                                                # 10 rack test, 11-12 levels 20+ / 250+ (split screen)
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "timeplt": [("ref/cover.py", list(range(1, 13)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs
@@ -65,6 +67,14 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "pacman": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/logic_test.py", ["{n}"], 3000),
+               ("tools/logic_test.py", ["6000", "--seed", "6", "--quiet"], None),   # levels and intermissions
+               ("tools/render_test.py", ["3000", "--seed", "2", "--start", "300", "--every", "3"], None),
+               ("tools/render_test.py", ["3000", "--seed", "12", "--start", "300", "--every", "5"], None),   # level 250+
+               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, holes, bands, wrap, 64 KB
+               ("tools/sound_test.py", ["3000"], None)],          # snd_update against tools/sound.py
     "timeplt": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
@@ -242,8 +252,8 @@ def main():
         games=list(GAMES) if a[1]=="all" else [a[1]]
         results=[]
         for g in games:
-            if g=="galaga":
-                print("galaga: no PPO profile yet (engine/ppo_profiles.py)")
+            if g in ("galaga", "pacman"):
+                print("%s: no PPO profile yet (engine/ppo_profiles.py)" % g)
                 results.append(dict(game=g,status="deferred"))
                 if a[1]!="all":return 2
                 continue

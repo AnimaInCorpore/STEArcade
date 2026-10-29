@@ -13,7 +13,7 @@ class Contracts(unittest.TestCase):
     def test_profiles_cover_registered_ports(self):
         for game in port.GAMES:
             p=profile(game)
-            if game=='galaga':self.assertTrue(p['deferred']);continue
+            if game in ('galaga','pacman'):self.assertTrue(p['deferred']);continue
             self.assertTrue(p['ram'])
             self.assertGreater(sum(r[1] for r in p['ram']),0)
             self.assertLessEqual(max(r[1] for r in p['ram']),65535)

@@ -110,12 +110,24 @@ class Gfx:
         self.rgb = np.array(self.palette + [(0, 0, 0)], np.uint8)       # index 32: black
 
 
+def skip_tests(rom):
+    """The boot's ROM checksum and RAM test (the IRQ target $3000: about 295 frames of the Z80, 6 seconds of the port
+    before its first picture) patched out: $3000 goes where the tests end when they pass ($30B0: ld b,$01 / jp $30BD:
+    the RAM and the video RAM cleared, "memory OK", the vector $FC, the switches' screen, the game's init at $234B).  No
+    later code checks the ROM: nothing to compensate."""
+    rom = bytearray(rom)
+    rom[0x3000:0x3005] = bytes((0x06, 0x01, 0xC3, 0xBD, 0x30))     # ld b,$01 / jp $30BD
+    return bytes(rom)
+
+
 class Pacman:
-    def __init__(self, dsw1=DSW1_DEFAULT, frame_line=VBLANK_LINE):
+    def __init__(self, dsw1=DSW1_DEFAULT, frame_line=VBLANK_LINE, skip=False):
         """frame_line: the screen line a frame starts at.  224, the start of the vertical blank, is MAME's phase: the
         frame ends where MAME draws the screen, so render_raw after run_frame is MAME's picture of that frame."""
         self.frame_line = frame_line
         self.rom = load("pacman.6e") + load("pacman.6f") + load("pacman.6h") + load("pacman.6j")
+        if skip:
+            self.rom = skip_tests(self.rom)
         self.ram = bytearray(0x1000)          # 4000-4FFF (4800-4BFF unused)
         self.sprite2 = bytearray(0x10)        # 5060-506F
         self.sound = bytearray(0x20)          # 5040-505F
@@ -276,8 +288,9 @@ class PacmanPort(Pacman):
     IDLE = 0x238D
     HALT = 0x234A
 
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
+    def __init__(self, *a, skip=True, **k):
+        """skip: the boot's tests patched out (skip_tests), as the port's program (gen.image) has them"""
+        super().__init__(*a, skip=skip, **k)
         self.irq_count = 0
 
     def waits(self):

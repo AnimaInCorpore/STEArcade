@@ -1,5 +1,7 @@
 # Pac-Man, Atari STE
 
+![Pac-Man on the STE (Hatari)](docs/screenshot.png)
+
 Port started 2026-10-29.  Set: MAME `pacman`, Pac-Man (Midway), 1980; one Z80, the closest existing port is Galaga
 (same Namco tile and sprite hardware, same WSG sound chip).  Paths in this file are relative to `games/pacman/`; the
 method is `docs/porting-guide.md`.
@@ -7,7 +9,9 @@ method is `docs/porting-guide.md`.
 State (2026-10-29): the reference machine's picture equals MAME's frame for frame; the Z80 program is translated and
 runs on the 68000 in lock-step with the reference (every frame exact, every seed); the picture is drawn (equal to the
 reference in every checked frame, 274 of the 288 lines shown) and runs at full speed in Hatari, in the attract mode and
-in play; the sound plays the WSG's three voices on the YM2149.  No pads; not in `port.py`'s list.
+in play; the sound plays the WSG's three voices on the YM2149; the pads work as on the other ports.  Registered in
+`port.py` (`port.py cover|build|test|mame pacman`), `tools/release.py` and the README's table: Verification pending
+(the full-game checks of `docs/port-status.md` are open, see "Next steps").
 
 * `src/pacman.s` the runtime (schedule, IRQ delivery, borders, inputs, crash dump); `src/render.s` the picture
 * `tools/prepare.py` the ROMs; `tools/machine.py` the reference machine (`Pacman`) and the port's schedule
@@ -22,7 +26,9 @@ From the repository root: `python games/pacman/tools/prepare.py`, coverage
 translation and the sprite code), `python games/pacman/tools/build.py --sim` (`run/pacman_sim/PACMAN.PRG`), then
 `python games/pacman/tools/logic_test.py 12000 --seed <n>`, `render_test.py 3000 --seed <n> --every 3`,
 `sprite_test.py`, `sound_test.py 4000`.  `build.py` without `--sim` builds `run/pacman/PACMAN.PRG`.  Controls: arrows or joystick move,
-**5** / **6** coin, **1** / **2** start, **Esc** quits.
+**5** / **6** coin, **1** / **2** start, **Esc** quits.  Jaguar pad / PowerPad (`engine/rt/jagpad.s`): either pad's
+D-pad moves Pac-Man (the players take turns), **Option** coin, **Pause** start, keypad **1** / **2** start, **5** / **6**
+coin, **\*** + **#** quit.
 
 ## ROMs
 
@@ -47,7 +53,12 @@ is `assets/roms/puckman.zip`, MAME's merged Puck Man set: the Midway set's files
 * A frame starts at the vertical blank (`frame_line=224`, MAME's phase): `render_raw` after `run_frame` is the picture
   MAME draws at that frame's end.  Starting frames at line 0 left about one frame in ten of the demo different from
   MAME: the foreground task writes the screen between line 0 and the blank.
-* The boot reaches the game's vector at frame 250; there is no long RAM test to skip (Galaga's was 600 frames).
+* The boot reaches the game's vector at frame 250: its IRQ target `$3000` checks the ROM and tests the RAM (255
+  passes) for about 295 frames of Z80 time.  The port patches that out (`machine.skip_tests`, `PacmanPort(skip=True)`
+  and `gen.image`; the MAME check uses the original): `$3000` becomes `ld b,$01 / jp $30BD`, the point the tests reach
+  when they pass (the RAM and the video RAM cleared, "memory OK", the vector `$FC`, the switches' screen, the game's
+  init at `$234B`).  No later code checks the ROM.  Frame 0 then takes 47 frames of Z80 time (the boot's own delay
+  loops): the first picture after about 1.8 seconds in Hatari, where the full test took 6.
 * The foreground is a task queue: the program spins at `$238D` (`ld hl,($4C82); ld a,(hl); and a; jp m,$238D`) until
   the IRQ handler posts a task in the ring at $4CC0.  That spin is where the STE runtime's schedule hands over (the
   idle hook of 1942's schedule, `docs/porting-guide.md`).
@@ -85,8 +96,8 @@ frame handler, whose `reti` goes back to `$238D` through the dispatch table, whe
 Without the IRQ the frame passes.  The runtime resets the 68000 stack before it enters the IRQ (the foreground waits
 at its top level); the boot's push at SP `$FFFF` is written byte by byte (an odd address).
 
-Unlike the arcade, the IRQ never cuts into a running task, and the boot's ROM / RAM test runs inside frame 0 (it
-never waits): the attract mode starts 250 frames earlier than on the board, the game is otherwise the same.  A task
+Unlike the arcade, the IRQ never cuts into a running task, and the boot runs inside frame 0 (it never waits; its
+tests are patched out, see above): the attract mode starts earlier than on the board, the game is otherwise the same.  A task
 that took longer than a frame on the arcade makes a longer frame here.
 
 ## Coverage
@@ -188,11 +199,18 @@ arcade frames, 5608 pictures: within about 50 frames of full speed after the boo
 the start (12 s) to the game over (66 s), its strongest frequencies 530-890 Hz in play; the stills show the game (the
 score, the lives and fruit rows, the game over, the high score kept).
 
+**Final Hatari run** (2026-10-29, the pads in and the boot patched; `hatari.ps1 -Frames 3000 -Sound 44100
+-Extra -DAUTOPLAY=1`): 3001 VBLs, 3492 arcade frames, 2877 pictures: about 109 frames lost at the boot, then full
+speed.
+
 ## Next steps
 
-1. The pads (`engine/rt/jagpad.s`) and a check of the keyboard and joystick by hand; perhaps a shorter boot (Galaga
-   patches its RAM test out: here about 6 seconds before the first picture).
-2. The sound against MAME's audio (a MAME with input: MAME 0.289's Lua, or a recorded `.inp`), by ear too.
-3. Register the port in `port.py` (GAMES, COVER, TESTS), `tools/release.py` and the README's tables; a screenshot.
-4. Play against MAME with input (a WolfMAME `.inp` or a MARP recording, `docs/porting-guide.md`), then the natural
-   playthrough `docs/port-status.md` asks for.
+For a green **Complete** (`docs/port-status.md`):
+
+1. A natural playthrough in Hatari (no cheats or RAM pokes), with the build identity, the input recording and a fresh
+   replay kept.  Pac-Man has no ending: decide what counts first (every distinct level up to about 21, where they stop
+   changing, and the three intermissions).
+2. The keyboard, the joystick and the pads checked by hand; the sound by ear.
+3. The sound against MAME's audio and the play against MAME's with input (a MAME with input: MAME 0.289's Lua, a
+   recorded `.inp`, or a MARP recording, `docs/porting-guide.md`).
+4. A PPO profile (`engine/ppo_profiles.py`: deferred for now) if an automated player should attempt the playthrough.

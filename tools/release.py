@@ -99,6 +99,11 @@ GAMES = [
      "  fall on the YM); 22 colours fitted into 16",
      "jump: Space, Control, Alternate, joystick fire, pad A/B/C.  One player at a time: both joysticks and both\n"
      "  pads move Junior.  One coin slot (5, Option)."),
+    ("pacman", "PACMAN.PRG", "Pac-Man (Namco / Midway 1980)",
+     "full speed (60 arcade frames and 50 pictures a second in play, Hatari); exact logic and picture, 274 of the\n"
+     "  288 lines (the never or hardly drawn ones left out); the WSG's voices on the YM",
+     "the arrows, the joystick or a pad move Pac-Man; no buttons.  One player at a time: both joysticks and both\n"
+     "  pads move him."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

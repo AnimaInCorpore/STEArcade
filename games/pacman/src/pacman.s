@@ -28,6 +28,30 @@ TA_NOPS = 84
 	endc
 BD_PALETTE = 0
 	include	"borders.s"
+
+; the pads (engine/rt/jagpad.s): IN0 and IN1 bits as in key_table (bytes 0-1 of each long; active high there).  Either
+; pad moves Pac-Man (upright: the players take turns); the fire buttons have nothing to do.
+JP_SH0 = 24
+JP_SH1 = 16
+JP1_UP = $01<<JP_SH0
+JP1_LEFT = $02<<JP_SH0
+JP1_RIGHT = $04<<JP_SH0
+JP1_DOWN = $08<<JP_SH0
+JP1_B1 = 0
+JP1_B2 = 0
+JP1_B3 = 0
+JP2_UP = JP1_UP
+JP2_LEFT = JP1_LEFT
+JP2_RIGHT = JP1_RIGHT
+JP2_DOWN = JP1_DOWN
+JP2_B1 = 0
+JP2_B2 = 0
+JP2_B3 = 0
+JP_START1 = $20<<JP_SH1
+JP_START2 = $40<<JP_SH1
+JP_COIN1 = $20<<JP_SH0
+JP_COIN2 = $40<<JP_SH0
+	include	"jagpad.s"
 	include	"ikbd.s"
 
 ; The Z80's 64 KB: a6 = g_block + $8000 = Z80 address 0 (signed word offsets: $8000-$FFFF lie below a6).
@@ -151,6 +175,7 @@ init_hardware:
 .w2:	btst	#1,$fffffc00.w
 	beq.s	.w2
 	move.b	#$12,$fffffc02.w	; mouse off
+	bsr	jagpad_init
 	endc
 	rts
 
@@ -224,8 +249,9 @@ vbl:
 	bne	quit
 	bsr	vbl_video
 	ifnd SIM
-	move.b	in0_kbd,IO_IN0
-	move.b	in1_kbd,IO_IN1
+	bsr	jagpad_poll
+	jp_merge	in0_kbd,IO_IN0,0
+	jp_merge	in1_kbd,IO_IN1,1
 	endc
 	ifd AUTOPLAY				; (measuring build: a coin and start, then the joystick in a new direction
 	move.l	frame_counter,d0	; every 24 VBLs; period 6000 VBLs: a new game after a game over)
@@ -415,6 +441,8 @@ pm_mark_all:
 	rts
 
 	borders_handlers
+	jagpad_text
+	jagpad_maps
 
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): IN0 and IN1 are active low bytes
@@ -805,6 +833,7 @@ old_fa1f:	ds.b	1
 old_fa21:	ds.b	1
 quit_flag:	ds.b	1
 	borders_vars
+	jagpad_vars
 vbl_pending:	ds.b	1		; arcade frames that have come (the VBL adds, the hook takes one)
 vbl_phase:	ds.b	1
 render_skips:	ds.b	1

@@ -23,6 +23,7 @@ def profile(game):
                       coin_mask=128,start_mask=4,buttons=[16],directions=[1,2,8,4],legacy=False,
                       ram=[(0x6000,0xc00,'z80_block+$6000')],rom=[(0,0x5fff)]),
         'galaga': dict(deferred='No RAM/input profile yet (the real 51xx/54xx ROMs are in since 2026-10-22).'),
+        'pacman': dict(deferred='No RAM/input profile yet (registered 2026-10-29).'),
         'bublbobl': dict(boot=600,coin=400,start=460,system_idle=3,high_system=True,coin_mask=4,
                          start_source='p1',start_mask=64,buttons=[32,16],directions=[2,1,0,0],legacy=False,
                          ram=[(0xe000,0x1800,'g_block+$e000')]),
