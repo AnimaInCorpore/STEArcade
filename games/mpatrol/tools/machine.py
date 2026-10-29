@@ -239,6 +239,112 @@ class MoonPatrol:
                                      self.regs, bool(self.flip))
 
 
+
+class MoonPatrolPort(MoonPatrol):
+    """The STE runtime's schedule.  The IRQ handler ($0038) does the game: it copies the sprite list ($E100) to the
+    sprite RAM, writes the scroll registers ($056D), counts the frame ($E04E) and the timers ($E050, $E051), and runs
+    the game's step ($040E, $047A, $01EC, ...); at $0104 it restarts the foreground with a new stack.  The foreground
+    waits for the IRQ in spin loops on $E050 / $E047, or (attract and play) runs a work loop at $026E: five helpers,
+    then the task queue the IRQ fills ($E600, indices $E1CF / $E1D0), back to $026E when it is empty.  Those pcs are
+    the idle hooks (HOOKS: pc -> the condition under which the foreground waits there; the work loop's head always
+    yields, so its helpers run once a frame instead of as often as the arcade's spare time allows).  IRQ_WAITS are
+    waits inside the handler (the stop mode): the frame ends there and the next one goes on there, without an IRQ.  One call of
+    run_frame_port = one arcade frame: the IRQ handler runs to its return (to TOKEN; the foreground goes on at the
+    hook's pc) or to a hook it reached instead (the restart), then the foreground runs at least one instruction and on
+    until a hook says it waits.  `ld a,r` reads the port's z80_rnd (a 16-bit shift register) instead of the refresh
+    register.  engine/z80.py runs the CPU."""
+    HOOKS = {
+        0x026E: lambda m: True,                    # the work loop (helpers, the IRQ's task queue): once a frame
+        0x0315: lambda m: m.mem[0xE050] != 0,      # wait for $E050 frames (0312: ld ($E050),a ... jr nz)
+        0x0359: lambda m: m.mem[0xE050] != 0,
+        0x05ED: lambda m: m.mem[0xE050] != 0,
+        0x078E: lambda m: m.mem[0xE047] != 0,      # wait until the IRQ clears $E047
+        0x010D: lambda m: not m.starts(),          # "push start" (0533: the text, blinking) until a game starts
+        0x01A7: lambda m: m.mem[0xE050] != 0 and (m.mem[0xE048] == 0 or not m.starts()),
+                                                   # the continue's countdown ($E054 each $40 frames), a start
+        0x0B59: lambda m: m.mem[0xE051] > 1,       # sector selection: no new start 1 press, until $E051 runs out
+    }
+    IRQ_WAITS = {                              # waits inside the IRQ handler: the next frame goes on there, no new IRQ
+        0x00AF: lambda m: m.in0 & 1 != 0,          # stop mode (DSW2 bit 4): stopped by start 2 until start 1
+    }
+    TOKEN = 0xF7FE
+
+    def __init__(self, dsw1=DSW1, dsw2=DSW2):
+        super().__init__(dsw1, dsw2)
+        from z80 import Z80
+        self.cpu = Z80(self.rd, self.wr, self.io_rd, self.io_wr)
+        self.cpu.r_hook = self.rnd
+        self.rnd_state = 0xACE1
+        self.booted = False
+        self.irq_count = 0
+        self.idle_pc = None
+        self.idle = {}                         # hook pc -> times the foreground waited there
+        self.irq_wait_pc = None                # the IRQ_WAITS pc the handler waits at, or None
+
+    def line(self):
+        return 0
+
+    def starts(self):
+        """whether 0533's check of the start buttons ($E053, the IRQ's copy of IN0) starts a game: start 1, or start 2
+        with more than one credit ($E048, BCD; 0559: sub 1, daa, ret z)"""
+        b = self.mem[0xE053]
+        return bool(b & 1) or bool(b & 2) and self.mem[0xE048] != 1
+
+    def rnd(self):
+        """What the port's z80_rnd gives for `ld a,r`: a 16-bit shift register byte (as Kung-Fu Master's)."""
+        s = self.rnd_state
+        s = (s >> 1) ^ (0xB400 if s & 1 else 0)
+        self.rnd_state = s
+        return s & 0xFF
+
+    def run_to_idle(self, limit=3000000):
+        """runs the foreground (at least one instruction) until it waits at a hook"""
+        c = self.cpu
+        hooks = self.HOOKS
+        for _ in range(limit):
+            c.step()
+            h = hooks.get(c.pc)
+            if h is not None and h(self):
+                self.idle_pc = c.pc
+                self.idle[c.pc] = self.idle.get(c.pc, 0) + 1
+                return
+        raise RuntimeError("the foreground did not wait (pc %04X, frame %d)" % (c.pc, self.frame))
+
+    def run_frame_port(self):
+        c = self.cpu
+        self.video_log = []
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        c.halted = False
+        if self.irq_wait_pc is not None:       # (the handler waited inside: it goes on there, no new IRQ)
+            c.pc, self.irq_wait_pc = self.irq_wait_pc, None
+        else:
+            c.iff1 = c.iff2 = 0
+            c.push(self.TOKEN)
+            c.pc = 0x38
+        hooks = self.HOOKS
+        waits = self.IRQ_WAITS
+        for _ in range(3000000):
+            w = waits.get(c.pc)
+            if w is not None and w(self):
+                self.irq_wait_pc = c.pc
+                break
+            c.step()
+            if c.pc == self.TOKEN:
+                c.pc = self.idle_pc
+                self.run_to_idle()
+                break
+            h = hooks.get(c.pc)
+            if h is not None and h(self):           # (the handler restarted the foreground, which waits now)
+                self.idle_pc = c.pc
+                self.idle[c.pc] = self.idle.get(c.pc, 0) + 1
+                break
+        else:
+            raise RuntimeError("the interrupt did not return (frame %d)" % self.frame)
+        self.irq_count += 1
+        self.frame += 1
+
 if __name__ == "__main__":
     import time
     from PIL import Image

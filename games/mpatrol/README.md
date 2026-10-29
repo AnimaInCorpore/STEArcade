@@ -7,6 +7,7 @@ Started 2026-10-29.  Not in `port.py list` yet: the scripts here run on their ow
 python games/mpatrol/tools/prepare.py              # verify assets/roms/mpatrol.zip, unpack to assets/roms/extracted/mpatrol/
 python games/mpatrol/tools/machine.py 300 2400     # run the reference board, pictures to build/mpatrol/ref<frame>.png
 MAME=<mpatrol.exe> python games/mpatrol/ref/mame_cmp_mpatrol.py [frame ...] [--play] [--keep <absolute dir>]
+for s in $(seq 1 9); do python games/mpatrol/ref/cover.py $s 20000; done   # coverage (~2 min each, in parallel)
 ```
 
 The authoritative MAME for this port is the 0.286 source in `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`
@@ -59,13 +60,46 @@ that folder.
   backgrounds at x + 128 / y + 14 (now + 124 / + 16), the sprites at x + 128 (now + 129) in another order, fills
   with pen 0 and draws hills and city together.
 
+## The schedule (`tools/machine.py` `MoonPatrolPort`)
+
+The IRQ handler ($0038) does the game: it copies the sprite list ($E100) to the sprite RAM and writes the scroll
+registers ($056D), counts the frame ($E04E) and two timers ($E050, $E051: decremented every frame, wrapping), reads
+the inputs ($E053 = IN0 inverted) and runs the game's step ($040E and on); at $0104 (a coin in the attract mode) it
+restarts the foreground with a new stack.  The foreground waits for the IRQ in loops on RAM the IRQ changes; those pcs
+are the idle hooks (the runtime draws there, waits for the next arcade frame and delivers the IRQ with a token as its
+return address, as Kung-Fu Master's):
+
+| pc | waits while | what |
+|---|---|---|
+| $026E | always (once a frame) | the work loop: five helpers, then the IRQ's task queue ($E600, $E1CF / $E1D0) |
+| $05ED, $0359, $0315 | $E050 != 0 | waits of $E050 frames (screens, the typewriter texts) |
+| $078E | $E047 != 0 | until the IRQ clears $E047 |
+| $010D | no start (`starts()`) | "push start": start 1, or start 2 with more than one credit (0533) |
+| $01A7 | $E050 != 0 and no start | the continue's countdown ($E054 every $40 frames) |
+| $0B59 | $E051 > 1 | sector selection: no new start 1 press until the time runs out |
+| $00AF (in the IRQ) | IN0 bit 0 set | stop mode: the handler waits for start 1; the next frame goes on there, no new IRQ |
+
+The work loop's helpers run once a frame instead of as often as the arcade's spare time allows; they are gated by the
+IRQ's counters and the game's state, so the game is the same: in the attract mode every port frame equals a MAME frame
+pixel for pixel (the port 7 frames ahead after the boot, whose frames with interrupts off the arcade loses, 15 by
+frame 2400).  `ld a,r` (the random numbers at $1B45) reads a 16-bit shift register (`rnd`), as in Kung-Fu Master.
+
+## Coverage (`ref/cover.py`)
+
+Nine seeds of 20,000 frames in the port's schedule (RAM addresses from MAME's cheats, mpatrol.xml): 1-2 plain play
+(deaths, continue, game over, new games; seed 2 two players), 3-6 invulnerable with MAME's "finish current section"
+every 900 frames (every point of the Beginner and Champion courses, the courses after them: $E510 up to 5), 7 the
+sector selection DIP switch, 8 the stop mode, 9 other DIP switches (5 lives, no bonus, 1 coin 2 credits, coin mode 2).
+Together 4,030 pcs, 65 computed jump targets, 50 text RAM writers, 158 sprite (code, colour, flip) combinations on the
+screen.  Static discovery (`engine/discover.py`) finds 631 more pcs: the service mode ($3300-$393B, DSW2 bit 7: left
+out, as in Kung-Fu Master), the typewriter's pause codes ($0310), rare paths of the game ($184E, $11BC, $07B1: other
+coinage settings).  Not covered: the flip screen (cocktail).
+
 ## Next steps (docs/porting-guide.md)
 
-1. The port schedule (`MoonPatrolPort`: idle hooks of the foreground's wait loops) and coverage (`ref/cover.py`, random
-   play over every course and sector: the Sector Selection DIP switch reaches them, plus game over, the high-score
-   entry and the continue).
-2. Translation (`tools/gen.py`, `z80x.FAST`), lock-step `logic_test.py`.
-3. Runtime and renderer: the score panel (picture lines 0-49) from its own image with its own colours, the playfield as
+1. Translation (`tools/gen.py`, `z80x.FAST`; the hooks above, the jump tables: the work loop's task table at $02D3
+   and the coverage's targets), lock-step `logic_test.py` against `MoonPatrolPort`.
+2. Runtime and renderer: the score panel (picture lines 0-49) from its own image with its own colours, the playfield as
    three parallax layers (two 256-pixel-wide backgrounds and the ground) plus Blitter sprites prepared the
    stefastbobs2 way (`engine/sprite_programs.py`, HOP 2 / OP 3 copy passes, no AND + OR pairs; see `AGENTS.md`).
-4. Sound from the M6803 driver, after Kung-Fu Master's.
+3. Sound from the M6803 driver, after Kung-Fu Master's.
