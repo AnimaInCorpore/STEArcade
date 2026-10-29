@@ -84,7 +84,7 @@ def load_taps(d, frame):
     out = []
     for l in (Path(d) / ("f%d_taps.txt" % frame)).read_text().splitlines():
         t, v, o, x = l.split()
-        out.append((t, float(v), int(o, 16), int(x, 16)))
+        out.append((t, float(v.replace(",", ".")), int(o, 16), int(x, 16)))    # (a German locale's comma)
     return out
 
 

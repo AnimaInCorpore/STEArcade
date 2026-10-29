@@ -1,0 +1,104 @@
+[
+ {
+  "name": "mpa-1.3m",
+  "size": 4096,
+  "crc32": "5873a860",
+  "sha1": "8c03726d6e049c3edbc277440184e31679f78258"
+ },
+ {
+  "name": "mpa-2.3l",
+  "size": 4096,
+  "crc32": "f4b85974",
+  "sha1": "dfb2efb57378a20af6f20569f4360cde95596f93"
+ },
+ {
+  "name": "mpa-3.3k",
+  "size": 4096,
+  "crc32": "2e1a598c",
+  "sha1": "112c3c9678db8a8540a8df3708020c87fd10c91b"
+ },
+ {
+  "name": "mpa-4.3j",
+  "size": 4096,
+  "crc32": "dd05b587",
+  "sha1": "727961b0dafa4a96b580d51013336db2a18aff1e"
+ },
+ {
+  "name": "mp-s1.1a",
+  "size": 4096,
+  "crc32": "561d3108",
+  "sha1": "4998c68a9e9a8002251fa8f07aa1082444a9dc80"
+ },
+ {
+  "name": "mpe-4.3f",
+  "size": 4096,
+  "crc32": "cca6d023",
+  "sha1": "fecb3059fb09897a096add9452b50aec55c07545"
+ },
+ {
+  "name": "mpe-5.3e",
+  "size": 4096,
+  "crc32": "e3ee7f75",
+  "sha1": "b03d0d56150d3e9da4a4c871338097b4f450b649"
+ },
+ {
+  "name": "mpb-2.3m",
+  "size": 4096,
+  "crc32": "707ace5e",
+  "sha1": "93c682e13e74bce29ced3a87bffb29569c114c3b"
+ },
+ {
+  "name": "mpb-1.3n",
+  "size": 4096,
+  "crc32": "9b72133a",
+  "sha1": "1393ef92ae1ad58a4b62ca1660c0793d30a8b5e2"
+ },
+ {
+  "name": "mpe-1.3l",
+  "size": 4096,
+  "crc32": "c46a7f72",
+  "sha1": "8bb7c9acaf6833fb6c0575b015991b873a305a84"
+ },
+ {
+  "name": "mpe-2.3k",
+  "size": 4096,
+  "crc32": "c7aa1fb0",
+  "sha1": "14c6c76e1d0db2c0745e5d6d33ea6945fac8e9ee"
+ },
+ {
+  "name": "mpe-3.3h",
+  "size": 4096,
+  "crc32": "a0919392",
+  "sha1": "8a090cb8d483a3d67c7360058e3fdd70e151cd62"
+ },
+ {
+  "name": "mpc-4.2a",
+  "size": 512,
+  "crc32": "07f99284",
+  "sha1": "dfc52958f2520e1ce4446dd4c84c91413bbacf76"
+ },
+ {
+  "name": "mpc-3.1m",
+  "size": 32,
+  "crc32": "6a57eff2",
+  "sha1": "2d1c12dab5915da2ccd466e39436c88be434d634"
+ },
+ {
+  "name": "mpc-1.1f",
+  "size": 32,
+  "crc32": "26979b13",
+  "sha1": "8c41a8cce4f3384c392a9f7a223a50d7be0e14a5"
+ },
+ {
+  "name": "mpc-2.2h",
+  "size": 256,
+  "crc32": "7ae4cd97",
+  "sha1": "bc0662fac82ffe65f02092d912b2c2b0c7a8ac2b"
+ },
+ {
+  "name": "mp_7621-5.7h",
+  "size": 512,
+  "crc32": "cf1fd9d0",
+  "sha1": "f9575bc59bf21dfecd10133264835e02890562f8"
+ }
+]
