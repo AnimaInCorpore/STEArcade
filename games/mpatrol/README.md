@@ -8,6 +8,8 @@ python games/mpatrol/tools/prepare.py              # verify assets/roms/mpatrol.
 python games/mpatrol/tools/machine.py 300 2400     # run the reference board, pictures to build/mpatrol/ref<frame>.png
 MAME=<mpatrol.exe> python games/mpatrol/ref/mame_cmp_mpatrol.py [frame ...] [--play] [--keep <absolute dir>]
 for s in $(seq 1 9); do python games/mpatrol/ref/cover.py $s 20000; done   # coverage (~2 min each, in parallel)
+python games/mpatrol/tools/build.py --sim            # the translation -> run/mpatrol_sim/MPATROL.PRG (no STE build yet)
+python games/mpatrol/tools/logic_test.py 20000 --seed 1   # the translation in lock-step with MoonPatrolPort
 ```
 
 The authoritative MAME for this port is the 0.286 source in `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`
@@ -95,11 +97,30 @@ screen.  Static discovery (`engine/discover.py`) finds 631 more pcs: the service
 out, as in Kung-Fu Master), the typewriter's pause codes ($0310), rare paths of the game ($184E, $11BC, $07B1: other
 coinage settings).  Not covered: the flip screen (cocktail).
 
+## The translation (`tools/gen.py`, `src/mpatrol.s`)
+
+The 16 KB program is translated statically (`translate.compile_code`, `z80x.FAST`, the signed 64 KB block): 4,312
+instructions from the coverage's pcs and computed jump targets, the hooks, and every entry of the three jump tables
+(`gen.TABLES`: the object types at $020C through `rst $28`, 49 words; the work loop's tasks at $02D3, 11; $08F5, 24),
+plus what static discovery reaches from them; the service mode ($3300 on) is left out (`z80_badpc`).  The
+memory-mapped I/O lives in the Z80 block, so reads need nothing: the runtime keeps IN0, IN1, IN2, DSW1, DSW2 at
+$D000-$D004 (copied there when an arcade frame starts; the program also reads them through (de) and (hl)) and the
+protection byte at $8800 (computed when port $40 is written).  The stores to the latches (`ld ($D000),a`, the sound
+command; `ld ($D001),a`, the flip latch) get a write hook (`mp_sound` / `mp_flip`) that takes A and puts the input
+byte back.  The ports (`out ($C0),a`, `out (c),a`, `outi`) go to `mp_out_*` routines that store the byte into
+`io_regs` by port >> 5 and keep the flags, but `outi`, whose S, Z, N and C are MAME's (B - 1; the carry of (hl) + l).
+`ld a,r` (13 sites) reads `z80_rnd`.  `src/mpatrol.s` is the simulator's runtime so far: the hooks (`z80_hook`, the
+conditions of `MoonPatrolPort.HOOKS`, the stop mode's wait inside the handler), no picture, no sound, no STE hardware.
+
+`tools/logic_test.py` runs the translation (Musashi) in lock-step with `MoonPatrolPort` through the coverage seeds'
+inputs, cheats and DIP switches: the text RAM, the RAM, the sprite RAM, the six video registers, the flip latch and
+the sound commands are equal every frame, 20,000 frames of each of the nine seeds.  The logic takes 24.6k-29.1k
+68000 cycles a frame (Musashi), a fifth of an STE frame.
+
 ## Next steps (docs/porting-guide.md)
 
-1. Translation (`tools/gen.py`, `z80x.FAST`; the hooks above, the jump tables: the work loop's task table at $02D3
-   and the coverage's targets), lock-step `logic_test.py` against `MoonPatrolPort`.
-2. Runtime and renderer: the score panel (picture lines 0-49) from its own image with its own colours, the playfield as
-   three parallax layers (two 256-pixel-wide backgrounds and the ground) plus Blitter sprites prepared the
-   stefastbobs2 way (`engine/sprite_programs.py`, HOP 2 / OP 3 copy passes, no AND + OR pairs; see `AGENTS.md`).
-3. Sound from the M6803 driver, after Kung-Fu Master's.
+1. The STE runtime (hardware, borders, IKBD and pads, the VBL's arcade frames: 56.74 Hz on 50) and the renderer:
+   the score panel (picture lines 0-49) from its own image with its own colours, the playfield as three parallax
+   layers (two 256-pixel-wide backgrounds and the ground) plus Blitter sprites prepared the stefastbobs2 way
+   (`engine/sprite_programs.py`, HOP 2 / OP 3 copy passes, no AND + OR pairs; see `AGENTS.md`).
+2. Sound from the M6803 driver, after Kung-Fu Master's.
