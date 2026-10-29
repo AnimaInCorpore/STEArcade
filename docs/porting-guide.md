@@ -86,7 +86,12 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
   (no MMU) maps each slot to its memory in the context (Gyruss: slot 3 is the main CPU's shared RAM in the Z80 block).
 * **Z80 translations**: z80x computes H after `inc` / `dec` where it is read (a `daa` after `inc a`: Gyruss's frame
   counter); `inline_leaves` and an emitter's `x_rst` override put the short `rst` I/O helpers of a sound driver in
-  place (Gyruss's sound: 57k -> 52k cycles a frame).
+  place (Gyruss's sound: 57k -> 52k cycles a frame).  A program that keeps data in the I register (Pooyan: loop
+  counters, `ld i,a` / `ld a,i`) gives `Config.iaddr`, an unused byte of the block; `ld a,i`'s P/V (IFF2) is not
+  produced, so a reader of it stops the build.  `inc` / `dec` of IYH / IYL are translated too (2026-10-29).
+  Fixed the same day: `inc` / `dec (iy+d)` with H live, where IY is kept in the block (no `iy_reg`: the `dk`,
+  `signed`, `long` layouts, `FAST_LONG`), took the H test's `move.b ea,d5` over the address in d5 and changed the
+  wrong byte; H now comes from the result there.  `xbench.py` had reported it; no port's code contained the case.
 * **MAME's debugger for exact traces of a small CPU** (Gyruss's i8039, `games/gyruss/tools/i8039.py --mame`): a
   breakpoint action's `printf` reads the registers of the debugger's current CPU, not of the one that hit the
   breakpoint (stop once on that CPU first); a command reaching a CPU through a latch with a delayed write needs its

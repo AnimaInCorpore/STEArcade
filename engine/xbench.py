@@ -36,6 +36,7 @@ RAM_LO, RAM_HI = 0x6100, 0x6F00     # pointers, the stack
 PTR_HI, SP_LO = 0x6C00, 0x6E40       # pointers below PTR_HI, the stack above SP_LO: a pointer (+d) never reaches
                                      # the stack words a push wrote (the merge pass does not write them: dead)
 IYADDR, FSHADOW = 0x4FF0, 0x4FF2     # the block words of IY and F' (old register map), away from the tested ranges
+IADDR = 0x4FF4                       # the block byte of I (Config.iaddr: ld i,a / ld a,i)
 
 HELPERS = open(str(RT_INCLUDE / "rtlib.s")).read() + """
 z80_unsupported:\tbra.s z80_unsupported
@@ -105,7 +106,7 @@ def assemble(src):
 
 # ---------------------------------------------------------------------------- the instructions
 
-SKIP = {"halt", "ld a,r", "in", "out", "im", "reti", "retn", "ld i,a", "ld a,i", "ld r,a", "di", "ei"}
+SKIP = {"halt", "ld a,r", "in", "out", "im", "reti", "retn", "ld r,a", "di", "ei"}
 
 
 def all_opcodes(rnd):
@@ -172,7 +173,7 @@ class Case:
         self.geo = layout.rstrip("+")
         # (sequences with BIT: the exact S of Config.bit_s, as F can be seen through push af / pop rr)
         bit_s = seq and any(i.mn == "bit" for i in code.values())
-        cfg = z80x.Config(io_read_redirect={}, write_hooks=(), iyaddr=IYADDR, fshadow=FSHADOW, bit_s=bit_s, **LAYOUTS[layout])
+        cfg = z80x.Config(io_read_redirect={}, write_hooks=(), iyaddr=IYADDR, fshadow=FSHADOW, iaddr=IADDR, bit_s=bit_s, **LAYOUTS[layout])
         if seq:
             em = translate.compile_code(code, {entry}, cfg)
         else:
@@ -212,7 +213,7 @@ class Case:
         p = lambda: rnd.randrange(RAM_LO, PTR_HI)
         st = {"a": rnd.randrange(256), "bc": w(), "de": w(), "hl": w(), "ix": w(), "iy": w(), "sp": p() & ~1,
               "f": rnd.randrange(256) & 0xD7, "a_": rnd.randrange(256), "f_": rnd.randrange(256) & 0xD7,
-              "bc_": w(), "de_": w(), "hl_": w()}
+              "bc_": w(), "de_": w(), "hl_": w(), "i": rnd.randrange(256)}
         ptr = set()
         for ins in self.code.values():
             ptr |= pointer_regs(ins)
@@ -313,6 +314,7 @@ class Case:
             for pc, ins in self.code.items():
                 space[pc:pc + ins.length] = self.raw[pc]
             iy_mem = IYADDR
+            space[IADDR] = st["i"]
             if not rm["iy"].startswith("a"):
                 space[iy_mem] = st["iy"] >> 8          # the 68000 keeps IY as a big-endian word
                 space[iy_mem + 1] = st["iy"] & 0xFF
@@ -343,6 +345,7 @@ class Case:
             z.b_, z.c_ = st["bc_"] >> 8, st["bc_"] & 255
             z.d_, z.e_ = st["de_"] >> 8, st["de_"] & 255
             z.h_, z.l_ = st["hl_"] >> 8, st["hl_"] & 255
+            z.i = st["i"]
             z.pc = self.entry
             n = 0
             while (z.pc in self.code) and n < 200000:
@@ -369,6 +372,8 @@ class Case:
             if rm["alt_af"] == "upper":
                 want["f_"] = self.f68(z.f_) & 0x0D        # (S Z C: H N are computed only where read)
                 got["f_"] &= 0x0D
+            if get_space(self.mem, self.layout)[IADDR] != z.i:
+                errs.append("i: got %X expected %X" % (get_space(self.mem, self.layout)[IADDR], z.i))
             for k, v in want.items():
                 if got.get(k) is not None and got[k] != v:
                     errs.append("%s: got %X expected %X" % (k, got[k], v))
@@ -388,7 +393,7 @@ class Case:
                     if self.live & fl and bool(d6 & mb) != bool(z.f & zb):
                         errs.append("flag %s: got %d expected %d" % (nm, bool(d6 & mb), bool(z.f & zb)))
             mm = get_space(self.mem, self.layout)
-            skip = set()
+            skip = {IADDR}
             if not rm["iy"].startswith("a"):
                 skip |= {iy_mem, iy_mem + 1}
             if rm["alt_af"] == "a3":

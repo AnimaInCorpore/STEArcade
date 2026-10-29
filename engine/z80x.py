@@ -76,7 +76,7 @@ class Config:
                  write_hooks=((DMA_TRIGGER, DMA_TRIGGER, "z80_dma", 0),), nmi_token=NMI_TOKEN,
                  table_entries=TABLE_ENTRIES, rst28_tables=True, iff_sym=None, hl_tables=False, pv_force=(), bit_s=False,
                  alt_af="a3", alt_regs="areg", iy_reg=None, inline_leaves=0, cpu030=None,
-                 inline_limit=0x8000, inline_rst=False, inline_jumps=False,
+                 inline_limit=0x8000, inline_rst=False, inline_jumps=False, iaddr=None,
                  rst28_counts=None):
         self.prefix = prefix
         # the 68030 forms (F030Arcade's Falcon ports; default: the STE_XCPU environment variable, the tests): the high
@@ -101,6 +101,7 @@ class Config:
         self.ram_sym = ram_sym
         self.iyaddr = iyaddr
         self.fshadow = fshadow
+        self.iaddr = iaddr              # an unused byte of the block for the I register (ld i,a / ld a,i as a store); None: unsupported
         self.io_read_redirect = IO_READ_REDIRECT if io_read_redirect is None else io_read_redirect
         self.write_hooks = list(write_hooks)
         self.nmi_token = nmi_token
@@ -192,7 +193,7 @@ def _uses_defs(ins):
     if mn in ("ldir", "ldi", "ldd", "lddr"):
         return 0, H | N
     if mn == "ld a,i":
-        return 0, S | Z | H | N
+        return 0, S | Z | H | N | PV     # (P/V = IFF2: not modelled, so a live P/V after it stops the translation)
     return 0, 0
 
 
@@ -1150,6 +1151,19 @@ class Emitter:
         self.e("move.b d7,%s" % hi)
 
     # ---- inc/dec ----------------------------------------------------------
+    def x_ld_i_a(self, ins):
+        """the I register as a byte of storage (Pooyan keeps loop counters in it; no IM 2 in the ports)"""
+        if self.cfg.iaddr is None:
+            raise Unsupported("ld i,a (no iaddr)")
+        self.e("move.b d0,%s" % self.mem(self.cfg.iaddr))
+
+    def x_ld_a_i(self, ins):
+        """S Z from I, H N cleared, C kept; P/V (IFF2) is not produced (uses_defs: a reader stops the translation)"""
+        if self.cfg.iaddr is None:
+            raise Unsupported("ld a,i (no iaddr)")
+        self.e("move.b %s,d0" % self.mem(self.cfg.iaddr))
+        self.flags(S | Z, const_clear=H | N)
+
     def x_inc(self, ins):
         self._incdec(ins, "addq")
 
@@ -1212,6 +1226,21 @@ class Emitter:
                         ea = "(a7)"
                 else:
                     ea = reg
+            elif n in ("iyh", "iyl"):
+                # (Pooyan's `dec iyh`) a half of IY: in the block, or turned in d5 when IY is an address register
+                if self.lo & H:
+                    raise Unsupported("H after %s %s" % (ins.mn, n))
+                if self.iyr:
+                    self.e("move.w %s,d5" % self.iyr)
+                    if n == "iyh":
+                        self.e("ror.w #8,d5")
+                    self.e("%s.b #1,d5" % op)
+                    self.flags(S | Z, const_set=0 if isinc else N, const_clear=N if isinc else 0)
+                    if n == "iyh":
+                        self.e("ror.w #8,d5")
+                    self.e("movea.w d5,%s" % self.iyr)
+                    return
+                ea = self.mem(self.cfg.iyaddr, 0 if n == "iyh" else 1)
             else:
                 raise Unsupported(n)
         else:
@@ -1219,7 +1248,22 @@ class Emitter:
             for l in pre:
                 self.e(l)
         hcomp = None
-        if self.lo & H:
+        if self.lo & H and "d5" in ea:
+            # (inc / dec (iy+d) with IY in the block: d5 holds the address until the operation is done) H from the
+            # result instead: its low nibble is 0 (inc) / $F (dec)
+            def hcomp():
+                l = self.new_label()
+                self.e("move.b %s,d5" % ea)
+                self.e("and.b #$0F,d5")
+                if not isinc:
+                    self.e("cmp.b #$0F,d5")
+                self.e("seq d5")
+                self.e("bclr #5,d6")
+                self.e("tst.b d5")
+                self.e("beq.s %s" % l)
+                self.e("bset #5,d6")
+                self.lines.append(l + ":")
+        elif self.lo & H:
             # H = a carry out of the low nibble: it was $F (inc) / a borrow: it was 0 (dec); d5 = $FF then
             self.e("move.b %s,d5" % ea)
             self.e("and.b #$0F,d5")
