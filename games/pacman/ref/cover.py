@@ -5,7 +5,7 @@
 pcs, jumps (where computed jumps went: jp (hl) / (ix) / (iy)), writes ((pc, address) of the stores to the video and
 colour RAM $4000-$47FF, the sprite RAM $4FF0-$4FFF and the I/O $5000-$50FF), io ((pc, address, 'r' / 'w') of the
 accesses to $5000-$5FFF and to anything outside ROM and RAM: $4800-$4BFF, the mirrors from $6000), outs ((pc, port,
-value) of `out`), halts (pcs).
+value) of `out`), halts (pcs), sprites (Counter of (code, colour, flip x, flip y) of the entries).
 
 Seeds: 1-3 attract, coin, start and random 4-way play to the game over, and again; 4-6 infinite lives (MAME cheat
 $4E14) and a level finished now and then (MAME's "Finish this Level Now!": $4E0E = $F4), so the play reaches the
@@ -131,17 +131,21 @@ def main():
     c.step, c.rd8, c.wr8, c.io_out = step, rd, wr, out
 
     levels = collections.Counter()
+    sprites = collections.Counter()
     state = {'seed': seed}
     for frame in range(frames):
         apply_inputs(m, frame, rnd, state)
         cheats(seed, frame, m, state)
         m.run_frame_port()
         levels[m.ram[LEVEL - 0x4000]] += 1
+        for o in range(0, 16, 2):
+            sa, sc = m.ram[0xFF0 + o], m.ram[0xFF1 + o]
+            sprites[(sa >> 2, sc & 0x1F, sa & 1, sa >> 1 & 1)] += 1
         if frame % 2000 == 0:
             print(f'seed {seed} frame {frame}: {len(pcs)} pcs, level {m.ram[LEVEL - 0x4000]}', flush=True)
     out = build_dir('pacman') / f'cover{seed}.pkl'
     out.write_bytes(pickle.dumps({'pcs': pcs, 'jumps': jumps, 'writes': writes, 'io': io, 'outs': outs,
-                                  'halts': halts, 'levels': levels, 'seed': seed, 'frames': frames}))
+                                  'halts': halts, 'levels': levels, 'sprites': sprites, 'seed': seed, 'frames': frames}))
     print(out, len(pcs), 'pcs, levels', sorted(levels))
 
 

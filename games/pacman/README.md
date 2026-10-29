@@ -4,20 +4,24 @@ Port started 2026-10-29.  Set: MAME `pacman`, Pac-Man (Midway), 1980; one Z80, t
 (same Namco tile and sprite hardware, same WSG sound chip).  Paths in this file are relative to `games/pacman/`; the
 method is `docs/porting-guide.md`.
 
-State (2026-10-29): steps 1-5 of the porting guide.  The reference machine's picture equals MAME's frame for frame;
-the Z80 program is translated and runs on the 68000 in lock-step with the reference (every frame exact, every seed).
-No picture (`src/render.s` is a stub) and no sound yet; not in `port.py`'s list.
+State (2026-10-29): the reference machine's picture equals MAME's frame for frame; the Z80 program is translated and
+runs on the 68000 in lock-step with the reference (every frame exact, every seed); the picture is drawn (equal to the
+reference in every checked frame, 274 of the 288 lines shown) and runs at full speed in Hatari.  No sound yet, no pads;
+not in `port.py`'s list.
 
-* `src/pacman.s` the runtime (schedule, IRQ delivery, inputs, crash dump); `src/render.s` the renderer's stub
+* `src/pacman.s` the runtime (schedule, IRQ delivery, borders, inputs, crash dump); `src/render.s` the picture
 * `tools/prepare.py` the ROMs; `tools/machine.py` the reference machine (`Pacman`) and the port's schedule
-  (`PacmanPort`); `tools/gen.py` the translation; `tools/build.py`; `tools/logic_test.py` the lock-step test
+  (`PacmanPort`); `tools/gen.py` the translation; `tools/assets.py` the graphics; `tools/build.py`;
+  `tools/logic_test.py` the lock-step test, `tools/render_test.py` the picture, `tools/sprite_test.py` the sprites at the
+  edges; `tools/hatari.ps1` a hidden Hatari run (AVI, counters)
 * `ref/cover.py` coverage; `ref/mame_cmp_pacman.py` the reference against MAME's picture
 
 From the repository root: `python games/pacman/tools/prepare.py`, coverage
 `python games/pacman/ref/cover.py <seed> 20000` for seeds 1-12 (`build/pacman/cover<seed>.pkl`, needed by the
-translation), `python games/pacman/tools/build.py --sim` (`run/pacman_sim/PACMAN.PRG`), then
-`python games/pacman/tools/logic_test.py 12000 --seed <n>`.  `build.py` without `--sim` builds `run/pacman/PACMAN.PRG`;
-it runs the game unseen (no picture yet; Esc quits) and has not been tried in Hatari.
+translation and the sprite code), `python games/pacman/tools/build.py --sim` (`run/pacman_sim/PACMAN.PRG`), then
+`python games/pacman/tools/logic_test.py 12000 --seed <n>`, `render_test.py 3000 --seed <n> --every 3`,
+`sprite_test.py`.  `build.py` without `--sim` builds `run/pacman/PACMAN.PRG`.  Controls: arrows or joystick move,
+**5** / **6** coin, **1** / **2** start, **Esc** quits.
 
 ## ROMs
 
@@ -122,14 +126,52 @@ arcade frame on Musashi (Hatari counts about 1.35 times that: 46-60k; at 60 arca
 of the 160k cycles of a VBL, an estimate to be measured in Hatari).  Seeds 13 and 14 (random play the coverage never
 ran, 15000 frames each) pass too: no code outside the coverage's was reached (it would stop at `z80_badpc`).
 
+## The picture
+
+`src/render.s`, after Time Pilot's renderer.  The arcade's 224 x 288 picture is turned as MAME's ROT90 turns it and
+sits at screen x 48-271 (black side bands of three 16-pixel groups: the edges lie on group boundaries), the top and
+bottom border open (`engine/rt/borders.s`, Galaga's timing, one palette).
+
+**The lines.**  Hatari shows 274 lines from the video base with both borders open: measured 2026-10-29 by matching a
+recorded picture with the reference line for line (the picture's first line at the window's first; its last two lines
+black).  Which 14 of the 288 to leave out was measured over the coverage's play (every line's use, 4 seeds x 8000
+frames): lines 7, 8 and 272 are never drawn; row 2 (lines 16-23) and line 273 only on the level-256 split screen; line
+287 hardly ever (393 of 10664 pictures); 274 is the top line of the life and fruit icons (the least visible loss: every
+text row stays whole).  Shown: lines 0-6, 9-15, 24-271, 275-286 (`tools/assets.py SHOWN`).  The maze and every sprite
+keep one offset: buffer line = arcade line (10 guard lines above the display); the HUD rows move (`hud_line`).  MAME
+clips sprites to lines 16-271, so a sprite's lines in the HUD bands are copied back from the clean screen
+(`band_restore`); MAME's second copy of each sprite 256 lines up is drawn where it reaches the maze.
+
+**Colours.**  The STE pixel is the arcade's colour index: the colour lookup PROM only ever selects the palette PROM's
+first 16 colours (and never its black duplicates 4, 8, 10), so `pm_pal` is that PROM on the STE's 4 bits a gun.  A
+sprite pen is transparent where its colour is black: three patterns ({0}, {0, 2}, {0, 3}); 11 colours draw nothing.
+
+**Drawing.**  Tiles into a clean screen when the translated writers marked their cell and its code or colour changed
+(per colour and line range a generated converter, `pm_tconv`), copied into each display buffer (`movep.l`).  Sprites
+from a cache baked on first use (rows grouped by opaque mask), drawn with `engine/sprite_programs.py`'s generated code
+for the 65 shapes the coverage drew (767 routines, a 55 KB stream) and the row path for the rest; across a side edge
+only the inner word, wholly outside culled (`AGENTS.md`).  Three display buffers; damage restored with HOG passes of
+at most 32 words.
+
+**Checked** (2026-10-29): `render_test.py` 9000 frames of seeds 2, 4, 6, 7, 11 and 12 (play, levels 1-28 and 250-255,
+the intermissions, two players), every third from frame 300: 17,400 pictures equal to the reference, side bands black.
+`sprite_test.py`: 168 made-up pictures exact (both edges at every pixel, flips, 40 codes with holes, the black-pen
+patterns, 36 pictures with 64 KB crossings, the bands, the wrapped copy, moving sequences in all three buffers).
+`BLIT_STATS=256`: 121,916 HOG passes from 691 places, the longest 256 bus cycles, none sharing the bus.
+Cost on Musashi: a picture 16-49k CPU cycles (the higher when levels change often: a maze redraw) and 6-7k Blitter bus
+cycles, the logic 27-29k a frame.
+
+**Hatari** (`tools/hatari.ps1`, 2026-10-29; the attract mode, no input): 4500 VBLs, 5043 arcade frames, 4181
+pictures.  After the boot it runs at full speed: 59.9 arcade frames and 49.8 pictures a second (the last 3000 VBLs).
+The boot costs about 6 seconds: its ROM / RAM test runs before the first frame (the arcade's takes about 4).  No
+crash, the stills match the reference (attract screens, the demo maze, frightened ghosts, Pac-Man's death).
+
 ## Next steps
 
-1. The picture (`src/render.s`): the maze is static tiles, redrawn from the marked cells (`cell_list`); 8 sprites the
-   stefastbobs2 way (`engine/sprite_programs.py`, 16-pixel rows; `AGENTS.md`).  The 288-line picture is taller than
-   the STE's: decide the layout (Galaga's crop, or the open borders) first.  Then `render_test.py` against
-   `render_raw`, `sprite_test.py` (edges, 16 shifts, holes, 64 KB crossings).
-2. Sound: the WSG's three voices as YM2149 square waves, Galaga's `tools/sound.py` (same chip, here written by the
+1. Sound: the WSG's three voices as YM2149 square waves, Galaga's `tools/sound.py` (same chip, here written by the
    main CPU in the IRQ handler: `$5040-$505F`; waveforms from `82s126.1m`).
-3. Hatari: run the build, the pads (`engine/rt/jagpad.s`), then register the port in `port.py` (GAMES, COVER, TESTS),
-   `tools/release.py` and the README's tables.
-4. Play against MAME with input (a WolfMAME `.inp` or a MARP recording, `docs/porting-guide.md`).
+2. Play in Hatari with input (keyboard, joystick; the pads through `engine/rt/jagpad.s`), the picture rate in play;
+   perhaps a shorter boot (Galaga patches its RAM test out).
+3. Register the port in `port.py` (GAMES, COVER, TESTS), `tools/release.py` and the README's tables; a screenshot.
+4. Play against MAME with input (a WolfMAME `.inp` or a MARP recording, `docs/porting-guide.md`), then the natural
+   playthrough `docs/port-status.md` asks for.

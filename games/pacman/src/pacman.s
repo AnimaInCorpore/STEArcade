@@ -1,6 +1,5 @@
 ; Pac-Man (Namco / Midway, 1980) for the Atari STE: the Z80 program translated (tools/gen.py -> build/pacman/
-; code_main.s).  The picture (render.s) is a stub so far: this runtime runs the game logic (the lock-step test,
-; tools/logic_test.py, on the simulator build).
+; code_main.s), the turned picture drawn by render.s (274 lines: the top and bottom border open, engine/rt/borders.s).
 ;
 ; The schedule (machine.PacmanPort): the foreground waits at the task loop's spin ($238D, the hook: the task ring's
 ; read entry has bit 7 set) and at the boot's halt ($234A).  There the picture is drawn when due, the next arcade frame
@@ -20,6 +19,15 @@ FRAMES = 0
 
 KEY_ESC = $01
 
+; Border removal (engine/rt/borders.s, Galaga's timing): Hatari shows 274 lines from the video base, one palette.
+	ifnd TA_DATA
+TA_DATA = 98
+	endc
+	ifnd TA_NOPS
+TA_NOPS = 84
+	endc
+BD_PALETTE = 0
+	include	"borders.s"
 	include	"ikbd.s"
 
 ; The Z80's 64 KB: a6 = g_block + $8000 = Z80 address 0 (signed word offsets: $8000-$FFFF lie below a6).
@@ -105,6 +113,13 @@ init_hardware:
 	move.l	$68.w,old_hbl
 	move.l	$70.w,old_vbl
 	move.l	$118.w,old_acia
+	move.l	$120.w,old_timer_b
+	move.l	$134.w,old_timer_a
+	move.b	$fffffa19.w,old_fa19
+	move.b	$fffffa1b.w,old_fa1b
+	move.b	$fffffa1d.w,old_fa1d
+	move.b	$fffffa1f.w,old_fa1f
+	move.b	$fffffa21.w,old_fa21
 	clr.b	$fffffa07.w
 	clr.b	$fffffa09.w
 	clr.b	$fffffa13.w
@@ -120,6 +135,12 @@ init_hardware:
 	move.l	#hbl,$68.w
 	move.l	#vbl,$70.w
 	move.l	#acia_isr,$118.w
+	move.l	#timer_b,$120.w
+	move.l	#timer_a,$134.w
+	bset	#0,$fffffa07.w		; Timer B
+	bset	#0,$fffffa13.w
+	bset	#5,$fffffa07.w		; Timer A
+	bset	#5,$fffffa13.w
 	bset	#6,$fffffa09.w		; ACIA (keyboard, joysticks)
 	bset	#6,$fffffa15.w
 	ifnd SIM
@@ -153,6 +174,13 @@ restore_hardware:
 	move.b	old_fa13,$fffffa13.w
 	move.b	old_fa15,$fffffa15.w
 	move.b	old_fa17,$fffffa17.w
+	move.b	old_fa1f,$fffffa1f.w
+	move.b	old_fa19,$fffffa19.w
+	move.b	old_fa1b,$fffffa1b.w
+	move.b	old_fa1d,$fffffa1d.w
+	move.b	old_fa21,$fffffa21.w
+	move.l	old_timer_b,$120.w
+	move.l	old_timer_a,$134.w
 	move.l	old_hbl,$68.w
 	move.l	old_vbl,$70.w
 	move.l	old_acia,$118.w
@@ -165,6 +193,9 @@ restore_hardware:
 	rts
 
 quit:
+	ifd DEBUG
+	bsr	dbg_counters
+	endc
 	bsr	restore_hardware
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -183,6 +214,9 @@ hbl:
 ; The VBL: the inputs copied into the ports the program reads, the arcade's frames counted: 60 Hz against the STE's
 ; 50, six to five VBLs.
 vbl:
+	ifnd SIM
+	borders_vbl			; (first: Timer B counts the frame's lines)
+	endc
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
 	tst.b	quit_flag
@@ -350,6 +384,8 @@ pm_mark_all:
 	st	tiles_all
 	rts
 
+	borders_handlers
+
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): IN0 and IN1 are active low bytes
 ; ------------------------------------------------------------------------------
@@ -512,6 +548,40 @@ crash_name:
 	dc.b	"CRASH.TXT",0
 	even
 
+	ifd DEBUG
+; COUNTERS.BIN (longs): VBLs, arcade frames, pictures drawn, pictures shown (tools/hatari.ps1)
+dbg_counters:
+	lea	dbg_buf,a0
+	move.l	frame_counter,(a0)+
+	moveq	#0,d0
+	move.w	isr_count,d0
+	move.l	d0,(a0)+
+	move.w	pic_count,d0
+	move.l	d0,(a0)+
+	move.w	pic_shown,d0
+	move.l	d0,(a0)+
+	clr	-(sp)			; Fcreate
+	pea	dbg_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	dbg_buf			; Fwrite
+	move.l	#16,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)		; Fclose
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+dbg_name:
+	dc.b	"COUNTERS.BIN",0
+	even
+	endc
+
 	ifd SIM
 sim_wait:				; the test harness stops here when the foreground waits with nothing pending: it
 	bra.s	sim_wait		; sets vbl_pending (and the inputs) and returns (rts) from here
@@ -519,6 +589,8 @@ sim_render_start:			; (render_test.py measures from here)
 	bra.s	sim_render_start
 sim_frame_done:				; the harness compares here (a picture is drawn), returns with rts
 	bra.s	sim_frame_done
+sim_render_ret:				; sprite_test.py calls render_frame with this as the return address
+	bra.s	sim_render_ret
 	endc
 
 ; ------------------------------------------------------------------------------
@@ -562,6 +634,8 @@ old_palette:	ds.l	8
 old_hbl:	ds.l	1
 old_vbl:	ds.l	1
 old_acia:	ds.l	1
+old_timer_b:	ds.l	1
+old_timer_a:	ds.l	1
 old_res:	ds.b	1
 old_hz:		ds.b	1
 old_fa07:	ds.b	1
@@ -569,7 +643,13 @@ old_fa09:	ds.b	1
 old_fa13:	ds.b	1
 old_fa15:	ds.b	1
 old_fa17:	ds.b	1
+old_fa19:	ds.b	1
+old_fa1b:	ds.b	1
+old_fa1d:	ds.b	1
+old_fa1f:	ds.b	1
+old_fa21:	ds.b	1
 quit_flag:	ds.b	1
+	borders_vars
 vbl_pending:	ds.b	1		; arcade frames that have come (the VBL adds, the hook takes one)
 vbl_phase:	ds.b	1
 render_skips:	ds.b	1
@@ -595,5 +675,8 @@ crash_sp:	ds.l	1
 crash_regs:	ds.l	16
 crash_text:	ds.b	512
 frame_counter:	ds.l	1
+	ifd DEBUG
+dbg_buf:	ds.l	4
+	endc
 	ds.l	1024
 own_stack_top:
