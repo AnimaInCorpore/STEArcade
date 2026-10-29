@@ -57,9 +57,14 @@ kill $HP 2>/dev/null; wait $HP 2>/dev/null
 [ -f $BENCH/COUNTERS.BIN ] || { echo "no COUNTERS.BIN"; exit 1; }
 python3 - <<'P'
 import struct
-v, lg, pic, drop, skip, late = struct.unpack('>6I', open('run/rtype_bench/COUNTERS.BIN', 'rb').read()[:24])
+raw = open('run/rtype_bench/COUNTERS.BIN', 'rb').read()
+v, lg, pic, drop, skip, late = struct.unpack('>6I', raw[:24])
 s = v / 50.0
 print("%d VBLs (%.1f s): arcade frames %d (%.1f /s, the arcade 55.0: %.0f%%), pictures %d (%.1f /s), dropped %d, "
       "skipped %d, renderer calls without a picture %d" % (v, s, lg, lg / s, lg / s / 55.017 * 100, pic, pic / s, drop,
                                                             skip, late))
+if len(raw) >= 40:
+    st = struct.unpack('>%dI' % ((len(raw) - 24) // 4), raw[24:])
+    names = ["waiting", "logic", "drawing", "between", "palette", "vram", "compose", "sync", "sprites", "bar"]
+    print("VBLs sampled: " + ", ".join("%s %d%%" % (n, 100 * x // max(1, v)) for n, x in zip(names, st) if x))
 P

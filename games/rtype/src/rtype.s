@@ -17,6 +17,11 @@
 ; Untranslated code reached: CRASH.TXT "BADPC xxxxx" (the linear address), back to the desktop.
 
 KEY_ESC = $01
+    ifd STAGE
+      ifnd SPRITE_LIST
+SPRITE_LIST = 1				; (STAGE: the stage renderer, src/stage.s: the objects' records, src/natives.s)
+      endc
+    endc
     ifnd SIM
       ifnd FADE_EXACT
 FADE_SNAP = 1				; (src/natives.s: the palette fades left out)
@@ -76,11 +81,16 @@ start:
 	lea	own_stack_top,sp
 	bsr	init_image
     ifd SIM
+      ifd STAGE
+	bsr	m72r_init		; (logic_test --render)
+      endc
 sim_wait:
 	bra.s	sim_wait
     else
 	bsr	snapshot_load
+    ifnd STAGE
 	bsr	m72_sync_all
+    endc
 	bsr	m72r_init
 	bsr	init_hardware
 main_loop:
@@ -93,7 +103,9 @@ main_loop:
 	move.b	#MAX_BEHIND,ticks
 	addq.l	#1,cnt_dropped
 .go:	subq.b	#1,ticks
+	move.b	#1,main_state
 	bsr	port_frame
+	move.b	#3,main_state
 	addq.l	#1,cnt_logic
 	addq.b	#1,since_pic		; a picture after every PIC_EVERY-th arcade frame, or when the logic caught up
 	cmp.b	#PIC_EVERY,since_pic
@@ -101,8 +113,12 @@ main_loop:
 	tst.b	ticks
 	bne	main_loop
 .pic:	clr.b	since_pic
+    ifnd STAGE
 	bsr	m72_sync
+    endc
+	move.b	#2,main_state
 	bsr	m72r_frame
+	clr.b	main_state
 	bra.s	main_loop
 .quit:	bsr	restore_hardware
 	bsr	write_counters
@@ -242,8 +258,10 @@ write_counters:
 	tst.w	d0
 	bmi.s	.r
 	move.w	d0,-(sp)
+	lea	start(pc),a0
+	move.l	a0,cnt_base
 	pea	cnt_vbls
-	pea	24.w
+	pea	92.w
 	move.w	d0,-(sp)
 	move.w	#$40,-(sp)		; Fwrite
 	trap	#1
@@ -354,6 +372,15 @@ vbl:	borders_vbl
 	bsr	compose
 	movem.l	(sp)+,d0-d2
 	addq.l	#1,cnt_vbls
+	ifd DEBUG
+	movem.l	d0/a0,-(sp)		; (the main loop's state at this VBL: a sampled profile)
+	moveq	#0,d0
+	move.b	main_state,d0
+	lsl.w	#2,d0
+	lea	cnt_state,a0
+	addq.l	#1,(a0,d0.w)
+	movem.l	(sp)+,d0/a0
+	endc
 	cmp.b	#32,ticks
 	bhs.s	.r
 	addq.b	#1,ticks
@@ -470,9 +497,13 @@ key_table:
 
 	include	"core.s"
 	include	"natives.s"
-    ifnd SIM
+    ifd STAGE
+	include	"stage.s"		; (the stage renderer: reads the program's state directly; SIM too: logic_test --render)
+    else
+      ifnd SIM
 	include	"video.s"
 	include	"render.s"
+      endc
     endc
 
 	section data,data
@@ -506,6 +537,11 @@ cnt_pictures:	ds.l	1
 cnt_dropped:	ds.l	1
 cnt_skipped:	ds.l	1
 cnt_lates:	ds.l	1
+cnt_state:	ds.l	16		; (DEBUG: VBLs that found the main loop waiting / in the logic / drawing / between;
+					; 4-9: the stage renderer's phases, src/stage.s ST_PHASE)
+cnt_base:	ds.l	1		; (DEBUG: the program's text address)
+main_state:	ds.b	1
+	even
 old_mfp:	ds.b	14
 old_res:	ds.b	1
 old_hz:		ds.b	1

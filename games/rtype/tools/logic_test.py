@@ -109,10 +109,16 @@ def main():
                     "must equal the reference's sprite buffer")
     ap.add_argument("--record", default="", help="(with --list) save each frame's video state as the stage renderers "
                     "get it to this file (render_test's state format + the object records: tools/stage_model.py)")
+    ap.add_argument("--render", type=int, default=0, help="(a STAGE build) a picture of src/stage.s every N arcade "
+                    "frames after the comparison: its cycles (CPU + Blitter); with --render-profile by routine")
+    ap.add_argument("--render-profile", type=int, default=0, help="profile the pictures from this frame on")
     args = ap.parse_args()
     recorded = []
+    rcost = []
+    import collections
+    rprof = collections.Counter()
     run = ROOT / "run" / "rtype_sim"
-    s = Sim(str(run / "RTYPE.PRG"), run_dir=run)
+    s = Sim(str(run / "RTYPE.PRG"), run_dir=run, ram_kib=16384)
     s.mem.set_trace_mode(False)
     sym = {k: v + s.base for k, v in s.symbols(build_dir("rtype") / "rtype_sim.map").items()}
     mem, cpu = s.mem, s.cpu
@@ -185,6 +191,40 @@ def main():
     keep = 0xF702 | (1 if live & 1 else 0) | (0x800 if live & 2 else 0) | (0x40 if live & 4 else 0) | \
         (0x80 if live & 8 else 0) | (4 if live & 0x100 else 0) | (0x10 if live & 0x200 else 0)
     print("idle flags live %X: PSW bits compared %04X" % (live, keep))
+
+    def call68(name):
+        sp7 = cpu.r_reg(R.A7) - 4
+        mem.w32(sp7, sym["sim_wait"])
+        cpu.w_reg(R.A7, sp7)
+        cpu.w_pc(sym[name])
+        s.blitter.cycles = 0
+        c = run_to(sym["sim_wait"])
+        return c + s.blitter.cycles
+
+    def render_picture(prof):
+        """m72r_frame (+ m72r_vbl twice: the flip, the buffer before free) on the program's state: its cycles"""
+        if not rcost:
+            mem.w_block(sym[MARKS[2]], bytes([0xFF]) * (MARKS[1] >> 8))      # (the first: everything new)
+        if prof:
+            lab = sorted((v, k) for k, v in sym.items() if not k.startswith(".") and k[:1] != "R")
+            la = [v for v, k in lab]
+            sp7 = cpu.r_reg(R.A7) - 4
+            mem.w32(sp7, sym["sim_wait"])
+            cpu.w_reg(R.A7, sp7)
+            cpu.w_pc(sym["m72r_frame"])
+            total = 0
+            while cpu.r_pc() != sym["sim_wait"]:
+                i = bisect.bisect_right(la, cpu.r_pc()) - 1
+                s.blitter.cycles = 0
+                c = cpu.execute(1).cycles + s.blitter.cycles
+                nm = lab[i][1]
+                rprof["(sprite code)" if nm.startswith("sts_") else nm] += c
+                total += c
+        else:
+            total = call68("m72r_frame")
+        call68("m72r_vbl")
+        call68("m72r_vbl")
+        return total
 
     def record_state():
         """the video state the program hands the renderer after this frame (src/video.s: the bands from the scroll
@@ -341,6 +381,7 @@ def main():
         cpu.w_reg(R.A7, sp7)
         cpu.w_pc(sym["port_frame"])
         video0 = bytes(mem.r_block(img + 0xC8000, MARKS[1]))
+        pending = bytes(mem.r_block(sym[MARKS[2]], MARKS[1] >> 8))      # (--render: the marks not consumed yet)
         mem.w_block(sym[MARKS[2]], bytes(MARKS[1] >> 8))
         try:
             if PROFILE and PROFILE["start"] <= f < PROFILE["start"] + PROFILE["frames"]:
@@ -356,14 +397,26 @@ def main():
             if video1[256 * k:256 * k + 256] != video0[256 * k:256 * k + 256] and not marks[k] and not os.environ.get("NO_MARKS"):
                 print("frame %d: video block %05X changed without its mark" % (f, 0xC8000 + 256 * k))
                 return 1
+        if args.render:
+            mem.w_block(sym[MARKS[2]], bytes(a | b for a, b in zip(marks, pending)))
         m.run_frame_port()
         if not compare(f):
             print("stopped after %d good frames" % f)
             return 1
         if args.record:
-            recorded.append((m.frame, record_state()))
+            recorded.append((f, record_state()))
+        if args.render and f % args.render == 0:
+            rcost.append(render_picture(args.render_profile and f >= args.render_profile))
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1 - args.start)), flush=True)
+    if rcost:
+        import numpy as np
+        a = np.array(rcost[2:] or rcost)
+        print("pictures: %d, cycles (CPU + Blitter) median %d, 10%% %d, 90%% %d, max %d" % (
+            len(a), np.median(a), np.percentile(a, 10), np.percentile(a, 90), a.max()))
+        tot = sum(rprof.values())
+        for k, v in rprof.most_common(20):
+            print("  %-22s %5.1f%%" % (k, 100.0 * v / tot))
     if args.record:
         import pickle
         Path(args.record).write_bytes(pickle.dumps(recorded))

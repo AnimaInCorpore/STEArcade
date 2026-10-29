@@ -31,12 +31,13 @@ from paths import build_dir
 import stage_model as SM
 
 # the stages: the recorded frames (render_test's sets) that show them
-STAGES = {1: [("play", 500, 7000)]}
+STAGES = {1: [("play", 500, 7000)],
+          2: [("build/rtype/stage_states_1.pkl", 430, 2260)]}     # (the attract mode's first demo: the green cave)
 # reserved indices (the user's idea, 2026-10-29): pens whose colour changes in the stage (a fade-in, blinking lights)
 # get playfield indices of their own; the renderer sets those indices to the pens' current colours each picture (and
 # makes the fades itself: FADE_SNAP jumps the palette RAM to the target).  Stage 1: the wall's pens (grey 371, light
 # grey 373, the lights 369 and 370; 372 stays black), faded in at frames ~4100-4750.
-RESERVED = {1: [371, 373, 369, 370]}
+RESERVED = {1: [371]}
 SAT_BOOST = 40              # weights x (1 + SAT_BOOST * chroma): saturated colours pull centres
 SPRITE_WEIGHT = 8           # a sprite pixel counts this many tile pixels (small saturated sprites keep their colours)
 STEP = 10
@@ -99,7 +100,9 @@ def build(stage, png=False):
     hist, hhist = collections.Counter(), collections.Counter()     # 12-bit colour -> weighted pixels
     pics = []
     for which, a, b in STAGES[stage]:
-        for f, item in T.load_states("rtype", which):
+        src = [(i, it) for i, (_, it) in enumerate(pickle.load(open(which, "rb")))] if which.endswith(".pkl") \
+            else T.load_states("rtype", which)              # (a recording: frames by position)
+        for f, item in src:
             if not a <= f <= b:
                 continue
             st = pickle.loads(zlib.decompress(item))
@@ -159,10 +162,23 @@ def build(stage, png=False):
             print("   ", o)
 
 
+def tiles():
+    """build/rtype/stage_tiles.bin: the FG tiles (rt_b-a*), then the BG tiles (rt_b-b*), 4096 each, 8 rows of 4 bytes
+    (8 pens a row, high nibble the left pixel) - the renderer colours them through its tables"""
+    v = m72.Video("rtype")
+    out = bytearray()
+    for t in v.tiles:
+        for tile in t:
+            for row in tile:
+                out += bytes((int(row[2 * k]) << 4) | int(row[2 * k + 1]) for k in range(4))
+    (build_dir("rtype") / "stage_tiles.bin").write_bytes(bytes(out))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--png", action="store_true")
     args = ap.parse_args()
+    tiles()
     for stage in STAGES:
         build(stage, args.png)
 

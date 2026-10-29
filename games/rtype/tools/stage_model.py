@@ -75,10 +75,11 @@ class Model:
             bx = (sx[0] + lock.L) if y0 < HUD_Y else sx[1]
             b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
             out[y0:y1 + 1] = np.where(f >= 0, f, np.where(b >= 0, b, BLACK))
-        self.sprites(out, st["spr"])
+        bar = any(b[0] == HUD_Y for b in st["bands"])
+        self.sprites(out, objs_to_spr(st) if "objs" in st else st["spr"], HUD_Y if bar else 256)
         return out
 
-    def sprites(self, out, spr):
+    def sprites(self, out, spr, ylim=HUD_Y):
         w16 = np.frombuffer(spr, "<u2").astype(np.int32)
         sp = self.video.sprites
         done = np.zeros(out.shape, bool)
@@ -97,7 +98,7 @@ class Model:
                     c = code + (8 * (w - 1 - cx) if fx else 8 * cx) + (h - 1 - cy if fy else cy)
                     px, py = sx + 16 * cx, sy + 16 * cy
                     ax0, ax1 = max(px, 0), min(px + 15, W - 1)
-                    ay0, ay1 = max(py, 0), min(py + 15, HUD_Y - 1)    # (never into the status bar)
+                    ay0, ay1 = max(py, 0), min(py + 15, ylim - 1)     # (never into the status bar)
                     if ax0 > ax1 or ay0 > ay1:
                         continue
                     src = sp[c % len(sp)]
@@ -111,6 +112,34 @@ class Model:
                     show = (s != 0) & ~dn
                     d[show] = (a & 15) * 16 + s[show]
                     dn |= s != 0
+
+
+_rom = []
+
+
+def objs_to_spr(st):
+    """the sprite list the object records stand for (src/natives.s; as tools/logic_test.py list_check expands them)"""
+    import struct
+    if not _rom:
+        from m72board import load_regions
+        _rom.append(load_regions("rtype")["main"])
+    rom = _rom[0]
+    o, end = st["objs"], st["objs_end"]
+    spr = bytearray(0x400)
+    for slot in range(0xC0, min(end, 0x3C8), 8):
+        bw, n, col, x, y = struct.unpack(">HBBhh", o[slot:slot + 8])
+        if not bw:
+            continue
+        s = slot
+        for e in range(n):
+            a = 0x10000 + bw + 6 * e
+            dx, dy = struct.unpack("<bb", rom[a:a + 2])
+            code, attr = struct.unpack("<HH", rom[a + 2:a + 6])
+            attr = (attr & 0xFF00) | col
+            if s + 8 <= 0x400:
+                spr[s:s + 8] = struct.pack("<HHHH", (y + dy) & 0xFFFF, code, attr, (x + dx) & 0xFFFF)
+            s += 16 if attr & 0x4000 else 8
+    return bytes(spr)
 
 
 class Lock:
