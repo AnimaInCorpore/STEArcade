@@ -90,7 +90,8 @@ BD_SAVED = 16
 BD_TA_P2 = 125
 BD_TA_P1 = 260-10-BD_TA_P2
 BD_TA_THR = BD_TA_P2-8			; the top border's HBL: the reload at or below this
-BD_TA_LOOP = 8				; the sync's cycles after the HBL in nops (move.b, cmp.b, dbls: 32 cycles)
+BD_TA_LOOP = 9				; the sync's cycles after the HBL in nops (move.b, cmp.b, dbls: 36 cycles, the MFP's
+					; read 4 more: Hatari put the 60 Hz write 4 cycles after stefastbobs2's with 8)
 
 borders_vbl	macro
 	clr.b	$fffffa1b.w		; Timer B: counts this frame's lines from the first
