@@ -31,11 +31,14 @@ PY = str(ROOT / "venv" / "bin" / "python") if (ROOT / "venv" / "bin" / "python")
 GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blktiger": "BLKTIGER.PRG",
          "commando": "COMMANDO.PRG", "gunsmoke": "GUNSMOKE.PRG", "gauntlet": "GAUNTLET.PRG", "kungfum": "KUNGFUM.PRG",
          "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
-         "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG"}
+         "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
+         "dkongjr": "DKONGJR.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
+                ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "timeplt": [("ref/cover.py", list(range(1, 13)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
@@ -152,6 +155,12 @@ TESTS = {
                  ("tools/render_test.py", ["--frames", "3", "--step", "375", "--scroll-sweep", "--flip-layout-sweep", "--sprite-edges"], None),
                  ("tools/sprite_test.py", [], None),                # edge clipping, black band words, a random walk
                  ("tools/sound_test.py", ["6000"], None)],          # the STE's sound player against the model
+    "dkongjr": [("tools/logic_test.py", ["{n}"], 3000),
+                ("tools/logic_test.py", ["3000", "--nocoin"], None),     # the attract sequence: the title in tile bank 1
+                ("tools/build.py", [], None),
+                ("tools/sprite_test.py", [], None),                     # Donkey Kong's edge test on Junior's program
+                ("tools/sound_test.py", [], None),                      # the sound driver's rules (run/dkongjr)
+                ("tools/render_test.py", ["1700", "1300:4", "200:0:1"], None)],   # play, the hideout, the title
     "dkong": [("tools/logic_test.py", ["{n}"], 3000),
               ("tools/build.py", [], None),
               ("tools/sprite_test.py", [], None)],               # left/right edge clipping, 16 shifts, 64 KB (run/dkong)

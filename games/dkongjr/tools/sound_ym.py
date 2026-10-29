@@ -1,0 +1,155 @@
+"""YM2149 patches for the discrete sounds of Junior's board (games/dkong/tools/sound_ym.py with Junior's circuits):
+walk ($7D00; with $7D07 set the circuit's second form, SOUND7), jump ($7D01), climb ($7D02), fall ($7D81, SOUND9).
+
+    python sound_ym.py        -> build/dkongjr/dkjr_ym.s, sound/ym/*.wav (MAME reference | YM model), a report
+
+The circuits are 555 / LFSR oscillators shaped by RC envelopes (MAME 0.286 dkong_a.cpp, dkongjr_discrete); climb is
+the LFSR one, measured like Donkey Kong's stomp.  Fall sounds while $7D81 is held (the game: 41-48 frames): its patch is
+the recording of a 3 s hold, and the driver cuts it when $7D81 drops.  Walk / walk2 and fall share channel A (Junior
+does not walk while it falls), jump is B, climb C.  The climb recording clipped in 283 samples (WolfMAME 0.184's
+output route is 1.0, 0.286's 0.5): its loudest frames measure a little low.  A YM channel is a square
+wave with a 12 bit period and 16 volume steps of ~3 dB; sound_update writes one (period, volume) pair per
+channel and frame (50 Hz), so a patch is the MAME recording (sound_capture.py, the game's 3 frame trigger)
+measured in 20 ms frames:
+  walk, jump   the pitch from the autocorrelation, the level from the RMS
+  stomp        an LFSR noise / 8 smoothed to ~123 Hz with a random period per cycle (5.5..13 ms): the pitch of
+               each frame is the mean of the reference's own cycles in that frame
+The level: a DMA sample of MAME level 1.0 is SCALE (dk_sound.s) * 12 Hatari mixer units; one YM channel at
+volume v is a 0..YM_LEVEL[v] square (Hatari's table measured on a real ST, ym2149_fixed_vol.h, scaled as on
+the STE), whose AC RMS is YM_LEVEL[v] / 2; the volume is the nearest in dB.
+"""
+import json, os, re, sys, wave
+import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine"))
+from paths import build_dir
+
+BUILD = build_dir("dkongjr")
+SRC = BUILD / "sound"
+YM_CLOCK = 2000000                       # STE: 8 MHz / 4
+FRAME = 1 / 50.0
+# one channel at volume v, others 0, in Hatari mixer units (16383 = all three at 15); DMA: 12 units a step
+YM_LEVEL = [0, 30, 63, 97, 150, 211, 316, 434, 638, 876, 1296, 1775, 2608, 3682, 5769, 8672]
+DMA_UNIT = 12
+# measured: in Hatari (STE, --sound 44100) the YM came out 11.9 dB weaker against the DMA than YM_LEVEL /
+# DMA_UNIT say (stomp against the intro tune, 2026-10-09); the levels are corrected by that
+YM_GAIN = 10 ** (-11.9 / 20)
+# name, recording, channel, seconds of the recording before the trigger (walk2: $7D07 2 frames before $7D00)
+PATCHES = (("walk", "pin_7d00", 0, 0.0), ("walk2", "walk_7d07", 0, 2 / 60.606), ("jump", "pin_7d01", 1, 0.0),
+           ("climb", "pin_7d02", 2, 0.0), ("fall", "hold_7d81", 0, 0.0))
+
+
+def load(name):
+    w = wave.open(str(SRC / (name + ".wav")))
+    r = w.getframerate()
+    return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float64) / 32768.0, r
+
+
+def f0_autocorr(s, r, lo=60.0, hi=1500.0):
+    s = s - s.mean()
+    n = len(s)
+    ac = np.correlate(s, s, "full")[n - 1:]
+    z = np.argmax(ac < 0)                # past the first zero: smooth waveforms peak at small lags
+    a, b = max(int(r / hi), z), int(r / lo)
+    return r / (a + int(np.argmax(ac[a:b])))
+
+
+def cycles(x, r):
+    """Upward zero crossings of the AC part: [(time s, period s)]."""
+    y = x - np.convolve(x, np.ones(int(0.02 * r)) / int(0.02 * r), "same")
+    up = np.where((y[:-1] < 0) & (y[1:] >= 0))[0]
+    return [(up[i] / r, (up[i + 1] - up[i]) / r) for i in range(len(up) - 1)]
+
+
+def nearest_volume(amp):
+    """The volume whose square has the AC RMS closest (in dB) to amp (mixer units)."""
+    if amp <= YM_GAIN * YM_LEVEL[1] / 2 / 1.41:
+        return 0
+    return min(range(1, 16), key=lambda v: abs(np.log(YM_GAIN * YM_LEVEL[v] / 2 / amp)))
+
+
+def extract(x, r, kind, units):
+    n = int(FRAME * r)
+    cyc = cycles(x, r) if kind == "climb" else None
+    out = []
+    for i in range(int(len(x) / n)):
+        s = x[i * n:(i + 1) * n]
+        rms = np.sqrt(((s - s.mean()) ** 2).mean())
+        vol = nearest_volume(rms * units)
+        if kind == "climb":
+            p = [c for t, c in cyc if i * FRAME <= t < (i + 1) * FRAME] or [0.0081]
+            f = 1 / np.mean(p)
+        else:
+            f = f0_autocorr(x[i * n:i * n + int(1.5 * n)], r)
+        out.append((int(round(YM_CLOCK / 16 / f)), vol, f, rms))
+    for i in range(len(out) - 2):        # the end: three silent frames (the recording's own end clicks)
+        if out[i][1] == out[i + 1][1] == out[i + 2][1] == 0:
+            out = out[:i]
+            break
+    while out and out[-1][1] == 0:
+        out.pop()
+    return out
+
+
+def render(frames, r):
+    """The YM model: a 0..YM_LEVEL square per frame, phase continuous, as Hatari mixes it (mixer units)."""
+    n = int(FRAME * r)
+    y = np.zeros(n * (len(frames) + 5))
+    ph = 0.0
+    for i, (per, vol, _, _) in enumerate(frames):
+        f = YM_CLOCK / 16 / per
+        t = ph + f * np.arange(1, n + 1) / r
+        y[i * n:(i + 1) * n] = np.where((t % 1.0) < 0.5, YM_GAIN * YM_LEVEL[vol], 0)
+        ph = t[-1] % 1.0
+    return y - np.convolve(y, np.ones(int(0.02 * r)) / int(0.02 * r), "same")   # AC coupled like the output
+
+
+def band_energy(x, r):
+    sp = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2
+    f = np.fft.rfftfreq(len(x), 1 / r)
+    tot = sp.sum()
+    return [round(float(100 * sp[(f >= lo) & (f < hi)].sum() / tot), 1) for lo, hi in
+            ((0, 200), (200, 400), (400, 800), (800, 1600), (1600, 3200), (3200, 24000))]
+
+
+def main():
+    scale = float(re.search(r"; scale ([\d.]+)", (BUILD / "dkjr_sound.s").read_text()).group(1))
+    units = scale * DMA_UNIT             # mixer units per MAME level 1.0
+    lines = ["; generated by games/dkongjr/tools/sound_ym.py: YM patches for the discrete sounds,",
+             "; one (tone period, volume) a 50 Hz frame; walk, walk2, fall on channel A, jump B, climb C", "",
+             "\tsection\tdata,data", "\teven"]
+    report = {}
+    outdir = SRC / "ym"
+    outdir.mkdir(parents=True, exist_ok=True)
+    for name, src, ch, pre in PATCHES:
+        x, r = load(src)
+        x = x[int(round(pre * r)):]
+        fr = extract(x, r, name, units)
+        lines.append("ym_%s:\tdc.w\t%d\t\t; frames" % (name, len(fr)))
+        for per, vol, f, rms in fr:
+            lines.append("\tdc.w\t%d,%d\t\t; %4.0f Hz, MAME rms %.3f" % (per, vol, f, rms))
+        y = render(fr, r)
+        ref = x[:len(y)] * units
+        ref = np.pad(ref, (0, len(y) - len(ref)))
+        n = int(FRAME * r)
+        lev = [(20 * np.log10(max(np.sqrt((ref[i * n:(i + 1) * n] ** 2).mean()), 1) /
+                              max(np.sqrt((y[i * n:(i + 1) * n] ** 2).mean()), 1))) for i in range(len(fr))]
+        report[name] = dict(frames=len(fr), seconds=round(len(fr) * FRAME, 2),
+                            volumes=[v for _, v, _, _ in fr], pitch_hz=[round(f) for _, _, f, _ in fr],
+                            level_err_db_mean=round(float(np.mean(np.abs(lev))), 2),
+                            ref_bands_pct=band_energy(ref, r), ym_bands_pct=band_energy(y, r))
+        gap = np.zeros(int(0.3 * r))
+        both = np.concatenate([ref, gap, y]) / units * 0.9
+        with wave.open(str(outdir / ("%s_mame_then_ym.wav" % name)), "wb") as o:
+            o.setnchannels(1); o.setsampwidth(2); o.setframerate(r)
+            o.writeframes(np.clip(both * 32767, -32768, 32767).astype(np.int16).tobytes())
+    (BUILD / "dkjr_ym.s").write_text("\n".join(lines) + "\n")
+    json.dump(report, open(outdir / "report.json", "w"), indent=1)
+    print("bands: <200 200-400 400-800 800-1600 1600-3200 >3200 Hz (% of energy)")
+    for k, v in report.items():
+        print("%-6s %d frames  volumes %s" % (k, v["frames"], v["volumes"]))
+        print("       pitch %s" % v["pitch_hz"])
+        print("       level error %.1f dB/frame   bands MAME %s  YM %s" % (v["level_err_db_mean"], v["ref_bands_pct"], v["ym_bands_pct"]))
+
+
+if __name__ == "__main__":
+    main()

@@ -479,12 +479,22 @@ vbl_render:
 	endc
 
 	ifd DUMPAT
+	ifd DUMPTILE			; test: freeze at the DUMPTILE-th frame drawn with tile bank 1 (the title)
+	tst.b	freeze_flag
+	bne.s	.no_dump
+	lea	z80_block,a0
+	btst	#0,$7c80(a0)
+	beq.s	.no_dump
+	addq	#1,tile_frames
+	cmp	#DUMPTILE,tile_frames
+	else
 	ifd DUMPBANK
 	tst.b	freeze_flag
 	bne.s	.no_dump
 	cmp	#DUMPBANK,bank_changes
 	else
 	cmp.l	#DUMPAT,frame_counter
+	endc
 	endc
 	bne.s	.no_dump
 	bsr	dump_state
@@ -864,6 +874,10 @@ quit_flag:	ds.b	1
 vbl_busy:	ds.b	1
 	borders_vars
 freeze_flag:	ds.b	1
+	even
+	ifd DUMPTILE
+tile_frames:	ds.w	1
+	endc
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
 in2_kbd:	ds.b	1

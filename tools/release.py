@@ -94,6 +94,11 @@ GAMES = [
      "work in progress: the arcade's full speed, 24-33 pictures a second in play (Hatari); exact logic, the turned\n"
      "  224 x 256 picture in 16 fitted colours; no sound yet",
      "fire: Space, Control, Z, joystick fire, pad A.  The joystick turns the plane."),
+    ("dkongjr", "DKONGJR.PRG", "Donkey Kong Junior (Nintendo 1982)",
+     "full speed (50 frames a second), exact logic and picture; sound (the 8035 board as DMA sound, walk/jump/climb/\n"
+     "  fall on the YM); 22 colours fitted into 16",
+     "jump: Space, Control, Alternate, joystick fire, pad A/B/C.  One player at a time: both joysticks and both\n"
+     "  pads move Junior.  One coin slot (5, Option)."),
 ]
 assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES (same order, same programs)"

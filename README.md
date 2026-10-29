@@ -29,6 +29,7 @@ reference renderer and MAME.
 | <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented |
 | <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
 | <a href="games/timeplt/README.md"><img src="games/timeplt/docs/screenshot.png" width="160" alt="Time Pilot"></a> | [Time Pilot](games/timeplt/README.md) | Z80 (translated) + Z80 sound (not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed, 24-33 pictures a second in play |
+| <a href="games/dkongjr/README.md"><img src="games/dkongjr/docs/screenshot.png" width="160" alt="Donkey Kong Junior"></a> | [Donkey Kong Junior](games/dkongjr/README.md) | Z80 (translated) + 8035 sound (recorded; DMA sound, the discrete effects on the YM) | ![Verification pending](docs/status/verification-pending.svg)<br>Picture equal to MAME; full-game checks pending |
 |  | [Splatterhouse](games/splatter/) | Namco System 1: 3 x MC6809 + HD63701 MCU (main and sub translated, the MCU native) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
@@ -61,7 +62,7 @@ Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode col
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
 
 **Screenshots and trademarks.** The screenshots and captures show the original games' graphics, which remain the
-copyright of their owners: Donkey Kong © 1981 Nintendo; Galaga © 1981 Namco; Bubble Bobble © 1986 Taito;
+copyright of their owners: Donkey Kong © 1981 Nintendo; Donkey Kong Junior © 1982 Nintendo; Galaga © 1981 Namco; Bubble Bobble © 1986 Taito;
 1942 © 1984 Capcom; 1943 © 1987 Capcom; Black Tiger © 1987 Capcom; Commando © 1985 Capcom; Gun.Smoke © 1985 Capcom;
 R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom; Double Dragon © 1987 Technos Japan; Gauntlet © 1985 Atari Games. The game titles and logos are trademarks of their owners. The pictures document the ports; this project is not affiliated with or endorsed by any of them.
 
