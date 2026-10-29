@@ -123,14 +123,15 @@ class Video:
         if top <= bot:
             bm[top:bot + 1, x0:x1 + 1] = BG_PENS + 4 * image + 3
 
-    def render_raw(self, vram, cram, sprite_ram, regs, flip=False):
+    def render_raw(self, vram, cram, sprite_ram, regs, flip=False, layers=("bg", "tx", "sp")):
         """The screen's pens [282, 384] (MAME's bitmap; VISIBLE is the snapshot) from the text RAMs, the 256 bytes of
-        sprite RAM and regs = (scroll, bg1 x, bg1 y, bg2 x, bg2 y, control)."""
+        sprite RAM and regs = (scroll, bg1 x, bg1 y, bg2 x, bg2 y, control).  layers: which of the backgrounds, the
+        text (but the opaque rows 0-6, always) and the sprites to draw (the STE renderer's tests, layer by layer)."""
         if flip:
             raise NotImplementedError("flip screen (cocktail)")
         scroll, x1, y1, x2, y2, ctl = regs
         bm = np.full((VTOTAL, HTOTAL), SP_PENS, np.int16)
-        if not ctl & 0x20:
+        if not ctl & 0x20 and "bg" in layers:
             if not ctl & 0x10:
                 self.draw_background(bm, x2, y2, 0)                     # distant mountains
             if not ctl & 0x02:
@@ -138,9 +139,11 @@ class Video:
             elif not ctl & 0x04:
                 self.draw_background(bm, x1, y1, 2)                     # city
         pix, opaque = self.text_layer(vram, cram, scroll)
+        if "tx" not in layers:
+            opaque[(np.arange(VTOTAL) - 16) % 256 >= 7 * 8] = False
         bm[opaque] = pix[opaque]
         sr = sprite_ram
-        for group in range(0x3C, 0x100, 0x40):
+        for group in (range(0x3C, 0x100, 0x40) if "sp" in layers else ()):
             for offs in range(group, (group & 0xC0) - 1, -4):
                 sy = 257 - sr[offs]
                 color = sr[offs + 1] & 0x0F                              # (& $3F, modulo the 16 colours)

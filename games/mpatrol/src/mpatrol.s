@@ -468,12 +468,10 @@ z80_rnd:
 	move.b	d7,d0
 	rts
 
-	ifnd SIM
 	borders_handlers
 	jagpad_text
 	jagpad_maps
 	borders_blit_go
-	endc
 
 ; ------------------------------------------------------------------------------
 ; Keyboard / joystick (IKBD): IN0, IN1 and IN2 are active low bytes
