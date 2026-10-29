@@ -4,9 +4,12 @@
 #
 #   games/trackfld/tools/bench.sh [VBLs]      PLAY=1: the recorded play (build/trackfld/play_inputs.bin, -D PLAYBACK=1)
 #                                            instead of the AUTOPLAY script; EXTRA="-D ...": more build.py options
+#                                            (EXTRA="-D NOSOUND=1": without the sound); AVI=1: the picture recorded
+#                                            ($BENCH/trackfld.avi) and a still every EVERY VBLs (ffmpeg); SOUND=1: Hatari's
+#                                            sound on (in the AVI too: trackfld.wav)
 #
-# Its own Hatari (the F030Arcade build), killed by its PID only (other sessions run Hatari too).  run/trackfld gets
-# the normal build back.  Reports the logic (arcade frames a second; the arcade: 60.0) and the pictures a second
+# Its own Hatari (the F030Arcade build), killed by its PID only (other sessions run Hatari too); the build is
+# run/trackfld_bench's (build.py --tag).  Reports the logic (arcade frames a second; the arcade: 60.0) and the pictures a second
 # separately, from the first arcade frame on.
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
@@ -14,16 +17,17 @@ PY=venv/bin/python
 FRAMES=${1:-6000}
 BENCH=run/trackfld_bench; mkdir -p $BENCH
 MODE="-D AUTOPLAY=1"; [ -n "$PLAY" ] && MODE="-D PLAYBACK=1"
-$PY games/trackfld/tools/build.py --debug $MODE --frames $FRAMES $EXTRA 2>&1 | grep -i "built\|rror" | tail -1
-cp run/trackfld/TRACKFLD.PRG $BENCH/TRACKFLD.PRG
-$PY games/trackfld/tools/build.py 2>&1 | grep -i "built\|rror" | tail -1
-rm -f $BENCH/COUNTERS.BIN $BENCH/RATE.BIN $BENCH/CRASH.TXT
+$PY games/trackfld/tools/build.py --debug $MODE --frames $FRAMES --tag trackfld_bench $EXTRA 2>&1 | grep -i "built\|rror" | tail -1
+rm -f $BENCH/COUNTERS.BIN $BENCH/RATE.BIN $BENCH/CRASH.TXT $BENCH/trackfld.avi $BENCH/still_*.png
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
+SND=off; [ -n "$SOUND" ] && SND=44100
+REC=(); [ -n "$AVI" ] && REC=(--borders true --avirecord true --avi-vcodec bmp --avi-file trackfld.avi)
 (cd $BENCH && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
-  --sound off --confirm-quit off --statusbar false --fast-forward true --log-file hatari.log TRACKFLD.PRG) > /dev/null 2>&1 &
+  --sound $SND --confirm-quit off --statusbar false --fast-forward true --log-file hatari.log "${REC[@]}" TRACKFLD.PRG) \
+  > /dev/null 2>&1 &
 HP=$!
-for i in $(seq ${WAIT:-600}); do sleep 1; [ -f $BENCH/COUNTERS.BIN ] || [ -f $BENCH/CRASH.TXT ] && break; kill -0 $HP 2>/dev/null || break; done
+for i in $(seq ${WAIT:-900}); do sleep 1; [ -f $BENCH/COUNTERS.BIN ] || [ -f $BENCH/CRASH.TXT ] && break; kill -0 $HP 2>/dev/null || break; done
 sleep 1
 kill $HP 2>/dev/null; wait $HP 2>/dev/null
 [ -f $BENCH/CRASH.TXT ] && { echo "--- CRASH.TXT"; head -10 $BENCH/CRASH.TXT; }
@@ -67,3 +71,8 @@ s = sorted(r[1] for r in rows)
 print("play only (%d windows): pictures/s mean %.1f, median %.1f, 10th percentile %.1f, min %.1f; arcade frames/s %.1f" % (
     len(s), sum(s) / len(s), s[len(s) // 2], s[len(s) // 10], s[0], sum(r[0] for r in rows) / len(rows)))
 P
+if [ -n "$AVI" ] && [ -f $BENCH/trackfld.avi ]; then
+  ffmpeg -v error -i $BENCH/trackfld.avi -vf "select=not(mod(n\\,${EVERY:-300}))" -fps_mode passthrough $BENCH/still_%03d.png
+  echo "stills: $(ls $BENCH/still_*.png | wc -l)"
+  [ -n "$SOUND" ] && ffmpeg -v error -y -i $BENCH/trackfld.avi -vn $BENCH/trackfld.wav && echo "audio: $BENCH/trackfld.wav"
+fi

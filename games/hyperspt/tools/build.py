@@ -1,6 +1,9 @@
 """Build HYPERSPT.PRG for a 4 MB Atari STE (--sim: the Musashi build for the tests).
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
+
+-D NOSOUND=1: without the sound (Track & Field's player: games/trackfld/tools/sndgen.py, src/sound.s; it needs
+games/trackfld/ref/cover_sound.py hyperspt's coverage).
 """
 from pathlib import Path
 import argparse
@@ -38,7 +41,13 @@ def main():
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')              # (no sound driver yet)
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'trackfld' / 'tools'))   # (the shared player)
+        for m in ('sndgen', 'sound'):
+            sys.modules.pop(m, None)
+        import sndgen                         # (games/trackfld/tools/sndgen.py; games/trackfld/ref/cover_sound.py's coverage)
+        srep = sndgen.build('hyperspt')
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']), 'pin sites', srep['pin_sites'], 'samples', srep['pcm_bytes'])
     tag = args.tag or ('hyperspt_sim' if args.sim else 'hyperspt')
     out = ROOT / 'run' / tag / 'HYPERSPT.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

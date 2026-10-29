@@ -105,13 +105,15 @@ GAMES = [
      "the arrows, the joystick or a pad move Pac-Man; no buttons.  One player at a time: both joysticks and both\n"
      "  pads move him."),
     ("trackfld", "TRACKFLD.PRG", "Track & Field (Konami 1983)",
-     "work in progress: the arcade's full speed, 30-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
-     "  pixels in 16 fitted colours; no sound yet",
+     "work in progress: the arcade's full speed, 20-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
+     "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
+     "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
-     "work in progress: 93% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
-     "  pixels in 16 fitted colours; no sound yet",
+     "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
+     "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
+     "  the tunes on the DMA sound",
      "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
      "  Up, Space, Control, X, joystick up / fire, pad B."),
 ]

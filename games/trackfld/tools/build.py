@@ -1,6 +1,8 @@
 """Build TRACKFLD.PRG for a 4 MB Atari STE (--sim: the Musashi build for the tests).
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
+
+-D NOSOUND=1: without the sound (tools/sndgen.py, src/sound.s; it needs ref/cover_sound.py's coverage).
 """
 from pathlib import Path
 import argparse
@@ -38,7 +40,13 @@ def main():
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')              # (no sound driver yet)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))     # (assets put Gyruss' tools first)
+        for m in ('sndgen', 'sound'):
+            sys.modules.pop(m, None)
+        import sndgen                         # (the sound: games/trackfld/ref/cover_sound.py's coverage)
+        srep = sndgen.build('trackfld')
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']), 'pin sites', srep['pin_sites'], 'samples', srep['pcm_bytes'])
     tag = args.tag or ('trackfld_sim' if args.sim else 'trackfld')
     out = ROOT / 'run' / tag / 'TRACKFLD.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

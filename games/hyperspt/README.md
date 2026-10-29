@@ -6,8 +6,10 @@ MAME set `hyperspt` (Konami GX330).  The main CPU, a KONAMI-1 (an MC6809 with en
 statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in lock-step; the
 picture is MAME's, 256 x 224, centred in the 320-pixel screen with the top and bottom borders open.  The port is
 Track & Field's (`games/trackfld`: the same board family, the same runtime and renderer design) with this board's
-memory map.  Work in progress: no sound yet (the sound board's Z80, SN76489A, VLM5030 speech and DAC), one fitted
-16-colour palette.  Started 2026-10-29.
+memory map.  Sound (2026-10-29): Track & Field's player (`games/trackfld/src/sound.s`, `tools/sndgen.py`,
+`tools/sound.py`) with this board's driver: the Z80 translated, the SN76489A on the YM2149, the VLM5030's speech and the
+DAC tunes rendered offline onto the DMA sound (see Sound).  Work in progress: one fitted 16-colour palette.  Started
+2026-10-29.
 
 ```sh
 python games/hyperspt/tools/prepare.py      # verify assets/roms/hyperspt.zip, unpack to assets/roms/extracted/hyperspt/
@@ -19,6 +21,10 @@ python games/hyperspt/tools/sprite_test.py                # edges, all 16 shifts
 python games/hyperspt/tools/native_test.py 2000           # src/natives.s against the 6809, edge cases included
 games/hyperspt/tools/bench.sh 6000          # Hatari speed (its own Hatari, killed by PID): logic and pictures a second
 python games/hyperspt/ref/mame_cmp_hyperspt.py [frame ...]  # the reference against MAME 0.289
+python games/trackfld/ref/cover_sound.py hyperspt <seed> 20000  # sound coverage: seeds 1-12 the game's, 101-103 random
+python games/hyperspt/tools/sound_test.py 6000 --seed 1   # the STE's sound player against the model every frame
+python games/trackfld/ref/sound_cmp.py hyperspt 1 4000    # the STE's sound schedule against the MAME-timed board
+SOUND=1 AVI=1 games/hyperspt/tools/bench.sh 6000          # Hatari with sound: run/hyperspt_bench/hyperspt.avi, .wav
 ```
 
 Supply `assets/roms/hyperspt.zip` (MAME's parent set; `docs/rom_manifest.json` has the files' sizes, CRCs and
@@ -61,7 +67,8 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
   Seeds 1-12 20,000 frames each (attract, the name entry, play to the game over and again; every event from its start
   by MAME's cheats with always the first try and no false starts; two players; the other DIP switches).  The logic
   costs ~30-56k Musashi cycles an arcade frame (seeds 1-12 over 20,000 frames each: 29.6k-56.0k; seed 5's skeet
-  shooting 52.8k, seed 9's weightlifting 56.0k), more than Track & Field's (~2,200 6809 instructions a frame).
+  shooting 52.8k, seed 9's weightlifting 56.0k), more than Track & Field's (~2,200 6809 instructions a frame); the
+  sound adds 20-36k (Sound).
 * **Natives** (`src/natives.s`, gen.py NATIVES): the IRQ handler's copies of the sprite RAM ($4FBD: $3600 -> $1000,
   144 bytes) and the scrolls ($4FD2: 64 bytes) as long moves, and the division at $A62B (0:D rotated, the divisor
   normalized, shift and subtract, the quotient in X, the remainder rotated back) in registers, step for step as the
@@ -78,17 +85,61 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
   no crash, no late border event in 6,000 VBLs.
 * **Colours**: black and 15 fitted in Oklab (`tools/assets.py`): mean error 1.0 a channel, weighted by pixels; the
   worst-matched pens are rare (a pink, a brown).
-* Not done: sound, the cocktail flip, the service mode, players 3 and 4 (P3_P4); the sprites' reordered-source /
-  generated-code path (`engine/sprite_programs.py`: AGENTS.md asks for it to be prototyped and measured; the row path
-  is used so far).
+* Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (P3_P4);
+  the sprites' reordered-source / generated-code path (`engine/sprite_programs.py`: AGENTS.md asks for it to be
+  prototyped and measured; the row path is used so far).
 
 ## Speed (2026-10-29)
 
-`tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): **93% of the arcade's speed
-(median 60 arcade frames a second), pictures 34.6 a second on average, median 34.5, 10th percentile 15** (before the
-natives: 91%, 31.6, 30, 12; before the translator's flag work: 89%, 28.4, 26.5, 11.5).  A picture
+`tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): with the sound **83% of
+the arcade's speed (median 56 arcade frames a second), pictures 23.6 a second on average, median 23, 10th percentile
+8.5**; without it (`EXTRA="-D NOSOUND=1"`): 93% (median 60), 34.6, 34.5, 15 (before the natives: 91%, 31.6, 30, 12;
+before the translator's flag work: 89%, 28.4, 26.5, 11.5).  The sound's cost is in Sound: the driver's music in
+attract and in the events (fast ticks) costs up to ~80k cycles an arcade frame.  A picture
 (`tools/render_test.py`, Musashi): ~65-76k CPU + ~39-49k Blitter bus cycles; the renderer is Track & Field's (see its
 README: the playfield, the rows drawn only where their scroll or cells changed or sprites were, the sprites' row path).
+
+## Sound
+
+The sound board is Track & Field's family (MAME 0.286 `konami/hyperspt.cpp` sound_map, `trackfld_a.cpp`); the model,
+the translation and the player are Track & Field's, shared (`games/trackfld/tools/sound.py` GAMES, `sndgen.py`,
+`src/sound.s`, `ref/cover_sound.py`, `ref/sound_cmp.py`; its README's Sound has the design).  This board, without
+mirrors: a Z80 at 3.579545 MHz, ROM $0000-$3FFF (c10, c09), RAM $4000-$4FFF, the command latch $6000, $8000 the timer
+(total cycles / 1024, & 3) with BSY in bit 2, the VLM5030's data $A000 and pins $C000-$DFFF (A4 ST, A5 RST; its 8 KB
+ROM c08), the DAC $E000, the SN76489A's latch $E001 and strobe $E002.
+
+The driver (16 KB): the loop's head $0238 (`ei`), a rising edge of the timer's bit 1 (4096 cycles), or bit 0 (2048:
+"fast ticks") while $400B is set (the DAC envelope of some effects); the three channels, the DAC envelope twice a tick
+in fast mode, the speech queue ($044C), the output-enable pins (`$03F4`, every tick), the tune check ($0231).  The IRQ
+handler: 0 all off, $01-$3F effects, $40-$47 the tunes, $60-$68 effects $36-$3E, $80-$D9 phrases into the queue, $FF
+speaks it.  The tunes ($030D:
+`rst $10` through $2198) reset the VLM first (RST pulsed: a phrase stops), then play the DAC waveform and the SN:
+tune 0 4.5 s (a game's start; the only one the game's coverage sends), 1-7 4.0, 4.7, 8.6, 13.2, 23.0, 17.1 and 2.9 s
+(random commands only).
+
+* **The STE's schedule** (`TickBoard`): Track & Field's; a frame is 119,318 half Z80 cycles (60 Hz), a tick 8,192, a
+  fast tick 4,096 (chosen by $400B at the tick's start).  A tune's effect includes the VLM reset (the busy time cleared,
+  the DMA's phrase stopped, the data byte latched).  `ref/sound_cmp.py hyperspt 1 4000`: each SN voice's audible states
+  in order **97.6%** equal (2,758 of 2,825), the phrases and tunes started 9 of 9 in the same order.
+* **Coverage**: seeds 1-12 (the game's commands) and 101-103 (random), 20,000 frames each: 3,110 instructions, 9 pin
+  sites (`ld (hl),a`); BSY is read with the timer's bits in the same byte (the waits are left out: the STE's read gives
+  BSY with timer bits 0; the driver masks with 4).
+* **DMA**: 73 phrases (29.5 s) and the 8 tunes (77.9 s) at 12,517 Hz: 1,344 KB.
+* **Test** (`tools/sound_test.py`, 2026-10-29): seeds 1, 5 and 9, 6,000 frames each: the sound RAM, the SN's and the
+  YM's registers, the YM's channels, the schedule's time, the VLM's busy time and the DMA's requests equal every frame
+  (9, 6 and 35 phrases, tune 0).  The logic, render, sprite and native tests pass with the sound build.  Hatari
+  (`SOUND=1 AVI=1 tools/bench.sh 6000`): silent until the AUTOPLAY's coin (21 s), then 85 of the 110 seconds after it
+  sound (the effects, the speech, tune 0, the event music); the dominant frequencies 150-940 Hz.
+* **Cost**: Musashi, the logic with the sound / without (`logic_test.py`): seed 1 58.3k / 29.8k cycles an arcade
+  frame (3,000 frames), seed 5 77.1k / 57.2k (3,000 frames; 20,000 frames: 89.3k / 52.8k).  The driver runs ~2,100 Z80
+  instructions an arcade frame on average, ~5,400 with the three channels' music in fast ticks (~186 a tick, 29 ticks
+  a frame); the idle-tick native (`snd_idle`) and the pins' store skipped when unchanged took 15% off.  Hatari: 93% ->
+  **83%** of the speed, the pictures 34.6 -> **23.6** a second (Speed).  The program grows from 381,843 to 2,154,009
+  bytes (the samples 1,344 KB, the dispatch table 256 KB, the 64 KB block): 2,879,340 bytes to load (MAX_LOAD
+  3,700,000); packed with LZ4 690,820 bytes: it still fits a 720 KB floppy.
+* Not done: the DAC's pulses outside the tunes (the $400B envelope: 600-8,300 pulses in a 20,000-frame game seed, the
+  attract's most; Track & Field's README), natives for the driver's hot paths (the channels' note step $0C03 / $0C2E,
+  the per-tick skeleton), which the music's cost asks for; the relative levels of the YM and the DMA are a guess.
 
 ## Full-game verification status
 

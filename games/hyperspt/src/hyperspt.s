@@ -882,7 +882,7 @@ dbg_name4:
 
 	include	"render.s"
 	ifnd NOSOUND
-	include	"sound.s"
+	include	"../../trackfld/src/sound.s"	; (Track & Field's player: the same sound board)
 	endc
 
 ; ------------------------------------------------------------------------------
