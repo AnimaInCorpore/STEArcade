@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [--out FILE] [-D NAME=VALUE ...] [--tag T]
 
-No sound yet.  The graphics (tools/assets.py) are made when missing or with --assets.
+The graphics (tools/assets.py) are made when missing or with --assets; the sound tables (tools/sound.py) always.
 """
 from pathlib import Path
 import argparse
@@ -32,6 +32,8 @@ def main():
     import assets
     if args.assets or not (build / 'pm_assets.s').exists():
         assets.build()
+    import sound
+    sound.emit(str(build / 'sound_tables.s'))
     text, report, _ = gen.generate()
     (build / 'code_main.s').write_text(text)
     (build / 'translation.json').write_text(json.dumps(report, indent=1) + '\n')

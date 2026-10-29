@@ -2,8 +2,9 @@
 # recorded (Hatari's AVI, the emulated screen with its borders), the counters printed (COUNTERS.BIN: VBLs, arcade
 # frames, pictures drawn, pictures shown), stills extracted every -Every VBLs (ffmpeg).  Outputs in run/<Name>.
 # Only the Hatari this script starts is stopped (other sessions may run their own).
-#   powershell -File games/pacman/tools/hatari.ps1 [-Frames 1500] [-Every 250] [-Name pacman_hatari] [-Extra ...]
-param([int]$Frames = 1500, [int]$Every = 250, [string]$Name = "pacman_hatari", [string[]]$Extra = @())
+#   powershell -File games/pacman/tools/hatari.ps1 [-Frames 1500] [-Every 250] [-Name pacman_hatari] [-Sound 44100]
+#     [-Extra build.py options, e.g. -D AUTOPLAY=1: a coin, start and play from the VBL]
+param([int]$Frames = 1500, [int]$Every = 250, [string]$Name = "pacman_hatari", [string]$Sound = "off", [string[]]$Extra = @())
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
@@ -23,7 +24,7 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'pacman.avi')) {
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" -WorkingDirectory $out -ArgumentList @(
     '--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$Sound,'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),
     '--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\pacman.avi",
     '--log-file',"$out\hatari.log","$out\PACMAN.PRG")

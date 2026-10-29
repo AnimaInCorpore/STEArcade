@@ -55,6 +55,7 @@ start:
 
 	bsr	init_hardware
 	bsr	init_render
+	bsr	snd_init
 
 	lea	G_Z80+$4800,a0		; the empty addresses $4800-$4BFF read $BF (machine.Pacman.rd8)
 	move	#$400/4-1,d0
@@ -226,6 +227,34 @@ vbl:
 	move.b	in0_kbd,IO_IN0
 	move.b	in1_kbd,IO_IN1
 	endc
+	ifd AUTOPLAY				; (measuring build: a coin and start, then the joystick in a new direction
+	move.l	frame_counter,d0	; every 24 VBLs; period 6000 VBLs: a new game after a game over)
+	divu	#6000,d0
+	swap	d0
+	cmp.w	#400,d0
+	blo.s	.ap
+	cmp.w	#404,d0
+	bhs.s	.ap1
+	move.b	#$DF,IO_IN0		; coin 1
+	bra.s	.ap
+.ap1:	cmp.w	#460,d0
+	blo.s	.ap
+	cmp.w	#464,d0
+	bhs.s	.ap2
+	move.b	#$DF,IO_IN1		; start 1
+	bra.s	.ap
+.ap2:	moveq	#0,d0
+	move.w	frame_counter+2,d0
+	lsr.w	#3,d0
+	divu	#3,d0
+	mulu	#$9E37,d0		; (a direction per 24 VBLs, scrambled)
+	swap	d0
+	and.w	#3,d0
+	move.b	.ap_dirs(pc,d0.w),IO_IN0
+	bra.s	.ap
+.ap_dirs:	dc.b	$FE,$FD,$FB,$F7		; (active low: up, left, right, down)
+.ap:
+	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
 	bpl.s	.ph
@@ -330,6 +359,7 @@ pm_frame:
 	subq.b	#1,vbl_pending
 	st	frame_dirty
 	addq.w	#1,isr_count
+	bsr	snd_update		; (the WSG as the last frame's handler left it)
 	clr.b	pm_deliver
 	btst	#0,LATCH_IRQ
 	beq.s	.out
@@ -607,6 +637,131 @@ z80_unsupported:
 	moveq	#99,d0			; the dump: d7 = the address
 	bra	crash_common
 
+; ------------------------------------------------------------------------------
+; Sound: the WSG ($5040-$505F, written by the frame handler) on the YM2149, a square wave per voice (Galaga's
+; snd_update without the explosion; latch bit 1, $5001, enables it).  tools/sound.py is the same in Python (ym_image),
+; tools/sound_test.py compares them.
+; ------------------------------------------------------------------------------
+
+; at the start: the YM silent, its shadow
+snd_init:
+	lea	snd_ym,a0
+	moveq	#0,d1
+.y:	move.b	d1,$ffff8800.w
+	moveq	#0,d0
+	cmp.b	#7,d1
+	bne.s	.w
+	moveq	#-1,d0			; (mixer: everything off, both ports outputs)
+.w:	move.b	d0,$ffff8802.w
+	move.b	d0,(a0)+
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.y
+	st	snd_en			; (no WSG state seen yet: the first update writes)
+	rts
+
+; One arcade frame: the YM's registers 0-10 from the WSG cells.  Clobbers d0-d7 / a0-a2.
+snd_update:
+	moveq	#1,d0			; nothing to do when the WSG and the enable are as last time
+	and.b	G_Z80+$5001,d0
+	cmp.b	snd_en,d0
+	bne.s	.changed
+	lea	G_Z80+$5040,a0
+	lea	snd_wsg,a1
+	moveq	#8-1,d0
+.cmp:	cmpm.l	(a0)+,(a1)+
+	dbne	d0,.cmp
+	bne.s	.changed
+	rts
+.changed:
+	moveq	#1,d0
+	and.b	G_Z80+$5001,d0
+	move.b	d0,snd_en
+	lea	G_Z80+$5040,a0
+	lea	snd_wsg,a1
+	moveq	#8-1,d0
+.keep:	move.l	(a0)+,(a1)+
+	dbf	d0,.keep
+	lea	snd_buf,a2
+	clr.l	(a2)
+	clr.l	4(a2)
+	clr.w	8(a2)
+	clr.b	10(a2)
+	moveq	#$3F,d6			; the mixer: bit k tone off, bit k + 3 noise off
+	tst.b	snd_en
+	beq	.mix			; (the sound disabled: every voice off)
+	lea	G_Z80+$5040,a0
+	moveq	#0,d5			; the voice
+.voice:	move.w	d5,d4
+	mulu	#5,d4			; its register offset
+	moveq	#0,d0			; the frequency
+	tst.w	d5
+	bne.s	.f1
+	move.b	$10(a0),d0
+	and.w	#15,d0
+.f1:	moveq	#4,d2			; nibbles $11-$14 of the voice: << 4, 8, 12, 16
+	lea	$11(a0,d4.w),a1
+.fn:	moveq	#15,d1
+	and.b	(a1)+,d1
+	lsl.l	d2,d1
+	add.l	d1,d0
+	addq.w	#4,d2
+	cmp.w	#20,d2
+	blo.s	.fn
+	moveq	#15,d1
+	and.b	$15(a0,d4.w),d1		; the volume
+	beq.s	.next
+	tst.l	d0
+	beq.s	.next
+	moveq	#7,d3
+	and.b	5(a0,d4.w),d3		; the waveform
+	move.w	#4095,d2
+	cmp.l	#334,d0
+	blo.s	.per
+	moveq	#20,d2
+	cmp.l	#$FFFF,d0
+	bhi.s	.per
+	move.l	#DIVIDEND,d2
+	divu	d0,d2
+.per:	lea	snd_shift,a1
+	move.b	(a1,d3.w),d7		; (the waveform's strongest harmonic: an octave a shift)
+	lsr.w	d7,d2
+	bne.s	.p1
+	moveq	#1,d2
+.p1:	lsl.w	#4,d3
+	add.w	d1,d3
+	lea	snd_level,a1
+	move.b	(a1,d3.w),d1		; the level
+	beq.s	.next
+	move.w	d5,d3
+	add.w	d3,d3
+	move.b	d2,(a2,d3.w)		; the period
+	lsr.w	#8,d2
+	move.b	d2,1(a2,d3.w)
+	move.b	d1,8(a2,d5.w)
+	bclr	d5,d6			; tone on
+.next:	addq.w	#1,d5
+	cmp.w	#3,d5
+	blo	.voice
+.mix:	or.b	#$C0,d6
+	move.b	d6,7(a2)
+	lea	snd_ym,a0		; the registers that changed (no interrupt handler of the port touches the YM)
+	moveq	#0,d1
+.wr:	move.b	(a2)+,d0
+	cmp.b	(a0),d0
+	beq.s	.same
+	move.b	d0,(a0)
+	move.b	d1,$ffff8800.w
+	move.b	d0,$ffff8802.w
+.same:	addq.l	#1,a0
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.wr
+	rts
+
+DIVIDEND = 1365333			; 125000 * 2^20 / 96000: the YM period of a WSG frequency
+	include	"sound_tables.s"
+
 	include	"render.s"
 
 ; ------------------------------------------------------------------------------
@@ -670,6 +825,11 @@ in0_kbd:	ds.b	1
 in1_kbd:	ds.b	1
 	even
 isr_count:	ds.w	1
+snd_wsg:	ds.b	32		; the WSG cells at the last snd_update
+snd_buf:	ds.b	12		; the YM registers of this frame
+snd_ym:		ds.b	12		; the YM2149's registers 0-10 as written
+snd_en:		ds.b	1		; latch bit 1 at the last snd_update
+	even
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16

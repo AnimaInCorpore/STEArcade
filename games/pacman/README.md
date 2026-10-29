@@ -6,21 +6,22 @@ method is `docs/porting-guide.md`.
 
 State (2026-10-29): the reference machine's picture equals MAME's frame for frame; the Z80 program is translated and
 runs on the 68000 in lock-step with the reference (every frame exact, every seed); the picture is drawn (equal to the
-reference in every checked frame, 274 of the 288 lines shown) and runs at full speed in Hatari.  No sound yet, no pads;
-not in `port.py`'s list.
+reference in every checked frame, 274 of the 288 lines shown) and runs at full speed in Hatari, in the attract mode and
+in play; the sound plays the WSG's three voices on the YM2149.  No pads; not in `port.py`'s list.
 
 * `src/pacman.s` the runtime (schedule, IRQ delivery, borders, inputs, crash dump); `src/render.s` the picture
 * `tools/prepare.py` the ROMs; `tools/machine.py` the reference machine (`Pacman`) and the port's schedule
-  (`PacmanPort`); `tools/gen.py` the translation; `tools/assets.py` the graphics; `tools/build.py`;
-  `tools/logic_test.py` the lock-step test, `tools/render_test.py` the picture, `tools/sprite_test.py` the sprites at the
-  edges; `tools/hatari.ps1` a hidden Hatari run (AVI, counters)
+  (`PacmanPort`); `tools/gen.py` the translation; `tools/assets.py` the graphics; `tools/sound.py` the sound model;
+  `tools/build.py`; `tools/logic_test.py` the lock-step test, `tools/render_test.py` the picture,
+  `tools/sprite_test.py` the sprites at the edges, `tools/sound_test.py` the sound; `tools/hatari.ps1` a hidden Hatari
+  run (AVI with sound, counters; `-Extra -DAUTOPLAY=1`: a coin, start and play from the VBL)
 * `ref/cover.py` coverage; `ref/mame_cmp_pacman.py` the reference against MAME's picture
 
 From the repository root: `python games/pacman/tools/prepare.py`, coverage
 `python games/pacman/ref/cover.py <seed> 20000` for seeds 1-12 (`build/pacman/cover<seed>.pkl`, needed by the
 translation and the sprite code), `python games/pacman/tools/build.py --sim` (`run/pacman_sim/PACMAN.PRG`), then
 `python games/pacman/tools/logic_test.py 12000 --seed <n>`, `render_test.py 3000 --seed <n> --every 3`,
-`sprite_test.py`.  `build.py` without `--sim` builds `run/pacman/PACMAN.PRG`.  Controls: arrows or joystick move,
+`sprite_test.py`, `sound_test.py 4000`.  `build.py` without `--sim` builds `run/pacman/PACMAN.PRG`.  Controls: arrows or joystick move,
 **5** / **6** coin, **1** / **2** start, **Esc** quits.
 
 ## ROMs
@@ -166,12 +167,32 @@ pictures.  After the boot it runs at full speed: 59.9 arcade frames and 49.8 pic
 The boot costs about 6 seconds: its ROM / RAM test runs before the first frame (the arcade's takes about 4).  No
 crash, the stills match the reference (attract screens, the demo maze, frightened ghosts, Pac-Man's death).
 
+## Sound
+
+`tools/sound.py` (the model) and `snd_update` in `src/pacman.s` (the same in 68000 code), Galaga's method: the same
+Namco WSG at 96 kHz with the same register map (MAME `namco.cpp pacman_sound_w`, checked).  Each voice becomes a
+square wave on its YM2149 channel: the period from the WSG frequency (`1365333 / freq`, the formula Galaga checked
+against MAME's audio) divided by the waveform's strongest harmonic, the level from the volume and the waveform's RMS
+(3 dB a step).  Pac-Man's waveforms (`82s126.1m`) are not Galaga's: their strongest harmonics are 1, 1, 2, 1, 8, 16, 1,
+2, so wave 4 (used by voice 1) sounds three octaves above its fundamental and wave 5 four (Galaga's rule followed one
+octave only).  Latch bit 1 (`$5001`) switches the sound off.  `snd_update` runs once an arcade frame, as the frame is
+delivered, on the registers the previous frame's handler wrote; it writes only the YM registers that changed.
+
+`sound_test.py` (2026-10-29): 4000 frames of a played game (after every frame the YM's registers equal `ym_image` of
+the reference's WSG registers) and 2000 random register sets, all equal.  Not checked against MAME's audio: Pac-Man's
+attract mode is silent, and the WolfMAME 0.162 on this machine has no Lua input to start a game; the pitch of waves 4
+and 5 is the analysis's, not heard.
+
+**Hatari in play** (`tools/hatari.ps1 -Frames 6000 -Sound 44100 -Extra -DAUTOPLAY=1`, 2026-10-29): 6001 VBLs, 6787
+arcade frames, 5608 pictures: within about 50 frames of full speed after the boot.  The recorded audio sounds from
+the start (12 s) to the game over (66 s), its strongest frequencies 530-890 Hz in play; the stills show the game (the
+score, the lives and fruit rows, the game over, the high score kept).
+
 ## Next steps
 
-1. Sound: the WSG's three voices as YM2149 square waves, Galaga's `tools/sound.py` (same chip, here written by the
-   main CPU in the IRQ handler: `$5040-$505F`; waveforms from `82s126.1m`).
-2. Play in Hatari with input (keyboard, joystick; the pads through `engine/rt/jagpad.s`), the picture rate in play;
-   perhaps a shorter boot (Galaga patches its RAM test out).
+1. The pads (`engine/rt/jagpad.s`) and a check of the keyboard and joystick by hand; perhaps a shorter boot (Galaga
+   patches its RAM test out: here about 6 seconds before the first picture).
+2. The sound against MAME's audio (a MAME with input: MAME 0.289's Lua, or a recorded `.inp`), by ear too.
 3. Register the port in `port.py` (GAMES, COVER, TESTS), `tools/release.py` and the README's tables; a screenshot.
 4. Play against MAME with input (a WolfMAME `.inp` or a MARP recording, `docs/porting-guide.md`), then the natural
    playthrough `docs/port-status.md` asks for.
