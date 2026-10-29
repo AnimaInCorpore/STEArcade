@@ -1,10 +1,12 @@
 # Pooyan (Konami, 1982) for Atari STE
 
+![Pooyan on the STE (Hatari)](docs/screenshot.png)
+
 MAME set `pooyan` (the Konami parent; the zip also holds the clones `pooyans` and `pootan`).  Started 2026-10-29:
-the reference board, its check against MAME, coverage, the translation and the runtime, exact in lock-step; the
-renderer is a stand-in (a black screen).  The board is Time Pilot's sibling (MAME: "very similar to Time Pilot"), so
-the port follows `games/timeplt`: a 3.072 MHz Z80 statically translated to 68000 code and checked in lock-step, a runtime
-that delivers the NMI at the game's idle point, a Blitter renderer.
+the reference board, its check against MAME, coverage, the translation, the runtime and the renderer, all exact
+against the reference; full speed in Hatari.  No sound yet.  The board is Time Pilot's sibling (MAME: "very similar
+to Time Pilot"), so the port follows `games/timeplt`: a 3.072 MHz Z80 statically translated to 68000 code and checked
+in lock-step, a runtime that delivers the NMI at the game's idle point, a Blitter renderer.
 
 ```sh
 python games/pooyan/tools/prepare.py       # verify assets/roms/pooyan.zip, unpack to assets/roms/extracted/pooyan/
@@ -14,7 +16,14 @@ python games/pooyan/ref/mame_avi_cmp.py [--keep DIR]   # the reference against W
 python games/pooyan/tools/gen.py           # -> build/pooyan/code_main.s, translation.json (needs the 12 coverage pickles)
 python games/pooyan/tools/build.py         # -> run/pooyan/POOYAN.PRG (--sim: run/pooyan_sim, the Musashi build)
 python games/pooyan/tools/logic_test.py 6000 --seed 4  # the translation in lock-step with the reference
+python games/pooyan/tools/render_test.py 3000 --start 1000 --every 3   # the STE picture against the reference
+python games/pooyan/tools/sprite_test.py   # made-up pictures: both edges at every shift, holes, 64 KB crossings
+powershell -File games/pooyan/tools/hatari.ps1 -Frames 3000   # Hatari: counters, an AVI, stills (DEBUG + AUTOPLAY)
 ```
+
+Controls (as Time Pilot's): **5/6** coin 1 / 2, **1/2** start, **up / down arrows** move the basket, **Space / Control /
+Z** fire, **Esc** quits; joystick port 1 player 1, port 0 player 2; Jaguar pads.  DIP switches: MAME's defaults (3
+lives, bonus 50K 80K+, difficulty 1, demo sounds on).
 
 Supply `assets/roms/pooyan.zip` (MAME's set; `docs/rom_manifest.json` has the 13 files' sizes, CRCs and SHA-1s).
 Nothing ROM-derived is in git.
@@ -67,15 +76,34 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
 * **Runtime** (`src/pooyan.s`, Time Pilot's without the clouds, the checksum natives and the random byte): the NMI at
   the hook $021C with the token, the inputs at $B100-$B104 (keyboard, joysticks, Jaguar pads as in Time Pilot), the
   sound commands into a ring at latch Q1's rising edge (`py_sound`), the written cells listed (`py_mark_*`), six
-  arcade frames to five VBLs.  `src/render.s` is a stand-in: a black screen, the picture count, the cell list emptied.
+  arcade frames to five VBLs.
 * **Logic** (`tools/logic_test.py`, 2026-10-29): exact against the reference's port schedule every frame (RAM
   $8000-$8FFF, the sprite RAMs, latch Q0, the sound commands, every changed cell marked): seed 1 6,000 frames (attract,
   coin, play), seeds 4, 5, 7 8,000 each (infinite lives, rounds 3-4), 9 6,000 (the high score), 10 6,000 (two
   players), 12 6,000 (5 lives, the hardest difficulty, no demo sounds): 48,000 frames.  **The logic: ~44-49k 68000
   cycles an arcade frame in play** (Musashi, no drawing), against Time Pilot's ~52k: no tuning yet.
-* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06; DEBUG + AUTOPLAY, 3,000 VBLs): no crash, 3,565 arcade frames
-  (59.4 a second with the boot: the arcade's speed), no late border event.  Nothing is drawn yet.
-* Not done: the renderer (4bpp tiles and sprites; sprites through `engine/sprite_programs.py` as Time Pilot's),
-  `render_test.py` / `sprite_test.py`, a Hatari script, the STE palette
-  (17 colours seen for 16), sound (Time Pilot's board: none of the ports has it yet), the cocktail flip, registration in
-  `port.py`, `tools/release.py` and the README table.
+* **Renderer** (`src/render.s`, after Time Pilot's, much simpler: one tile layer, no front tiles, score bands or
+  clouds): the turned 224 x 256 picture centred with black 48-pixel side bands (the edges on 16-pixel groups), borders
+  open, three display buffers and a clean screen.  Tiles: a changed cell's image (code, flips, colour) baked on first
+  use into a directly indexed table (16,384 x 32 bytes) and drawn with `movep.l`.  Sprites: the entry at $10 first
+  (the last on top), baked on first use per (code, colour, flips) into a 512-slot cache; a pen is transparent where
+  its colour's lookup entry is colour 0, so the masks depend on the colour: 8 transparency classes.  The coverage's 84
+  shapes (class, code, flips) have generated code (`engine/sprite_programs.py`: 1,398 routines, 132 KB of end-mask
+  streams), the rest and 64 KB crossings take the row path; clipped at the side edges (the inner word only), whole into
+  the guard lines.  Colours (`tools/assets.py`): black and the 15 most frequent of the 17 the arcade shows; the two
+  left out ((104, 0, 251), (33, 71, 251): 0.003% of the pixels) map to the nearest; mean error 0.5 a channel, nearly
+  all of it the STE's 4 bits a gun.
+* **Picture** (`tools/render_test.py`, 2026-10-29): exact in the shown colours, the side bands black: seed 1 667
+  pictures of play (every 3rd of frames 1000-3000), seed 5 900 (rounds 2-4), seed 9 700 (the high score), seed 10 625
+  (two players).  `tools/sprite_test.py`: 158 made-up pictures exact (both side edges at every shift, flips, the
+  colours with holes, generated and row path, 64 KB crossings, the top and bottom, 60 moving pictures in a row; 193,000
+  sprite pixels).  `BLIT_STATS=256`: every pass HOG, the longest 256 bus cycles, none on a shared bus.
+* **Speed** (Musashi): a picture in play 25-33k CPU + 7.5-16k Blitter bus cycles; the generated sprite code against
+  the row path alone (`-D REN_GEN=0`, the same pictures, exact both): seed 1 31.6k + 10.0k against 40.0k + 12.4k,
+  seed 5 25.1k + 8.2k against 32.2k + 10.4k: kept.  **Hatari** (`tools/hatari.ps1`, DEBUG + AUTOPLAY, 3,000 VBLs): no
+  crash, no late border event; in play **60 arcade frames and 50 pictures a second** in most 2-second windows, 28-42
+  pictures at a round's start (many new tiles baked); 57.9 frames and 46.3 pictures a second over the whole run with
+  the boot and the attract mode.
+* Not done: sound (Time Pilot's board: none of the ports has it yet), the cocktail flip, a recorded play
+  (`PLAYBACK`), registration in `port.py`, `tools/release.py` and the README table's screenshot; full-game Hatari
+  verification.
