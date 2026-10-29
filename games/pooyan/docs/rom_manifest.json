@@ -1,0 +1,80 @@
+[
+ {
+  "name": "1.4a",
+  "size": 8192,
+  "crc32": "bb319c63",
+  "sha1": "5401b8ef586127c8cf5a431e5c44e38be2254a98"
+ },
+ {
+  "name": "2.5a",
+  "size": 8192,
+  "crc32": "a1463d98",
+  "sha1": "b23cc7e61276c61a78e80fe08c7f0c8adadf2ffe"
+ },
+ {
+  "name": "3.6a",
+  "size": 8192,
+  "crc32": "fe1a9e08",
+  "sha1": "5206893760f188ac71a5e6bd42561cf25fcc3d49"
+ },
+ {
+  "name": "4.7a",
+  "size": 8192,
+  "crc32": "9e0f9bcc",
+  "sha1": "4d9707423ad531ac535db432e329b3d52cbb4559"
+ },
+ {
+  "name": "xx.7a",
+  "size": 4096,
+  "crc32": "fbe2b368",
+  "sha1": "5689a84ef110bdc0039ad1a6c5778e0b8eccfce0"
+ },
+ {
+  "name": "xx.8a",
+  "size": 4096,
+  "crc32": "e1795b3d",
+  "sha1": "9ab4e5362f9f7d9b46b750e14b1d9d71c57be40f"
+ },
+ {
+  "name": "8.10g",
+  "size": 4096,
+  "crc32": "931b29eb",
+  "sha1": "0325c1c1fdb44e0044b82b7c79b5eeabf5c11ce7"
+ },
+ {
+  "name": "7.9g",
+  "size": 4096,
+  "crc32": "bbe6d6e4",
+  "sha1": "de5447d59a99c4c08c4f40c0b7dd3c3c609c11d4"
+ },
+ {
+  "name": "6.9a",
+  "size": 4096,
+  "crc32": "b2d8c121",
+  "sha1": "189ad488869f34d7a38b82ef70eb805acfe04312"
+ },
+ {
+  "name": "5.8a",
+  "size": 4096,
+  "crc32": "1097c2b6",
+  "sha1": "c815f0d27593efd23923511bdd13835456ef7f76"
+ },
+ {
+  "name": "pooyan.pr1",
+  "size": 32,
+  "crc32": "a06a6d0e",
+  "sha1": "ae131320b66d76d4bc9108da6708f6f874b2e123"
+ },
+ {
+  "name": "pooyan.pr3",
+  "size": 256,
+  "crc32": "8cd4cd60",
+  "sha1": "e0188ecd5b53a8e6e28c1de80def676740772334"
+ },
+ {
+  "name": "pooyan.pr2",
+  "size": 256,
+  "crc32": "82748c0b",
+  "sha1": "9ce8eb92e482eba5a9077e9db99841d65b011346"
+ }
+]
