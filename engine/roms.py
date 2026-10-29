@@ -2,7 +2,8 @@
 
     extract(game, "dkong.zip", derived={"cpu.rom": ["c_5et_g.bin", ...]})
 
-The manifest (games/<game>/docs/rom_manifest.json) lists the files the port uses: name, size, crc32, sha1.  Every one
+The manifest (games/<game>/docs/rom_manifest.json) lists the files the port uses: name, size, crc32, sha1 (and
+`member`, the file's path in the archive when that differs from its name: a clone's files in a merged set).  Every one
 is checked before anything is written; `derived` files are the concatenation of manifest files (Donkey Kong's
 cpu.rom).  The extracted folders are not in git: port.py runs the game's tools/prepare.py when one is missing.
 """
@@ -24,7 +25,7 @@ def extract(game, archive, derived=None):
     files = {}
     with zipfile.ZipFile(ROMS / archive) as z:
         for entry in manifest:
-            data = z.read(entry["name"])
+            data = z.read(entry.get("member", entry["name"]))     # member: its path in a merged archive (Pac-Man)
             got = fingerprint(data)
             if any(got[k] != entry[k] for k in ("size", "crc32", "sha1")):
                 sys.exit("%s: %s does not match the manifest (%s, expected %s)" % (archive, entry["name"], got, entry))

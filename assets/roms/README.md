@@ -28,6 +28,7 @@ the repository** (`.gitignore`): supply the archives below yourself; `port.py pr
 | `kungfum.zip` | Kung-Fu Master (World, MAME `kungfum`; MAME's file names) | `extracted/kungfum/` (28 verified files) | `games/kungfum` |
 | `trojanr.zip` | Trojan (Romstar, set 1, MAME `trojanr`; old file names `tb01.bin`-`tb25.bin`, `mb7114e.1e` = `tbb-1.1e`, `tbp24s10.7j` = `tbb-2.7j`) | `extracted/trojan/` (27 verified files); `build/trojan/mame_roms/` with MAME's names | `games/trojan` |
 | `ddragon.zip` | Double Dragon (Japan set 1, MAME `ddragonj`; MAME's file names) | `extracted/ddragon/` (23 verified files); MAME runs `ddragonj` from `assets/roms` | `games/ddragon` |
+| `puckman.zip` | MAME's merged Puck Man set; the port uses its clone Pac-Man (Midway, MAME `pacman`), whose files lie in the clone folders `pacman/`, `newpuckx/`, `hangly/` and the parent's PROMs (the manifest's `member`) | `extracted/pacman/` (10 verified files, MAME's names) and `build/pacman/mame_roms/` | `games/pacman` |
 | `gauntlet.zip` | Gauntlet (rev 14, MAME `gauntlet`; MAME's file names; `136037-104.6p` is the 8 KB half of the chip) | `extracted/gauntlet/` (20 verified files); `build/gauntlet/mame_roms/` with the alphanumerics padded to MAME's 16 KB | `games/gauntlet` |
 
 Only the games in `port.py list` are registered with the common front end. For the other sets above, run

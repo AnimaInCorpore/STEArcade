@@ -1,0 +1,72 @@
+[
+ {
+  "name": "pacman.6e",
+  "member": "pacman/pacman.6e",
+  "size": 4096,
+  "crc32": "c1e6ab10",
+  "sha1": "e87e059c5be45753f7e9f33dff851f16d6751181"
+ },
+ {
+  "name": "pacman.6f",
+  "member": "newpuckx/pacman.6f",
+  "size": 4096,
+  "crc32": "1a6fb2d4",
+  "sha1": "674d3a7f00d8be5e38b1fdc208ebef5a92d38329"
+ },
+ {
+  "name": "pacman.6h",
+  "member": "pacman/pacman.6h",
+  "size": 4096,
+  "crc32": "bcdd1beb",
+  "sha1": "8e47e8c2c4d6117d174cdac150392042d3e0a881"
+ },
+ {
+  "name": "pacman.6j",
+  "member": "pacman/pacman.6j",
+  "size": 4096,
+  "crc32": "817d94e3",
+  "sha1": "d4a70d56bb01d27d094d73db8667ffb00ca69cb9"
+ },
+ {
+  "name": "pacman.5e",
+  "member": "hangly/pacman.5e",
+  "size": 4096,
+  "crc32": "0c944964",
+  "sha1": "06ef227747a440831c9a3a613b76693d52a2f0a9"
+ },
+ {
+  "name": "pacman.5f",
+  "member": "hangly/pacman.5f",
+  "size": 4096,
+  "crc32": "958fedf9",
+  "sha1": "4a937ac02216ea8c96477d4a15522070507fb599"
+ },
+ {
+  "name": "82s123.7f",
+  "member": "pm1-1.7f",
+  "size": 32,
+  "crc32": "2fc650bd",
+  "sha1": "8d0268dee78e47c712202b0ec4f1f51109b1f2a5"
+ },
+ {
+  "name": "82s126.4a",
+  "member": "pm1-4.4a",
+  "size": 256,
+  "crc32": "3eb3a8e4",
+  "sha1": "19097b5f60d1030f8b82d9f1d3a241f93e5c75d6"
+ },
+ {
+  "name": "82s126.1m",
+  "member": "pm1-3.1m",
+  "size": 256,
+  "crc32": "a9cc86bf",
+  "sha1": "bbcec0570aeceb582ff8238a4bc8546a23430081"
+ },
+ {
+  "name": "82s126.3m",
+  "member": "pm1-2.3m",
+  "size": 256,
+  "crc32": "77245b66",
+  "sha1": "0c4d0bee858b97632411c440bea6948a74759746"
+ }
+]

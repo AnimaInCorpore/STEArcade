@@ -55,8 +55,10 @@ def word_table(rom, start, known=(), limit=None):
 
 
 def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=(), rst28_tables=True,
-             hl_tables=False, table_calls=()):
+             hl_tables=False, table_calls=(), rst_data=None):
     # table_calls: call targets that are followed by a word table (a dict maps the target to the highest code address)
+    # rst_data: {rst target: k} the restart reads k inline bytes and returns past them (the code goes on at the rst + 1
+    # + k), or {rst target: "table"} a word table of jump targets follows it (indexed by A; no fall-through) - Pac-Man
     """Recursive descent.  Returns (code: dict pc->Ins, tables: dict site->list of targets).
     rst28_tables: `rst $28` is followed by a table of jump targets (Donkey Kong).
     hl_tables: `ld hl,T; rst $08|$10; ld a,(hl); inc hl; ld h,(hl); ld l,a; jp (hl)` (or
@@ -101,6 +103,17 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
                 pc = nxt
                 continue
             if fl == "rst":
+                skip = (rst_data or {}).get(ins.target)
+                if skip == "table":
+                    tbl = word_table(rom, nxt, known)
+                    tables[pc] = (nxt, tbl)
+                    work.append(ins.target)
+                    work.extend(tbl)
+                    break
+                if skip:
+                    work.append(ins.target)
+                    pc = nxt + skip
+                    continue
                 if ins.target == 0x28 and rst28_tables:
                     tbl = [t for t in table_after_rst28(rom, nxt, known) if t]
                     if rst28_counts and nxt in rst28_counts:
@@ -121,7 +134,7 @@ def discover(rom, roots, extra_code=(), rst28_counts=None, verbose=False, known=
         new_targets = hl_jump_tables(rom, code, tables, known, verbose)
         if new_targets:
             return discover(rom, list(roots) + new_targets, extra_code, rst28_counts, verbose, known,
-                            rst28_tables, hl_tables, table_calls)
+                            rst28_tables, hl_tables, table_calls, rst_data)
     return code, tables
 
 
