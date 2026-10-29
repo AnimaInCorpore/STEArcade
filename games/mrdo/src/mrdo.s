@@ -19,15 +19,15 @@ FRAMES = 0
 
 KEY_ESC = $01
 
-; Border removal and the palette: engine/rt/borders.s (the picture's 256 lines, black above and below).
+; Border removal and the palette: engine/rt/borders.s (the picture's 240 lines, black above and below).
 	ifnd TA_DATA
 TA_DATA = 98
 	endc
 	ifnd TA_NOPS
 TA_NOPS = 84
 	endc
-PIC_TOP = 10				; the picture's first displayed line
-PIC_LINES = 256
+PIC_TOP = 18				; the picture's first displayed line (240 lines centred as the 256 of the other ports at 10)
+PIC_LINES = 240
 BD_PALETTE = 1
 	include	"borders.s"
 

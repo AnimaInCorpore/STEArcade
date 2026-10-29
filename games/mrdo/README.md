@@ -1,26 +1,35 @@
 # Mr. Do!, Atari STE
 
+![Mr. Do! on the STE (Hatari)](docs/screenshot.png)
+
 Port started 2026-10-29.  Set: MAME `mrdo`, Mr. Do! (Universal), 1982; one Z80, two SN76489s, two 2-bit tile layers
 and 64 sprites of 16 x 16 (2 bits).  Paths in this file are relative to `games/mrdo/`; the method is
 `docs/porting-guide.md`, the driver MAME 0.286's `universal/mrdo.cpp`, `mrdo_v.cpp` (the authoritative source tree).
 
 State (2026-10-29): the reference machine's picture equals MAME's frame for frame (2696 of 2701 frames of the attract
 mode; the other five differ in a tile column written at the frame's end); the Z80 program is translated and runs on
-the 68000 in lock-step with the reference's port schedule (12 seeds, 144,000 frames exact) and at full speed in
-Hatari.  The runtime (`src/mrdo.s`) is complete but for the sound;
-`src/render.s` is a stand-in (a black screen) until the renderer is written.  Not registered in `port.py` yet.
+the 68000 in lock-step with the reference's port schedule (12 seeds, 144,000 frames exact); the renderer draws every
+picture exact against the reference (32,000 pictures of four seeds: the title's and intermissions' scrolling, every
+scene, two players; 476 made-up pictures of sprites at the edges, every scroll value).  In Hatari the logic keeps the
+arcade's 60 frames a second in most of play with 44-50 pictures a second (about 23 on the title).  No sound yet; not
+registered in `port.py` yet.
 
 * `src/mrdo.s` the runtime (schedule, IRQ delivery, borders, inputs, sound bytes into a ring, crash dump);
-  `src/render.s` the picture (a stand-in)
+  `src/render.s` the picture (two tile layers composited per cell, the background scrolled; generated sprite code)
 * `tools/prepare.py` the ROMs; `tools/machine.py` the reference machine (`MrDo`) and the port's schedule (`MrDoPort`);
-  `tools/gen.py` the translation; `tools/build.py`; `tools/logic_test.py` the lock-step test; `tools/hatari.ps1` a
-  hidden Hatari run (counters, AVI; `-Extra -DAUTOPLAY=1`: a coin, start and play from the VBL)
-* `ref/cover.py` coverage; `ref/mame_cmp_mrdo.py` the reference against MAME's picture
+  `tools/gen.py` the translation; `tools/assets.py` the graphics, colours and sprite code; `tools/build.py`;
+  `tools/logic_test.py` the lock-step test; `tools/render_test.py` the pictures against the reference;
+  `tools/sprite_test.py` made-up pictures (edges, shifts, 64 KB crossings, scroll values); `tools/bench.sh` Hatari's
+  speed (macOS; `AVI=1`: stills), `tools/hatari.ps1` the same run on Windows (counters, AVI)
+* `ref/cover.py` coverage; `ref/pens.py` the pens shown (the palette fit); `ref/mame_cmp_mrdo.py` the reference
+  against MAME's picture
 
 From the repository root: `python games/mrdo/tools/prepare.py`, coverage `python games/mrdo/ref/cover.py <seed> 20000`
 for seeds 1-12 (`build/mrdo/cover<seed>.pkl`, needed by the translation; about 20 minutes each, run them in
 parallel), `python games/mrdo/tools/build.py --sim` (`run/mrdo_sim/MRDO.PRG`), then
-`python games/mrdo/tools/logic_test.py 12000 --seed <n>`.  `build.py` without `--sim` builds `run/mrdo/MRDO.PRG`.
+`python games/mrdo/tools/logic_test.py 12000 --seed <n>`; the palette needs `python games/mrdo/ref/pens.py <seed>`
+for seeds 7, 10, 11, 12 (`build/mrdo/pens<seed>.pkl`, ~5 minutes each), then `tools/assets.py` (or `build.py
+--assets`); `tools/render_test.py 8000 --seed 10 --every 4`, `tools/sprite_test.py`.  `build.py` without `--sim` builds `run/mrdo/MRDO.PRG`.
 Controls (planned as on the other ports): arrows or joystick move, Space / Control / Z fire, **5** / **6** coin,
 **1** / **2** start, **Esc** quits; either Jaguar pad plays (the players take turns on the upright cabinet).
 
@@ -122,12 +131,46 @@ shape.
 Hatari (`tools/hatari.ps1`, DEBUG + AUTOPLAY, 3000 VBLs, the stand-in renderer): no crash, 59.5 arcade frames a
 second (the arcade's 59.94).
 
+## The picture (src/render.s, tools/assets.py)
+
+After Time Pilot's renderer; the method's details are in `src/render.s`'s header.
+
+* **Turned** as MAME's ROT270: picture pixel (X, Y), 192 x 240, is the raw pixel (x = 247 - Y, y = 32 + X); raw cell
+  (tx, ty) is the 8 x 8 cell at X = 8 ty - 32, Y = 240 - 8 tx (a byte of each plane); a sprite is the 16 x 16 square
+  at X = 224 - byte 1, Y = 232 - byte 3 (raw flip x reverses its turned rows, flip y its columns).  Centred: screen x
+  64-255 (the edges on 16-pixel groups), `PIC_TOP` 18, `PIC_LINES` 240; 24 guard lines above the picture (a sprite
+  reaches 23 lines above it) and 20 below.
+* **Two tile layers**: the background is kept converted to STE planes as a 256-pixel band per raw column tx
+  (`bg_img`), the foreground per cell as plane bytes and the bits it keeps of what lies below (`fg_cache`, `fg_kind`:
+  empty, partly transparent, opaque).  A changed video RAM cell (the writers' list, compared with a copy) converts its
+  layer and marks its screen cells (a background cell two when the scroll is not a multiple of 8); a marked cell is
+  composited (the background's chunk, or two chunks shifted, then the foreground) into the clean screen and copied
+  into each display buffer.  The converter takes the colour's four pens from a table (`sel_tab`, from the pen map), so
+  another palette needs no new code.
+* **The scroll**: only the background's raw y scroll is used (x is only ever cleared), by the title (the stripes
+  behind the logo) and the intermissions (the big characters walk across): a horizontal move in the picture.  A new
+  scroll value marks the rows with background content (or content since the last change), not under opaque
+  foreground: about 130 cells a picture on the title, ~180k CPU cycles.
+* **Sprites** over everything (entry 63 first, entry 0 on top): Time Pilot's preparation (`engine/sprite_programs.py`:
+  rows grouped by mask, one- or two-word passes per row and shift, code per shape and pass-type pattern, end masks from
+  a stream) for the coverage's 203 shapes (code x flips): 2,964 routines, 332 KB of streams; others and 64 KB crossings
+  the row path (`draw_cell`).  Clipped at the group-aligned side edges (the inner word only), culled wholly outside;
+  whole into the guard lines.  Damage: the drawn lines and words, restored by short HOG copies.
+* **Colours**: the arcade shows 26 colours (at most 15 in one picture); one palette of black and 15 fitted in Oklab
+  to `ref/pens.py`'s counts with square-root weights: mean error 3.7 a channel; pure blue (some sprite colours) shows
+  as a duller blue, the three yellow-greens, the two pale yellows and the ochres merge.  Per-scene palettes (exact:
+  each picture has at most 15) would need a switch by scene with a full redraw and a sprite cache flush.
+
+Measured (`tools/render_test.py`, Musashi, CPU + Blitter bus cycles a picture, exact): seed 4's play (frames
+1600-2200) 30.1k + 12.9k with the generated sprite code, 43.0k + 14.6k with every sprite on the row path
+(`-D REN_GEN=0`); the title ~263k + 0.  `tools/bench.sh 4000` (Hatari, AUTOPLAY, 2026-10-29): no crash, no late
+border event; per 2 s the logic 59-60 arcade frames a second in 33 of 40 windows (the first one boots; 38-55 in six
+others: scene starts and long maze searches), pictures 44-50 in play, 22-24 on the title.
+
 ## Next steps
 
-1. The renderer (`src/render.s`, `tools/assets.py`, `tools/render_test.py`): the two tile layers (the background
-   scrolled), the sprites by the reordered-source method (`engine/sprite_programs.py`, `docs/sprite-preparation.md`),
-   the palette (the 14+ colours of a scene into 16), and the picture's 240 x 192 on the STE (ROT270: rotated, or the
-   arcade's raw orientation with the playfield sideways; to be decided).
-2. Hatari: the logic's pace with the long search frames; yield points if they show.
+1. Hatari: the logic's pace with the long search frames (the dips to 38-55 frames a second); yield points if they
+   show in play.  The title's scroll compositing (~180k a picture) could use the Blitter for rows without foreground.
+2. Per-scene palettes (exact colours).
 3. The sound: the two SN76489s on the YM2149 (three tone voices and noise each).
-4. Registration in `port.py`, `tools/release.py`, the README's table.
+4. Registration in `port.py` (GAMES, COVER, TESTS) and `tools/release.py`.
