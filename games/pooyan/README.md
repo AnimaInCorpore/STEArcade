@@ -11,9 +11,9 @@ in lock-step, a runtime that delivers the NMI at the game's idle point, a Blitte
 ```sh
 python games/pooyan/tools/prepare.py       # verify assets/roms/pooyan.zip, unpack to assets/roms/extracted/pooyan/
 python games/pooyan/tools/machine.py       # the reference in the port's schedule: 600 frames
-python games/pooyan/ref/cover.py <seed> 20000          # coverage, seeds 1-12 -> build/pooyan/cover<seed>.pkl
+python games/pooyan/ref/cover.py <seed> 20000          # coverage, seeds 1-13 -> build/pooyan/cover<seed>.pkl
 python games/pooyan/ref/mame_avi_cmp.py [--keep DIR]   # the reference against WolfMAME 0.162, every frame
-python games/pooyan/tools/gen.py           # -> build/pooyan/code_main.s, translation.json (needs the 12 coverage pickles)
+python games/pooyan/tools/gen.py           # -> build/pooyan/code_main.s, translation.json (needs the 13 coverage pickles)
 python games/pooyan/tools/build.py         # -> run/pooyan/POOYAN.PRG (--sim: run/pooyan_sim, the Musashi build)
 python games/pooyan/tools/logic_test.py 6000 --seed 4  # the translation in lock-step with the reference
 python games/pooyan/tools/render_test.py 3000 --start 1000 --every 3   # the STE picture against the reference
@@ -61,7 +61,7 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
   there is no difference to note.
 * **Port schedule** (`PooyanPort.run_frame_port`): boots, attract mode, coin, start, play through the rounds and the
   bonus stage in the reference.
-* **Coverage** (`ref/cover.py` seeds 1-12, 20,000 frames each; see its docstring): 9,557 pcs; the cheated seeds 4-8
+* **Coverage** (`ref/cover.py` seeds 1-13, 20,000 frames each; see its docstring): 9,557 pcs; the cheated seeds 4-8
   reach rounds 3-6, the bonus stages and the round-2 climb (wolves going up).  Colours seen (the pens of every 8th
   picture): 17 of the PROM's 19, black never (the sky is (0, 0, 171), 76% of the pixels); two are nearly unused
   ((33, 71, 251) 0.002%, (104, 0, 251) 0.001%), so one fixed STE palette of 16 can be all but exact.

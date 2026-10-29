@@ -26,7 +26,7 @@ from machine import PooyanPort, load, ROMS
 BUILD = build_dir('pooyan')
 HOOKS = [PooyanPort.IDLE]
 TOKEN = PooyanPort.TOKEN
-SEEDS = [int(x) for x in os.environ.get('PY_SEEDS', '').split(',') if x] or range(1, 13)
+SEEDS = [int(x) for x in os.environ.get('PY_SEEDS', '').split(',') if x] or range(1, 14)
 ROM_END = 0x8000
 PORTS = {0xA000: 0, 0xA080: 1, 0xA0A0: 2, 0xA0C0: 3, 0xA0E0: 4}     # DSW1, IN0, IN1, IN2, DSW0 (without mirrors)
 IN_BASE = 0xB100

@@ -10,7 +10,8 @@ round too (rounds: Counter per [$8907]); sprites: Counter of (code, colour, flip
 Seeds: 1-3 attract, coin, start and random play to the game over and again; 4-8 infinite lives (MAME cheat $8908)
 with "1 wolf left" ($8901) every 400-1200 frames, so the play goes through the rounds, the bonus stages and the later
 loops; 9 a score of 50,000+ ($88A2-$88A3, BCD hundreds) before the game ends: the high-score entry; 10-11 two players; 12 the
-DIP switches' other bonus, 5 lives, the hardest difficulty, no demo sounds.
+DIP switches' other bonus, 5 lives, the hardest difficulty, no demo sounds; 13 no coin: the whole attract cycle
+(its second half, state 18 at $71B9, a demo that starts ~95 s after power-on, frame 5781).
 """
 import collections
 import pickle
@@ -109,6 +110,8 @@ def main():
     rounds = collections.defaultdict(collections.Counter)
     sprites = collections.Counter()
     state = {'two': seed in (10, 11)}
+    if seed == 13:
+        state['coin_at'] = frames          # (never: attract mode only)
     for frame in range(frames):
         m.system, m.p1, m.p2 = inputs(frame, rnd, state)
         cheats(seed, frame, m, state)
