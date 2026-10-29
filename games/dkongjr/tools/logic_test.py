@@ -149,6 +149,7 @@ def main():
     ap.add_argument("frames", nargs="?", type=int, default=100)
     ap.add_argument("--visits", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--nocoin", action="store_true", help="no coin: the whole attract sequence (the title in tile bank 1)")
     a = ap.parse_args()
     L = Lock()
     print("code instructions:", L.rep["instructions"], "unsupported:", len(L.rep["unsupported"]))
@@ -173,8 +174,8 @@ def main():
             if frame % 7 == 0:
                 joy = rnd.choice([0, 0, 1, 2, 4, 8, 16, 17, 18])
             in2 = 0
-            if 20 <= frame < 24: in2 |= 0x80
-            if 40 <= frame < 44: in2 |= 0x04
+            if 20 <= frame < 24 and not a.nocoin: in2 |= 0x80
+            if 40 <= frame < 44 and not a.nocoin: in2 |= 0x04
             L.set_inputs(joy, 0, in2, 0x80)
             # reference NMI
             cpu = L.ref.cpu

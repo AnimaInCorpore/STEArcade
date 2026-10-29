@@ -6,8 +6,9 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
 
 ## Steps
 
-1. **Read the MAME driver** (`F030Arcade/third_party/jsm68kdisassembler/third_party/mame`, see PORTING there; the
-   installed `mame` binary is newer than that source, so it is the truth for colours): memory map, interrupts,
+1. **Read the MAME driver** (`F030Arcade/third_party/jsm68kdisassembler/third_party/mame`, MAME 0.286, see PORTING
+   there): the authoritative MAME for every port (user, 2026-10-29, `AGENTS.md`), colours included: where a MAME
+   binary disagrees with this source, the source wins and the port's README notes it.  Memory map, interrupts,
    video RAM layout, sprite format, palette PROMs, helper chips.  Chips with their own program (Bubble Bobble's
    MC6801, Galaga's 51xx/54xx) are either run (translated, preferred when the ROM is in the set: "run the device,
    don't replay its answers") or simulated at the register interface.
@@ -126,8 +127,11 @@ prints 0 differing pixels for all four frames now.  Notes:
   `-seconds_to_run 250` (about 15000 frames with `-nothrottle`, enough for every check here).  The warning itself
   stays in the log; Galaga's came from blank MCU ROMs before its real ones were in (2026-10-21), Bubble Bobble's
   from the PAL dumps nobody has.
-* **The MAME source in `F030Arcade/third_party/mame` is older than the binary** (Galaga's blue channel differs:
-  the source says 0x47/0x97, MAME 0.289 produces 0x51/0xAE).  The installed `mame` is the truth.
+* **MAME binaries and the authoritative source can differ** (Galaga's blue channel: the 0.286 source says
+  0x47/0x97, MAME 0.289 produces 0x51/0xAE).  Since 2026-10-29 the source in
+  `F030Arcade/third_party/jsm68kdisassembler/third_party/mame` is the truth (`AGENTS.md`); a binary is still useful
+  for pictures and traces of the drivers whose source is the same in both versions.  Galaga's reference still uses
+  0.289's blue (not changed yet).
 * **Several frames in one run, write logs with the beam line** (`engine/mame_frames.lua` + `engine/mame_cmp.py`, used
   by Track & Field, Hyper Sports, Gyruss, 2026-10-12): dumps of any CPU's ranges, snapshots and pens at a list of
   frames, and a log of the writes to TAPS ranges.  Two MAME 0.289 Lua traps found on the way: a write tap installed

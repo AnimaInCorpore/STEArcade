@@ -425,6 +425,12 @@ vbl:
 	bhs.s	.no_start
 	or.b	#$04,d1
 .no_start:
+	ifd STAGE			; test: during the intro, start stage STAGE ($6227: 1 springboard,
+	cmp.l	#100-50,d0		; 2 vines, 3 chains, 4 hideout), so every stage can be drawn
+	bne.s	.no_stage
+	move.b	#STAGE,$6227(a6)
+.no_stage:
+	endc
 	endc
 	move.b	d1,$7f00(a6)
 	move.b	#$80,$7f80(a6)		; DSW0: upright, 3 lives, 10000 bonus, 1 coin 1 credit

@@ -2,7 +2,9 @@
 
     python cover.py SEED FRAMES   -> build/dkongjr/cover_SEED.pkl ((pcs, io events)), pens_SEED.pkl (Counter pen -> pixels)
 
-Random joystick, coins and starts (1 and 2 players).  Seeds >= 10 also visit every stage by setting $6227 (stage:
+Random joystick, coins and starts (1 and 2 players).  Seeds 4-9 insert no coin: the whole attract sequence ($600A
+steps 0-7: the demo, the title logo in tile bank 1 with its palette cycling at $07CB, ...), which a coin cuts short.
+Seeds >= 10 also visit every stage by setting $6227 (stage:
 1 springboard, 2 vines (the first), 3 chains, 4 hideout; the same RAM layout as Donkey Kong) and $6229 (level),
 refill the lives ($6228) now and then, and seeds >= 20 set a P1 score of 90000+ ($60B2, BCD) so the game over reaches
 the high-score name entry.  The pens are counted from the reference renderer every 20 frames.
@@ -48,6 +50,8 @@ for f in range(nframes):
     m.in1 = joy if rnd.random() < 0.5 else 0
     m.in2 = 0
     r = rnd.random()
+    if 4 <= seed < 10:
+        r = 0.5                     # no coin, no start
     if r < 0.01: m.in2 |= 0x80
     if r > 0.985: m.in2 |= 0x04
     if r > 0.995: m.in2 |= 0x08

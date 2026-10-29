@@ -15,7 +15,7 @@ from paths import EXTRACTED, build_dir, require_coverage
 BUILD = build_dir("dkongjr")
 NMI_TOKEN = 0x6001
 TABLE_ENTRIES = 0x6002
-SEEDS = (1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23)
+SEEDS = (1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 21, 22, 23)
 COVER = ["cover_%d.pkl" % s for s in SEEDS]
 
 
