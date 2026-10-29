@@ -20,6 +20,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / "tools")]
+sys.path.insert(0, str(HERE.parents[2] / "engine"))
+import mamewin                       # (MAME runs minimized)
 import numpy as np
 from machine import Machine1942, ROMDIR
 
@@ -32,7 +34,7 @@ LAG0 = 119                                       # AVI index = hook count + 119 
 
 def record(frames, work):
     env = dict(os.environ, FRAMES=" ".join(map(str, frames)), LAST=str(max(frames) + 130))
-    subprocess.run([MAME, "1942", "-rompath", ROMS, "-window", "-sound", "none", "-nothrottle", "-frameskip", "0",
+    mamewin.run([MAME, "1942", "-rompath", ROMS, "-window", "-sound", "none", "-nothrottle", "-frameskip", "0",
                     "-skip_gameinfo", "-seconds_to_run", "100", "-aviwrite", "m1942.avi",
                     "-autoboot_script", str(HERE / "mame_dump.lua")], cwd=work, env=env,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)

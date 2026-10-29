@@ -14,6 +14,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, "..", "tools"), os.path.join(HERE, "..", "..", "..", "engine")]
+import mamewin                       # (MAME runs minimized)
 import machine
 
 from paths import ROMS, ENGINE
@@ -21,7 +22,7 @@ frames = [int(a) for a in sys.argv[1:]] or [700, 1500, 2500]
 for f in frames:
     out = tempfile.mkdtemp()
     env = dict(os.environ, FRAME=str(f), OUT=out, START="0xc000", END="0xf9ff")
-    subprocess.run(["mame", "bublbobl", "-window", "-rompath", ROMS, "-sound", "none", "-nothrottle",
+    mamewin.run(["mame", "bublbobl", "-window", "-rompath", ROMS, "-sound", "none", "-nothrottle",
                     "-seconds_to_run", "250", "-skip_gameinfo", "-autoboot_script",
                     str(ENGINE / "mame_dump.lua"), "-snapshot_directory", out, "-snapname", "shot"],
                    env=env, cwd=out, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

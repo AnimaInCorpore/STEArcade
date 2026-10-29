@@ -10,6 +10,8 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'tools'))
+sys.path.insert(0, str(HERE.parents[2] / 'engine'))
+import mamewin                       # (MAME runs minimized)
 from machine import BlackTiger
 from paths import ROMS
 
@@ -22,7 +24,7 @@ def main():
     worst = 0
     for frame in frames:
         out = Path(tempfile.mkdtemp(prefix='mame_blktiger_'))
-        subprocess.run([executable, 'blktiger', '-rompath', str(ROMS), '-window', '-sound', 'none',
+        mamewin.run([executable, 'blktiger', '-rompath', str(ROMS), '-window', '-sound', 'none',
                         '-nothrottle', '-frameskip', '0', '-seconds_to_run', '250', '-skip_gameinfo',
                         '-autoboot_script', str(HERE / 'mame_dump.lua'), '-snapshot_directory', str(out),
                         '-snapname', 'shot'], cwd=out, env=dict(os.environ, OUT=str(out), FRAME=str(frame)),

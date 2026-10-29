@@ -8,6 +8,8 @@ import tempfile
 import numpy as np
 from PIL import Image
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'engine'))
+import mamewin                       # (MAME runs minimized)
 from machine import GunSmoke
 from paths import ROMS
 
@@ -21,7 +23,7 @@ def main():
     for frame in frames or ([900,1500,2500] if play else [100,700,1500,2500,4000,6000]):
         out=Path(tempfile.mkdtemp(prefix='mame_gunsmoke_'))
         with (out/'mame.log').open('w') as log:
-            subprocess.run([executable,'gunsmoke','-rompath',str(ROMS),'-window','-sound','none',
+            mamewin.run([executable,'gunsmoke','-rompath',str(ROMS),'-window','-sound','none',
                             '-nothrottle','-frameskip','0','-seconds_to_run','250','-skip_gameinfo',
                             '-autoboot_script',str(Path(__file__).with_name('mame_dump.lua')),
                             '-snapshot_directory',str(out),'-snapname','shot'],cwd=out,

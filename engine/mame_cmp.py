@@ -17,8 +17,14 @@ import numpy as np
 from PIL import Image
 
 from paths import ENGINE, ROMS
+import mamewin
 
 LUA = ENGINE / "mame_frames.lua"
+
+
+def run_minimized(args, timeout=None, **kw):
+    """subprocess.run for MAME, always minimized (engine/mamewin.py)."""
+    return mamewin.run(args, timeout=timeout, **kw)
 
 
 def run_mame(game, frames, dumps, taps=(), timeout=600, keep=None, rompath=None, snaps=(), pens_every=False):
@@ -30,9 +36,9 @@ def run_mame(game, frames, dumps, taps=(), timeout=600, keep=None, rompath=None,
     env = dict(os.environ, OUT=str(out), FRAMES=" ".join(map(str, frames)), DUMPS=" ".join(dumps), TAPS=" ".join(taps),
                SNAPS=" ".join(snaps), PENS_EVERY="1" if pens_every else "0")
     with (out / "mame.log").open("w") as log:
-        r = subprocess.run([exe, game, "-rompath", str(rompath or ROMS), "-window", "-sound", "none", "-nothrottle",
-                            "-frameskip", "0", "-seconds_to_run", "250", "-skip_gameinfo", "-autoboot_script", str(LUA),
-                            "-snapshot_directory", str(out)], cwd=out, env=env, stdout=log, stderr=log, timeout=timeout)
+        r = run_minimized([exe, game, "-rompath", str(rompath or ROMS), "-window", "-sound", "none", "-nothrottle",
+                           "-frameskip", "0", "-seconds_to_run", "250", "-skip_gameinfo", "-autoboot_script", str(LUA),
+                           "-snapshot_directory", str(out)], cwd=out, env=env, stdout=log, stderr=log, timeout=timeout)
     last = max(frames)
     if not (out / ("f%d.png" % last)).exists():
         raise RuntimeError("MAME capture failed (exit %d); see %s" % (r.returncode, out / "mame.log"))

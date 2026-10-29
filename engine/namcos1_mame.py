@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mamewin                       # (MAME runs minimized)
 from namcos1 import NamcoS1
 from paths import ROMS
 
@@ -30,7 +31,7 @@ def capture(game, frames, extra=()):
         raise RuntimeError("MAME not found; set MAME")
     out = Path(tempfile.mkdtemp(prefix="mame_%s_" % game))
     with (out / "mame.log").open("w") as log:
-        subprocess.run([exe, game, "-rompath", str(ROMS), "-window", "-sound", "none", "-nothrottle",
+        mamewin.run([exe, game, "-rompath", str(ROMS), "-window", "-sound", "none", "-nothrottle",
                         "-frameskip", "0", "-seconds_to_run", "250", "-skip_gameinfo", *extra,
                         "-autoboot_script", str(LUA), "-snapshot_directory", str(out), "-snapname", "shot"],
                        cwd=out, env=dict(os.environ, OUT=str(out), FRAMES=" ".join(map(str, frames))),

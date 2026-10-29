@@ -139,6 +139,14 @@ prints 0 differing pixels for all four frames now.  Notes:
   `vpos()`/`hpos()` in Lua (an error inside a tap callback is swallowed: the log just stays empty); the line is
   `(-screen:time_until_pos(0, 0) / screen.scan_period) % vtotal`.  Run MAME in a fresh directory per capture: it
   writes `nvram/` there and reads it back next time (high scores, NVRAM games boot differently).
+* **MAME never in the user's way** (user, 2026-10-29: "Always run mame minimized!"): start every MAME that opens a
+  window through `engine/mamewin.py` (`mamewin.run` / `mamewin.popen`, drop-ins for `subprocess.run` / `Popen`;
+  `mame_cmp.run_mame` uses it).  On Windows MAME then runs on a desktop of its own with `-video gdi`: a merely
+  minimized MAME still took the foreground and the keyboard (it shows its window with SW_SHOW, and once nobody has
+  typed for a while Windows lets any process take the foreground); Direct3D and bgfx crash on such a desktop.
+  Snapshots, `-aviwrite` and `-wavwrite` are unchanged (Moon Patrol and Gauntlet: still 0 differing pixels).  A run
+  with `-video none` opens no window and needs nothing.  Lua numbers printed under a German locale have a decimal
+  comma: parse them with `.replace(",", ".")`.
 * **Partial updates**: a driver whose RAM write handler calls `screen.update_partial(vpos)` (Gyruss's sprite RAM: the
   sub CPU writes sprites until line ~36) draws the lines up to the write's line with the old values.  A reference
   render of one end-of-frame memory dump then differs in a few pixels; render per band of lines from the previous

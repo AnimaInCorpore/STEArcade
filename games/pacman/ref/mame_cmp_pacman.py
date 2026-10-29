@@ -26,6 +26,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "tools"))
+sys.path.insert(0, str(HERE.parents[2] / "engine"))
+import mamewin                       # (MAME runs minimized)
 from machine import Pacman  # noqa: E402
 from paths import ROOT  # noqa: E402
 
@@ -38,7 +40,7 @@ def record(seconds):
     out = Path(tempfile.mkdtemp(prefix="mame_pacman_"))
     cmd = [MAME, "pacman", "-rompath", str(ROOT / "build" / "pacman" / "mame_roms"), "-window", "-sound", "none",
            "-nothrottle", "-frameskip", "0", "-skip_gameinfo", "-seconds_to_run", str(seconds), "-aviwrite", "pac.avi"]
-    subprocess.run(cmd, cwd=out, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    mamewin.run(cmd, cwd=out, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return out / "snap" / "pac.avi"
 
 

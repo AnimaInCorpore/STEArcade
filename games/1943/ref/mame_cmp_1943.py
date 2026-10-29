@@ -9,6 +9,8 @@ import numpy as np
 from PIL import Image
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / 'tools'))
+sys.path.insert(0, str(HERE.parents[2] / 'engine'))
+import mamewin                       # (MAME runs minimized)
 from prepare import verify
 from video import Video
 
@@ -32,7 +34,7 @@ def main():
     for frame in frames:
         out = outroot / str(frame)
         out.mkdir()
-        result = subprocess.run([executable, set_name, '-rompath', str(romroot), '-window',
+        result = mamewin.run([executable, set_name, '-rompath', str(romroot), '-window',
                                  '-sound', 'none', '-nothrottle', '-frameskip', '0',
                                  '-seconds_to_run', '250', '-skip_gameinfo',
                                  '-autoboot_delay', '0', '-autoboot_script', str(HERE / 'mame_dump.lua'),

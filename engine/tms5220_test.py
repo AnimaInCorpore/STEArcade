@@ -20,6 +20,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mamewin                       # (MAME runs minimized)
 from tms5220 import TMS5220C, AS
 
 CPU_AS = AS // 1789772                  # the 6502's cycle (14.318181 MHz / 8)
@@ -34,7 +35,7 @@ def run_mame(out, frames=3600):
     from mame_roms import rompath
     env = dict(os.environ, OUT=out, FRAMES=str(frames), INPUTS=INPUTS)
     with tempfile.TemporaryDirectory() as d:
-        subprocess.run(["mame", "gauntlet", "-rompath", str(rompath()), "-window", "-sound", "none", "-nothrottle",
+        mamewin.run(["mame", "gauntlet", "-rompath", str(rompath()), "-window", "-sound", "none", "-nothrottle",
                         "-skip_gameinfo", "-autoboot_script", os.path.join(HERE, "gauntlet_sound_log.lua")],
                        cwd=d, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

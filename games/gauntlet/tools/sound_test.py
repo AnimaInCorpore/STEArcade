@@ -33,6 +33,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve()
 sys.path[:0] = [str(HERE.parent), str(HERE.parents[3] / "engine")]
+import mamewin                       # (MAME runs minimized)
 import numpy as np
 import sound as S
 from paths import ROOT, build_dir, VASM, VLINK
@@ -318,7 +319,7 @@ def mame_capture(rate=48000):
     tmp = Path(tempfile.mkdtemp(dir=os.environ.get("TMPDIR")))
     (tmp / "cap.lua").write_text(MAME_LUA % dict(events=", ".join("{%d, %d}" % e for e in ev), start=start,
                                                   fps=MAME_HZ, tail=tail))
-    r = subprocess.run(["mame", "gauntlet", "-rompath", str(rompath()), "-window", "-nothrottle", "-skip_gameinfo",
+    r = mamewin.run(["mame", "gauntlet", "-rompath", str(rompath()), "-window", "-nothrottle", "-skip_gameinfo",
                         "-seconds_to_run", "250", "-samplerate", str(rate), "-wavwrite", str(tmp / "out.wav"),
                         "-autoboot_script", str(tmp / "cap.lua")], capture_output=True, text=True, cwd=tmp)
     t0 = [l for l in r.stdout.splitlines() if l.startswith("CAPTURE_START")]
@@ -326,7 +327,7 @@ def mame_capture(rate=48000):
         sys.exit("MAME failed:\n" + r.stdout + r.stderr)
     w = wave.open(str(tmp / "out.wav"))
     x = np.frombuffer(w.readframes(w.getnframes()), np.int16).reshape(-1, w.getnchannels()).mean(1)
-    x = x[int(round(float(t0[0].split()[1]) * rate)):]
+    x = x[int(round(float(t0[0].split()[1].replace(",", ".")) * rate)):]
     np.save(cache, x)
     return x, rate
 

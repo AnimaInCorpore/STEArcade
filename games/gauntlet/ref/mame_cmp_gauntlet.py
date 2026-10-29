@@ -24,6 +24,7 @@ import time
 import numpy as np
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "tools"), str(Path(__file__).resolve().parents[3] / "engine")]
+import mamewin                       # (MAME runs minimized)
 from video import Video, H
 from machine import Gauntlet
 from mame_roms import rompath
@@ -46,7 +47,7 @@ def run_mame(frames, keep):
                DUMPS=" ".join(DUMPS), TAPS=" ".join(TAPS), SNAPS="",
                PENS_EVERY="1")
     with (out / "mame.log").open("w") as log:
-        r = subprocess.run([exe, "gauntlet", "-rompath", str(rompath()), "-window", "-sound", "none", "-nothrottle",
+        r = mamewin.run([exe, "gauntlet", "-rompath", str(rompath()), "-window", "-sound", "none", "-nothrottle",
                             "-frameskip", "0", "-seconds_to_run", str(SECONDS), "-skip_gameinfo", "-autoboot_script",
                             str(C.LUA), "-snapshot_directory", str(out)], cwd=out, env=env, stdout=log, stderr=log,
                            timeout=1800)

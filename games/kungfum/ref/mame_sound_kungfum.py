@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / 'tools'), str(Path(__file__).resolve().parents[3] / 'engine')]
+import mamewin                       # (MAME runs minimized)
 import sound
 from paths import ROMS
 
@@ -30,7 +31,7 @@ def run_mame(frames, keep=None, play=False):
         return out
     env = dict(os.environ, OUT=str(out), FRAMES=str(frames), PLAY='1' if play else '0')
     with (out / 'mame.log').open('w') as log:
-        subprocess.run([shutil.which('mame'), 'kungfum', '-rompath', str(ROMS), '-window', '-sound', 'none',
+        mamewin.run([shutil.which('mame'), 'kungfum', '-rompath', str(ROMS), '-window', '-sound', 'none',
                         '-nothrottle', '-seconds_to_run', '250', '-skip_gameinfo', '-autoboot_script', str(LUA)],
                        cwd=out, env=env, stdout=log, stderr=log, timeout=3000)
     return out
