@@ -18,6 +18,9 @@
 
 KEY_ESC = $01
     ifnd SIM
+      ifnd FADE_EXACT
+FADE_SNAP = 1				; (src/natives.s: the palette fades left out)
+      endc
 PIC_TOP = 9				; the picture's first displayed line (256 lines: 9 .. 264)
 TA_DATA = 98
 TA_NOPS = 84
@@ -466,6 +469,7 @@ key_table:
     endc
 
 	include	"core.s"
+	include	"natives.s"
     ifnd SIM
 	include	"video.s"
 	include	"render.s"

@@ -61,6 +61,8 @@ def main():
     ap.add_argument("--start", type=int, default=0, help="frames the reference runs alone before the comparison")
     ap.add_argument("--steplock", type=int, default=-1, help="frame run instruction by instruction against the "
                     "interpreter (registers compared at every translated label)")
+    ap.add_argument("--snap", action="store_true", help="a FADE_SNAP build (src/natives.s): the palettes and the work "
+                    "RAM's palette copies and fade records ($42000-$42EAF) and the stack page ($43F00-) are are not compared")
     args = ap.parse_args()
     run = ROOT / "run" / "rtype_sim"
     s = Sim(str(run / "RTYPE.PRG"), run_dir=run)
@@ -143,6 +145,11 @@ def main():
             got = swap(bytes(mem.r_block(img + base, n)))
             ref = ref_region(m, base, n)
             diff = [o for o in range(n) if got[o] != ref[o]]
+            if args.snap:
+                if name in ("pal0", "pal1"):
+                    diff = []
+                elif name == "ram":
+                    diff = [o for o in diff if not (0x2000 <= o < 0x2EB0 or o >= 0x3F00)]
             if name == "ram" and m.irq_psws:
                 for a in m.irq_psws:
                     o = a - 0x40000

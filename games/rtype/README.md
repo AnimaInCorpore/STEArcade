@@ -41,6 +41,11 @@ DIP switches: MAME's defaults (3 lives, demo sounds on, coin mode 1).
 * Speed (Hatari, F030Arcade build, STE 4 MB): attract ~23 arcade frames a second (41% of the arcade's 55), play
   ~16 (29%), 5.5-6.5 pictures a second.  The game slows down evenly (frames are dropped when the logic falls behind,
   not skipped by the game itself).
+* Palette fades are left out (2026-10-29, `src/natives.s`, FADE_SNAP): the fade loop sets each colour to its target at
+  once; the fade's counter still runs, so the game sees each fade end at the same frame.  `logic_test.py --snap` checks
+  such a build: everything but the palettes, the work RAM's palette copies and fade records and the stack page stays
+  equal to the reference (seeds 1, 4, 8: 3000-4000 frames).  Logic 119k -> 110k cycles an arcade frame (seed 4);
+  Hatari play 15.0 -> 16.4 arcade frames/s, 4.6 -> 5.3 pictures/s.  `-D FADE_EXACT=1` builds the arcade's fades.
 * No sound: the main CPU's commands to the sound CPU (port $00) are kept in a ring (`src/core.s`), for a player.
 
 ## Method

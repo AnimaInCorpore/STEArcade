@@ -28,6 +28,8 @@ from machine import IDLE, VBL_VECTOR, RASTER_VECTOR
 from paths import build_dir
 
 NAME, PREFIX = "main", "R"
+# hand-written replacements (src/natives.s): linear address -> label
+NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b"}         # the palette fade's inner loop (FADE_SNAP)
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 
@@ -303,6 +305,7 @@ def program(regions, cover):
                         exec_cover={k for k in exec_ if code_limit(v30x.lin_of(*k))},
                         acc_cover=acc, targets=tg, targets_seen=seen, io_cover=io, ip_table_cs=0x0040,
                         exec_counts={v30x.lin_of(*k): n for k, n in exec_.items()}, hooks={idle_lin: "main_idle"},
+                        natives={} if os.environ.get("NO_NATIVES") else NATIVES,
                         hook_next={idle_lin: idle_lin}, port_in=port_in, port_out=port_out, code_limit=code_limit,
                         store_marks=None if os.environ.get("NO_MARKS") else store_marks(acc))
     return prog, vbl, raster, idle_lin
