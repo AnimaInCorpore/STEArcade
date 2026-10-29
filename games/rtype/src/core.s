@@ -200,9 +200,31 @@ main_mark_range:
 ; port $04: the sprite DMA (the sprite RAM to the buffer the picture shows)
 m72_sprite_dma:
 	st	m72_dma_done
+    ifd SPRITE_LIST
+	movem.l	d0/a0-a1,-(sp)		; the objects' records (src/natives.s) from slot $C0 up to the list's pointer
+	move.w	v30_image+$40000+$2EFC,d0	; (DS0 $4000: [2EFCh])
+	cmp.w	m72_slots_hw,d0
+	bcc.s	.p
+	move.w	m72_slots_hw,d0		; (a slow frame: the last list's tail)
+.p:	move.w	d0,m72_objs_end
+	sub.w	#$C0,d0
+	bls.s	.none
+	lsr.w	#3,d0
+	subq.w	#1,d0
+	lea	m72_slots+$C0,a0
+	lea	m72_objs+$C0,a1
+.c:	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	dbf	d0,.c
+.none:	movem.l	(sp)+,d0/a0-a1
+	rts
+    endc
 	movem.l	d0-d7/a0-a4,-(sp)
+    ifd SPRITE_LIST
+    else
 	lea	v30_image+$C0000,a0
 	lea	m72_spritebuf,a1
+    endc
 	moveq	#$400/32-1,d0
 .l:	movem.l	(a0)+,d1-d7/a2
 	movem.l	d1-d7/a2,(a1)
@@ -248,5 +270,11 @@ badpc:		ds.l	1
 badctx:		ds.l	1
 cnt_other_out:	ds.l	1
 m72_spritebuf:	ds.b	$400		; (the sprite list the picture shows)
+    ifd SPRITE_LIST
+m72_slots:	ds.b	$400		; (src/natives.s: per sprite RAM slot an object's record)
+m72_objs:	ds.b	$400		; (their copy at the DMA, slots $C0 .. m72_objs_end: what the picture shows)
+m72_objs_end:	ds.w	1
+m72_slots_hw:	ds.w	1		; (the end of the list at the last fill)
+    endc
 main_ip_table:	ds.l	$8000		; (main_dispatch_ip: the labels of CS $0040's entry points by IP)
 main_ip_mid:	ds.l	$8000

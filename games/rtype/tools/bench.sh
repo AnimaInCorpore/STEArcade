@@ -3,6 +3,7 @@
 #
 #   games/rtype/tools/bench.sh [hatari items ...]          e.g. shot@20 tap:06@25 tap:02@27 down:57@30 shot@60 up:57@61
 #   EXTRA="-D PIC_EVERY=3" WAIT=200 games/rtype/tools/bench.sh ...
+#   MEMSIZE=14 games/rtype/tools/bench.sh ...   (Hatari ST RAM in MB, default 4: test builds larger than a 4 MB STE)
 #
 # Hatari (the F030Arcade build; HATARI / TOS override) is started here and stopped by its PID, never by tools/hatari.sh
 # (that one stops every running "hatari").  Items as in tools/hatari.sh: shot@s, tap:K@s (scancodes in hex: 06 coin 1,
@@ -18,7 +19,7 @@ cp run/rtype/RTYPE.PRG $BENCH/
 rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
-(cd $BENCH && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+(cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-4} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
 HP=$!
 START=$SECONDS

@@ -46,6 +46,14 @@ DIP switches: MAME's defaults (3 lives, demo sounds on, coin mode 1).
   such a build: everything but the palettes, the work RAM's palette copies and fade records and the stack page stays
   equal to the reference (seeds 1, 4, 8: 3000-4000 frames).  Logic 119k -> 110k cycles an arcade frame (seed 4);
   Hatari play 15.0 -> 16.4 arcade frames/s, 4.6 -> 5.3 pictures/s.  `-D FADE_EXACT=1` builds the arcade's fades.
+* The sprite emitters are native (2026-10-29, `src/natives.s`: 0040:1BCC / 1C1B / 1CA6 and the fill 0040:0653): an
+  object's sprites come from a definition in ROM (DS1:[BW]) plus its colour and position.  Without SPRITE_LIST they
+  write the sprite RAM as the arcade (lock-step identical); with SPRITE_LIST (for the stage renderers, not used by the
+  program yet) they write one record per object (definition, colour, x, y) at its first slot, and the DMA copies the
+  records (`logic_test.py --list` expands them through the ROM and compares them with the reference's sprite list every
+  frame).  Logic with FADE_SNAP + SPRITE_LIST: seed 4 play 119k -> 95k cycles an arcade frame, seed 1 attract 93k -> 82k.
+  `tools/stage_model.py`: the picture the stage renderers will draw (no stars - BG star tiles and the star sprites
+  $AF2-$AF7 -, BG locked to FG within 2 pixels, sprites over the tiles, fixed colours).
 * No sound: the main CPU's commands to the sound CPU (port $00) are kept in a ring (`src/core.s`), for a player.
 
 ## Method

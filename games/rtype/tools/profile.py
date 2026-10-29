@@ -24,6 +24,8 @@ def main():
     ap.add_argument("--start", type=int, default=600)
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--top", type=int, default=40)
+    ap.add_argument("--snap", action="store_true", help="the build has FADE_SNAP (logic_test --snap)")
+    ap.add_argument("--list", action="store_true", help="the build has SPRITE_LIST (logic_test --list)")
     args = ap.parse_args()
     prof = collections.Counter()
     counts = collections.Counter()
@@ -49,7 +51,8 @@ def main():
             elif j >= 0:
                 prof["rt:" + names[j][1]] += n
     logic_test.PROFILE = dict(start=args.start, frames=args.frames, stepper=stepper)
-    sys.argv = [sys.argv[0], "%d" % (args.start + args.frames), "--seed", str(args.seed)]
+    sys.argv = [sys.argv[0], "%d" % (args.start + args.frames), "--seed", str(args.seed)] + \
+        (["--snap"] if args.snap else []) + (["--list"] if args.list else [])
     logic_test.main()
     total = sum(prof.values())
     print("%d cycles in %d frames: %.0f a frame" % (total, args.frames, total / args.frames))

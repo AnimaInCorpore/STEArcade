@@ -53,6 +53,47 @@ def ref_region(m, base, n):
     return bytes(m.videoram[0 if base == 0xD0000 else 1])
 
 
+_rom = []
+_calls = [0]
+
+
+def list_check(objs, end, ref):
+    """the object records (big-endian: definition, entries << 8 | colour, x, y at each object's first slot) expanded
+    through their definitions (ROM $10000 + BW) against the sprite buffer's slots from $C0 (little-endian words)"""
+    if not _rom:
+        from m72board import load_regions
+        _rom.append(load_regions("rtype")["main"])
+    rom = _rom[0]
+    _calls[0] += 1
+    if _calls[0] <= 2:                  # (the start: the snapshot's list was built before any record)
+        return []
+    import struct
+    want = bytearray(0x400)
+    covered = set()
+    for slot in range(0xC0, min(end, 0x3C8), 8):
+        bw, n, col, x, y = struct.unpack(">HBBhh", objs[slot:slot + 8])
+        if not bw:
+            continue
+        s = slot
+        for e in range(n):
+            a = 0x10000 + bw + 6 * e
+            dx, dy = struct.unpack("<bb", rom[a:a + 2])
+            code, attr = struct.unpack("<HH", rom[a + 2:a + 6])
+            attr = (attr & 0xFF00) | col
+            want[s:s + 8] = struct.pack("<HHHH", (y + dy) & 0xFFFF, code, attr, (x + dx) & 0xFFFF)
+            covered.add(s)
+            s += 16 if attr & 0x4000 else 8
+    bad = []
+    for slot in range(0xC0, 0x3C0, 8):
+        r = ref[slot:slot + 8]
+        if slot in covered:
+            if want[slot:slot + 8] != r:
+                bad.append("object slot %03X: %s, reference %s" % (slot, want[slot:slot + 8].hex(), r.hex()))
+        elif r[4:8] != bytes(4) and slot not in {c + 8 for c in covered}:
+            bad.append("slot %03X: reference %s, no object" % (slot, r.hex()))
+    return bad[:4]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=600)
@@ -63,6 +104,9 @@ def main():
                     "interpreter (registers compared at every translated label)")
     ap.add_argument("--snap", action="store_true", help="a FADE_SNAP build (src/natives.s): the palettes and the work "
                     "RAM's palette copies and fade records ($42000-$42EAF) and the stack page ($43F00-) are are not compared")
+    ap.add_argument("--list", action="store_true", help="a SPRITE_LIST build (src/natives.s): the sprite RAM is not "
+                    "compared; the object records the picture gets (m72_objs) expanded through their ROM definitions "
+                    "must equal the reference's sprite buffer")
     args = ap.parse_args()
     run = ROOT / "run" / "rtype_sim"
     s = Sim(str(run / "RTYPE.PRG"), run_dir=run)
@@ -145,6 +189,8 @@ def main():
             got = swap(bytes(mem.r_block(img + base, n)))
             ref = ref_region(m, base, n)
             diff = [o for o in range(n) if got[o] != ref[o]]
+            if args.list and name == "sprites":
+                diff = []
             if args.snap:
                 if name in ("pal0", "pal1"):
                     diff = []
@@ -159,9 +205,13 @@ def main():
             if diff:
                 bad.append("%s: %d bytes, first %s" % (name, len(diff), ["%05X %02X/%02X" % (base + o, got[o], ref[o])
                                                                        for o in diff[:6]]))
-        sb = swap(bytes(mem.r_block(sym["m72_spritebuf"], 0x400)))
-        if sb != bytes(m.spritebuf):
-            bad.append("sprite buffer differs")
+        if args.list:
+            bad += list_check(bytes(mem.r_block(sym["m72_objs"], 0x400)), mem.r16(sym["m72_objs_end"]),
+                              bytes(m.spritebuf))
+        else:
+            sb = swap(bytes(mem.r_block(sym["m72_spritebuf"], 0x400)))
+            if sb != bytes(m.spritebuf):
+                bad.append("sprite buffer differs")
         regs = [mem.r32(ctx + 16 + 4 * k) for k in range(7)]
         want = [c.r[i] for r68, i in DREG]
         segs = [mem.r16(ctx + 2 * k) for k in range(4)]
