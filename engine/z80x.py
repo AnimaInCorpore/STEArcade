@@ -1993,12 +1993,35 @@ class Emitter:
         cc, tgt = ops[0][1], ops[1][1]
         self.branch(cc, self.label_of(tgt))
 
+    def pv_block_before(self, prev, pc):
+        """the instruction whose P/V a `jp pe/po` at pc reads: prev, or past `inc` / `dec` of HL, DE, IX, IY (no
+        flags, BC untouched) the ldi / ldd / cpi / cpd before them (Mr. Do!'s `ldi; inc hl; jp pe` at $10C6), when no
+        jump, join or other entry lands between."""
+        if prev is None or self.code[prev].mn in ("ldi", "ldd", "cpi", "cpd"):
+            return prev
+        if getattr(self, "_static_targets", None) is None:
+            self._static_targets = {i.target for i in self.code.values() if i.target is not None}
+            for i in self.code.values():
+                for op in i.ops:
+                    if op[0] in ("addr", "imm"):
+                        self._static_targets.add(op[1])
+        entered = self._static_targets | getattr(self, "joins", set())
+        hops = [pc]
+        while prev is not None and self.code[prev].mn in ("inc", "dec") and \
+                self.code[prev].ops in ([("r16", "hl")], [("r16", "de")], [("r16", "ix")], [("r16", "iy")]):
+            hops.append(prev)
+            prev = self.ends.get(prev)
+        if prev is None or self.code[prev].mn not in ("ldi", "ldd", "cpi", "cpd") or entered & set(hops):
+            return self.ends.get(pc)
+        return prev
+
     def branch(self, cc, label, inv=False):
         """branch to label if the Z80 condition cc holds (or does not, inv).  P/V is not
-        tracked; `jp pe/po` right after ldi/ldd (P/V = BC != 0) is the one form supported."""
+        tracked; `jp pe/po` after ldi / ldd (P/V = BC != 0; pv_block_before) is the one form supported."""
         if cc in ("pe", "po"):
             prev = self.ends.get(self.cur.pc)
             taken = (cc == "pe") != inv
+            prev = self.pv_block_before(prev, self.cur.pc)
             if prev is not None and self.code[prev].mn in ("ldi", "ldd", "cpi", "cpd"):
                 self.e("tst.w d1")
                 self.e("b%s %s" % ("ne" if taken else "eq", label))

@@ -92,6 +92,9 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
   Fixed the same day: `inc` / `dec (iy+d)` with H live, where IY is kept in the block (no `iy_reg`: the `dk`,
   `signed`, `long` layouts, `FAST_LONG`), took the H test's `move.b ea,d5` over the address in d5 and changed the
   wrong byte; H now comes from the result there.  `xbench.py` had reported it; no port's code contained the case.
+  Also 2026-10-29 (Mr. Do!, `$10C6`): `ldi; inc hl; jp pe` read a stale P/V (only a `jp pe/po` right after the
+  block instruction tested BC); `pv_block_before` now looks back past `inc`/`dec` of HL, DE, IX, IY when no entry
+  lands between.  No other port's generated code had the shape.
 * **MAME's debugger for exact traces of a small CPU** (Gyruss's i8039, `games/gyruss/tools/i8039.py --mame`): a
   breakpoint action's `printf` reads the registers of the debugger's current CPU, not of the one that hit the
   breakpoint (stop once on that CPU first); a command reaching a CPU through a latch with a delayed write needs its

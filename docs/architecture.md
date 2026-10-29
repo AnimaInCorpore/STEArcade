@@ -199,7 +199,8 @@ unchanged.  Check it on a 68030: `STE_XCPU=68030 python engine/xbench.py` (Musas
   and push/pop pairs, compiled through `compile_code` like a program, against `engine/z80.py` on Musashi, in the memory
   layouts of the ports (`dk`, `signed`, `long` and the `+` variants with the fast register maps).  Registers, memory
   (but the dead stack below SP), the next pc and the live flags must match.  Known by design: S after `bit` without
-  `Config.bit_s`, H after `ccf`, P/V only for `jp pe/po` right after `ldi`/`cpi`.  `python engine/xbench.py --seq 1000`
+  `Config.bit_s`, H after `ccf`, P/V only for `jp pe/po` after `ldi`/`cpi` (right after, or past
+  `inc`/`dec` of HL, DE, IX, IY with no entry between: `pv_block_before`, 2026-10-29).  `python engine/xbench.py --seq 1000`
   takes ~5 minutes for all six layouts (34k single cases, 6k sequences).
 * `engine/xprof.py <game>`: a `--sim` build stepped instruction by instruction, each 68000 instruction charged to the
   Z80 instruction it was translated from: cycles per *game frame* (one round of the arcade's interrupts, so a faster
