@@ -1,6 +1,8 @@
 """Build MPATROL.PRG for a 4 MB Atari STE (--sim: the Musashi build for the tests).
 
-    python tools/build.py [--sim] [--assets] [--frames N] [-D NAME=VALUE ...]
+    python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
+
+--debug: COUNTERS.BIN / RATE.BIN at the end (tools/bench.sh); -D NOSOUND=1: without the sound board.
 """
 from pathlib import Path
 import argparse
@@ -16,6 +18,8 @@ from toolchain import assemble_link
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", action="store_true")
+    ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--tag", help="another run/<tag> folder (default mpatrol / mpatrol_sim)")
     ap.add_argument("--assets", action="store_true", help="make the graphics and palettes again")
     ap.add_argument("--frames", type=int, default=0, help="quit after this many VBLs (test builds)")
     ap.add_argument("-D", dest="defines", action="append", default=[])
@@ -30,12 +34,18 @@ def main():
     text, report, _ = gen.generate()
     (build / "code_mpatrol.s").write_text(text)
     (build / "translation.json").write_text(json.dumps(report, indent=1) + "\n")
+    import sndgen
+    (build / "snd_rom.bin").write_bytes((EXTRACTED / "mpatrol" / "mp-s1.1a").read_bytes())
+    stext, sem, scode = sndgen.generate()
+    (build / "snd_code.s").write_text(stext)
+    if args.assets or not (build / "snd_voices.s").exists():
+        sndgen.sound.build_voices(build)
     print("translation:", {k: v for k, v in report.items() if k not in ("unsupported", "tables", "io")},
           len(report["unsupported"]), "unsupported")
-    tag = "mpatrol_sim" if args.sim else "mpatrol"
+    tag = args.tag or ("mpatrol_sim" if args.sim else "mpatrol")
     out = ROOT / "run" / tag / "MPATROL.PRG"
     out.parent.mkdir(parents=True, exist_ok=True)
-    defs = list(args.defines) + (["SIM=1"] if args.sim else [])
+    defs = list(args.defines) + (["SIM=1"] if args.sim else []) + (["DEBUG=1"] if args.debug else [])
     if args.frames:
         defs.append("FRAMES=%d" % args.frames)
     assemble_link("mpatrol", "mpatrol.s", tag, str(out), defs)

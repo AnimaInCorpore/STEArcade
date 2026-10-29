@@ -1,5 +1,7 @@
 ; Moon Patrol (Irem M52, 1982) for the Atari STE: the main Z80 program translated (tools/gen.py ->
-; build/mpatrol/code_mpatrol.s), the picture drawn by render.s (so far the score panel; the playfield is black).
+; build/mpatrol/code_mpatrol.s), the picture drawn by render.s, the sound board's translated M6803 driver feeding the
+; YM2149 and the DMA sound (sound.s; NOSOUND: without).  DEBUG: COUNTERS.BIN / RATE.BIN at the end (tools/bench.sh);
+; AUTOPLAY: coin, start and scripted play (bench builds).
 ; SIM: the simulator build for the tests (tools/logic_test.py): no hardware, the harness drives the frames.
 
 	ifnd MAX_PENDING
@@ -85,6 +87,9 @@ start:
 	endc
 	bsr	init_hardware
 	bsr	init_render
+	ifnd NOSOUND
+	bsr	snd_init
+	endc
 	move.w	#$ACE1,rnd_state
 	bsr	put_inputs
 
@@ -182,6 +187,14 @@ init_hardware:
 restore_hardware:
 	ifnd SIM
 	move	#$2700,sr
+	clr.b	$ffff8901.w		; (the DMA sound off)
+	moveq	#8,d0			; the YM2149 silent
+.silence:
+	move.b	d0,$ffff8800.w
+	clr.b	$ffff8802.w
+	addq.b	#1,d0
+	cmp.b	#11,d0
+	blo.s	.silence
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
 	move.b	old_res,$ffff8260.w
@@ -214,6 +227,9 @@ restore_hardware:
 	rts
 
 quit:
+	ifd DEBUG
+	bsr	dbg_counters
+	endc
 	bsr	restore_hardware
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -237,6 +253,21 @@ vbl:
 	endc
 	movem.l	d0-d1/a0,-(sp)
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	subq.w	#1,dbg_tl_n		; every 100 VBLs: the arcade frames and pictures so far (RATE.BIN, bench.sh)
+	bgt.s	.tl
+	move.w	#100,dbg_tl_n
+	move.l	dbg_tl_p,a0
+	cmp.w	#0,a0
+	bne.s	.tl1
+	lea	dbg_tl,a0
+.tl1:	cmp.l	#dbg_tl_end,a0
+	bhs.s	.tl
+	move.w	isr_count,(a0)+
+	move.w	pic_count,(a0)+
+	move.l	a0,dbg_tl_p
+.tl:
+	endc
 	tst.b	quit_flag
 	bne	quit
 	bsr	vbl_video
@@ -246,6 +277,40 @@ vbl:
 	jp_merge	in_sys,io_in,0
 	jp_merge	in_p1,io_in+1,1
 	jp_merge	in_p2,io_in+2,2
+	ifd AUTOPLAY				; (bench builds: a coin, start 1 and scripted driving, period 4000 frames)
+	moveq	#0,d0
+	move.w	isr_count,d0
+	divu	#4000,d0
+	swap	d0
+	cmp.w	#700,d0
+	blo.s	.ap1
+	cmp.w	#710,d0
+	bhs.s	.ap1
+	bclr	#3,io_in			; coin 1
+.ap1:	cmp.w	#790,d0
+	blo.s	.ap2
+	cmp.w	#800,d0
+	bhs.s	.ap2
+	bclr	#0,io_in			; start 1
+.ap2:	cmp.w	#900,d0
+	blo.s	.ap3
+	move.b	#$FE,d1				; right (faster) ...
+	btst	#7,d0
+	beq.s	.ap4
+	move.b	#$FF,d1				; (... or not, 128 frames each)
+.ap4:
+	and.w	#15,d0
+	cmp.w	#3,d0
+	bhs.s	.ap5
+	and.b	#$7F,d1				; fire 3 of 16 frames
+.ap5:	move.w	isr_count,d0
+	and.w	#63,d0
+	cmp.w	#4,d0
+	bhs.s	.ap6
+	and.b	#$DF,d1				; jump 4 of 64 frames
+.ap6:	move.b	d1,io_in+1
+.ap3:
+	endc
 	endc
 	addq.b	#1,vbl_pending
 	add.w	#ARCADE_FRAC,vbl_frac
@@ -371,6 +436,9 @@ next_frame:
 .go:	subq.b	#1,vbl_pending
 	st	frame_dirty
 	addq.w	#1,isr_count
+	ifnd NOSOUND
+	bsr	snd_frame		; (the sound board: the commands of the frame before, its ticks; sound.s)
+	endc
 	bra	put_inputs
 
 ; ------------------------------------------------------------------------------
@@ -577,6 +645,57 @@ key_table:
 	dc.b	0,0,0,0
 	even
 
+	ifd DEBUG
+; COUNTERS.BIN (words): VBLs, pictures, arcade frames, the frames whose top border the VBL armed, the late border
+; events (engine/rt/borders.s); RATE.BIN: (arcade frames, pictures) every 100 VBLs
+dbg_counters:
+	lea	dbg_buf,a0
+	move.w	frame_counter+2,(a0)+
+	move.w	pic_count,(a0)+
+	move.w	isr_count,(a0)+
+	move.w	bd_fallbacks,(a0)+
+	move.w	bd_late_top,(a0)+
+	move.w	bd_late_on,(a0)+
+	move.w	bd_late_low,(a0)+
+	move.w	bd_late_off,(a0)+
+	move.l	bd_pieced,(a0)+
+	lea	dbg_name3,a1
+	lea	dbg_tl,a2
+	move.l	dbg_tl_p,d0
+	sub.l	a2,d0
+	bsr	dbg_write
+	lea	dbg_name2,a1
+	lea	dbg_buf,a2
+	moveq	#20,d0
+	bsr	dbg_write
+	rts
+dbg_write:				; a1 = the name, a2 = the data, d0.l = its length
+	movem.l	d0/a2,-(sp)
+	clr	-(sp)
+	move.l	a1,-(sp)
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	movem.l	(sp)+,d0/a2
+	move.l	a2,-(sp)
+	move.l	d0,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+dbg_name2:
+	dc.b	"COUNTERS.BIN",0
+dbg_name3:
+	dc.b	"RATE.BIN",0
+	even
+	endc
+
 ; ------------------------------------------------------------------------------
 ; Crash dump (CRASH.TXT: vector, registers, the stack top)
 ; ------------------------------------------------------------------------------
@@ -700,6 +819,9 @@ z80_unsupported:
 	bra	crash_common
 
 	include	"render.s"
+	ifnd NOSOUND
+	include	"sound.s"
+	endc
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch table in the data section)
@@ -773,6 +895,13 @@ in_p2:		ds.b	1
 	even
 rnd_state:	ds.w	1
 isr_count:	ds.w	1
+	ifd DEBUG
+dbg_tl_n:	ds.w	1
+dbg_tl_p:	ds.l	1
+dbg_tl:		ds.l	400		; (40000 VBLs)
+dbg_tl_end:
+dbg_buf:	ds.l	16
+	endc
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16

@@ -11,6 +11,8 @@ for s in $(seq 1 9); do python games/mpatrol/ref/cover.py $s 20000; done   # cov
 python games/mpatrol/tools/build.py [--sim]          # -> run/mpatrol/MPATROL.PRG (--sim: run/mpatrol_sim, the tests)
 python games/mpatrol/tools/shots.py 250 1000        # Hatari screenshots at those VBLs (no window: engine/mamewin.py)
 python games/mpatrol/tools/logic_test.py 20000 --seed 1   # the translation in lock-step with MoonPatrolPort
+python games/mpatrol/tools/sound_test.py 20000 --seed 1   # the STE's sound player against its model (--random: all commands)
+games/mpatrol/tools/bench.sh [VBLs]                 # Hatari speed (own Hatari, its PID); SOUND=1 AVI=1: the audio as WAV
 ```
 
 The authoritative MAME for this port is the 0.286 source in `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`
@@ -44,8 +46,7 @@ that folder.
   backgrounds 12).  The reference shows up to 23 colours in one frame (median 15) and 28 overall in 9,000 frames of
   attract and random play; the score panel (tile rows 0-6: picture lines 0-49) uses 8, the playfield below it 26.
 * **Sound**: Irem's M52 "Sound C" board: the M6803 driver (4 KB, `mp-s1.1a`), two AY-3-8910s and one MSM5205, on a
-  smaller map than Kung-Fu Master's M62 board, whose translated driver (`games/kungfum/tools/sound.py`,
-  `src/sound.s`) is the model to start from.
+  smaller map than Kung-Fu Master's M62 board (see "Sound" below).
 
 ## State
 
@@ -110,8 +111,8 @@ protection byte at $8800 (computed when port $40 is written).  The stores to the
 command; `ld ($D001),a`, the flip latch) get a write hook (`mp_sound` / `mp_flip`) that takes A and puts the input
 byte back.  The ports (`out ($C0),a`, `out (c),a`, `outi`) go to `mp_out_*` routines that store the byte into
 `io_regs` by port >> 5 and keep the flags, but `outi`, whose S, Z, N and C are MAME's (B - 1; the carry of (hl) + l).
-`ld a,r` (13 sites) reads `z80_rnd`.  `src/mpatrol.s` is the simulator's runtime so far: the hooks (`z80_hook`, the
-conditions of `MoonPatrolPort.HOOKS`, the stop mode's wait inside the handler), no picture, no sound, no STE hardware.
+`ld a,r` (13 sites) reads `z80_rnd`.  `src/mpatrol.s` holds the hooks (`z80_hook`, the conditions of
+`MoonPatrolPort.HOOKS`, the stop mode's wait inside the handler) and the STE runtime (below).
 
 `tools/logic_test.py` runs the translation (Musashi) in lock-step with `MoonPatrolPort` through the coverage seeds'
 inputs, cheats and DIP switches: the text RAM, the RAM, the sprite RAM, the six video registers, the flip latch and
@@ -155,12 +156,59 @@ clipping applies); the borders are open (engine/rt/borders.s, PIC_TOP 10, PIC_LI
   colours.  Hatari (`tools/shots.py`): the attract mode as the arcade's.
 * **Speed (not done).**  369k 68000 cycles a picture in the attract mode (Musashi, CPU and Blitter): the text's
   pieces 85k, the hills' passes 53k, the Blitter's long passes (clear, mountains, fills) ~50k.  In Hatari the game
-  runs at about half the arcade's speed.  Next: redraw only the lines whose content changed (each buffer's damage:
+  runs at about two thirds of the arcade's speed (`tools/bench.sh`, AUTOPLAY: 35 arcade frames, 12 pictures a
+  second).  Next: redraw only the lines whose content changed (each buffer's damage:
   the sky only where text or sprites were, the mountains when their x changed), the ground's full lines as one pass
   for all of them, generated sprite code (engine/sprite_programs.py) for the coverage's shapes.
+
+## Sound (`tools/sound.py`, `tools/sndgen.py`, `src/sound.s`, 2026-10-29)
+
+Kung-Fu Master's method (its `tools/sound.py`, `sndgen.py`, `src/sound.s`) on this board.
+
+* **The board** (MAME 0.286 `irem/irem.cpp`, `m52_soundc_audio_device`, `m52_small_sound_map`): the M6803 at
+  3.579545 MHz (E 894,887 Hz) with its RAM $80-$FF; the external map has `global_mask(0x7fff)`: $0000-$0FFF writes
+  the MSM5205's nibble (offset bit 0; bit 1 would be a second MSM5205, which this board has not), $1000-$1FFF the IRQ
+  acknowledge (only while the latch has bit 7), the 4 KB ROM at $7000 (the program runs at the mirror $F000, where
+  the vectors are).  Port 1 / port 2 drive the two AY-3-8910s (3.579545 / 4 MHz) as on the M62 board; AY 45M's
+  port A reads the command latch, its port B sets the MSM5205's prescaler (the driver writes $13: S96, 4-bit, 4 kHz)
+  and reset; AY 45L's port A (the M62 boards' analog drums) drives nothing here.  The IRQ: a command with bit 7 0
+  (the game writes each command, then the command | $80: `05D4`); the NMI: the MSM5205's VCK, 4 kHz.  MAME's
+  discrete "filtermix" (the AYs' tied outputs, filters) is not modelled.  `sound.Board` is the reference: Kung-Fu
+  Master's 6803 model (MAME's cycle table, the IRQ / NMI timing fitted to MAME's traces there) on this map and
+  frame (54,144 main CPU cycles at 3.072 MHz).  It is checked against MAME's source, not against a MAME run (no M52
+  MAME binary on this Mac).
+* **The driver** (`mp-s1.1a`, the M62 drivers' family): the reset $FB00, the main loop $FB1B (the tick's counters
+  when $C0 > 0, the command $BC: 0 stop all, 1-3 the ADPCM voices, $10-$17 effects into slots 1-3, $18-$1F tunes
+  into slot 0 after a reset; the four slots' sequencers; software volume decay; port B = $D8 | $BE), the IRQ $FC8B
+  ($BC = latch & $1F), the NMI $FBD9 (the voice's nibble, $BD, a tick every 16th NMI: 250 a second).  The voices
+  (table $F400): 1 $F000 for $400 bytes, 2 $F004 for $E0 bytes and then voice 3 (the loop chains it: $BC = 3),
+  3 $F004 for $3FC bytes: the same 1 KB of ADPCM in the ROM's first quarter.  The game sends 0, 1-3 and $10-$1F
+  (the coverage seeds; the voices from the Beginner course's later points on).
+* **On the STE** (`src/sound.s`, from `next_frame` once an arcade frame before the IRQ; `-D NOSOUND=1` builds without):
+  the driver translated by `tools/sndgen.py` (engine/m6801x.py; 531 instructions, the NMI and IRQ handlers left
+  out), one iteration of the main loop per command ($BC = command & $1F) and per tick (141/32 an arcade frame:
+  250 / 56.7376), the busy waits and the loop's port B write skipped (`sound.SKIP`); the two AYs' register files go
+  to the YM2149 each frame (`snd_ym`, Kung-Fu Master's: the three loudest audible channels, kept on their YM channel,
+  periods x 2,000,000 / 894,886).  The voices: decoded offline on the exact board (`sound.voice_signal`: the MSM5205 of
+  MAME's msm5205.cpp, from the start until 20 ms after its reset; voice 2 with voice 3 behind it), resampled to the
+  DMA sound's 6258 Hz as signed bytes (`build/mpatrol/snd_voices.bin`, 8 KB), copied into a 2 KB ring the DMA plays
+  in a loop, 700 bytes ahead of its counter; 0 and $18-$1F end the voice.
+* **Verified.**  `tools/sound_test.py` (snd_frame on Musashi against `sound.STEBoard`, the driver on the 6803 model in
+  the STE's schedule): the driver's RAM, both AYs' registers, the YM's registers and channel choice and the DMA ring
+  equal in every frame: 20,000 frames of each coverage seed's game commands (seeds 1-9: 579-836 commands, 12-17k YM
+  writes each) and 20,000 frames of random commands (all 20 commands).  The STE schedule against the exact board
+  (commands at their frame, NMIs at 4 kHz): the AY registers equal at 99.7 % of 4,000 frame ends of seed 3 (the
+  others a tick apart).  Hatari (`bench.sh` with SOUND=1 AVI=1, the AVI's audio to WAV): the attract mode silent (as
+  the arcade's), the music and effects from the coin on, its strongest tones at 82, 148 and 166 Hz as the model's YM
+  periods of tune $18 give; a VOICE_TEST build (`-D VOICE_TEST=1`: voices 1-3 in turn every 128 frames) plays the
+  three voices on the DMA sound (0.5-0.75 s each).
+* **Cost.**  snd_frame 10-11.6k 68000 cycles an arcade frame on average (Musashi; median 6.6-8.1k, max 39k: a
+  command's reset and a tick), snd_mix 1.5k.  Hatari (bench.sh, 6000 VBLs of AUTOPLAY): 36.4 arcade frames / 12.8
+  pictures a second without sound (`EXTRA="-D NOSOUND=1"`), 35.1 / 12.1 with it (-3.6 % / -5 %).
 
 ## Next steps (docs/porting-guide.md)
 
 1. The picture's speed (above), then `tools/sprite_test.py` (edges, all 16 shifts, holes) and the BLIT_STATS check of
    the HOG passes (engine/sim.py).
-2. Sound from the M6803 driver, after Kung-Fu Master's.
+2. Sound: compare the reference board with MAME's sound board (a trace of the 6803 or the AY writes from
+   `mpatrol.exe`); not done on the Mac (no M52 MAME build there).
