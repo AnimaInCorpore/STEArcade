@@ -107,7 +107,10 @@ def main():
     ap.add_argument("--list", action="store_true", help="a SPRITE_LIST build (src/natives.s): the sprite RAM is not "
                     "compared; the object records the picture gets (m72_objs) expanded through their ROM definitions "
                     "must equal the reference's sprite buffer")
+    ap.add_argument("--record", default="", help="(with --list) save each frame's video state as the stage renderers "
+                    "get it to this file (render_test's state format + the object records: tools/stage_model.py)")
     args = ap.parse_args()
+    recorded = []
     run = ROOT / "run" / "rtype_sim"
     s = Sim(str(run / "RTYPE.PRG"), run_dir=run)
     s.mem.set_trace_mode(False)
@@ -182,6 +185,27 @@ def main():
     keep = 0xF702 | (1 if live & 1 else 0) | (0x800 if live & 2 else 0) | (0x40 if live & 4 else 0) | \
         (0x80 if live & 8 else 0) | (4 if live & 0x100 else 0) | (0x10 if live & 0x200 else 0)
     print("idle flags live %X: PSW bits compared %04X" % (live, keep))
+
+    def record_state():
+        """the video state the program hands the renderer after this frame (src/video.s: the bands from the scroll
+        before and after the raster interrupt; the object records), as zlib(pickle(dict)): fg, bg, pal0, pal1 (V30
+        byte order), spr (the reference's sprite buffer: what the records stand for), objs (m72_objs, slots up to
+        objs_end), bands [(y0, y1, (FG x, BG x), (FG y, BG y), off)]"""
+        import pickle
+        import zlib
+        rd = lambda a, n: swap(bytes(mem.r_block(a, n)))
+        sv = [mem.r16(sym["m72_scroll_vbl"] + 2 * k) for k in range(4)]
+        sc = [mem.r16(sym["m72_scroll"] + 2 * k) for k in range(4)]
+        off = bool(mem.r16(sym["m72_port02"]) & 8)
+        line = mem.r16(sym["m72_raster"]) - 128
+        if 0 <= line < 255:
+            bands = [(0, line, (sv[1], sv[3]), (sv[0], sv[2]), off), (line + 1, 255, (sc[1], sc[3]), (sc[0], sc[2]), off)]
+        else:
+            bands = [(0, 255, (sc[1], sc[3]), (sc[0], sc[2]), off)]
+        st = dict(fg=rd(img + 0xD0000, 0x4000), bg=rd(img + 0xD8000, 0x4000), pal0=rd(img + 0xC8000, 0xC00),
+                  pal1=rd(img + 0xCC000, 0xC00), spr=bytes(m.spritebuf), objs=bytes(mem.r_block(sym["m72_objs"], 0x400)),
+                  objs_end=mem.r16(sym["m72_objs_end"]), bands=bands)
+        return zlib.compress(pickle.dumps(st), 1)
 
     def compare(f):
         bad = []
@@ -336,8 +360,14 @@ def main():
         if not compare(f):
             print("stopped after %d good frames" % f)
             return 1
+        if args.record:
+            recorded.append((m.frame, record_state()))
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1 - args.start)), flush=True)
+    if args.record:
+        import pickle
+        Path(args.record).write_bytes(pickle.dumps(recorded))
+        print("%d states -> %s" % (len(recorded), args.record))
     print("%d frames identical; %.0f 68000 cycles a frame" % (args.frames - args.start,
                                                               cycles / max(1, args.frames - args.start)))
     return 0
