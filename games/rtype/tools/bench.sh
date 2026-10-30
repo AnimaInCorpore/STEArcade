@@ -80,5 +80,5 @@ if os.path.exists('run/rtype_bench/BORDERS.BIN'):
     print("borders: frames with the top border armed late (fallbacks) %d, late events: top %d, palette on %d, "
           "bottom %d, off %d" % (fb, lt, lo, ll, lf))
 if len(raw) >= 112:
-    print("stage renderer: pens looked up %d, scene checks %d, colour rows made %d, scene switches %d" % struct.unpack('>4I', raw[96:112]))
+    print("stage renderer: log entries copied %d (lines %d), erase words %d, whole copies %d" % struct.unpack('>4I', raw[96:112]))
 P

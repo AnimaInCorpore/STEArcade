@@ -254,10 +254,10 @@ write_counters:
 	move.l	m72r_skipped,cnt_skipped
 	move.l	m72r_lates,cnt_lates
 	ifd	STAGE
-	move.l	st_npens,cnt_x
-	move.l	st_nscene,cnt_x+4
-	move.l	st_nrows,cnt_x+8
-	move.l	st_switches,cnt_x+12
+	move.l	st_nlog,cnt_x
+	move.l	st_nlogl,cnt_x+4
+	move.l	st_nrectw,cnt_x+8
+	move.l	st_nfull,cnt_x+12
 	endc
 	clr.w	-(sp)
 	pea	.name(pc)

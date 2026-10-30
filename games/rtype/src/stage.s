@@ -632,11 +632,14 @@ st_vram:
 	lsl.w	#6,d1
 	add.w	d1,a2			; the row's 64 cell flags
 	lea	st_colok,a3
-	moveq	#0,d2			; the column
-.c:	cmpm.l	(a0)+,(a1)+
-	beq.s	.cs
+	moveq	#64-1,d3		; (the cells left: the column = 63 - d3)
+.c:	cmpm.l	(a0)+,(a1)+		; (the unchanged cells: 30 cycles each)
+	dbne	d3,.c
+	beq.s	.n			; (the row's end, the last cell equal)
 	move.l	-4(a0),-4(a1)
-	clr.b	(a2)			; (composed again: its column looked at again)
+	moveq	#63,d2			; the column
+	sub.w	d3,d2
+	clr.b	(a2,d2.w)		; (composed again: its column looked at again)
 	clr.b	(a3,d2.w)
 	move.w	d6,d0			; (a cell of the status bar: st_bardraw draws it)
 	sub.w	st_barpos,d0
@@ -650,21 +653,12 @@ st_vram:
 	cmp.w	#40,d1
 	bhs.s	.cs
 	add.w	d1,d0
+	move.l	a1,-(sp)
 	lea	st_bardc,a1
 	st	(a1,d0.w)
-	lea	st_fgcopy,a1		; (a1 again: the copy's next long)
-	move.w	d6,d0
-	lsl.w	#8,d0
-	add.w	d0,a1
-	move.w	d2,d0
-	addq.w	#1,d0
-	lsl.w	#2,d0
-	add.w	d0,a1
+	move.l	(sp)+,a1
 	st	st_bardirty
-.cs:	addq.l	#1,a2
-	addq.w	#1,d2
-	cmp.w	#64,d2
-	blo.s	.c
+.cs:	dbf	d3,.c
 .n:	addq.w	#1,d6
 	cmp.w	#64,d6
 	blo	.r
@@ -937,6 +931,17 @@ st_tile:
 ; st_sync: the display buffer brought up to the clean buffer: the logged compositions since its last picture (or, too
 ; many, the whole buffer), the rectangles of its last sprites
 ; ======================================================================================================================
+ST_PASSES	macro			; d1 lines in passes of d3 lines (a4 BLT_YC, d5 the start); d1 >= 1
+.p\@:	cmp.w	d3,d1
+	bls.s	.q\@
+	move.w	d3,(a4)
+	move.b	d5,4(a4)
+	sub.w	d3,d1
+	bra.s	.p\@
+.q\@:	move.w	d1,(a4)
+	move.b	d5,4(a4)
+	endm
+
 st_sync:
 	move.w	st_draw,d0
 	add.w	d0,d0
@@ -960,23 +965,53 @@ st_sync:
 	move.w	(a0),d6
 	move.w	d7,(a0)
 	lea	st_log,a3
+	; (the registers that stay: a copy, 2 a word, HOG passes started by d5 at BLT_YC + 4)
+	move.w	#2,BLT_SXI.w
+	move.w	#2,BLT_DXI.w
+	move.w	#$0203,BLT_HOP.w
+	clr.b	BLT_SKEW.w
+	lea	BLT_YC.w,a4
+    ifd ST_NOCOPY
+	moveq	#0,d5
+    else
+	moveq	#-$40,d5		; ($C0: busy, HOG)
+    endc
+	; the log: a group's 4 plane words a line, the byte's mask, 8 lines a pass
+	move.w	#4,BLT_XC.w
+	move.w	#ST_LB-6,BLT_SYI.w
+	move.w	#ST_LB-6,BLT_DYI.w
+	moveq	#0,d4			; (the masks loaded: none yet)
 .l:	cmp.w	d6,d7
 	beq.s	.lx
 	move.w	d6,d2
 	lsl.w	#3,d2
 	move.l	(a3,d2.w),d0		; offset
 	lea	(a5,d0.l),a0
-	lea	(a6,d0.l),a1
-	moveq	#4,d0			; (the 4 planes' words of the group)
-	move.w	4(a3,d2.w),d1		; lines
-	move.w	6(a3,d2.w),d2		; the byte's mask
-	move.w	d2,d3
-	move.w	d2,d4
-	bsr	st_copy
+	move.l	a0,BLT_SRC.w
+	lea	(a6,d0.l),a0
+	move.l	a0,BLT_DST.w
+	move.w	6(a3,d2.w),d3		; the byte's mask
+	cmp.w	d3,d4
+	beq.s	.m
+	move.w	d3,d4
+	move.w	d3,BLT_END1.w
+	move.w	d3,BLT_END2.w
+	move.w	d3,BLT_END3.w
+.m:	move.w	4(a3,d2.w),d1		; lines
+    ifd DEBUG
+	addq.l	#1,st_nlog
+	add.l	d1,st_nlogl
+    endc
+	moveq	#8,d3
+	ST_PASSES
 	addq.w	#1,d6
 	and.w	#ST_LOG-1,d6
 	bra.s	.l
 .lx:	; the last sprites' rectangles
+	moveq	#-1,d0
+	move.w	d0,BLT_END1.w
+	move.w	d0,BLT_END2.w
+	move.w	d0,BLT_END3.w
 	move.w	st_draw,d0
 	add.w	d0,d0
 	lea	st_dmgn,a0
@@ -985,23 +1020,41 @@ st_sync:
 	lea	st_dmg,a2
 	mulu	#ST_DMG*8/2,d0
 	add.l	d0,a2
+	lea	st_lpp,a3
 	subq.w	#1,d7
 	bmi.s	.dx
 .d:	move.l	(a2)+,d0
 	lea	(a5,d0.l),a0
-	lea	(a6,d0.l),a1
+	move.l	a0,BLT_SRC.w
+	lea	(a6,d0.l),a0
+	move.l	a0,BLT_DST.w
 	moveq	#0,d0
 	move.b	(a2)+,d0		; words a line
 	moveq	#0,d1
 	move.b	(a2)+,d1		; lines
 	addq.l	#2,a2
-	moveq	#-1,d2
-	moveq	#-1,d3
-	moveq	#-1,d4
-	bsr	st_copy
+    ifd DEBUG
+	move.w	d0,d2
+	mulu	d1,d2
+	add.l	d2,st_nrectw
+    endc
+	move.w	d0,BLT_XC.w
+	move.w	#ST_LB+2,d2
+	sub.w	d0,d2
+	sub.w	d0,d2
+	move.w	d2,BLT_SYI.w
+	move.w	d2,BLT_DYI.w
+	moveq	#1,d3			; the lines a pass: 32 words
+	cmp.w	#32,d0
+	bhi.s	.lp
+	move.b	(a3,d0.w),d3
+.lp:	ST_PASSES
 	dbf	d7,.d
 .dx:	rts
 .full:	; (the whole buffer from the clean one)
+    ifd DEBUG
+	addq.l	#1,st_nfull
+    endc
 	clr.b	(a1,d0.w)
 	move.w	st_loghead,(a0)
 	lea	st_logcnt,a2
@@ -1623,7 +1676,10 @@ m72r_skipped:	ds.l	1
 m72r_lates:	ds.l	1
 st_unknown:	ds.l	1
 st_switches:	ds.l	1		; (scene switches)
-st_npens:	ds.l	1		; (pens looked up)
+st_nlog:	ds.l	1		; (DEBUG: log entries copied, their lines, the erase rectangles' words, whole copies)
+st_nlogl:	ds.l	1
+st_nrectw:	ds.l	1
+st_nfull:	ds.l	1
 st_nscene:	ds.l	1		; (scene checks)
 st_nrows:	ds.l	1		; (colour rows' tables made)
 st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
