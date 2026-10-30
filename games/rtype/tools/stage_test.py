@@ -289,6 +289,11 @@ def main():
             continue
         got, bot = h.screen()
         diff = got != want
+        if all(b[4] for b in st["bands"]):                # (display off: the renderer shows black palettes)
+            d = h.r16("m72r_shown")
+            pals = [h.r16("m72r_disp_pal", 32 * d + 2 * k) for k in range(16)] + \
+                [h.r16("m72r_disp_hpal", 32 * d + 2 * k) for k in range(16)]
+            diff = np.zeros_like(diff) if not any(pals) else np.ones_like(diff)
         bad = int(diff.sum())
         costs.append((f, r[0], r[1]))
         unk = h.r32("st_unknown")
