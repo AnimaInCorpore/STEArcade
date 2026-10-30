@@ -1323,3 +1323,90 @@ nat_prow1:
 	PROW	$2D34,$2134,R05712,R05730
 nat_prow2:
 	PROW	$2DF4,$2734,R05741,R0575F
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:E601: an enemy bullet's handler (~3 a frame): its move by [BP+30h] / [BP+32h], its sprite (every frame while
+; [BP+0] = E603h or [BP+20h] runs out, else [BP+20h] counts down), the ship's box (0040:F885) and the Force's (76h)
+; against it (BW 84C6h: its widths), every other frame the BG / FG tiles under it and the screen (0040:1D6B).  BP even
+; (else the translation); a hit or a wall continues in the arcade's code with its flags.  The registers and the stack
+; below SP (the CALLs' return IPs) as the arcade leaves them.
+; ---------------------------------------------------------------------------------------------------------------------
+POSADD	macro				; \1 the word offset (4 x / 8 y): the 24 bits at [BP+\1-1] .. [BP+\1+1] plus AW
+	move.w	\1(a0),d7
+	lsl.l	#8,d7
+	move.b	\1-2(a0),d7
+	move.w	d0,a1
+	add.l	a1,d7
+	move.b	d7,\1-2(a0)
+	lsr.l	#8,d7
+	move.w	d7,\1(a0)
+	endm
+nat_he601:
+	btst	#0,d6
+	bne	.tr
+	lea	(a4,d6.l),a0
+	move.w	$30(a0),d0		; CALL 0A72h: x
+	move.w	#$E609,-2(a5)
+	POSADD	4
+	move.w	$32(a0),d0		; CALL 0A89h: y
+	move.w	#$E60F,-2(a5)
+	POSADD	8
+	cmp.w	#$E603,(a0)
+	beq.s	.em
+	tst.w	$20(a0)
+	beq.s	.em
+	subq.w	#1,$20(a0)
+	bra.s	.sh
+.em:	move.w	d6,d3			; the sprite: 84AEh + 3 * ((((BP >> 3) + [2EB6h]) & 18h) >> 2)
+	lsr.w	#3,d3
+	add.w	$2EB6(a3),d3
+	and.w	#$18,d3
+	lsr.w	#1,d3
+	move.w	d3,d1			; CW
+	lsr.w	#1,d3
+	add.w	d1,d3
+	add.w	#$84AE,d3
+	move.w	#$E642,-2(a5)
+	jsr	leaf_emit1
+.sh:	move.w	#$84C6,d3		; 0040:E642: the ship (0040:F885: its box when its flag is clear)
+	move.w	#$56,d4
+	move.w	#$E648,-2(a5)
+	tst.b	$56(a3)
+	bne.s	.f
+	bsr	nat_box
+	bcc.s	.f
+	jmp	R0EA4A			; (the ship hit)
+.f:	move.w	#$76,d4			; 0040:E64E: the Force
+	move.w	#$E657,-2(a5)
+	bsr	nat_box
+	bcc.s	.t
+	jmp	R0EA86
+.t:	move.w	$2EB6(a3),d7		; every other frame the tiles
+	and.w	#1,d7
+	beq.s	.ti
+	jmp	R0EA7B			; (RET)
+.ti:	move.w	#$E664,-2(a5)		; CALL 22B5h
+	jsr	leaf_bgtile
+	cmp.w	#$DFC,d0
+	bcs.s	.w
+	cmp.w	#$7D0,d1
+	bcs.s	.w
+	tst.b	$2FC5(a3)		; [2FC4h]
+	bne.s	.o
+	move.w	#$E679,-2(a5)		; CALL 216Bh: on the screen (carry: off)
+	move.w	4(a4,d6.l),d0
+	sub.w	#$12C,d0
+	bcs.s	.so
+	sub.w	#$1A8,d0
+	bcc.s	.so
+	move.w	8(a4,d6.l),d0
+	sub.w	#$7C,d0
+	bcs.s	.so
+	sub.w	#$118,d0
+	bcc.s	.so
+	andi	#$FE,ccr
+	jmp	R0EA7B			; (RET)
+.so:	ori	#1,ccr
+.o:	jmp	R0EA7C
+.w:	jmp	R0EA86
+.tr:	jmp	R0EA01_t
