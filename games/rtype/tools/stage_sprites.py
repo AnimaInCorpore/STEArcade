@@ -160,18 +160,89 @@ def pass_values(cls2, m, w, k):
     return xc, (2 - 8 * (xc - 1)) & 0xFFFF, e1, e2, e3, ctl
 
 
-def sprite_code(grps, long_dst):
-    """the drawing code of a whole sprite for every shift (its groups' values from the stream at a0): word mode
+def units_of_groups(grps):
+    """the groups (one mask a group) as units: (cls2, width, [(y, x0, mask)])"""
+    return [(cls2, w, [(y, x0, m) for y, x0 in rows]) for (cls2, m, k15, w), rows in grps]
+
+
+def units_of_blocks(pcs):
+    """sprite_compiler.js's blocks (stedaimakaimura): the pieces that fit one 16- or 32-pixel window of the sprite, each
+    row aligned to the block's left (one XC, DYI, control word a block at every shift), the rows sorted by their mask
+    (an end mask written again only where it changes) - as units (cls2, the block's width, [(y, block left, mask)])"""
+    blocks = []
+    for y, x0, w, m in pcs:
+        mw = 16 if w <= 16 else 32
+        for blk in blocks:
+            if blk["mw"] == mw and blk["R"] - mw + 1 <= x0 and blk["L"] + mw - 1 >= x0 + w - 1:
+                blk["L"], blk["R"] = min(blk["L"], x0), max(blk["R"], x0 + w - 1)
+                blk["rows"].append((y, x0, w, m))
+                break
+        else:
+            blocks.append(dict(mw=mw, L=x0, R=x0 + w - 1, rows=[(y, x0, w, m)]))
+    units = []
+    for blk in blocks:
+        n = blk["mw"]
+        rows = []
+        for y, x0, w, m in blk["rows"]:
+            pw = 16 if w <= 16 else 32
+            full = m << (n - pw) if n >= pw else m      # (the piece's mask, its first pixel at bit n - 1 ...)
+            rows.append((y, blk["L"], full >> (x0 - blk["L"])))   # (... moved to the block's left)
+        rows.sort(key=lambda r: (r[2], r[0]))
+        units.append((n == 32, blk["R"] - blk["L"] + 1, rows))
+    units.sort(key=lambda u: u[2][0][0])
+    return units
+
+
+def unit_rows(u, s):
+    """a unit's rows' pass values at shift s: [(dst, (xc, dyi, e1, e2, e3, ctl))]"""
+    cls2, w, rows = u
+    return [(y * LB + ((s + x0) >> 4) * 8, pass_values(cls2, m, w, (s + x0) & 15)) for y, x0, m in rows]
+
+
+def unit_changes(u):
+    """per row after the first: (END1 [+ END2] written again, END3 written again) - when they differ at any shift"""
+    cls2, w, rows = u
+    vals = [unit_rows(u, s) for s in range(16)]
+    out = []
+    for i in range(1, len(rows)):
+        e12 = any(vals[s][i][1][2:4] != vals[s][i - 1][1][2:4] if cls2 else vals[s][i][1][2] != vals[s][i - 1][1][2]
+                  for s in range(16))
+        e3 = any(vals[s][i][1][4] != vals[s][i - 1][1][4] for s in range(16))
+        out.append((e12, e3))
+    return out
+
+
+def units_cost(units):
+    """the estimated cycles of drawing them (the CPU's register writes, the Blitter's words), mean over the shifts"""
+    cpu = blit = 0
+    for u in units:
+        cls2, w, rows = u
+        cpu += 100 + 34 * (len(rows) - 1)
+        for e12, e3 in unit_changes(u):
+            cpu += (16 if cls2 else 12) * e12 + 12 * e3
+        for s in range(16):
+            for dst, (xc, *_rest) in unit_rows(u, s):
+                blit += (32 * xc + 16) / 16
+    return cpu + blit
+
+
+def sprite_code(units, long_dst):
+    """the drawing code of a whole sprite for every shift (its units' values from the stream at a0): word mode
     d0 = the destination's low word (a4 = DST low word, a3 = DYI), long mode a3 = the destination (a4 = DST)"""
     body = []
-    for (cls2, m, k15, w), rows in grps:
+    for u in units:
+        cls2, w, rows = u
         if long_dst:
             body += ["\tadda.w (a0)+,a3", "\tmove.l a3,(a4)", "\tmove (a0)+,BLT_XC.w", "\tmove (a0)+,BLT_DYI.w"]
         else:
             body += ["\tadd (a0)+,d0", "\tmove d0,(a4)", "\tmove (a0)+,BLT_XC.w", "\tmove (a0)+,(a3)"]
         body += ["\tmove.l (a0)+,(a1)" if cls2 else "\tmove (a0)+,(a1)", "\tmove (a0)+,(a6)", "\tmove d1,(a5)",
                  "\tmove (a0)+,(a2)"]
-        for (ya, xa), (yb, xb) in zip(rows, rows[1:]):
+        for ((ya, xa, ma), (yb, xb, mb)), (e12, e3) in zip(zip(rows, rows[1:]), unit_changes(u)):
+            if e12:
+                body.append("\tmove.l (a0)+,(a1)" if cls2 else "\tmove (a0)+,(a1)")
+            if e3:
+                body.append("\tmove (a0)+,(a6)")
             d = (yb - ya) * LB + ((xb - xa) // 16) * 8
             if long_dst:
                 body += ["\tadda.w d4,a3" if d == LB else "\tlea %d(a3),a3" % d, "\tmove.l a3,(a4)"]
@@ -181,21 +252,27 @@ def sprite_code(grps, long_dst):
     return body + ["\trts"]
 
 
-def sprite_streams(grps):
-    """per shift 0-15: the groups' values (destination step, XC, DYI, END1, [END2 for 17-32 pieces], END3, control)"""
+def sprite_streams(units):
+    """per shift 0-15: each unit's first row's values (destination step, XC, DYI, END1, [END2 for 32-pixel units],
+    END3, control), then its further rows' changed end masks"""
     out = []
+    chg = [unit_changes(u) for u in units]
     for s in range(16):
         blk = bytearray()
         prev = 0
-        for (cls2, m, k15, w), rows in grps:
-            y, x0 = rows[0]
-            dst = y * LB + ((s + x0) >> 4) * 8
-            xc, dyi, e1, e2, e3, ctl = pass_values(cls2, m, w, (s + x0) & 15)
+        for u, ch in zip(units, chg):
+            cls2 = u[0]
+            rv = unit_rows(u, s)
+            dst, (xc, dyi, e1, e2, e3, ctl) = rv[0]
             vals = [dst - prev, xc, dyi, e1] + ([e2] if cls2 else []) + [e3, ctl]
+            for (d, (_, _, f1, f2, f3, _)), (e12, e3c) in zip(rv[1:], ch):
+                if e12:
+                    vals += [f1, f2] if cls2 else [f1]
+                if e3c:
+                    vals.append(f3)
             for v in vals:
                 blk += (int(v) & 0xFFFF).to_bytes(2, "big")
-            prev = y * LB + ((s + rows[-1][1]) >> 4) * 8 + (rows[-1][0] - y) * 0
-            prev = rows[-1][0] * LB + ((s + rows[-1][1]) >> 4) * 8
+            prev = rv[-1][0]
         out.append(bytes(blk))
     return out
 
@@ -207,7 +284,7 @@ def build(paths):
     codes, streams = {}, {}
     code_lines, stream = [], bytearray()
     recs, pens_out = [], []
-    stars = maxh = npieces = ngroups = 0
+    stars = maxh = npieces = ngroups = nblocks = 0
     for bw, n in defs:
         ents = entries(rom, bw, n)
         if all((c & 0xFFF) in SM.STAR_SPRITES for _, _, c, _ in ents):
@@ -221,19 +298,22 @@ def build(paths):
         img, ox, oy = r
         h, w = img.shape
         maxh = max(maxh, h)
-        grps = groups_of(pieces(img))
-        npieces += sum(len(rows) for _, rows in grps)
-        ngroups += len(grps)
+        pcs = pieces(img)
+        ug, ub = units_of_groups(groups_of(pcs)), units_of_blocks(pcs)
+        units = ub if units_cost(ub) < units_cost(ug) else ug
+        nblocks += units is ub
+        npieces += sum(len(rows) for _, _, rows in units)
+        ngroups += len(units)
         labels = []
         for long_dst in (False, True):
-            body = sprite_code(grps, long_dst)
+            body = sprite_code(units, long_dst)
             key = tuple(body)
             if key not in codes:
                 codes[key] = "stc_%d" % len(codes)
                 code_lines += [codes[key] + ":"] + body
             labels.append(codes[key])
         offs = []
-        for blk in sprite_streams(grps):
+        for blk in sprite_streams(units):
             if blk not in streams:
                 streams[blk] = len(stream)
                 stream += blk
@@ -241,9 +321,9 @@ def build(paths):
         # the pens a piece: 8 bytes (16 pixels) or 16 (32), left-aligned, in the groups' order
         pens = bytearray()
         shape = []
-        for (cls2, m, k15, pw), rows in grps:
+        for cls2, uw, rows in units:
             shape.append((1 if cls2 else 0, len(rows)))
-            for y, x0 in rows:
+            for y, x0, m in rows:
                 n_px = 32 if cls2 else 16
                 p = [int(v) for v in img[y, x0:x0 + n_px]] + [0] * n_px
                 p = p[:n_px]
@@ -275,9 +355,10 @@ def build(paths):
     b = build_dir("rtype")
     (b / "stage_sprites.s").write_text("\n".join(out) + "\n")
     (b / "stage_sstream.bin").write_bytes(bytes(stream))
-    print("%d definitions (%d stars), the tallest %d rows; %d pieces in %d groups (%.1f a group); %d routines "
-          "(%d lines), stream %d bytes" % (len(defs), stars, maxh, npieces, ngroups, npieces / max(1, ngroups),
-                                            len(codes), len(code_lines), len(stream)))
+    print("%d definitions (%d stars, %d in blocks), the tallest %d rows; %d pieces in %d units (%.1f a unit); %d "
+          "routines (%d lines), stream %d bytes" % (len(defs), stars, nblocks, maxh, npieces, ngroups,
+                                                    npieces / max(1, ngroups), len(codes), len(code_lines),
+                                                    len(stream)))
 
 
 def main():
