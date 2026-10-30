@@ -182,7 +182,7 @@ class Expected:
     """the model's picture in STE indices as the renderer colours it (src/stage.s st_palette): a pen's index comes from
     its committed colour - committed when its palette row is loaded (ROWLOAD or more of the row's pens off their
     committed colours, unless back to its colours before its last load: an animation) or when its new colour stayed STABLE pictures (no colour animation: the user, 2026-10-30), a
-    reserved pen at once -; the scene picked from the committed tile colours (tools/stage_assets.py choose_scene)"""
+    reserved pen at once, a brighter colour at once (an animation rests on its brightest) -; the scene picked from the committed tile colours (tools/stage_assets.py choose_scene)"""
     ROWLOAD, STABLE = 8, 50
 
     def __init__(self):
@@ -196,6 +196,13 @@ class Expected:
         self.pend, self.stab = [], np.zeros(512, np.int32)
         self.prev = np.full(512, 0xFFFF, np.int32)      # (each row's committed colours before its last load)
 
+    @staticmethod
+    def bright1(c):
+        return ((c >> 8) & 15) + ((c >> 4) & 15) + (c & 15)
+
+    def bright(self, cols):
+        return sum(self.bright1(int(c)) for c in cols if c != 0xFFFF)
+
     def colours(self, col):
         changed = np.nonzero(col != self.ccol)[0]
         self.ccol[changed] = col[changed]
@@ -206,9 +213,13 @@ class Expected:
         tilechg = False
         for r in sorted({p >> 4 for p in chg}):
             sl = slice(16 * r, 16 * r + 16)
-            if (self.ccol[sl] == self.prev[sl]).all():
-                continue                                # (back to its colours before its last load: an animation)
-            if (self.ccol[sl] != self.pcol[sl]).sum() >= self.ROWLOAD:
+            if (self.ccol[sl] == self.prev[sl]).all():  # (back to its colours before its last load: an animation,
+                if self.bright(self.ccol[sl]) <= self.bright(self.pcol[sl]):    # the brighter set kept)
+                    continue
+                load = True
+            else:
+                load = (self.ccol[sl] != self.pcol[sl]).sum() >= self.ROWLOAD
+            if load:
                 self.prev[sl] = self.pcol[sl]
                 tilechg |= r >= 16 and bool((self.ccol[sl] != self.pcol[sl]).any())
                 self.pcol[sl] = self.ccol[sl]
@@ -217,8 +228,9 @@ class Expected:
         for p in self.pend:
             if self.ccol[p] == self.pcol[p]:
                 continue
-            if p in res:
-                commit = True
+            if p in res or self.pcol[p] == 0xFFFF or self.bright1(self.ccol[p]) > self.bright1(self.pcol[p]):
+                commit = True                           # (a reserved pen; a brighter colour: an animation rests on
+                                                        # its brightest - the power-up crystal's blue)
             elif p in chg:
                 self.stab[p] = 0
                 commit = False

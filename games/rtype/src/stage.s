@@ -357,19 +357,19 @@ st_palette:
 	add.w	d2,a1
 	moveq	#64-1,d3
 .cmp:	cmpm.l	(a0)+,(a1)+
-	beq.s	.ce
+	beq	.ce
 	move.l	-4(a0),-4(a1)
 	moveq	#63,d4			; the long's two pens
 	sub.w	d3,d4
 	add.w	d4,d4
 	add.w	d1,d4
 	tst.b	(a5,d4.w)
-	bne.s	.c2
+	bne	.c2
 	st	(a5,d4.w)
 	move.w	d4,(a6)+
 .c2:	addq.w	#1,d4
 	tst.b	(a5,d4.w)
-	bne.s	.ce
+	bne	.ce
 	st	(a5,d4.w)
 	move.w	d4,(a6)+
 .ce:	dbf	d3,.cmp
@@ -397,7 +397,7 @@ st_palette:
 	add.w	d0,d0
 	lea	v30_image+$C8000,a0
 	cmp.w	#256,d7
-	blo.s	.p0
+	blo	.p0
 	lea	v30_image+$CC000-$200,a0
 .p0:	add.w	d0,a0
 	moveq	#31,d1
@@ -443,9 +443,11 @@ st_palette:
 	add.w	d0,a1
 	moveq	#16-1,d3
 .pv:	cmpm.w	(a0)+,(a1)+
-	bne.s	.pvn
+	bne	.pvn
 	dbf	d3,.pv
-	bra	.rbn			; (its colours before: an animation)
+	bsr	st_rowbright		; (its colours before: an animation - the brighter of the two sets kept)
+	bls	.rbn
+	bra	.ld
 .pvn:	lea	st_ccol,a0
 	lea	st_pcol,a1
 	move.w	d5,d0
@@ -455,12 +457,12 @@ st_palette:
 	moveq	#0,d2
 	moveq	#16-1,d3
 .cnt:	cmpm.w	(a0)+,(a1)+
-	beq.s	.cn1
+	beq	.cn1
 	addq.w	#1,d2
 .cn1:	dbf	d3,.cnt
 	cmp.w	#ST_ROWLOAD,d2
-	blo.s	.rbn
-	lea	st_pcol,a0		; (its committed colours kept as the ones before)
+	blo	.rbn
+.ld:	lea	st_pcol,a0		; (its committed colours kept as the ones before)
 	lea	st_rowprev,a1
 	move.w	d5,d0
 	lsl.w	#5,d0
@@ -477,11 +479,11 @@ st_palette:
 	dbf	d6,.cm
 .rbn:	addq.w	#1,d5
 	cmp.w	#32,d5
-	blo.s	.rb
+	blo	.rb
 .pc:	lea	st_pend,a6		; C: the pending pens (kept in place: a5)
 	move.l	a6,a5
 .pl:	cmp.l	st_pendp,a6
-	beq.s	.pdone
+	beq	.pdone
 	move.w	(a6)+,d7
 	move.w	d7,d0
 	add.w	d0,d0
@@ -489,36 +491,44 @@ st_palette:
 	move.w	(a0,d0.w),d1
 	lea	st_pcol,a0
 	cmp.w	(a0,d0.w),d1
-	beq.s	.pdrop			; (committed, or back to its colour)
+	beq	.pdrop			; (committed, or back to its colour)
 	bsr	st_isres
-	beq.s	.pcom			; (a reserved pen: at once)
+	beq	.pcom			; (a reserved pen: at once)
+	lea	st_bright,a0		; (a brighter colour at once: an animation rests on its brightest - the
+	move.b	(a0,d1.w),d2		; power-up crystal's blue; the user, 2026-10-30)
+	lea	st_pcol,a1
+	move.w	(a1,d0.w),d3
+	cmp.w	#$FFFF,d3
+	beq	.pcom
+	cmp.b	(a0,d3.w),d2
+	bhi	.pcom
 	lea	st_pchg,a0
 	tst.b	(a0,d7.w)
-	beq.s	.pst
+	beq	.pst
 	clr.b	(a0,d7.w)
 	lea	st_pstab,a0
 	clr.b	(a0,d7.w)
-	bra.s	.pkeep
+	bra	.pkeep
 .pst:	lea	st_pstab,a0
 	addq.b	#1,(a0,d7.w)
 	cmp.b	#ST_STABLE,(a0,d7.w)
-	blo.s	.pkeep
+	blo	.pkeep
 .pcom:	bsr	st_commit
 .pdrop:	lea	st_pendf,a0
 	clr.b	(a0,d7.w)
 	lea	st_pchg,a0
 	clr.b	(a0,d7.w)
-	bra.s	.pl
+	bra	.pl
 .pkeep:	move.w	d7,(a5)+
-	bra.s	.pl
+	bra	.pl
 .pdone:	move.l	a5,st_pendp
 	lea	st_pidx,a2		; (for the reserved pens below)
 .pend:	tst.b	st_tilechg		; the scene: the best match of the tile palette (st_scene)
-	beq.s	.nosc
+	beq	.nosc
 	sf	st_tilechg
 	bsr	st_scene
 	tst.w	d0
-	beq.s	.nosc
+	beq	.nosc
 	lea	st_pcol,a1		; (another scene: every pen again with its tables, everything composed again)
 	lea	st_ccol,a3
 	lea	st_plist,a6
@@ -529,7 +539,7 @@ st_palette:
 	move.w	d7,(a0)+
 	addq.w	#1,d7
 	cmp.w	#512,d7
-	blo.s	.al
+	blo	.al
 	move.l	a0,st_plend
 	clr.l	st_rowtch
 	lea	st_rowprev,a0		; (no colours before: the new scene's committed at once)
@@ -543,13 +553,13 @@ st_palette:
 	move.l	st_scn,a0
 	lea	SC_RES(a0),a0
 	move.w	(a0)+,d0
-	beq.s	.rr
+	beq	.rr
 	moveq	#16,d1
 	sub.w	d0,d1
 	subq.w	#1,d0
 .r:	move.w	(a0)+,d2
 	cmp.b	(a2,d2.w),d1
-	beq.s	.r1
+	beq	.r1
 	move.b	d1,(a2,d2.w)
 	move.w	d2,d3
 	lsr.w	#4,d3
@@ -559,12 +569,12 @@ st_palette:
 .r1:	addq.w	#1,d1
 	dbf	d0,.r
 .rr:	move.l	st_hrowchg,d4		; the status bar's changed rows: its tables, its version
-	beq.s	.hr
+	beq	.hr
 	clr.l	st_hrowchg
 	addq.b	#1,st_hver
 	moveq	#0,d5
 .hrow:	btst	d5,d4
-	beq.s	.hn
+	beq	.hn
 	movem.l	d4-d5,-(sp)
 	lea	st_hidx,a0
 	move.w	d5,d0
@@ -582,7 +592,7 @@ st_palette:
 	movem.l	(sp)+,d4-d5
 .hn:	addq.w	#1,d5
 	cmp.w	#16,d5
-	blo.s	.hrow
+	blo	.hrow
 .hr:	; the changed rows: tables, versions
 	move.l	st_rowchg,d4
 	beq	.pal
@@ -594,7 +604,7 @@ st_palette:
 	addq.l	#1,st_nrows
 	bsr	st_rowtables
 	cmp.w	#16,d5
-	blo.s	.rn
+	blo	.rn
 	bsr	st_rowcells		; (a tile row: its cells again)
 .rn:	addq.w	#1,d5
 	cmp.w	#32,d5
@@ -611,7 +621,7 @@ st_palette:
 	move.l	st_scn,a0
 	lea	SC_RES(a0),a0
 	move.w	(a0)+,d0
-	beq.s	.x
+	beq	.x
 	moveq	#16,d1
 	sub.w	d0,d1
 	add.w	d1,d1
@@ -640,7 +650,7 @@ st_commit:
 	beq	.x
 	move.w	d1,(a0,d0.w)
 	cmp.w	#256,d7
-	blo.s	.pt
+	blo	.pt
 	st	st_tilechg		; (a tile pen's colour: the scene looked at)
 .pt:	cmp.w	#$FFFF,d1
 	beq	.x			; (not read yet)
@@ -650,7 +660,7 @@ st_commit:
 	move.b	(a3,d1.w),d2		; the playfield's index
 	lea	st_pidx,a2
 	cmp.b	(a2,d7.w),d2
-	beq.s	.hud
+	beq	.hud
 	move.b	d2,(a2,d7.w)
 	move.w	d7,d3
 	lsr.w	#4,d3
@@ -658,13 +668,13 @@ st_commit:
 	bset	d3,d4
 	move.l	d4,st_rowchg
 .hud:	cmp.w	#256,d7
-	blo.s	.x
+	blo	.x
 	move.l	st_scn,a0
 	lea	SC_HTAB(a0),a0
 	move.b	(a0,d1.w),d2
 	lea	st_hidx-256,a0
 	cmp.b	(a0,d7.w),d2
-	beq.s	.x
+	beq	.x
 	move.b	d2,(a0,d7.w)
 	move.w	d7,d3			; (the status bar's tables of this tile row again)
 	lsr.w	#4,d3
@@ -675,6 +685,36 @@ st_commit:
 .x:	movem.l	(sp)+,d0-d4/a0-a3
 	rts
 
+; st_rowbright: d5 = a row: the flags hi when its current colours (st_ccol) are brighter in sum than its committed
+; ones (st_pcol)
+st_rowbright:
+	movem.l	d0-d4/a0-a2,-(sp)
+	lea	st_ccol,a0
+	lea	st_pcol,a1
+	move.w	d5,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	add.w	d0,a1
+	lea	st_bright,a2
+	moveq	#0,d1			; (the current colours' sum)
+	moveq	#0,d2			; (the committed ones')
+	moveq	#0,d4
+	moveq	#16-1,d3
+.l:	move.w	(a0)+,d0
+	cmp.w	#$FFFF,d0
+	beq	.c
+	move.b	(a2,d0.w),d4
+	add.w	d4,d1
+.c:	move.w	(a1)+,d0
+	cmp.w	#$FFFF,d0
+	beq	.n
+	move.b	(a2,d0.w),d4
+	add.w	d4,d2
+.n:	dbf	d3,.l
+	cmp.w	d2,d1
+	movem.l	(sp)+,d0-d4/a0-a2
+	rts
+
 ; st_isres: d7 = a pen: Z set when it is one of the scene's reserved pens
 st_isres:
 	movem.l	d0/a0,-(sp)
@@ -682,9 +722,9 @@ st_isres:
 	lea	SC_RES(a0),a0
 	move.w	(a0)+,d0
 	subq.w	#1,d0
-	bmi.s	.no
+	bmi	.no
 .l:	cmp.w	(a0)+,d7
-	beq.s	.yes
+	beq	.yes
 	dbf	d0,.l
 .no:	movem.l	(sp)+,d0/a0
 	andi	#$FB,ccr
@@ -709,24 +749,24 @@ st_scene:
 	moveq	#0,d3
 	move.w	#256-1,d2
 .c:	cmpm.w	(a1)+,(a3)+
-	bne.s	.n
+	bne	.n
 	addq.w	#1,d3
 .n:	dbf	d2,.c
 	cmp.w	d6,d3
-	ble.s	.nb
+	ble	.nb
 	move.w	d3,d6
 	move.w	d4,d5
 .nb:	add.l	#SC_SIZE,a0
 	addq.w	#1,d4
 	cmp.w	d7,d4
-	blo.s	.s
+	blo	.s
 	moveq	#0,d0
 	cmp.w	st_curscn,d5
-	beq.s	.x
+	beq	.x
 	tst.w	st_curscn
 	bmi.s	.sw			; (the first)
 	cmp.w	#SCENE_MATCH,d6
-	blo.s	.x
+	blo	.x
 .sw:	addq.l	#1,st_switches
 	move.w	d5,st_curscn
 	mulu	#SC_SIZE,d5
@@ -1892,6 +1932,13 @@ v	set	0
 	rept	32
 	dc.b	((((v<<3)|(v>>2))*2+17)/34)
 v	set	v+1
+	endr
+	even
+st_bright:	; 12-bit colour -> r + g + b (4 bits each): the brighter colour of an animation
+c	set	0
+	rept	4096
+	dc.b	((c>>8)&15)+((c>>4)&15)+(c&15)
+c	set	c+1
 	endr
 	even
 st_ste12:	; 12-bit colour -> the STE's palette word (4 bits a channel, bit 3 the lowest)
