@@ -8,6 +8,9 @@ The simplifications, per stage (STAGES):
   * the BG locked to the FG: BG is drawn at FG x + L, L the locked relative offset (Lock); L follows the arcade's
     offset (BG x - FG x) only when it is off by LOCK_SLACK pixels or more, or for free while the window's BG holds
     nothing but empty tiles;
+  * a BG strip (stage 2's tunnel, the user's choice 2026-10-30; tools/stage_bg.py): the stage's whole BG as one strip,
+    drawn locked to the FG - the strip's column (unwrapped FG column - the scene's first one) mod its length, the FG's
+    rows - instead of the arcade's half-speed BG (decorative there: no parallax, it repeats);
   * no sprite / tile priority: the sprites are over both layers (the list's first entry on top, as the arcade);
   * no BG-over-FG pixels (BG groups 1-3): FG's opaque pixels are over BG;
   * the colours: a fixed STE palette per stage and a fixed index per pen (tools/stage_assets.py), the status bar's
@@ -59,14 +62,39 @@ class Model:
         cols = ((np.arange(bx, bx + W) & 511) >> 3)
         return bool(self.star[w[np.unique(rows)][:, np.unique(cols), 0] & 0x3FFF].all())
 
-    def picture(self, st, lock, squeeze=False, tile_dx=0):
+    def strip_pens(self, strip):
+        """a BG strip's pens [64 * 8, n * 8] (-1: an empty tile, as layer)"""
+        key = id(strip)
+        if getattr(self, "_strip_key", None) != key:
+            t = self.video.tiles[1]
+            n = len(strip)
+            img = np.zeros((512, n * 8), np.int32)
+            for c in range(n):
+                for r in range(64):
+                    code, attr = int(strip[c, r, 0]), int(strip[c, r, 1])
+                    tc = (code & 0x3FFF) % len(t)
+                    if self.star[tc]:
+                        img[r * 8:r * 8 + 8, c * 8:c * 8 + 8] = -1
+                        continue
+                    tl = t[tc]
+                    if code & 0x4000:
+                        tl = tl[:, ::-1]
+                    if code & 0x8000:
+                        tl = tl[::-1, :]
+                    img[r * 8:r * 8 + 8, c * 8:c * 8 + 8] = 256 + (attr & 15) * 16 + tl.astype(np.int32)
+            self._strip_key, self._strip_img = key, img
+        return self._strip_img
+
+    def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None):
         """the window's pens [256, 320] (BLACK = 512: empty / display off) for a recorded state (render_test's), lock
-        a Lock (updated)"""
+        a Lock (updated); strip: the scene's BG strip (load_strip) or None"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
         out = np.full((256, W), BLACK, np.int32)
         xp = np.arange(X0, X0 + W)
         main = max(st["bands"], key=lambda b: b[1] - b[0])
         lock.update(self, st, main)
+        lock.track(main[2][0], strip is not None)
+        simg = self.strip_pens(strip) if strip is not None else None
         for y0, y1, sx, sy, off in st["bands"]:
             if off:
                 continue
@@ -74,7 +102,12 @@ class Model:
             xs = xp + (tile_dx if y0 < HUD_Y else 0)    # (a scene's playfield tiles shown shifted: TILE_DX; not the bar)
             f = fgm[((ys + sy[0] + 128) & 511)[:, None], ((xs + sx[0]) & 511)[None, :]]
             bx = (sx[0] + lock.L) if y0 < HUD_Y else sx[1]
-            b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
+            if simg is not None and y0 < HUD_Y:     # (the strip: locked to the unwrapped FG column)
+                ap = lock.fgabs + xs                # (the unwrapped FG pixel x)
+                sc = ((ap >> 3) - lock.origin) % (simg.shape[1] // 8)
+                b = simg[((ys + sy[0] + 128) & 511)[:, None], (sc * 8 + (ap & 7))[None, :]]
+            else:
+                b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
             out[y0:y1 + 1] = np.where(f >= 0, f, np.where(b >= 0, b, BLACK))
         bar = any(b[0] == HUD_Y for b in st["bands"])
         self.sprites(out, objs_to_spr(st, squeeze) if "objs" in st else st["spr"], HUD_Y if bar else 256)
@@ -153,11 +186,29 @@ def objs_to_spr(st, squeeze=False):
     return bytes(spr)
 
 
+def load_strip(name):
+    """build/rtype/stage_bg_<name>.bin (tools/stage_bg.py): [n, 64, 2] (code, attribute)"""
+    import struct
+    raw = (build_dir("rtype") / ("stage_bg_%s.bin" % name)).read_bytes()
+    n, a0, by = struct.unpack(">HhH", raw[:6])
+    return np.frombuffer(raw[6:], "<u2").reshape(n, 64, 2)
+
+
 class Lock:
-    """the BG's locked offset from FG (see the module's docstring); redraw: set when L moved while the BG showed"""
+    """the BG's locked offset from FG (see the module's docstring); redraw: set when L moved while the BG showed;
+    fgabs: the FG's x unwrapped (src/stage.s st_fgabs), origin: a strip scene's first FG column (None outside)"""
     def __init__(self):
         self.L = None
         self.redraw = False
+        self.fgabs = None
+        self.origin = None
+
+    def track(self, fx, strip):
+        self.fgabs = fx if self.fgabs is None else self.fgabs + (fx - self.fgabs + 256) % 512 - 256
+        if not strip:
+            self.origin = None
+        elif self.origin is None:
+            self.origin = (self.fgabs + X0) >> 3
 
     def update(self, model, st, band):
         y0, y1, sx, sy, off = band

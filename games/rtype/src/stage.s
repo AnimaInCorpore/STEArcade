@@ -699,6 +699,14 @@ st_bands:
 	move.w	m72_scroll,st_bary
 	move.w	m72_scroll+2,st_barx
 .one:	move.w	2(a0),d0		; FG x
+	move.w	d0,d1			; (unwrapped: st_fgabs, the BG strip's position)
+	sub.w	st_fgprev,d1
+	add.w	#256,d1
+	and.w	#511,d1
+	sub.w	#256,d1
+	ext.l	d1
+	add.l	d1,st_fgabs
+	move.w	d0,st_fgprev
 	add.w	#96,d0
 	move.l	st_scn,a1
 	moveq	#0,d1
@@ -718,7 +726,23 @@ st_bands:
 	lsr.w	#3,d0
 	and.b	#1,d0
 	move.b	d0,st_off
-	tst.b	st_allnew
+	move.l	st_scn,a1		; a BG strip scene (SC_FLAGS bit 1): its origin, the FG column at its first picture
+	btst	#1,SC_FLAGS+1(a1)
+	beq.s	.ns
+	tst.b	st_stripon
+	bne.s	.al
+	st	st_stripon
+	move.l	st_fgabs,d0
+	add.l	#96,d0
+	asr.l	#3,d0
+	move.w	d0,st_origin
+	st	st_allnew
+	bra.s	.al
+.ns:	tst.b	st_stripon
+	beq.s	.al
+	sf	st_stripon
+	st	st_allnew
+.al:	tst.b	st_allnew
 	beq.s	.x
 	sf	st_allnew
 	lea	st_cells,a0		; everything composed again
@@ -737,6 +761,8 @@ st_bands:
 ; ======================================================================================================================
 st_compose:
 	move.w	st_loghead,st_logstart
+	tst.b	st_stripon
+	bne	st_composes
 	move.w	st_W,d6
 	lsr.w	#3,d6			; the first column
 	moveq	#41-1,d7
@@ -748,6 +774,43 @@ st_compose:
 	bsr	st_column
 .cn:	addq.w	#1,d6
 	dbf	d7,.col
+	rts
+
+; (a BG strip scene: each window column's absolute FG column - its ring column composed again when it is another one)
+st_composes:
+	move.l	st_fgabs,d0
+	add.l	#96,d0
+	move.w	st_tdx,d1
+	ext.l	d1
+	add.l	d1,d0
+	asr.l	#3,d0
+	move.w	d0,d5			; the first column's absolute column
+	moveq	#41-1,d7
+.sc:	move.w	d5,d6
+	and.w	#63,d6
+	lea	st_colabs,a0
+	move.w	d6,d1
+	add.w	d1,d1
+	cmp.w	(a0,d1.w),d5
+	beq.s	.same
+	move.w	d5,(a0,d1.w)
+	lea	st_colok,a0
+	clr.b	(a0,d6.w)
+	lea	st_cells,a0
+	add.w	d6,a0
+	moveq	#64-1,d1
+.cl:	clr.b	(a0)
+	lea	64(a0),a0
+	dbf	d1,.cl
+.same:	lea	st_colok,a0
+	tst.b	(a0,d6.w)
+	bne.s	.sn
+	st	(a0,d6.w)
+	move.w	d5,-(sp)
+	bsr	st_column
+	move.w	(sp)+,d5
+.sn:	addq.w	#1,d5
+	dbf	d7,.sc
 	rts
 
 ; st_column: d6 = a map column: its cells in the picture's rows composed where not done
@@ -803,11 +866,14 @@ st_cell:
 	move.w	(a0,d0.w),d1		; code: tile, flip x (14), flip y (15)
 	move.w	2(a0,d0.w),d2		; attribute: colour 0-3
 	and.w	#15,d2
+	and.w	#$CFFF,d1		; (bits 12, 13 unused: bit 12 marks a BG strip's tile in st_tile)
 	lea	st_colused,a0		; (the columns each colour is composed into: st_rowcells)
 	move.w	d2,d0
 	lsl.w	#6,d0
 	add.w	d6,d0
 	st	(a0,d0.w)
+	tst.b	st_stripon
+	bne.s	.strip
 	bsr	st_tile			; -> a0: 8 longs (movep order)
 	moveq	#8-1,d0
 .w:	move.l	(a0)+,d1
@@ -815,6 +881,76 @@ st_cell:
 	movep.l	d1,256(a1)		; (the copy 512 pixels on)
 	lea	ST_LB(a1),a1
 	dbf	d0,.w
+	bra	.logs
+.strip:	; the FG tile over the BG strip's: each line BG ^ ((BG ^ FG) & the FG's opaque pixels)
+	movem.l	a2-a3,-(sp)
+	move.w	d1,-(sp)		; (the FG code: its mask)
+	bsr	st_tile
+	lea	st_cf,a2		; (a copy: the BG's conversion may take the cache slot)
+	rept	8
+	move.l	(a0)+,(a2)+
+	endr
+	lea	st_colabs,a2		; the strip's column: (the absolute column - the origin) mod its length
+	move.w	d6,d0
+	add.w	d0,d0
+	move.w	(a2,d0.w),d0
+	sub.w	st_origin,d0
+	ext.l	d0
+	divs	st_strip,d0
+	swap	d0
+	tst.w	d0
+	bpl.s	.sp
+	add.w	st_strip,d0
+.sp:	and.l	#$FFFF,d0
+	lsl.l	#8,d0			; (256 bytes a column)
+	moveq	#0,d3
+	move.w	d5,d3
+	lsl.w	#2,d3
+	add.l	d3,d0
+	lea	st_strip+2,a2
+	add.l	d0,a2
+	move.w	(a2),d1			; its code ($FFFF: empty, black)
+	cmp.w	#$FFFF,d1
+	beq.s	.be
+	move.w	2(a2),d2
+	and.w	#15,d2
+	lea	st_colused,a0		; (its colour's columns too)
+	move.w	d2,d0
+	lsl.w	#6,d0
+	add.w	d6,d0
+	st	(a0,d0.w)
+	bsr	st_tile
+	bra.s	.bc
+.be:	lea	st_zero8,a0
+.bc:	move.w	(sp)+,d1		; the FG's mask: 8 longs a tile (then the X-flipped ones), rows backwards Y-flipped
+	moveq	#0,d0
+	move.w	d1,d0
+	and.w	#$0FFF,d0
+	lsl.l	#5,d0
+	lea	st_tmask,a3
+	add.l	d0,a3
+	btst	#14,d1
+	beq.s	.nx
+	add.l	#4096*32,a3
+.nx:	moveq	#4,d4
+	btst	#15,d1
+	beq.s	.ny
+	lea	28(a3),a3
+	moveq	#-4,d4
+.ny:	lea	st_cf,a2
+	moveq	#8-1,d0
+.r:	move.l	(a0)+,d1		; BG
+	move.l	(a2)+,d3		; FG
+	eor.l	d1,d3
+	and.l	(a3),d3
+	eor.l	d1,d3
+	movep.l	d3,0(a1)
+	movep.l	d3,256(a1)
+	lea	ST_LB(a1),a1
+	add.w	d4,a3
+	dbf	d0,.r
+	movem.l	(sp)+,a2-a3
+.logs:
 	; the log: the cell (one byte of each plane, 8 lines) at both copies
 	move.l	d7,d0
 	bsr	st_logcell
@@ -891,6 +1027,10 @@ st_tile:
 	lsl.l	#5,d0
 	lea	st_tiles,a1
 	add.l	d0,a1			; the tile's pens: 8 rows of 4 bytes
+	btst	#12,d1
+	beq.s	.fgt
+	add.l	#4096*32,a1		; (bit 12: a BG strip's tile - the BG tiles follow the FG's)
+.fgt:
 	moveq	#10,d0
 	lsl.l	d0,d2
 	lea	st_tt,a2
@@ -1838,6 +1978,11 @@ SC_FLAGS	= 80+12288		; a word: bit 0 the sprites squeezed toward the centre (st_
 SC_SIZE		= SC_FLAGS+2
 SCENE_MATCH	= 12
 st_tiles:	incbin	"stage_tiles.bin"
+	even
+st_tmask:	incbin	"stage_tmask.bin"	; (the FG tiles' opaque pixels: st_cell over a BG strip)
+st_strip:	incbin	"stage_strip_s2.bin"	; (stage 2's BG: tools/stage_bg.py, stage_assets.py strips)
+	even
+st_zero8:	dcb.l	8,0
 ; the pixel bits of each index for the colour tables (st_mktab): tiles (a long of 4 plane bytes, plane 0 the high
 ; byte: the left pixel bit 1, the right bit 0 of each), sprites (st_ta: planes 0 / 1 in the words' bits 1 / 0, st_tb:
 ; planes 2 / 3)
@@ -1899,6 +2044,13 @@ st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
 st_npool:	ds.l	1
+st_fgabs:	ds.l	1		; (the FG's x unwrapped, its last x)
+st_fgprev:	ds.w	1
+st_origin:	ds.w	1		; (a BG strip scene: its first window column)
+st_colabs:	ds.w	64		; (a strip scene: the absolute column each ring column was composed for)
+st_cf:		ds.l	8
+st_stripon:	ds.b	1
+	even
 st_dmg0:	ds.l	1		; (this picture's first erase rectangle)
 st_nobj:	ds.l	1		; (SIM: the objects, those drawn)
 st_ndrawn:	ds.l	1

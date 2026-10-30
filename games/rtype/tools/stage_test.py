@@ -190,6 +190,7 @@ class Expected:
         self.scenes = SA.load_scenes()
         self.model, self.lock = SM.Model(), SM.Lock()
         self.cur, self.tiles = None, None
+        self.strips = {}
 
     def __call__(self, st):
         t = np.frombuffer(st["recs"], np.uint8).astype(np.int32)
@@ -199,7 +200,8 @@ class Expected:
         ref, pal, hpal, spm, tpm, hpm, flags = self.scenes[self.cur]
         pidx = np.concatenate([spm[t[r]] if r < 16 else tpm[t[r]] for r in range(32)])
         hidx = np.concatenate([np.zeros(256, np.int32)] + [hpm[t[r]] for r in range(16, 32)])
-        pens = self.model.picture(st, self.lock, squeeze=bool(flags & 1), tile_dx=flags >> 8)
+        strip = self.strips.setdefault("s2", SM.load_strip("s2")) if flags & 2 else None
+        pens = self.model.picture(st, self.lock, squeeze=bool(flags & 1), tile_dx=flags >> 8, strip=strip)
         bar = any(b[0] == SM.HUD_Y for b in st["bands"])
         pp = np.minimum(pens, 511)
         want = pidx[pp]

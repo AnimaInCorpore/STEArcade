@@ -176,7 +176,7 @@ def build(stage, png=False):
 
 # ---- scenes: the screens told apart by their tile rows' targets (the renderer picks one when a tile row's target
 # changes)
-SCENE_RECORDINGS = ["build/rtype/stage_states_1.pkl", "build/rtype/stage_states_8.pkl"]
+SCENE_RECORDINGS = ["build/rtype/stage_states_1.pkl", "build/rtype/stage_states_8.pkl", "build/rtype/stage_states_s2.pkl"]
 SCENE_DIFF_ROWS = 3         # a frame belongs to the first scene whose tile-row targets differ in fewer rows
 SCENE_STEP = 5
 SCENE_MATCH = 12            # the renderer switches to the best scene only when it matches this many tile rows
@@ -186,6 +186,8 @@ SQUEEZE_SCENES = {0}        # (scene 0: the title - the recordings start with it
 # scenes whose tiles are shown shifted (the window over the tile layers moves, the sprites keep their places): the
 # title's text lines reach the arcade's right edge (x 168-367; the ranking 88-287): 16 shows them whole
 TILE_DX = {0: 16}
+BG_STRIPS = ["s2"]
+BG_STRIP_SCENES = {3}       # (flag bit 1: the BG from the stage's strip, locked to FG - stage 2's tunnel: stage_bg_s2)
 SC_SIZE = 16 + 64 + 3 * 4096 + 2
 
 
@@ -287,7 +289,8 @@ def scenes(png=False):
         for kind, table in ((0, tab), (1, tab), (1, htab)):
             for t in range(256):
                 data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
-        data += ((1 if k in SQUEEZE_SCENES else 0) | (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
+        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) |
+                 (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
         print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
             k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
             " ".join("%03X" % v for v in hpal)))
@@ -331,6 +334,35 @@ def tiles():
             for row in tile:
                 out += bytes((int(row[2 * k]) << 4) | int(row[2 * k + 1]) for k in range(4))
     (build_dir("rtype") / "stage_tiles.bin").write_bytes(bytes(out))
+    # the FG tiles' opaque pixels (pen not 0): per tile 8 longs, a row's byte (the left pixel bit 7) in each plane's
+    # byte (movep order), then the same X-flipped: src/stage.s st_cell composes a FG cell over a BG strip's
+    rows, rowsf = bytearray(), bytearray()
+    for tile in v.tiles[0]:
+        for row in tile:
+            b = sum(1 << (7 - k) for k in range(8) if row[k])
+            bf = int("{:08b}".format(b)[::-1], 2)
+            rows += bytes([b] * 4)
+            rowsf += bytes([bf] * 4)
+    (build_dir("rtype") / "stage_tmask.bin").write_bytes(bytes(rows + rowsf))
+    strips()
+
+
+def strips():
+    """build/rtype/stage_strip_<name>.bin (src/stage.s): a word, the columns; per column 64 rows of (code, attribute)
+    big-endian words - the code's bit 12 set (a BG tile: st_tile's tables and cache), $FFFF an empty tile (the
+    model's rule: drawn black)"""
+    md = SM.Model()
+    for name in BG_STRIPS:
+        strip = SM.load_strip(name)
+        out = bytearray(len(strip).to_bytes(2, "big"))
+        for col in strip:
+            for code, attr in col:
+                code, attr = int(code), int(attr)
+                if md.star[(code & 0x3FFF) % len(md.star)]:
+                    out += b"\xff\xff" + attr.to_bytes(2, "big")
+                else:
+                    out += (((code & 0xCFFF) | 0x1000) & 0xFFFF).to_bytes(2, "big") + attr.to_bytes(2, "big")
+        (build_dir("rtype") / ("stage_strip_%s.bin" % name)).write_bytes(bytes(out))
 
 
 def main():
