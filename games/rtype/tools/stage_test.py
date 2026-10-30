@@ -189,12 +189,12 @@ class Expected:
         self.cur, self.tiles = None, None
 
     def __call__(self, st):
-        pens = self.model.picture(st, self.lock)
         col = self.SA.pen_colours(st)
         if self.tiles is None or (col[256:] != self.tiles).any():
             self.cur = self.SA.choose_scene(col[256:], [sc[0] for sc in self.scenes], self.cur)
             self.tiles = col[256:].copy()
-        ref, pal, hpal, ctab, htab, res = self.scenes[self.cur]
+        ref, pal, hpal, ctab, htab, res, flags = self.scenes[self.cur]
+        pens = self.model.picture(st, self.lock, squeeze=bool(flags & 1))
         pidx = ctab[col].copy()
         for j, rp in enumerate(res):
             pidx[rp] = 16 - len(res) + j

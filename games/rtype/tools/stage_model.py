@@ -59,7 +59,7 @@ class Model:
         cols = ((np.arange(bx, bx + W) & 511) >> 3)
         return bool(self.star[w[np.unique(rows)][:, np.unique(cols), 0] & 0x3FFF].all())
 
-    def picture(self, st, lock):
+    def picture(self, st, lock, squeeze=False):
         """the window's pens [256, 320] (BLACK = 512: empty / display off) for a recorded state (render_test's), lock
         a Lock (updated)"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
@@ -76,7 +76,7 @@ class Model:
             b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
             out[y0:y1 + 1] = np.where(f >= 0, f, np.where(b >= 0, b, BLACK))
         bar = any(b[0] == HUD_Y for b in st["bands"])
-        self.sprites(out, objs_to_spr(st) if "objs" in st else st["spr"], HUD_Y if bar else 256)
+        self.sprites(out, objs_to_spr(st, squeeze) if "objs" in st else st["spr"], HUD_Y if bar else 256)
         return out
 
     def sprites(self, out, spr, ylim=HUD_Y):
@@ -117,7 +117,15 @@ class Model:
 _rom = []
 
 
-def objs_to_spr(st):
+def squeeze_x(x):
+    """an object's x (its record's) squeezed toward the picture's centre (stage_assets SQUEEZE_SCENES; src/stage.s
+    st_object): picture x a = x - 320 moves by -(a - 192) / 10, the quotient truncated toward 0"""
+    n = (x - 320) - 192
+    q = abs(n) // 10
+    return x - (q if n >= 0 else -q)
+
+
+def objs_to_spr(st, squeeze=False):
     """the sprite list the object records stand for (src/natives.s; as tools/logic_test.py list_check expands them)"""
     import struct
     if not _rom:
@@ -130,6 +138,8 @@ def objs_to_spr(st):
         bw, n, col, x, y = struct.unpack(">HBBhh", o[slot:slot + 8])
         if not bw:
             continue
+        if squeeze:
+            x = squeeze_x(x)
         s = slot
         for e in range(n):
             a = 0x10000 + bw + 6 * e

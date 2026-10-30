@@ -1249,8 +1249,17 @@ st_object:
 	bge	.out			; (below)
 	cmp.w	#-ST_G,d4
 	blt	.out			; (beyond the guard lines: never visible)
-	move.w	st_W,d3
-	add.w	4(a0),d3
+	move.w	4(a0),d1		; x
+	move.l	st_scn,a1
+	btst	#0,SC_FLAGS+1(a1)
+	beq.s	.nsq
+	move.w	d1,d0			; (squeezed: x moves by -(x - 320 - 192) / 10, the user's title logo at 320 pixels)
+	sub.w	#320+192,d0
+	ext.l	d0
+	divs	#10,d0
+	sub.w	d0,d1
+.nsq:	move.w	st_W,d3
+	add.w	d1,d3
 	add.w	(a2),d3
 	sub.w	#256+96,d3		; the composite's buffer x
 	; its colouring (the cache)
@@ -1659,7 +1668,8 @@ SC_HPAL		= 544
 SC_CTAB		= 576			; 4096 bytes the playfield's index of each 12-bit colour
 SC_HTAB		= 576+4096		; the status bar's
 SC_RES		= 576+8192		; a word R, 2 words the reserved pens (indices 16 - R .. 15)
-SC_SIZE		= SC_RES+6
+SC_FLAGS	= SC_RES+6		; a word: bit 0 the sprites squeezed toward the centre (st_object)
+SC_SIZE		= SC_RES+8
 SCENE_MATCH	= 192
 st_tiles:	incbin	"stage_tiles.bin"
 ; the pixel bits of each index for the colour tables (st_mktab): tiles (a long of 4 plane bytes, plane 0 the high
