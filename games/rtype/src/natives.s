@@ -800,16 +800,17 @@ ECOLL	macro
 	add.w	4(a1),d7
 	; the broad phase (es_build once a frame): with ordered boxes and proper spans the arcade's test is the overlap of
 	; the spans with the box; no overlap with any of the distinct live boxes -> no hit (the end as the arcade's)
-	tst.b	es_ok		; (port_frame and a hit clear it)
-	bne.s	.bk
+.bs:	move.b	es_ok,d4		; (0: port_frame or a hit cleared it; 1: valid; 2: an unordered box)
+	subq.b	#1,d4
+	beq.s	.bk
+	bpl	.full
 	bsr	es_build
+	bra.s	.bs
 .bk:
     ifd ES_CHECK
 	tst.b	es_rej
 	bne	.full
     endc
-	tst.b	es_full
-	bne	.full
 	cmp.w	d0,d3			; (proper spans: x + [BW] <= x <= x + [BW+2], y + [BW+4] <= y <= y + [BW+6])
 	bhi	.full
 	cmp.w	d0,d1
@@ -836,8 +837,8 @@ ECOLL	macro
 .nx:	dbf	d4,.bl
 .rej:	move.w	es_last,a1		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
 	move.w	es_lastip,d7		; the 3 ...
-	tst.w	es_last
-	bne	.rend
+	move.w	a1,d4
+	bne.s	.rend
 	move.w	$B4(a3),d0		; ... C8h / A8h by their conditions (BP: 6(sp)) ...
 	move.w	$D4(a3),d1
 	move.w	6(sp),d2
@@ -869,7 +870,6 @@ ECOLL	macro
     if \2=0
 	bsr	nat_box			; (AW; d7 kept)
     endc
-	move.w	d7,-4(a5)
 	bra	.r
 .full:
 	tst.b	$56(a3)			; 0040:F485 the ship (when its flag is clear)
@@ -943,9 +943,8 @@ k	set	k+1
 	move.w	#$F6D4,-2(a5)
 	move.w	#$476,d4
 	moveq	#0,d1
-	move.w	#$456,d7		; (the last ADD IX,20h's flags)
+	move.w	#$456,d7		; (the last ADD IX,20h's flags: the carry clear - the CLR1 CY)
 	add.w	#$20,d7
-	andi	#$FE,ccr		; (CLR1 CY)
 	NEXIT	\1,R0FAD9
 .hit:
     ifd ES_CHECK
@@ -1030,7 +1029,7 @@ leaf_posy:
 
 ; es_build: the player side's summary for nat_ecoll's broad phase, once a frame (port_frames; again after a hit):
 ; the distinct live boxes (R and B not 0: those never meet a proper span) of every box the arcade may test (the ship's when its flag is clear, the Force's and the bits',
-; A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set), es_full when a box is not ordered (L > R or
+; A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set), es_ok 2 when a box is not ordered (L > R or
 ; T > B: the broad phase off), the box tested last when nothing hits (es_last: of the 24 or the 3, else 0;
 ; es_lastb: D6h / B6h / 116h).  The calls of a frame come from the enemy loop, after the player's objects moved.
 ESB	macro				; \1 IX: its box into the list
@@ -1047,9 +1046,8 @@ ESF	macro				; \1 IX: its box when its flag [IX+1] is set (es_last, its CALL's r
 	endm
 es_build:
 	movem.l	d0-d4/a0-a1,-(sp)
-	st	es_ok
+	move.b	#1,es_ok
 	clr.w	es_n
-	clr.b	es_full
 	clr.w	es_last
 	ESB	$76			; the Force, the bits, A8h / C8h (their tests' conditions: at the call)
 	ESB	$136
@@ -1102,12 +1100,12 @@ k	set	k+1
 	swap	d2
 	cmp.w	d0,d2
 	bls.s	.o1
-	st	es_full
+	move.b	#2,es_ok
 .o1:	move.l	d1,d2
 	swap	d2
 	cmp.w	d1,d2
 	bls.s	.o2
-	st	es_full
+	move.b	#2,es_ok
 .o2:	lea	es_boxes,a1
 	move.w	es_n,d2
 	bra.s	.q
