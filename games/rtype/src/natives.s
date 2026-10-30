@@ -810,3 +810,63 @@ k	set	k+1
 .hit:	movem.l	(sp)+,d2/d6
 .fb:	jmp	R0FA94_t
 .ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:0672 / 0689: an object's x / y (24 bits: [BP+3] .. [BP+5] / [BP+7] .. [BP+9]) plus the speed AW (signed): the
+; arcade adds the odd word and carries / borrows into the high byte.  One 24-bit add here (BP even: the high and
+; middle bytes are the image word at BP+4 / BP+8, the low byte at BP+2 / BP+6); the flags are dead after the RETs
+; (every return point defines them first), AW unchanged.
+; ---------------------------------------------------------------------------------------------------------------------
+POS24	macro				; \1 the image offset of the word (BP+4 / BP+8), \2 the RET
+	btst	#0,d6
+	bne.s	.o\@
+	lea	(a4,d6.l),a0
+	move.w	\1(a0),d7
+	lsl.l	#8,d7
+	move.b	\1-2(a0),d7
+	move.w	d0,a1
+	add.l	a1,d7
+	move.b	d7,\1-2(a0)
+	lsr.l	#8,d7
+	move.w	d7,\1(a0)
+	jmp	\2
+.o\@:	jmp	\3
+	endm
+nat_posx:
+	POS24	4,R00A7F,R00A72_t
+nat_posy:
+	POS24	8,R00A96,R00A89_t
+
+; (the same as subroutines for the CALLs (tools/gen.py LEAF_CALLS): the return IP below SP written by the caller)
+LEAF24	macro				; \1 3 (x) / 7 (y): the 24 bits at [BP+\1] .. [BP+\1+2] plus AW
+	lea	(a4,d6.l),a0
+	btst	#0,d6
+	bne.s	.o\@
+	move.w	\1+1(a0),d7		; (BP even: the high bytes' word, the low byte)
+	lsl.l	#8,d7
+	move.b	\1-1(a0),d7
+	move.w	d0,a1
+	add.l	a1,d7
+	move.b	d7,\1-1(a0)
+	lsr.l	#8,d7
+	move.w	d7,\1+1(a0)
+	rts
+.o\@:	moveq	#0,d7			; (BP odd: three bytes)
+	move.b	\1+3(a0),d7
+	lsl.w	#8,d7
+	move.b	\1(a0),d7
+	lsl.l	#8,d7
+	move.b	\1+1(a0),d7
+	move.w	d0,a1
+	add.l	a1,d7
+	move.b	d7,\1+1(a0)
+	lsr.l	#8,d7
+	move.b	d7,\1(a0)
+	lsr.w	#8,d7
+	move.b	d7,\1+3(a0)
+	rts
+	endm
+leaf_posx:
+	LEAF24	3
+leaf_posy:
+	LEAF24	7

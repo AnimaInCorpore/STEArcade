@@ -40,7 +40,9 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x0EF20: "nat_tblk0", 0x0EF53: "nat_tblk8",              # a map block into the tile video RAM
            0x0EF86: "nat_tblk4", 0x0EFBB: "nat_tblkc",
            0x05408: "nat_bar1", 0x0543B: "nat_bar2", 0x05472: "nat_bar3",   # the BEAM gauge's cells
-           0x0FA94: "nat_ecoll"}                                    # an object's box against the player's side
+           0x0FA94: "nat_ecoll",                                    # an object's box against the player's side
+           0x00A72: "nat_posx", 0x00A89: "nat_posy"}                # an object's x / y plus its speed
+LEAF_CALLS = {0x00A72: "leaf_posx", 0x00A89: "leaf_posy"}   # (CALLs to these: a JSR, src/natives.s)
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 
@@ -317,6 +319,7 @@ def program(regions, cover):
                         acc_cover=acc, targets=tg, targets_seen=seen, io_cover=io, ip_table_cs=0x0040,
                         exec_counts={v30x.lin_of(*k): n for k, n in exec_.items()}, hooks={idle_lin: "main_idle"},
                         natives={} if os.environ.get("NO_NATIVES") else NATIVES,
+                        leaf_calls={} if os.environ.get("NO_NATIVES") else LEAF_CALLS,
                         hook_next={idle_lin: idle_lin}, port_in=port_in, port_out=port_out, code_limit=code_limit,
                         store_marks=None if os.environ.get("NO_MARKS") else store_marks(acc))
     return prog, vbl, raster, idle_lin

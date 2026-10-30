@@ -160,7 +160,7 @@ class Program:
     def __init__(self, name, prefix, rd, roots, exec_cover=(), acc_cover=None, targets=None, io_cover=None,
                  hooks=None, hook_next=None, natives=None, after=None, port_in=None, port_out=None, image="v30_image",
                  code_limit=None, indirect_live=True, pal_sites=None, hook_flags=ALLF, targets_seen=None,
-                 exec_counts=None, ip_table_cs=None, store_marks=None):
+                 exec_counts=None, ip_table_cs=None, store_marks=None, leaf_calls=None):
         self.name, self.prefix, self.rd = name, prefix, rd
         self.roots = list(roots)
         self.exec_cover = set(exec_cover)
@@ -172,6 +172,9 @@ class Program:
         self.store_marks = store_marks              # (pred(lin, ins), base, size, marks): after a store the pred
         #                                             picks, the byte marks[(68000 address - base) >> 8] is set when
         #                                             the address is in base .. base + size (REP: <name>_mark_range)
+        self.leaf_calls = dict(leaf_calls or {})   # (callee linear: a 68000 subroutine doing its body and RET: its
+        #                                             CALLs become a JSR, the return IP written below SP, where the
+        #                                             flags after the return are dead)
         self.io_cover = io_cover or {}
         self.hooks = dict(hooks or {})
         self.hook_next = dict(hook_next or {})
@@ -847,6 +850,13 @@ class Emitter:
 
     def emit_call(self, v, ins):
         ret = (ins.ip + ins.length) & 0xFFFF
+        leaf = self.p.leaf_calls.get(lin_of(*ins.target))
+        if leaf and not (self.live_in.get(next_lin(ins), ALLF) & CCR):
+            self.stats["leaf call"] += 1
+            self.e("move.w #$%04X,-2(a5)" % ret)
+            self.e("jsr %s" % leaf)
+            self.fallthrough(v, ins)
+            return
         self.push_word(v, "#$%04X" % ret)
         self.entries.add(next_lin(ins))
         self.e("bra %s" % self.lab(lin_of(*ins.target)))
