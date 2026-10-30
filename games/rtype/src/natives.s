@@ -799,9 +799,8 @@ ECOLL	macro
 	add.w	4(a1),d7
 	; the broad phase (es_build once a frame): with ordered boxes and proper spans the arcade's test is the overlap of
 	; the spans with the box; no overlap with any of the distinct live boxes -> no hit (the end as the arcade's)
-	move.l	port_frames,a1
-	cmpa.l	es_key,a1
-	beq.s	.bk
+	tst.b	es_ok		; (port_frame and a hit clear it)
+	bne.s	.bk
 	bsr	es_build
 .bk:
     ifd ES_CHECK
@@ -955,7 +954,7 @@ k	set	k+1
 .hok:
     endc
 	movem.l	(sp)+,d2/d6
-	clr.l	es_key			; (a hit: the game changes the player's side - the summary again)
+	clr.b	es_ok			; (a hit: the game changes the player's side - the summary again)
 .fb:	NFALL	\1,R0FA94_t
 	endm
 nat_ecoll:
@@ -1033,91 +1032,98 @@ leaf_posy:
 ; A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set), es_full when a box is not ordered (L > R or
 ; T > B: the broad phase off), the box tested last when nothing hits (es_last: of the 24 or the 3, else 0;
 ; es_lastb: D6h / B6h / 116h).  The calls of a frame come from the enemy loop, after the player's objects moved.
+ESB	macro				; \1 IX: its box into the list
+	move.w	#\1,d4
+	bsr	.box
+	endm
+ESF	macro				; \1 IX: its box when its flag [IX+1] is set (es_last, its CALL's return IP \2)
+	tst.b	\1(a3)
+	beq.s	.n\@
+	move.w	#\1,es_last
+	move.w	#\2,es_lastip
+	ESB	\1
+.n\@:
+	endm
 es_build:
-	movem.l	d0-d4/a0,-(sp)
-	move.l	port_frames,es_key
+	movem.l	d0-d4/a0-a1,-(sp)
+	st	es_ok
 	clr.w	es_n
 	clr.b	es_full
 	clr.w	es_last
-	lea	es_fixed,a0
-.f:	move.w	(a0)+,d4
-	beq.s	.fx
-	bsr	.box
-	bra.s	.f
-.fx:	tst.b	$56(a3)			; the ship: tested when its flag is clear
+	ESB	$76			; the Force, the bits, A8h / C8h (their tests' conditions: at the call)
+	ESB	$136
+	ESB	$156
+	ESB	$F6
+	ESB	$116
+	ESB	$A8
+	ESB	$C8
+	tst.b	$56(a3)			; the ship: tested when its flag is clear
 	bne.s	.s
-	move.w	#$56,d4
-	bsr	.box
+	ESB	$56
 .s:	move.w	#$116,es_lastb
 	move.w	#$F4B8,es_lastbip
 	tst.b	$B6(a3)
 	beq.s	.b6
-	move.w	#$B6,d4
-	move.w	d4,es_lastb
+	move.w	#$B6,es_lastb
 	move.w	#$F4CB,es_lastbip
-	bsr	.box
+	ESB	$B6
 .b6:	tst.b	$D6(a3)
 	beq.s	.d6
-	move.w	#$D6,d4
-	move.w	d4,es_lastb
+	move.w	#$D6,es_lastb
 	move.w	#$F4D9,es_lastbip
-	bsr	.box
-.d6:	move.w	#$4D6,d4		; the 3, the 24
-.t3:	tst.b	(a3,d4.w)
-	beq.s	.n3
-	move.w	d4,es_last
-	move.w	#$F557,es_lastip
-	bsr	.box
-.n3:	add.w	#$20,d4
-	cmp.w	#$4D6+3*$20,d4
-	bne.s	.t3
-	move.w	#$176,d4
-.t24:	tst.b	(a3,d4.w)
-	beq.s	.n24
-	move.w	d4,es_last
-	move.w	#$F56F,es_lastip
-	bsr	.box
-.n24:	add.w	#$20,d4
-	cmp.w	#$176+24*$20,d4
-	bne.s	.t24
-	movem.l	(sp)+,d0-d4/a0
+	ESB	$D6
+.d6:
+k	set	0				; the 3, the 24
+	rept	3
+	ESF	$4D6+$20*k,$F557
+k	set	k+1
+	endr
+k	set	0
+	rept	24
+	ESF	$176+$20*k,$F56F
+k	set	k+1
+	endr
+	tst.w	es_last			; (no slot: with [B4h] and [D4h] 0 the arcade tests C8h last - BP is never 0)
+	bne.s	.x
+	move.w	$B4(a3),d0
+	or.w	$D4(a3),d0
+	bne.s	.x
+	move.w	#$C8,es_last
+	move.w	#$F503,es_lastip
+.x:	movem.l	(sp)+,d0-d4/a0-a1
 	rts
-.box:	move.l	d4,-(sp)		; the box at IX d4 into the list (not when dead: R or B 0; once)
-	move.l	a0,-(sp)
-	lea	(a3,d4.w),a1
-	movem.w	2(a1),d0-d3		; L R T B
-	cmp.w	d1,d0
+.box:	movem.l	2(a3,d4.w),d0-d1	; the box at IX d4 into the list (not when dead: R or B 0; once):
+	tst.w	d0			; d0 L:R, d1 T:B
+	beq.s	.bx
+	tst.w	d1
+	beq.s	.bx
+	move.l	d0,d2			; (L > R or T > B: the overlap is not the arcade's test)
+	swap	d2
+	cmp.w	d0,d2
 	bls.s	.o1
-	st	es_full			; (L > R: the overlap test is not the arcade's)
-.o1:	cmp.w	d3,d2
+	st	es_full
+.o1:	move.l	d1,d2
+	swap	d2
+	cmp.w	d1,d2
 	bls.s	.o2
 	st	es_full
-.o2:	tst.w	d1
-	beq.s	.bx
-	tst.w	d3
-	beq.s	.bx
-	lea	es_boxes,a0
-	move.w	es_n,d4
+.o2:	lea	es_boxes,a1
+	move.w	es_n,d2
 	bra.s	.q
-.ql:	cmp.w	(a0),d0
+.ql:	cmp.l	(a1)+,d0
 	bne.s	.qn
-	cmp.w	2(a0),d1
-	bne.s	.qn
-	cmp.w	4(a0),d2
-	bne.s	.qn
-	cmp.w	6(a0),d3
+	cmp.l	(a1),d1
 	beq.s	.bx			; (the same box)
-.qn:	addq.l	#8,a0
-.q:	dbf	d4,.ql
-	movem.w	d0-d3,(a0)
+.qn:	addq.l	#4,a1
+.q:	dbf	d2,.ql
+	move.l	d0,(a1)+
+	move.l	d1,(a1)
 	addq.w	#1,es_n
-.bx:	move.l	(sp)+,a0
-	move.l	(sp)+,d4
-	rts
-es_fixed:	dc.w	$76,$136,$156,$F6,$116,$A8,$C8,0
+.bx:	rts
 
 	section bss,bss
-es_key:		ds.l	1
+es_ok:		ds.b	1
+	even
 es_n:		ds.w	1
 es_boxes:	ds.w	4*40
 es_last:	ds.w	1

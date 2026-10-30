@@ -3,6 +3,9 @@
 #
 #   games/rtype/tools/bench.sh [hatari items ...]          e.g. shot@20 tap:06@25 tap:02@27 down:57@30 shot@60 up:57@61
 #   EXTRA="-D PIC_EVERY=3" WAIT=200 games/rtype/tools/bench.sh ...
+#   FAST=true NOESC=1 games/rtype/tools/bench.sh   (Hatari's fast forward: the counters are emulated VBLs, so the
+#                                                same numbers sooner; NOESC: no Esc after the items - for PLAYBACK
+#                                                runs, which quit at the end of their inputs)
 #   MEMSIZE=4 games/rtype/tools/bench.sh ...    (Hatari ST RAM in MB, default 14: the stage-renderer test builds are
 #                                                larger than a 4 MB STE; R-Type only)
 #
@@ -21,7 +24,7 @@ rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo $BENCH/BORDERS.BIN
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
 (cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-14} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
-  --sound off --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
+  --sound off --fast-forward ${FAST:-false} --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
 HP=$!
 START=$SECONDS
 FIFO=$BENCH/cmd.fifo
@@ -47,7 +50,7 @@ for ITEM in "$@"; do
   esac
 done
 sleep 1
-if kill -0 $HP 2>/dev/null && [ ! -f $BENCH/CRASH.TXT ]; then
+if [ -z "$NOESC" ] && kill -0 $HP 2>/dev/null && [ ! -f $BENCH/CRASH.TXT ]; then
   printf 'hatari-event keypress 01\n' > $FIFO
 fi
 while [ $((SECONDS - START)) -lt ${WAIT:-400} ]; do
