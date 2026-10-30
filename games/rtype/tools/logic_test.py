@@ -415,7 +415,10 @@ def main():
         print("pictures: %d, cycles (CPU + Blitter) median %d, 10%% %d, 90%% %d, max %d" % (
             len(a), np.median(a), np.percentile(a, 10), np.percentile(a, 90), a.max()))
         if "st_switches" in sym:
-            print("scene switches: %d" % mem.r32(sym["st_switches"]))
+            print("scene switches: %d; status bar whole checks %d, cells drawn %d; colour rows %d" % (
+                mem.r32(sym["st_switches"]), mem.r32(sym["st_nbarfull"]), mem.r32(sym["st_nbarcells"]),
+                mem.r32(sym["st_nrows"])))
+            print("sprite colourings %d, pool resets %d" % (mem.r32(sym["st_nbake"]), mem.r32(sym["st_npool"])))
         tot = sum(rprof.values())
         for k, v in rprof.most_common(20):
             print("  %-22s %5.1f%%" % (k, 100.0 * v / tot))

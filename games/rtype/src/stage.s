@@ -39,7 +39,7 @@ ST_NBUF		= 3
 ST_DMG		= 600			; erase rectangles a buffer (more: the whole buffer copied)
 ST_LOG		= 2048			; clean-buffer changes kept (a power of 2)
 ST_POOL		= 1024*1024		; the sprite colour cache
-ST_HASH		= 4096
+ST_HASH		= 16384
 ST_TCN		= 4096			; tile conversions cached
 ST_BARLB	= 160			; the status bar's image: 320 x 16
 ST_HUDY		= 240
@@ -746,11 +746,28 @@ st_vram:
 	move.l	-4(a0),-4(a1)
 	clr.b	(a2)			; (composed again: its column looked at again)
 	clr.b	(a3,d2.w)
-	move.w	d6,d0			; (a row of the status bar: st_bardraw looks)
+	move.w	d6,d0			; (a cell of the status bar: st_bardraw draws it)
 	sub.w	st_barpos,d0
 	and.w	#63,d0
 	cmp.w	#2,d0
 	bhs.s	.cs
+	mulu	#40,d0
+	move.w	d2,d1
+	sub.w	st_barpos+2,d1
+	and.w	#63,d1
+	cmp.w	#40,d1
+	bhs.s	.cs
+	add.w	d1,d0
+	lea	st_bardc,a1
+	st	(a1,d0.w)
+	lea	st_fgcopy,a1		; (a1 again: the copy's next long)
+	move.w	d6,d0
+	lsl.w	#8,d0
+	add.w	d0,a1
+	move.w	d2,d0
+	addq.w	#1,d0
+	lsl.w	#2,d0
+	add.w	d0,a1
 	st	st_bardirty
 .cs:	addq.l	#1,a2
 	addq.w	#1,d2
@@ -1140,7 +1157,9 @@ st_copy:
 	bls.s	.go
 	move.w	d1,d2
 .go:	move.w	d2,BLT_YC.w
+	ifnd	ST_NOCOPY
 	move.b	#$C0,BLT_CTRL.w
+	endc
 	sub.w	d2,d1
 	bne.s	.p
 	movem.l	(sp)+,d0-d5
@@ -1348,7 +1367,8 @@ st_bake:
 	bne.s	.miss
 	move.l	6(a0),a3
 	rts
-.miss:	move.l	a2,(a0)
+.miss:	addq.l	#1,st_nbake
+	move.l	a2,(a0)
 	move.w	d0,4(a0)
 	move.w	6(a2),d5		; NS
 	move.l	st_poolp,a3		; (the pool: the addresses, then the plane words)
@@ -1368,6 +1388,7 @@ st_bake:
 	add.l	a1,d1
 	cmp.l	#st_pool+ST_POOL,d1
 	blo.s	.room
+	addq.l	#1,st_npool
 	movem.l	d0/a0,-(sp)		; (full: everything coloured again)
 	lea	st_hash,a1
 	move.w	#ST_HASH*10/4-1,d1
@@ -1438,7 +1459,30 @@ st_bardraw:
 	bne.s	.mv
 	tst.b	st_bardirty
 	beq	.x			; (nothing of the bar changed)
+	sf	st_bardirty		; only the cells the game changed (st_vram: st_bardc)
+	lea	st_bardc,a4
+	moveq	#0,d5
+.dr:	moveq	#0,d6
+.dc:	tst.b	(a4)
+	beq.s	.dn
+	clr.b	(a4)
+	movem.l	d5-d6/a4,-(sp)
+	bsr	st_barcell
+	movem.l	(sp)+,d5-d6/a4
+.dn:	addq.l	#1,a4
+	addq.w	#1,d6
+	cmp.w	#40,d6
+	blo.s	.dc
+	addq.w	#1,d5
+	cmp.w	#2,d5
+	blo.s	.dr
+	rts
 .mv:	sf	st_bardirty
+	addq.l	#1,st_nbarfull
+	lea	st_bardc,a4		; (everything checked)
+	moveq	#80/4-1,d2
+.cl:	clr.l	(a4)+
+	dbf	d2,.cl
 	move.b	st_hver,st_barhv
 	move.w	d0,st_barpos
 	move.w	d1,st_barpos+2
@@ -1491,6 +1535,52 @@ st_bardraw:
 	cmp.w	#2,d5
 	blo	.r
 .x:	rts
+
+; st_barcell: d5 = the bar's row (0-1), d6 = its column: the cell drawn, its key set
+st_barcell:
+	addq.l	#1,st_nbarcells
+	move.w	st_barpos,d0
+	add.w	d5,d0
+	and.w	#63,d0
+	lsl.w	#6,d0
+	move.w	st_barpos+2,d1
+	add.w	d6,d1
+	and.w	#63,d1
+	add.w	d1,d0
+	lsl.w	#2,d0
+	lea	v30_image+$D0000,a0
+	move.w	(a0,d0.w),d1		; the code
+	moveq	#15,d2
+	and.w	2(a0,d0.w),d2		; the colour
+	move.w	d1,d3
+	swap	d3
+	move.w	d2,d3
+	lsl.w	#8,d3
+	move.b	st_hver,d3
+	move.w	d5,d0
+	mulu	#40,d0
+	add.w	d6,d0
+	lsl.w	#2,d0
+	lea	st_barkey,a4
+	move.l	d3,(a4,d0.w)
+	bsr	st_bartile
+	move.l	st_bar,a1
+	move.w	d5,d0
+	mulu	#8*ST_BARLB,d0
+	add.w	d0,a1
+	move.w	d6,d0
+	lsr.w	#1,d0
+	lsl.w	#3,d0
+	add.w	d0,a1
+	moveq	#1,d0
+	and.w	d6,d0
+	add.w	d0,a1
+	moveq	#8-1,d0
+.w:	move.l	(a0)+,d1
+	movep.l	d1,0(a1)
+	lea	ST_BARLB(a1),a1
+	dbf	d0,.w
+	rts
 
 ; st_bartile: d1 = the code word, d2 = the colour row: a0 = 8 longs (movep order) in the status bar's indices
 ; (st_htt / st_httf: the status bar's tables)
@@ -1627,6 +1717,10 @@ st_switches:	ds.l	1		; (scene switches)
 st_npens:	ds.l	1		; (pens looked up)
 st_nscene:	ds.l	1		; (scene checks)
 st_nrows:	ds.l	1		; (colour rows' tables made)
+st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
+st_nbarcells:	ds.l	1
+st_nbake:	ds.l	1		; (sprite colourings, pool resets)
+st_npool:	ds.l	1
 st_logn:	ds.l	1
 m72r_shown:	ds.w	1
 m72r_prev:	ds.w	1
@@ -1693,6 +1787,7 @@ st_fgcopy:	ds.b	$4000
 st_bartmp:	ds.l	8
 st_mkr:		ds.l	16
 st_barkey:	ds.l	80		; (the bar's cells as drawn: code << 16 | colour << 8 | st_hver)
+st_bardc:	ds.b	80		; (the bar's cells the game changed)
 st_hrowchg:	ds.l	1
 st_htt:		ds.l	256*16
 st_httf:	ds.l	256*16
