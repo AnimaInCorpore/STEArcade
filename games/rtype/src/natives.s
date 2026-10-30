@@ -1410,3 +1410,9 @@ nat_he601:
 .o:	jmp	R0EA7C
 .w:	jmp	R0EA86
 .tr:	jmp	R0EA01_t
+
+; 0040:F6DA: the larger enemies' collision tests (their hits clear the player's shots' flags outside nat_ecoll): the
+; broad phase's summary built again after it.
+nat_eco2:
+	clr.b	es_ok
+	jmp	R0FADA_t

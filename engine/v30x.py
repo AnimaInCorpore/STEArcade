@@ -161,7 +161,7 @@ class Program:
                  hooks=None, hook_next=None, natives=None, after=None, port_in=None, port_out=None, image="v30_image",
                  code_limit=None, indirect_live=True, pal_sites=None, hook_flags=ALLF, targets_seen=None,
                  exec_counts=None, ip_table_cs=None, store_marks=None, leaf_calls=None,
-                 inline_calls=False):
+                 inline_calls=False, byte_parity=None):
         self.name, self.prefix, self.rd = name, prefix, rd
         self.roots = list(roots)
         self.exec_cover = set(exec_cover)
@@ -174,6 +174,9 @@ class Program:
         #                                             picks, the byte marks[(68000 address - base) >> 8] is set when
         #                                             the address is in base .. base + size (REP: <name>_mark_range)
         self.inline_calls = inline_calls
+        self.byte_parity = byte_parity or {}       # (linear: the set of parities (odd?) the coverage saw the
+        #                                             instruction's byte accesses at: one only -> its byte operand
+        #                                             [reg + d] at a fixed image offset, as the word operands)
         self.leaf_calls = dict(leaf_calls or {})   # (callee linear: (a 68000 subroutine doing its body and RET,
         #                                             exact flags): its CALLs become a JSR, the return IP written below
         #                                             SP - where the flags after the return are dead unless exact)
@@ -408,6 +411,12 @@ class Emitter:
     def odd_site(self, v):
         return any(odd for rw, w, reg, odd in self.p.acc_cover.get(v, ()))
 
+    def always_odd(self, v):
+        """the coverage saw the site's word accesses only at odd addresses (no run-time parity test: as an even word
+        operand that the coverage never saw odd is taken as even)"""
+        par = {odd for rw, w, reg, odd in self.p.acc_cover.get(v, ()) if w == 2}
+        return par == {True}
+
     def odd_word(self, v, o, w):
         """a word memory operand that may be at an odd address: a static odd one, or a site the coverage saw odd"""
         if w != 2 or o[0] != "m":
@@ -535,6 +544,20 @@ class Emitter:
                 self.e("lea %d(%s,%s.l),a0" % (sd, base, rs[-1]))
                 return "(a0)"
             return "%d(%s,%s.l)" % (sd, base, rs[-1]) if sd else "(%s,%s.l)" % (base, rs[-1])
+        if w == 1 and regs == (BP,) and not wide and len(self.p.byte_parity.get(v, ())) == 1:
+            # ((reg + d) ^ 1 = reg + d - 1 at odd addresses, reg + d + 1 at even ones)
+            self.stats["byte parity"] += 1
+            sd = s16(d) + (-1 if True in self.p.byte_parity[v] else 1)
+            if absb:
+                self.e("lea %s,a0" % absb)
+                base = "a0"
+            if not -128 <= sd <= 127:
+                self.e("lea %d(%s),a0" % (sd, base))
+                base, sd = "a0", 0
+            if in_a0:
+                self.e("lea %d(%s,%s.l),a0" % (sd, base, rs[0]))
+                return "(a0)"
+            return "%d(%s,%s.l)" % (sd, base, rs[0]) if sd else "(%s,%s.l)" % (base, rs[0])
         # the offset in d7 (a byte: offset ^ 1)
         if w == 1 and len(rs) == 1 and not (d & 1 or wide):
             self.e("moveq #1,d7")                       # (the registers' upper words are 0)
@@ -616,11 +639,12 @@ class Emitter:
         _, regs, disp, seg = o
         lo = self.mem(v, ins, o, 1, in_a0=True)       # a0 = the low byte's 68000 address (V30 a ^ 1)
         odd, done = self.new_label(), self.new_label()
-        self.e("move.l a0,d7")
-        self.e("btst #0,d7")
-        self.e("beq.s %s" % odd)                      # (68000 even: V30 odd)
-        self.e("move.w -1(a0),d7")
-        self.e("bra.s %s" % done)
+        if not self.always_odd(v):
+            self.e("move.l a0,d7")
+            self.e("btst #0,d7")
+            self.e("beq.s %s" % odd)                  # (68000 even: V30 odd)
+            self.e("move.w -1(a0),d7")
+            self.e("bra.s %s" % done)
         self.lines.append(odd + ":")
         self.e("move.b 3(a0),-(sp)")                  # (V30 a odd: low at a - 1, high at a + 2 in the image)
         self.e("move.w (sp)+,d7")
@@ -635,11 +659,12 @@ class Emitter:
             self.e("move.w %s,-(sp)" % src)
         self.mem(v, ins, o, 1, in_a0=True)            # a0 = image + (a ^ 1)
         odd, done = self.new_label(), self.new_label()
-        self.e("move.l a0,d7")
-        self.e("btst #0,d7")
-        self.e("beq.s %s" % odd)
-        self.e("move.w (sp),-1(a0)")
-        self.e("bra.s %s" % done)
+        if not self.always_odd(v):
+            self.e("move.l a0,d7")
+            self.e("btst #0,d7")
+            self.e("beq.s %s" % odd)
+            self.e("move.w (sp),-1(a0)")
+            self.e("bra.s %s" % done)
         self.lines.append(odd + ":")
         self.e("move.b 1(sp),(a0)")
         self.e("move.b (sp),3(a0)")
@@ -1778,11 +1803,12 @@ class Emitter:
         self.stats["odd word site"] += 1
         self.mem(v, ins, o, 1, in_a0=True)            # a0 = image + (a ^ 1)
         odd, done = self.new_label(), self.new_label()
-        self.e("move.l a0,d7")
-        self.e("btst #0,d7")
-        self.e("beq.s %s" % odd)
-        op("-1(a0)")
-        self.e("bra.s %s" % done)
+        if not self.always_odd(v):
+            self.e("move.l a0,d7")
+            self.e("btst #0,d7")
+            self.e("beq.s %s" % odd)
+            op("-1(a0)")
+            self.e("bra.s %s" % done)
         self.lines.append(odd + ":")
         self.e("move.b 3(a0),-(sp)")
         self.e("move.w (sp)+,d7")

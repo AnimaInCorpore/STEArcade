@@ -44,7 +44,8 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x00A72: "nat_posx", 0x00A89: "nat_posy",                # an object's x / y plus its speed
            0x08DB0: "nat_h89b0",                                    # the cave crawler's handler
            0x05701: "nat_prow1", 0x05730: "nat_prow2",              # the palette rows' fades (the scan)
-           0x0EA01: "nat_he601"}                                    # an enemy bullet's handler
+           0x0EA01: "nat_he601",
+           0x0FADA: "nat_eco2"}                                     # (the other collision tests: the summary again)                                    # an enemy bullet's handler
 # CALLs to these: a JSR (src/natives.s); (label, exact flags: usable where the flags after the RET are live)
 LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
               0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
@@ -61,6 +62,8 @@ def load_cover():
     tg = collections.defaultdict(set)
     io = collections.defaultdict(set)
     segs = collections.defaultdict(set)
+    bpar = collections.defaultdict(set)
+    complete = True
     for f in files:
         d = pickle.load(open(f, "rb"))
         exec_.update(d["exec"])
@@ -72,7 +75,11 @@ def load_cover():
             io[v30x.lin_of(cs, ip)] |= s
         for (cs, ip), s in d["segs"].items():
             segs[v30x.lin_of(cs, ip)] |= s
-    return exec_, acc, tg, io, segs
+        for (cs, ip), s in d.get("bpar", {}).items():
+            bpar[v30x.lin_of(cs, ip)] |= s
+        complete = complete and "bpar" in d
+    # (the byte parities only when every coverage file has them: one without could have seen the other parity)
+    return exec_, acc, tg, io, segs, (bpar if complete else {})
 
 
 def code_limit(lin):
@@ -237,7 +244,7 @@ def stored_handlers(rom, code_ins, icall_sites):
 
 
 def program(regions, cover):
-    exec_, acc, tg, io, segs = cover
+    exec_, acc, tg, io, segs, bpar = cover
     rom = regions["main"]
     rd = lambda a: rom[a & 0xFFFFF]
     from v30dec import decode
@@ -327,6 +334,7 @@ def program(regions, cover):
                         natives={} if os.environ.get("NO_NATIVES") else NATIVES,
                         leaf_calls={} if os.environ.get("NO_NATIVES") else LEAF_CALLS,
                         inline_calls=not os.environ.get("NO_INLINE"),
+                        byte_parity={} if os.environ.get("NO_BYTE_PARITY") else bpar,
                         hook_next={idle_lin: idle_lin}, port_in=port_in, port_out=port_out, code_limit=code_limit,
                         store_marks=None if os.environ.get("NO_MARKS") else store_marks(acc))
     return prog, vbl, raster, idle_lin

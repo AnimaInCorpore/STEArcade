@@ -8,6 +8,7 @@
 #                                                runs, which quit at the end of their inputs)
 #   REPLAY=8:3000:8000 FAST=true NOESC=1 EXTRA="-D STAGE -D INVULN -D PLAYBACK -D DEBUG" games/rtype/tools/bench.sh
 #                                                (a replay point: the game from seed 8's arcade frame 3000 to 8000)
+#   HATARI_ARGS="--avirecord true --avi-file /abs/path.avi" games/rtype/tools/bench.sh shot@40   (a video)
 #   MEMSIZE=4 games/rtype/tools/bench.sh ...    (Hatari ST RAM in MB, default 14: the stage-renderer test builds are
 #                                                larger than a 4 MB STE; R-Type only)
 #
@@ -31,7 +32,7 @@ rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo $BENCH/BORDERS.BIN
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
 (cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-14} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
-  --sound off --fast-forward ${FAST:-false} --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
+  --sound off --fast-forward ${FAST:-false} --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log $HATARI_ARGS RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
 HP=$!
 START=$SECONDS
 FIFO=$BENCH/cmd.fifo

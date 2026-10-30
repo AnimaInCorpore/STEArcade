@@ -8,6 +8,7 @@ button held more often: the stages go by (R-Type has no stage select).  Records,
   exec      Counter of (cs, ip) executed (a REP instruction once per chunk)
   acc       {(cs, ip): set of (r|w, width 1|2, region, odd address?)} the data accesses (the instruction's own fetches
             excluded); regions: rom ram spr pal fg bg snd none
+  bpar      {(cs, ip): set of the byte accesses' address parities (odd?)} (the translator's byte operands)
   addrs     {(cs, ip): set of linear addresses} for the accesses outside ROM and work RAM (at most 64 a site)
   segs      {(cs, ip): set of (DS0, DS1, SS)} the segment registers at the instruction (at most 16)
   io        {(cs, ip): set of (r|w, width, port)}
@@ -56,7 +57,7 @@ def instrument(m):
     rec = dict(exec=collections.Counter(), acc=collections.defaultdict(set), addrs=collections.defaultdict(set),
                segs=collections.defaultdict(set), io=collections.defaultdict(set),
                targets=collections.defaultdict(set), ints=collections.Counter(), df=collections.defaultdict(set),
-               regs=collections.defaultdict(set))
+               regs=collections.defaultdict(set), bpar=collections.defaultdict(set))
     accs = []
     rd, wr, wr16, io_rd, io_wr, io_wr16 = m.main_rd, m.main_wr, m.main_wr16, m.io_rd, m.io_wr, m.io_wr16
     c.rd_op = rd
@@ -106,6 +107,8 @@ def instrument(m):
                 continue
             reg = region(a)
             rec["acc"][key].add((rw, w, reg, bool(a & 1) and w == 2))
+            if w == 1:
+                rec["bpar"][key].add(bool(a & 1))
             if reg not in ("rom", "ram"):
                 ad = rec["addrs"][key]
                 if len(ad) < 64:
