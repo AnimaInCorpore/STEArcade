@@ -1183,10 +1183,15 @@ PROBE	macro				; \1 the direction bit, \2 4 (x) / 8 (y), \3 the offset, \4 the l
 	cmp.w	#$DFC,d0
 	bcs.s	.n\@
 	subq.b	#1,$1F(a0)		; [BP+1Eh]
-	move.w	#\5,d0
-	move.w	#\7,-2(a5)
-	jsr	\6
-	lea	(a4,d6.l),a0
+	move.w	#\5,d0			; AW: the speed
+	move.w	#\7,-2(a5)		; (the CALL of 0040:0672 / 0689: \6 inline, BP even)
+	move.w	\2(a0),d7		; the 24 bits at [BP+\2-1] .. [BP+\2+1] plus the speed
+	lsl.l	#8,d7
+	move.b	\2-2(a0),d7
+	add.l	#\5-((\5&$8000)<<1),d7
+	move.b	d7,\2-2(a0)
+	lsr.l	#8,d7
+	move.w	d7,\2(a0)
 .n\@:
 	endm
 
