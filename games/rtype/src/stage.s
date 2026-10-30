@@ -87,8 +87,21 @@ m72r_init:
 	bne.s	.d1
 	moveq	#1,d1
 .d1:	lsr.w	#1,d0
+	move.l	d0,d2
 	lsl.l	#2,d0
 	move.l	d1,(a1,d0.l)
+	lsl.l	#4,d2			; (st_dt2: the record, no colouring yet, the 64 KB test's H * ST_LB + 64)
+	lea	st_dt2,a2
+	add.l	d2,a2
+	move.l	d1,(a2)
+	move.w	#$FFFF,8(a2)
+	cmp.l	#1,d1
+	beq.s	.d
+	move.l	d1,a3
+	move.w	4(a3),d2
+	mulu	#ST_LB,d2
+	add.w	#64,d2
+	move.w	d2,10(a2)
 	bra.s	.d
 .dd:	move.l	#$FFFFFFFF,d0
 	lea	st_rtgt,a0		; (no row's target known: every row read at the first picture)
@@ -1130,7 +1143,7 @@ w	set	w+1
 ; ======================================================================================================================
 ; Sprites: the object records from the last to the first
 ; ======================================================================================================================
-st_sprites:
+st_sprites_sq:				; (the squeezed scenes: st_object for each object)
 	move.w	#$0203,BLT_HOP.w
 	move.w	#2,BLT_SXI.w		; (the plane words of a piece's row, the planes in order: the source runs on)
 	move.w	#2,BLT_SYI.w
@@ -1173,6 +1186,184 @@ st_sprites:
 	cmp.w	#$C0,d7
 	bge.s	.o
 .x:	rts
+
+; st_sprites: the fast loop (not squeezed): the sprite code's registers set once (a1 END1, a6 END3, a5 YC, a2 CTRL,
+; d1 4, d2 the start, d4 a line), d5 the window st_W, d6 the erase rectangles' pointer, d7 the slot - the code keeps
+; them (it uses d0, a0, a3, a4); st_obj2 a record.  The rectangles' count once at the end (at most 112 objects).
+st_sprites:
+	move.l	st_scn,a0
+	btst	#0,SC_FLAGS+1(a0)
+	bne	st_sprites_sq
+	movem.l	d5-d6,-(sp)		; (the caller's)
+	move.w	#$0203,BLT_HOP.w
+	move.w	#2,BLT_SXI.w
+	move.w	#2,BLT_SYI.w
+	move.w	#8,BLT_DXI.w
+	move.w	#$FFFF,BLT_END2.w
+	move.w	st_draw,d0
+	add.w	d0,d0
+	lea	st_dmgn,a0
+	add.w	d0,a0
+	move.l	a0,st_dmgnp
+	mulu	#ST_DMG*8/2,d0
+	lea	st_dmg,a0
+	add.l	d0,a0
+	move.l	a0,d6
+	move.l	a0,st_dmg0
+	move.w	st_W,d5
+	lea	BLT_END1.w,a1
+	lea	BLT_END3.w,a6
+	lea	BLT_YC.w,a5
+	lea	BLT_CTRL.w,a2
+	moveq	#4,d1
+	moveq	#-$40,d2
+	move.w	#ST_LB,d4
+	move.w	#$3F8,d7		; the fixed slots ($3F8 .. $3C0: under the others), then the list from its end
+.f:	lea	m72_objs,a0
+	tst.w	(a0,d7.w)
+	beq.s	.fn
+	add.w	d7,a0
+	bsr	st_obj2
+.fn:	subq.w	#8,d7
+	cmp.w	#$3C0,d7
+	bhs.s	.f
+	move.w	m72_objs_end,d7
+	cmp.w	#$3C0,d7
+	bls.s	.e
+	move.w	#$3C0,d7
+.e:	subq.w	#8,d7
+	cmp.w	#$C0,d7
+	blt.s	.x
+.o:	lea	m72_objs,a0
+	tst.w	(a0,d7.w)
+	beq.s	.on
+	add.w	d7,a0
+	bsr	st_obj2
+.on:	subq.w	#8,d7
+	cmp.w	#$C0,d7
+	bge.s	.o
+.x:	move.l	d6,d0			; the rectangles' count
+	sub.l	st_dmg0,d0
+	lsr.l	#3,d0
+	move.l	st_dmgnp,a0
+	move.w	d0,(a0)
+	movem.l	(sp)+,d5-d6
+	rts
+
+; st_obj2: a0 = the record (BW, entries, colour, x, y): as st_object (see there), with the loop's registers; scratch
+; d0, d3, a0, a3, a4 (and the stack).
+st_obj2:
+    ifd SIM
+	addq.l	#1,st_nobj
+    endc
+	moveq	#0,d0
+	move.w	(a0),d0
+	lsr.w	#1,d0
+	lsl.l	#4,d0
+	lea	st_dt2,a3
+	add.l	d0,a3			; its entry: the record, the last colouring (data, key), H * ST_LB + 64
+	move.l	(a3),d0
+	beq	.unknown
+	subq.l	#1,d0
+	beq	.out			; (a star, an empty one)
+	addq.l	#1,d0
+	move.l	d0,a4			; the whole sprite's record
+	move.w	#384,d0			; the top line: 384 - y + OY
+	sub.w	6(a0),d0
+	add.w	2(a4),d0
+	move.w	d0,d3
+	add.w	4(a4),d3
+	ble	.out			; (above the picture)
+	cmp.w	#ST_PL,d0
+	bge	.out			; (below)
+	cmp.w	#-ST_G,d0
+	blt	.out
+	move.w	4(a0),d3		; x relative to the window: x + OX - 352
+	add.w	(a4),d3
+	sub.w	#256+96,d3
+	add.w	6(a4),d3
+	ble	.out			; (wholly left)
+	sub.w	6(a4),d3
+	cmp.w	#320,d3
+	bge	.out			; (right)
+	add.w	d5,d3			; the buffer x
+    ifd SIM
+	addq.l	#1,st_ndrawn
+    endc
+	move.w	d0,-(sp)		; (the top line, x)
+	move.w	d3,-(sp)
+	moveq	#15,d3			; the colour: its plane words (the entry's last colouring, else st_bake)
+	and.b	3(a0),d3
+	lea	st_ver,a0
+	moveq	#0,d0
+	move.b	(a0,d3.w),d0
+	lsl.w	#4,d0
+	or.w	d3,d0			; the key: version << 4 | colour
+	cmp.w	8(a3),d0
+	bne.s	.miss
+	move.l	4(a3),BLT_SRC.w
+	bra.s	.hit
+.miss:	movem.l	d0-d2/d4/a1-a6,-(sp)
+	moveq	#15,d2
+	and.w	d3,d2
+	move.l	a4,a2
+	bsr	st_bake			; -> a3
+	move.l	a3,d3
+	movem.l	(sp)+,d0-d2/d4/a1-a6
+	move.l	d3,4(a3)
+	move.w	d0,8(a3)
+	move.l	d3,BLT_SRC.w
+.hit:	move.l	a3,a0			; (the entry)
+	move.w	(sp)+,d3		; x
+	move.w	(sp)+,d0		; the top line
+	add.w	#ST_G,d0		; the destination: the line, the first word
+	mulu	d4,d0
+	add.l	st_dbuf,d0
+	move.w	d3,-(sp)
+	asr.w	#4,d3
+	lsl.w	#3,d3
+	ext.l	d3
+	add.l	d3,d0
+	move.l	d6,a3			; the erase rectangle: offset, words a line ((x & 15) + W - 1) / 16 + 1 groups, H
+	move.l	d0,d3
+	sub.l	st_dbuf,d3
+	move.l	d3,(a3)+
+	move.w	(sp),d3
+	and.w	#15,d3
+	add.w	6(a4),d3
+	subq.w	#1,d3
+	lsr.w	#4,d3
+	addq.w	#1,d3
+	lsl.w	#2,d3
+	move.b	d3,(a3)+
+	move.b	5(a4),(a3)+
+	clr.w	(a3)+
+	move.l	a3,d6
+	move.w	10(a0),d3		; (a 64 KB crossing: the long-destination code)
+	add.w	d0,d3
+	scs	d3
+	move.w	d3,a3
+	move.w	(sp)+,d3		; the shift's stream
+	and.w	#15,d3
+	lsl.w	#2,d3
+	move.l	24(a4,d3.w),a0
+	move.w	a3,d3
+	tst.b	d3
+	bne.s	.long
+	move.l	12(a4),-(sp)		; the code
+	move.l	d0,BLT_DST.w		; (the high word; the code writes the low word)
+	lea	BLT_DYI.w,a3
+	lea	BLT_DST+2.w,a4
+	rts				; (into the code: it returns to the loop)
+.long:	addq.l	#1,st_nlong
+	move.l	16(a4),-(sp)
+	move.l	d0,a3
+	lea	BLT_DST.w,a4
+	rts
+.out:	rts
+.unknown:
+	addq.l	#1,st_unknown
+	rts
 
 ; st_object: a0 = the record (BW, entries, colour, x, y): its whole sprite (tools/stage_sprites.py: OX, OY, H, W,
 ; its plane bytes / 8, its groups G, the code (word / long destination), its pens, 16 streams (a shift each), G x (class,
@@ -1315,6 +1506,22 @@ st_object:
 ; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = its plane words in this colour (cached: the key
 ; is the record, the colour and the row's version).  A piece's row: 16 pixels -> its 4 plane words; 32 -> the planes
 ; in order, each its 2 words (the source of a pass runs on).
+; st_dt2inv: every st_dt2 entry's colouring forgotten (the colour pool starts again)
+st_dt2inv:
+	movem.l	d0/a0-a1,-(sp)
+	lea	st_defs,a0
+.l:	moveq	#0,d0
+	move.w	(a0)+,d0
+	beq.s	.x
+	addq.l	#4,a0
+	lsr.w	#1,d0
+	lsl.l	#4,d0
+	lea	st_dt2,a1
+	move.w	#$FFFF,8(a1,d0.l)
+	bra.s	.l
+.x:	movem.l	(sp)+,d0/a0-a1
+	rts
+
 st_bake:
 	lea	st_ver,a0
 	moveq	#0,d0
@@ -1345,6 +1552,7 @@ st_bake:
 	cmp.l	#st_pool+ST_POOL,d1
 	blo.s	.room
 	addq.l	#1,st_npool
+	bsr	st_dt2inv		; (st_dt2's colourings too)
 	movem.l	d0/a0,-(sp)		; (full: everything coloured again)
 	lea	st_hash,a1
 	move.w	#ST_HASH*16/4-1,d1
@@ -1691,6 +1899,7 @@ st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
 st_npool:	ds.l	1
+st_dmg0:	ds.l	1		; (this picture's first erase rectangle)
 st_nobj:	ds.l	1		; (SIM: the objects, those drawn)
 st_ndrawn:	ds.l	1
 st_nlong:	ds.l	1		; (sprites drawn with the long-destination code: 64 KB crossings)
@@ -1766,5 +1975,6 @@ st_tckey:	ds.l	ST_TCN
 st_tcdata:	ds.b	ST_TCN*32
 st_hash:	ds.b	ST_HASH*16
 st_deftab:	ds.l	32768
+st_dt2:		ds.b	32768*16		; (st_obj2: the record.l, the last colouring's data.l and key.w, H * ST_LB + 64)
 st_pool:	ds.b	ST_POOL
 st_mem:		ds.b	(ST_NBUF+1)*ST_BUFSZ+ST_BARLB*16+256

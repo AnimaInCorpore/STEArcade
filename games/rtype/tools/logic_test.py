@@ -120,6 +120,8 @@ def main():
     args = ap.parse_args()
     recorded = []
     defs_seen = set()
+    import collections as _c
+    rpc = _c.Counter()
     rcost = []
     import collections
     rprof = collections.Counter()
@@ -220,11 +222,14 @@ def main():
             cpu.w_pc(sym["m72r_frame"])
             total = 0
             while cpu.r_pc() != sym["sim_wait"]:
-                i = bisect.bisect_right(la, cpu.r_pc()) - 1
+                pc0 = cpu.r_pc()
+                i = bisect.bisect_right(la, pc0) - 1
                 s.blitter.cycles = 0
                 c = cpu.execute(1).cycles + s.blitter.cycles
                 nm = lab[i][1]
                 rprof["(sprite code)" if nm.startswith(("sts_", "stn_")) else nm] += c
+                if nm == os.environ.get("RPROF_SYM"):
+                    rpc[cpu.r_pc() - la[i] if False else pc0 - la[i]] += c
                 total += c
         else:
             total = call68("m72r_frame")
@@ -440,6 +445,10 @@ def main():
         tot = sum(rprof.values())
         for k, v in rprof.most_common(20):
             print("  %-22s %5.1f%%" % (k, 100.0 * v / tot))
+        if rpc:
+            print("  %s by offset:" % os.environ.get("RPROF_SYM"))
+            for k, v in sorted(rpc.items()):
+                print("    +%03X %6.2f%%" % (k, 100.0 * v / tot))
     if args.defs:
         Path(args.defs).write_text(json.dumps(sorted(defs_seen)))
         print("%d (definition, entries) pairs -> %s" % (len(defs_seen), args.defs))
