@@ -26,6 +26,7 @@ init_image:
 ; logic), then the raster interrupt (vector $22: the status bar's scroll), each run until the CPU is idle again.
 ; m72_scroll_vbl keeps the scroll the playfield is drawn with (the values before the raster interrupt).
 port_frame:
+	addq.l	#1,port_frames		; (natives.s: nat_ecoll's summary is a frame's)
 	movem.l	d0-d7/a0-a6,-(sp)
 	lea	ctx_main,a6
 	movem.l	R_D0(a6),d0-d6
@@ -256,6 +257,7 @@ m72_sound_latch:
 
 	section data,data
 	even
+port_frames:	dc.l	1		; (port_frame calls)
     ifd INVULN
 in_ports:	dc.w	$FFFF,$FFFF,$FDFB&~$4000	; (INVULN: DIP SW2:7, Invulnerability - for measurements)
     else

@@ -785,7 +785,7 @@ ECOLL	macro
 	cmp.w	#$2B4,4(a4,d6.l)
 	bcc	.fb			; (x >= 2B4h: the arcade's short way)
 	movem.l	d2/d6,-(sp)		; (BP: 6(sp))
-	lea	(a2,d5.l),a1		; the widths, DS1:IY (BW = IY)
+.again:	lea	(a2,d5.l),a1		; the widths, DS1:IY (BW = IY)
 	move.l	d6,a0
 	move.w	4(a4,a0.l),d0		; x
 	move.w	d0,d1
@@ -797,6 +797,79 @@ ECOLL	macro
 	add.w	6(a1),d6
 	move.w	d2,d7
 	add.w	4(a1),d7
+	; the broad phase (es_build once a frame): with ordered boxes and proper spans the arcade's test is the overlap of
+	; the spans with the box; no overlap with any of the distinct live boxes -> no hit (the end as the arcade's)
+	move.l	port_frames,a1
+	cmpa.l	es_key,a1
+	beq.s	.bk
+	bsr	es_build
+.bk:
+    ifd ES_CHECK
+	tst.b	es_rej
+	bne	.full
+    endc
+	tst.b	es_full
+	bne	.full
+	cmp.w	d0,d3			; (proper spans: x + [BW] <= x <= x + [BW+2], y + [BW+4] <= y <= y + [BW+6])
+	bhi	.full
+	cmp.w	d0,d1
+	bcs	.full
+	cmp.w	d2,d7
+	bhi	.full
+	cmp.w	d2,d6
+	bcs	.full
+	lea	es_boxes,a0		; the distinct live boxes: none overlapped -> no hit
+	move.w	es_n,d4
+	bra.s	.nx
+.bl:	cmp.w	(a0)+,d1		; x + [BW+2] < L
+	bcs.s	.m1
+	cmp.w	(a0)+,d3		; x + [BW] >= R
+	bcc.s	.m2
+	cmp.w	(a0)+,d6		; y + [BW+6] < T
+	bcs.s	.m3
+	cmp.w	(a0)+,d7		; y + [BW+4] < B: overlap
+	bcs	.full
+	bra.s	.nx
+.m1:	addq.l	#2,a0
+.m2:	addq.l	#2,a0
+.m3:	addq.l	#2,a0
+.nx:	dbf	d4,.bl
+.rej:	move.w	es_last,a1		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
+	move.w	es_lastip,d7		; the 3 ...
+	tst.w	es_last
+	bne	.rend
+	move.w	$B4(a3),d0		; ... C8h / A8h by their conditions (BP: 6(sp)) ...
+	move.w	$D4(a3),d1
+	move.w	6(sp),d2
+	tst.w	d0
+	bne.s	.e1
+	cmp.w	d1,d2
+	beq.s	.e3			; (neither)
+.e1:	tst.w	d1
+	bne.s	.e2
+	cmp.w	d0,d2
+	beq.s	.e2
+	move.w	#$C8,a1
+	move.w	#$F503,d7
+	bra	.rend
+.e2:	tst.w	d0
+	bne.s	.e3
+	move.w	#$A8,a1
+	move.w	#$F4EE,d7
+	bra	.rend
+.e3:	move.w	es_lastb,a1		; ... else D6h / B6h / 116h
+	move.w	es_lastbip,d7
+.rend:
+    ifd ES_CHECK
+	bra	.end
+    endc
+	movem.l	(sp)+,d2/d6
+	move.w	d5,d3			; BW = IY
+	move.w	a1,d4
+	bsr	nat_box			; (AW; d7 kept)
+	move.w	d7,-4(a5)
+	bra	.r
+.full:
 	tst.b	$56(a3)			; 0040:F485 the ship (when its flag is clear)
 	bne.s	.s2
 	FBOX	$56
@@ -831,6 +904,21 @@ k	set	0				; 0040:F560: 24 from 176h
 k	set	k+1
 	endr
 	; no hit: AW from the last box test (nat_box again), its return IP at SP-4, the last call's at SP-2
+.end:
+    ifd ES_CHECK
+	tst.b	es_rej
+	bne.s	.chk2
+	move.w	a1,es_pred		; (the rejection's prediction: now the full test)
+	st	es_rej
+	move.l	4(sp),d6		; (d6, d2 back: the spans again, then the full test)
+	move.l	(sp),d2
+	bra	.again
+.chk2:	move.w	es_pred,d7
+	cmp.w	a1,d7
+	beq.s	.chk3
+	addq.b	#1,$1FF2(a3)		; (a wrong last box: 41FF3)
+.chk3:	clr.b	es_rej
+    endc
 	movem.l	(sp)+,d2/d6
 	move.w	d5,d3			; BW = IY
 	move.w	a1,d4
@@ -855,7 +943,15 @@ k	set	k+1
 	add.w	#$20,d7
 	andi	#$FE,ccr		; (CLR1 CY)
 	NEXIT	\1,R0FAD9
-.hit:	movem.l	(sp)+,d2/d6
+.hit:
+    ifd ES_CHECK
+	tst.b	es_rej
+	beq.s	.hok
+	addq.b	#1,$1FF0(a3)		; (a rejected enemy hits: the lock-step shows work RAM 41FF1)
+.hok:
+    endc
+	movem.l	(sp)+,d2/d6
+	clr.l	es_key			; (a hit: the game changes the player's side - the summary again)
 .fb:	NFALL	\1,R0FA94_t
 	endm
 nat_ecoll:
@@ -924,3 +1020,106 @@ leaf_posx:
 	LEAF24	3
 leaf_posy:
 	LEAF24	7
+
+; es_build: the player side's summary for nat_ecoll's broad phase, once a frame (port_frames; again after a hit):
+; the distinct live boxes (R and B not 0: those never meet a proper span) of every box the arcade may test (the ship's when its flag is clear, the Force's and the bits',
+; A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set), es_full when a box is not ordered (L > R or
+; T > B: the broad phase off), the box tested last when nothing hits (es_last: of the 24 or the 3, else 0;
+; es_lastb: D6h / B6h / 116h).  The calls of a frame come from the enemy loop, after the player's objects moved.
+es_build:
+	movem.l	d0-d4/a0,-(sp)
+	move.l	port_frames,es_key
+	clr.w	es_n
+	clr.b	es_full
+	clr.w	es_last
+	lea	es_fixed,a0
+.f:	move.w	(a0)+,d4
+	beq.s	.fx
+	bsr	.box
+	bra.s	.f
+.fx:	tst.b	$56(a3)			; the ship: tested when its flag is clear
+	bne.s	.s
+	move.w	#$56,d4
+	bsr	.box
+.s:	move.w	#$116,es_lastb
+	move.w	#$F4B8,es_lastbip
+	tst.b	$B6(a3)
+	beq.s	.b6
+	move.w	#$B6,d4
+	move.w	d4,es_lastb
+	move.w	#$F4CB,es_lastbip
+	bsr	.box
+.b6:	tst.b	$D6(a3)
+	beq.s	.d6
+	move.w	#$D6,d4
+	move.w	d4,es_lastb
+	move.w	#$F4D9,es_lastbip
+	bsr	.box
+.d6:	move.w	#$4D6,d4		; the 3, the 24
+.t3:	tst.b	(a3,d4.w)
+	beq.s	.n3
+	move.w	d4,es_last
+	move.w	#$F557,es_lastip
+	bsr	.box
+.n3:	add.w	#$20,d4
+	cmp.w	#$4D6+3*$20,d4
+	bne.s	.t3
+	move.w	#$176,d4
+.t24:	tst.b	(a3,d4.w)
+	beq.s	.n24
+	move.w	d4,es_last
+	move.w	#$F56F,es_lastip
+	bsr	.box
+.n24:	add.w	#$20,d4
+	cmp.w	#$176+24*$20,d4
+	bne.s	.t24
+	movem.l	(sp)+,d0-d4/a0
+	rts
+.box:	move.l	d4,-(sp)		; the box at IX d4 into the list (not when dead: R or B 0; once)
+	move.l	a0,-(sp)
+	lea	(a3,d4.w),a1
+	movem.w	2(a1),d0-d3		; L R T B
+	cmp.w	d1,d0
+	bls.s	.o1
+	st	es_full			; (L > R: the overlap test is not the arcade's)
+.o1:	cmp.w	d3,d2
+	bls.s	.o2
+	st	es_full
+.o2:	tst.w	d1
+	beq.s	.bx
+	tst.w	d3
+	beq.s	.bx
+	lea	es_boxes,a0
+	move.w	es_n,d4
+	bra.s	.q
+.ql:	cmp.w	(a0),d0
+	bne.s	.qn
+	cmp.w	2(a0),d1
+	bne.s	.qn
+	cmp.w	4(a0),d2
+	bne.s	.qn
+	cmp.w	6(a0),d3
+	beq.s	.bx			; (the same box)
+.qn:	addq.l	#8,a0
+.q:	dbf	d4,.ql
+	movem.w	d0-d3,(a0)
+	addq.w	#1,es_n
+.bx:	move.l	(sp)+,a0
+	move.l	(sp)+,d4
+	rts
+es_fixed:	dc.w	$76,$136,$156,$F6,$116,$A8,$C8,0
+
+	section bss,bss
+es_key:		ds.l	1
+es_n:		ds.w	1
+es_boxes:	ds.w	4*40
+es_last:	ds.w	1
+es_lastb:	ds.w	1
+es_lastip:	ds.w	1
+es_lastbip:	ds.w	1
+es_full:	ds.b	1
+es_rej:		ds.b	1
+	even
+es_pred:	ds.w	1
+	even
+	section text,code
