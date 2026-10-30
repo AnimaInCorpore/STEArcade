@@ -36,7 +36,10 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x0F960: "nat_coll24", 0x0F948: "nat_coll3",             # the collision scans
            0x0226C: "nat_fgtile", 0x022B5: "nat_bgtile",            # the tiles under an object
            0x05CB0: "nat_glow", 0x1000A: "nat_blink",               # (STAGE: the colour animations off,
-           0x0565A: "nat_palcopy"}                                  # no copies into the arcade's palette)
+           0x0565A: "nat_palcopy",                                  # no copies into the arcade's palette)
+           0x0EF20: "nat_tblk0", 0x0EF53: "nat_tblk8",              # a map block into the tile video RAM
+           0x0EF86: "nat_tblk4", 0x0EFBB: "nat_tblkc",
+           0x05408: "nat_bar1", 0x0543B: "nat_bar2", 0x05472: "nat_bar3"}   # the BEAM gauge's cells
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

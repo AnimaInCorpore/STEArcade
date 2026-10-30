@@ -276,10 +276,13 @@ UNKNOWN = CCR          # what an unknown continuation reads (P and AC are read n
 
 
 def liveness(prog, code, ret_points):
-    """live_out[v]: the flags read after the instruction at v (C V Z N P A).  A call's are its callee's (what the
-    callee does not define reaches its RETs, which read what their return points read); computed jumps / calls read
-    what the targets the coverage saw read (S Z O C at most: an entry point does not read P or AC); RETI, INT and hooks
-    per their rules."""
+    """live_out[v]: the flags read after the instruction at v (C V Z N P A).  A call's are its callee's in this call's
+    context: what the callee reads before defining (its RETs reading nothing) and, of what it leaves undefined up to its
+    RETs, what this call's return point reads - a summary per callee (the fixpoints with RETs reading nothing and
+    everything), so a callee that some callers need flag-preserving does not make all of them keep their flags.  The
+    callee's own code keeps what the union of its RETs' return points read (what the callee does not define reaches its
+    RETs, which read what their return points read); computed jumps / calls read what the targets the coverage saw read
+    (S Z O C at most: an entry point does not read P or AC); RETI, INT and hooks per their rules."""
     succ = {}
     for v, ins in code.items():
         s = []
@@ -289,57 +292,73 @@ def liveness(prog, code, ret_points):
             s.append(lin_of(*ins.target))
         succ[v] = s
     tg = {v: [lin_of(*t) for t in prog.targets_seen.get(v, ()) if lin_of(*t) in code] for v in code}
-    live_in = {v: 0 for v in code}
-    live_out = {}
+    # three fixpoints together: [0] the RETs read nothing, [1] the RETs read every flag (the callee summaries:
+    # live_in of a callee in a context L = in0 | (L & in1)), [2] the RETs read their return points' (the code)
+    ins_ = [{v: 0 for v in code} for _ in range(3)]
+    outs = [{} for _ in range(3)]
     order = sorted(code, reverse=True)
+
+    def called(k, t, nx):
+        if t not in code:
+            return UNKNOWN
+        cont = ins_[k].get(nx, UNKNOWN)
+        return ins_[0][t] | (cont & ins_[1][t])
+
     changed = True
     while changed:
         changed = False
-        for v in order:
-            ins = code[v]
-            fl = ins.flow
-            if v in prog.hooks:
-                nx = prog.hook_next.get(v)
-                out = live_in.get(nx, UNKNOWN) if nx is not None else prog.hook_flags
-            elif fl in ("ret", "retf"):
-                rp = ret_points.get(v)
-                if rp:
+        for k in range(3):
+            live_in = ins_[k]
+            for v in order:
+                ins = code[v]
+                fl = ins.flow
+                if v in prog.hooks:
+                    nx = prog.hook_next.get(v)
+                    out = live_in.get(nx, UNKNOWN) if nx is not None else prog.hook_flags
+                elif fl in ("ret", "retf"):
+                    if k == 0:
+                        out = 0
+                    elif k == 1:
+                        out = ALLF
+                    else:
+                        rp = ret_points.get(v)
+                        if rp:
+                            out = 0
+                            for t in rp:
+                                out |= live_in.get(t, UNKNOWN)
+                        else:
+                            out = UNKNOWN
+                elif fl in ("ijmp", "ijmpf"):
+                    if prog.indirect_live and tg[v]:
+                        out = 0
+                        for t in tg[v]:
+                            out |= live_in[t]
+                        out &= CCR                     # (an entry point reading P or AC: table data, not code)
+                    else:
+                        out = UNKNOWN
+                elif fl in ("call", "callf"):
+                    out = called(k, lin_of(*ins.target), next_lin(ins))
+                elif fl in ("icall", "icallf"):
+                    if tg[v]:
+                        out = 0 if prog.indirect_live else UNKNOWN
+                        for t in tg[v]:
+                            out |= called(k, t, next_lin(ins))
+                        out &= CCR
+                    else:
+                        out = UNKNOWN
+                elif fl in ("iret", "int", "halt"):
+                    out = 0 if fl == "iret" else UNKNOWN
+                else:
                     out = 0
-                    for t in rp:
+                    for t in succ[v]:
                         out |= live_in.get(t, UNKNOWN)
-                else:
-                    out = UNKNOWN
-            elif fl in ("ijmp", "ijmpf"):
-                if prog.indirect_live and tg[v]:
-                    out = 0
-                    for t in tg[v]:
-                        out |= live_in[t]
-                    out &= CCR                     # (an entry point reading P or AC: table data, not code)
-                else:
-                    out = UNKNOWN
-            elif fl in ("call", "callf"):
-                out = live_in.get(lin_of(*ins.target), UNKNOWN)
-            elif fl in ("icall", "icallf"):
-                if tg[v]:
-                    out = 0 if prog.indirect_live else UNKNOWN
-                    for t in tg[v]:
-                        out |= live_in[t]
-                    out &= CCR
-                else:
-                    out = UNKNOWN
-            elif fl in ("iret", "int", "halt"):
-                out = 0 if fl == "iret" else UNKNOWN
-            else:
-                out = 0
-                for t in succ[v]:
-                    out |= live_in.get(t, UNKNOWN)
-            d, u = defs_uses(ins)
-            li = (out & ~d) | u
-            live_out[v] = out
-            if li != live_in[v]:
-                live_in[v] = li
-                changed = True
-    return live_in, live_out
+                d, u = defs_uses(ins)
+                li = (out & ~d) | u
+                outs[k][v] = out
+                if li != live_in[v]:
+                    live_in[v] = li
+                    changed = True
+    return ins_[2], outs[2]
 
 
 class Emitter:

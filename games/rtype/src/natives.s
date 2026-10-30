@@ -337,36 +337,32 @@ nat_box:
 ; in $D8000, from the BG scroll [2EC9h] / [2ECDh]; AW, BW the FG's).  The scroll words are at odd addresses (two
 ; bytes).  Registers, the flags (the last AND's) and the stack below SP as the arcade leaves them.
 ; ---------------------------------------------------------------------------------------------------------------------
-TILE_AT	macro				; \1 the odd x scroll word's image offset (its low byte; the high byte 3 on), AW -> BW
-	moveq	#0,d0
-	move.b	\1+3(a3),d0
-	lsl.w	#8,d0
-	move.b	\1(a3),d0		; AW = the scroll x
-	move.w	d0,d1
-	and.w	#7,d1			; CW
-	lsr.w	#1,d0
-	and.w	#$FC,d0
-	add.w	#$1020,d0
-	move.w	d0,d3			; BW
-	move.w	4(a4,d6.l),d0
-	add.w	d1,d0
-	sub.w	#$140,d0
-	lsr.w	#1,d0
-	and.w	#$FFFC,d0
-	add.w	d0,d3
+; The scroll words' terms are cached, keyed by the image longs that hold them (FG x [2EC1h]: the long at $2EC0, BG x
+; [2EC9h]: $2EC8, BG y [2ECDh]: $2ECC; the initial values are those of all-zero longs).
+FG_AT	macro				; -> d3 = BW (the FG tile's offset), d1 = CW (FG x & 7); d0, d7 used
+	move.l	$2EC0(a3),d7
+	cmp.l	tc_kf,d7
+	beq.s	.c\@
+	bsr	tc_fg
+.c\@:	move.w	4(a4,d6.l),d3
+	add.w	tc_cxf,d3
+	lsr.w	#1,d3
+	and.w	#$FFFC,d3
+	add.w	tc_basef,d3
 	and.w	#$10FF,d3
-	endm
-
-nat_fgtile:
-	TILE_AT	$2EC0			; ([2EC1h])
+	move.w	tc_cwf,d1
 	move.w	#$17F,d0
 	sub.w	8(a4,d6.l),d0
-	bcc.s	.y
+	bcc.s	.y\@
 	moveq	#0,d0
-.y:	and.w	#$FFF8,d0
+.y\@:	and.w	#$FFF8,d0
 	lsl.w	#5,d0
 	add.w	d0,d3
 	and.w	#$3FFF,d3
+	endm
+
+nat_fgtile:
+	FG_AT
 	move.w	6(a6),-2(a5)		; (push ds0)
 	lea	v30_image+$D0000,a0
 	move.w	(a0,d3.l),d0
@@ -374,47 +370,94 @@ nat_fgtile:
 	jmp	R022B4
 
 nat_bgtile:
-	TILE_AT	$2EC0			; the FG tile (0040:1E6C)
-	move.w	#$17F,d0
-	sub.w	8(a4,d6.l),d0
-	bcc.s	.y
-	moveq	#0,d0
-.y:	and.w	#$FFF8,d0
-	lsl.w	#5,d0
-	add.w	d0,d3
-	and.w	#$3FFF,d3
+	FG_AT				; the FG tile (0040:1E6C)
 	lea	v30_image+$D0000,a0
 	move.w	(a0,d3.l),d0
 	and.w	#$FFF,d0
 	move.w	d3,-2(a5)		; (push bw, push aw)
 	move.w	d0,-4(a5)
-	movem.l	d0/d3,-(sp)
-	TILE_AT	$2EC8			; the BG's ([2EC9h])
-	moveq	#0,d0
-	move.b	$2ECF(a3),d0
-	lsl.w	#8,d0
-	move.b	$2ECC(a3),d0		; [2ECDh]: the BG scroll y
-	move.w	d0,d1
-	and.w	#7,d1
-	lsl.w	#5,d0
-	and.w	#$3F00,d0
-	add.w	d0,d3
-	move.w	#$17F,d0
-	add.w	d1,d0
-	sub.w	8(a4,d6.l),d0
+	move.l	$2EC8(a3),d7		; the BG's ([2EC9h], [2ECDh])
+	cmp.l	tc_kbx,d7
+	beq.s	.cx
+	bsr	tc_bx
+.cx:	move.l	$2ECC(a3),d7
+	cmp.l	tc_kby,d7
+	beq.s	.cy
+	bsr	tc_by
+.cy:	move.w	4(a4,d6.l),d5
+	add.w	tc_cxb,d5
+	lsr.w	#1,d5
+	and.w	#$FFFC,d5
+	add.w	tc_basebx,d5
+	and.w	#$10FF,d5
+	add.w	tc_byterm,d5
+	move.w	tc_yb,d7
+	sub.w	8(a4,d6.l),d7
 	bcc.s	.by
-	moveq	#0,d0
-.by:	and.w	#$FFF8,d0
-	lsl.w	#5,d0
-	add.w	d0,d3
-	and.w	#$3FFF,d3
+	moveq	#0,d7
+.by:	and.w	#$FFF8,d7
+	lsl.w	#5,d7
+	add.w	d7,d5			; IY
+	and.w	#$3FFF,d5
 	move.w	6(a6),-6(a5)		; (push ds0)
 	lea	v30_image+$D8000,a0
-	move.w	(a0,d3.l),d1
-	move.w	d3,d5			; IY
+	move.w	(a0,d5.l),d1
 	and.w	#$FFF,d1		; (the flags)
-	movem.l	(sp)+,d0/d3		; (pop aw, pop bw: no flags)
 	jmp	R0231A
+
+tc_word	macro				; d7 = the image long of an odd scroll word -> \1.w = the word (\2 scratch)
+	moveq	#0,\1
+	move.b	d7,\1
+	lsl.w	#8,\1
+	rol.l	#8,d7
+	move.b	d7,\1
+	endm
+tc_fg:	move.l	d7,tc_kf		; x: CW = x & 7, the column term ((x >> 1) & $FC) + $1020
+	tc_word	d0
+	move.w	d0,d7
+	and.w	#7,d7
+	move.w	d7,tc_cwf
+	sub.w	#$140,d7
+	move.w	d7,tc_cxf
+	lsr.w	#1,d0
+	and.w	#$FC,d0
+	add.w	#$1020,d0
+	move.w	d0,tc_basef
+	rts
+tc_bx:	move.l	d7,tc_kbx
+	tc_word	d1
+	move.w	d1,d7
+	and.w	#7,d7
+	sub.w	#$140,d7
+	move.w	d7,tc_cxb
+	lsr.w	#1,d1
+	and.w	#$FC,d1
+	add.w	#$1020,d1
+	move.w	d1,tc_basebx
+	rts
+tc_by:	move.l	d7,tc_kby		; y: the row term (y << 5) & $3F00, the line $17F + (y & 7)
+	tc_word	d1
+	move.w	d1,d7
+	and.w	#7,d7
+	add.w	#$17F,d7
+	move.w	d7,tc_yb
+	lsl.w	#5,d1
+	and.w	#$3F00,d1
+	move.w	d1,tc_byterm
+	rts
+
+	section data,data
+tc_kf:	dc.l	0
+tc_kbx:	dc.l	0
+tc_kby:	dc.l	0
+tc_cwf:	dc.w	0
+tc_cxf:	dc.w	-$140
+tc_basef:	dc.w	$1020
+tc_cxb:	dc.w	-$140
+tc_basebx:	dc.w	$1020
+tc_byterm:	dc.w	0
+tc_yb:	dc.w	$17F
+	section text,code
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; STAGE: the colour animations switched off at their source (the user, 2026-10-30: no colour animation with the STE's
@@ -500,3 +543,156 @@ nat_palcopy:
     else
 	jmp	R0565A_t
     endc
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:EB20 / EB53 / EB86 / EBBB: a map block into the tile video RAM (DS1:IY), 8 x 6 cells from the ROM (DS0 = $3000,
+; IX = (AW & $3FFF) * 144: cells of 3 bytes, each copied as 4 bytes - the 4th is the next cell's first), rows $100
+; apart; bit 15 of the map word AW flips Y (the rows from IY + $500 up, attribute bit 15 set), bit 14 flips X (the
+; cells from IY + $1C left, attribute bit 14).  The arcade copies word by word (MOVBKW / LDMW + XOR + STMW); here a
+; cell at an even IX is one long move (the image's swapped words are the destination's), at an odd IX four bytes.
+; The video blocks' marks per row (its first and last word).  Registers as the arcade leaves them (AW = IX's start,
+; flipped: the last cell's first word; CW $0800, DW, IX, IY after the rows), the stack below SP (the last row's
+; pushes), then the arcade's ADD BW,2 / POP DS1 / POP DS0 / RET (R0EF45; the flags are dead).
+; ---------------------------------------------------------------------------------------------------------------------
+nat_tblk0:
+	moveq	#0,d7
+	bra.s	nat_tblk
+nat_tblk8:
+	move.w	#$8000,d7
+	bra.s	nat_tblk
+nat_tblk4:
+	move.w	#$4000,d7
+	bra.s	nat_tblk
+nat_tblkc:
+	move.w	#$C000,d7
+nat_tblk:
+	and.w	#$3FFF,d0
+	lsl.w	#4,d0
+	move.w	d0,d2			; DW
+	lsl.w	#3,d0
+	add.w	d2,d0			; AW = IX
+	move.w	d0,d4
+	movem.l	d0/d2/d3/d6,-(sp)
+	moveq	#4,d2			; the cell step
+	move.w	#$100,d6		; the row step
+	moveq	#0,d3			; the attribute's flip bits
+	tst.w	d7
+	bpl.s	.ny
+	add.w	#$500,d5
+	neg.w	d6
+	move.b	#$80,d3
+.ny:	btst	#14,d7
+	beq.s	.nx
+	add.w	#$1C,d5
+	neg.w	d2
+	eor.b	#$40,d3
+.nx:	moveq	#6-1,d1
+.row:	move.w	d5,-4(a5)		; (push iy)
+	moveq	#0,d7			; the row's video blocks: its words d5 (- $1C flipped X) .. + $1E
+	move.w	d5,d7
+	tst.w	d2
+	bpl.s	.m
+	sub.w	#$1C,d7
+.m:	bsr.s	.mark
+	add.w	#$1E,d7
+	bsr.s	.mark
+	move.w	d5,-(sp)
+	swap	d1
+	move.w	#8-1,d1
+.cell:	btst	#0,d4
+	bne.s	.odd
+	lea	(a3,d4.l),a0
+	lea	(a2,d5.l),a1
+	move.l	(a0),(a1)
+	bra.s	.x
+.odd:	lea	-1(a3,d4.l),a0
+	lea	(a2,d5.l),a1
+	move.b	3(a0),(a1)
+	move.b	(a0),1(a1)
+	move.b	5(a0),2(a1)
+	move.b	2(a0),3(a1)
+.x:	eor.b	d3,(a1)
+	addq.w	#3,d4
+	add.w	d2,d5
+	dbf	d1,.cell
+	swap	d1
+	move.w	(sp)+,d5
+	add.w	d6,d5
+	dbf	d1,.row
+	move.w	#$0801,-2(a5)		; (push cw)
+	move.l	#$0800,d1
+	tst.b	d3
+	movem.l	(sp)+,d0/d2/d3/d6	; (no flags)
+	beq.s	.nf
+	move.w	(a1),d0			; (flipped: the last LDMW's word, XORed)
+.nf:	jmp	R0EF45
+.mark:	move.l	a2,a0
+	add.l	d7,a0
+	move.l	a0,-(sp)
+	sub.l	#v30_image+$C8000,(sp)
+	cmp.l	#$18000,(sp)
+	bcc.s	.mk
+	move.l	(sp),a0
+	move.l	d7,(sp)
+	move.l	a0,d7
+	lsr.l	#8,d7
+	lea	v30_vmarks,a0
+	st	(a0,d7.l)
+	move.l	(sp)+,d7
+	rts
+.mk:	addq.l	#4,sp
+	rts
+
+; ---------------------------------------------------------------------------------------------------------------------
+; The BEAM gauge's cells (FG video RAM, DS0:BW, a cell = the tile word and $008F), rewritten every frame:
+;   0040:5008  AW cells $06BA (AW >= 1), on to 0040:5019 (the flags of the last DEC AW);
+;   0040:503B  CW cells $06AE (CW >= 1, DBNZ), on to 0040:504B; 0040:5072 the same, on to 0040:5082 (the flags of
+;              the last ADD BW,2h; CW 0).
+; The video blocks marked once (the first and the last word: at most 64 bytes, two blocks).
+; ---------------------------------------------------------------------------------------------------------------------
+nat_mark:				; a0 = an address in the image: its 256-byte block marked (as a translated store)
+	move.l	a0,d7
+	sub.l	#v30_image+$C8000,d7
+	cmp.l	#$18000,d7
+	bcc.s	.n
+	lsr.l	#8,d7
+	lea	v30_vmarks,a0
+	st	(a0,d7.l)
+.n:	rts
+
+nat_bar1:
+	lea	(a3,d3.l),a0
+	bsr	nat_mark
+.l:	move.w	#$6BA,(a3,d3.l)
+	addq.w	#2,d3
+	move.w	#$8F,(a3,d3.l)
+	addq.w	#2,d3
+	subq.w	#1,d0
+	bne.s	.l
+	move.w	sr,-(sp)
+	lea	-2(a3,d3.l),a0
+	bsr	nat_mark
+	move.w	(sp)+,ccr
+	jmp	R05419
+
+BAR_CW	macro				; \1 the continuation
+	lea	(a3,d3.l),a0
+	bsr	nat_mark
+	move.w	d1,d7
+	subq.w	#1,d7
+	moveq	#0,d1
+.l\@:	move.w	#$6AE,(a3,d3.l)
+	addq.w	#2,d3
+	move.w	#$8F,(a3,d3.l)
+	addq.w	#2,d3
+	dbf	d7,.l\@
+	move.w	sr,-(sp)
+	lea	-2(a3,d3.l),a0
+	bsr	nat_mark
+	move.w	(sp)+,ccr
+	jmp	\1
+	endm
+nat_bar2:
+	BAR_CW	R0544B
+nat_bar3:
+	BAR_CW	R05482

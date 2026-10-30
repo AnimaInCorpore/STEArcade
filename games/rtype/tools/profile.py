@@ -6,6 +6,7 @@ window of frames, cycles summed per V30 instruction (its label's code), per runt
 import argparse
 import bisect
 import collections
+import json
 import re
 import sys
 from pathlib import Path
@@ -26,6 +27,7 @@ def main():
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument("--snap", action="store_true", help="the build has FADE_SNAP (logic_test --snap)")
     ap.add_argument("--list", action="store_true", help="the build has SPRITE_LIST (logic_test --list)")
+    ap.add_argument("--dump", default="", help="a JSON file: cycles and executions per label")
     args = ap.parse_args()
     prof = collections.Counter()
     counts = collections.Counter()
@@ -55,6 +57,8 @@ def main():
         (["--snap"] if args.snap else []) + (["--list"] if args.list else [])
     logic_test.main()
     total = sum(prof.values())
+    if args.dump:
+        Path(args.dump).write_text(json.dumps(dict(frames=args.frames, cycles=prof, counts=counts)))
     print("%d cycles in %d frames: %.0f a frame" % (total, args.frames, total / args.frames))
     groups = collections.Counter()
     for k, n in prof.items():
