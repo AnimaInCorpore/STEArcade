@@ -50,7 +50,7 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
 # CALLs to these: a JSR (src/natives.s); (label, exact flags: usable where the flags after the RET are live)
 LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
               0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
-              0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True)}
+              0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True), 0x0FADA: ("leaf_eco2", True)}
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

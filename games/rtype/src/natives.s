@@ -785,6 +785,9 @@ FFLAG	macro				; \1 IX: the box test when the object's flag [IX+1] is set
 ECOLL	macro
 	cmp.w	#$2B4,4(a4,d6.l)
 	bcc	.fb			; (x >= 2B4h: the arcade's short way)
+    if \3=1
+	move.w	d0,-(sp)		; (0040:F6DA: its AW, pushed with AL = [BP+1Fh], back at its end)
+    endc
 	movem.l	d2/d6,-(sp)		; (BP: 6(sp))
 .again:	lea	(a2,d5.l),a1		; the widths, DS1:IY (BW = IY)
 	move.l	d6,a0
@@ -865,6 +868,9 @@ ECOLL	macro
 	bra	.end
     endc
 	movem.l	(sp)+,d2/d6
+    if \3=1
+	move.w	(sp)+,d0
+    endc
 	move.w	d5,d3			; BW = IY
 	move.w	a1,d4
     if \2=0
@@ -922,6 +928,9 @@ k	set	k+1
 .chk3:	clr.b	es_rej
     endc
 	movem.l	(sp)+,d2/d6
+    if \3=1
+	move.w	(sp)+,d0
+    endc
 	move.w	d5,d3			; BW = IY
 	move.w	a1,d4
     if \2=0
@@ -939,6 +948,7 @@ k	set	k+1
 	cmp.w	d7,d4
 	bne.s	.rl
 	swap	d7
+    if \3=0
 .r:	move.w	d7,-4(a5)
 	move.w	#$F6D4,-2(a5)
 	move.w	#$476,d4
@@ -946,6 +956,19 @@ k	set	k+1
 	move.w	#$456,d7		; (the last ADD IX,20h's flags: the carry clear - the CLR1 CY)
 	add.w	#$20,d7
 	NEXIT	\1,R0FAD9
+    else
+.r:	move.w	d7,-6(a5)		; (0040:F6DA: the last box test's return IP under its CALL's, 0040:F73F, under
+	move.w	#$F73F,-4(a5)		; its PUSH AW)
+	move.l	d6,d7			; AL = [BP+1Fh]
+	add.w	#$1F,d7
+	eori.w	#1,d7
+	move.b	(a4,d7.l),d0
+	move.w	d0,-2(a5)
+	move.w	#$476,d4
+	moveq	#0,d1
+	cmp.b	d0,d0			; (POP AW, CMP AL,[BP+1Fh]: equal)
+	NEXIT	\1,R0FB5E
+    endc
 .hit:
     ifd ES_CHECK
 	tst.b	es_rej
@@ -954,17 +977,32 @@ k	set	k+1
 .hok:
     endc
 	movem.l	(sp)+,d2/d6
+    if \3=1
+	move.w	(sp)+,d0
+    endc
 	clr.b	es_ok			; (a hit: the game changes the player's side - the summary again)
+    if \3=0
 .fb:	NFALL	\1,R0FA94_t
+    else
+.fb:	NFALL	\1,R0FADA_t
+    endc
 	endm
 nat_ecoll:
-	ECOLL	0,0
+	ECOLL	0,0,0
 leaf_ecoll:
 	subq.l	#2,a5
-	ECOLL	1,0
+	ECOLL	1,0,0
 leaf_ecoll_naw:				; (for a CALL after which AW is dead: no AW from the last box test)
 	subq.l	#2,a5
-	ECOLL	1,1
+	ECOLL	1,1,0
+; 0040:F6DA: the tougher enemies' collision tests (hits counted in [BP+1Fh]): the same six tests in the same order,
+; another end (AW back from its PUSH, AL = [BP+1Fh]; CMP AL,[BP+1Fh]) - a hit: its translation from the start, the
+; summary again (its hits change the player's side)
+nat_eco2:
+	ECOLL	0,1,1
+leaf_eco2:
+	subq.l	#2,a5
+	ECOLL	1,1,1
 ecoll_ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
 
 ; ---------------------------------------------------------------------------------------------------------------------
@@ -1408,12 +1446,6 @@ nat_he601:
 .o:	jmp	R0EA7C
 .w:	jmp	R0EA86
 .tr:	jmp	R0EA01_t
-
-; 0040:F6DA: the larger enemies' collision tests (their hits clear the player's shots' flags outside nat_ecoll): the
-; broad phase's summary built again after it.
-nat_eco2:
-	clr.b	es_ok
-	jmp	R0FADA_t
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; 0040:86EA: a handler of ~8 enemies a frame in stage 1 (its timer, the x scroll, its sprite [BP+22h], the collision
