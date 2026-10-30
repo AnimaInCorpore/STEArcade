@@ -866,7 +866,9 @@ ECOLL	macro
 	movem.l	(sp)+,d2/d6
 	move.w	d5,d3			; BW = IY
 	move.w	a1,d4
+    if \2=0
 	bsr	nat_box			; (AW; d7 kept)
+    endc
 	move.w	d7,-4(a5)
 	bra	.r
 .full:
@@ -922,7 +924,9 @@ k	set	k+1
 	movem.l	(sp)+,d2/d6
 	move.w	d5,d3			; BW = IY
 	move.w	a1,d4
+    if \2=0
 	bsr	nat_box
+    endc
 	move.w	#$F56F,d7
 	cmp.w	#$4D6,d4
 	bcs.s	.r1
@@ -955,10 +959,13 @@ k	set	k+1
 .fb:	NFALL	\1,R0FA94_t
 	endm
 nat_ecoll:
-	ECOLL	0
+	ECOLL	0,0
 leaf_ecoll:
 	subq.l	#2,a5
-	ECOLL	1
+	ECOLL	1,0
+leaf_ecoll_naw:				; (for a CALL after which AW is dead: no AW from the last box test)
+	subq.l	#2,a5
+	ECOLL	1,1
 ecoll_ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
 
 ; ---------------------------------------------------------------------------------------------------------------------
@@ -1123,3 +1130,149 @@ es_rej:		ds.b	1
 es_pred:	ds.w	1
 	even
 	section text,code
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:89B0: the cave crawler's handler (stage 1: ~10 a frame, a third of the play logic with what it calls) up to its
+; sprite (0040:8A8F, translated on: the emitter, the collision test, the screen test).  Its timer (0040:F63A, the
+; common way: neither limit reached - else the arcade's CALL), its direction toward the ship (every [BP+30h]-th frame,
+; up to 400h: [BP+2Eh]), four terrain probes 18h away (FG tiles from DFCh: a step back at speed C0h; 0040:1E6C inline,
+; the scroll terms once), the X / Y moves (leaf_posx / leaf_posy), its sprite (IX, BW).  BP even (else the
+; translation).  Registers, the flags at 8A8F and the stack below SP (the pushes, the CALLs' return IPs, the tile
+; lookup's push of DS0) as the arcade leaves them.
+; ---------------------------------------------------------------------------------------------------------------------
+FGXY	macro				; d4 x, d7 y -> d3 = BW (the FG tile's offset), d1 = CW, d0 = AW = the tile & FFFh
+	move.w	d4,d3
+	add.w	tc_cxf,d3
+	lsr.w	#1,d3
+	and.w	#$FFFC,d3
+	add.w	tc_basef,d3
+	and.w	#$10FF,d3
+	move.w	#$17F,d0
+	sub.w	d7,d0
+	bcc.s	.y\@
+	moveq	#0,d0
+.y\@:	and.w	#$FFF8,d0
+	lsl.w	#5,d0
+	add.w	d0,d3
+	and.w	#$3FFF,d3
+	move.w	tc_cwf,d1
+	lea	v30_image+$D0000,a1
+	move.w	(a1,d3.l),d0
+	and.w	#$FFF,d0
+	endm
+PROBE	macro				; \1 the direction bit, \2 4 (x) / 8 (y), \3 the offset, \4 the lookup's return IP,
+	btst	#\1,$2F(a0)		; \5 the speed, \6 the move, \7 its return IP
+	beq	.n\@
+	move.w	\2(a0),-2(a5)		; (push [BP+\2])
+	move.w	4(a0),d4
+	move.w	8(a0),d7
+    if \2=4
+	add.w	#\3,d4
+    else
+	add.w	#\3,d7
+    endc
+	move.w	#\4,-4(a5)		; (CALL 226Ch)
+	move.w	6(a6),-6(a5)		; (its PUSH DS0)
+	FGXY
+	cmp.w	#$DFC,d0
+	bcs.s	.n\@
+	subq.b	#1,$1F(a0)		; [BP+1Eh]
+	move.w	#\5,d0
+	move.w	#\7,-2(a5)
+	jsr	\6
+	lea	(a4,d6.l),a0
+.n\@:
+	endm
+
+nat_h89b0:
+	btst	#0,d6
+	bne	.tr
+	lea	(a4,d6.l),a0		; the object (BP even: a word [BP+k] at k(a0), a byte at (k ^ 1)(a0))
+	move.w	$26(a0),d7		; 0040:F63A: the timer (AW): at [BP+2Ah] or from [BP+2Ch] on (then 0 again) its
+	addq.w	#1,d7			; spawn when [BP+28h] is set (that: the arcade's routine)
+	move.w	d7,d0
+	cmp.w	$2A(a0),d7
+	beq.s	.t1
+	cmp.w	$2C(a0),d7
+	bcs.s	.t2
+	tst.w	$28(a0)
+	bne	.fa
+	moveq	#0,d7			; (reset)
+	bra.s	.t2
+.t1:	tst.w	$28(a0)
+	bne	.fa
+.t2:	move.w	d7,$26(a0)
+	move.w	#$89B3,-2(a5)		; (its CALL)
+	addq.w	#1,$20(a0)		; 0040:89B3
+	move.w	$30(a0),d0
+	move.w	$20(a0),d7
+	and.w	d0,d7
+	bne.s	.e
+	cmp.w	#$400,$20(a0)
+	bcc.s	.e
+	moveq	#1,d7			; BL: the direction toward the ship ([28h] y, [24h] x)
+	move.w	8(a0),d0
+	cmp.w	$28(a3),d0
+	bcs.s	.d1
+	moveq	#2,d7
+.d1:	move.w	4(a0),d0
+	cmp.w	$24(a3),d0
+	bcs.s	.d2
+	or.b	#4,d7
+	bra.s	.d3
+.d2:	or.b	#8,d7
+.d3:	move.b	d7,d3			; (BW's low byte)
+	move.b	d7,$2F(a0)		; [BP+2Eh]
+.e:	move.b	#2,$1F(a0)		; [BP+1Eh]
+	move.l	$2EC0(a3),d7		; (the FG scroll's terms)
+	cmp.l	tc_kf,d7
+	beq.s	.c
+	bsr	tc_fg
+.c:	PROBE	0,8,$18,$89FB,$C0,leaf_posy,$8A0C
+	PROBE	1,8,-$18,$8A1C,$FF40,leaf_posy,$8A2D
+	PROBE	2,4,-$18,$8A3D,$FF40,leaf_posx,$8A4E
+	PROBE	3,4,$18,$8A5E,$C0,leaf_posx,$8A6F
+	move.w	#$3C2A,d4		; 0040:8A6F: the sprite
+	btst	#3,$2F(a0)
+	bne.s	.f1
+	move.w	#$3C22,d4
+.f1:	move.w	$2ED0(a3),d0
+	add.w	d0,4(a0)
+	moveq	#0,d7
+	move.w	$2EB6(a3),d3
+	and.w	#$30,d3
+	lsr.w	#3,d3			; (the flags of SHR BW,3)
+	move.w	d3,d7
+	add.w	d4,d7
+	lea	(a2,d7.l),a1
+	move.w	(a1),d3
+	move.w	#$8A92,-2(a5)		; 0040:8A8F CALL 1FCCh: the sprite
+	jsr	leaf_emit1
+	move.w	#$3C56,d5		; IY
+	move.w	#$8A98,-2(a5)		; CALL 0FA94h: the collision test (AW is dead after it: 0040:1D6B sets it)
+	jsr	leaf_ecoll_naw
+	bcc.s	.h1
+	jmp	R08E9A			; (a hit)
+.h1:	move.w	#$8AA0,-2(a5)		; CALL 216Bh: on the screen (carry: off)
+	move.w	4(a4,d6.l),d0
+	sub.w	#$12C,d0
+	bcs.s	.sc
+	sub.w	#$1A8,d0
+	bcc.s	.sc
+	move.w	8(a4,d6.l),d0
+	sub.w	#$7C,d0
+	bcs.s	.sc
+	sub.w	#$118,d0
+	bcc.s	.sc
+	tst.b	$2FC5(a3)		; 0040:8AA5 [2FC4h]
+	beq.s	.t6
+	jmp	R08EAC
+.sc:	ori	#1,ccr
+	jmp	R08EA2
+.t6:	cmp.b	#2,$1F(a4,d6.l)		; [BP+1Eh] (BP even)
+	bne.s	.rt
+	jmp	R08EB5
+.rt:	jmp	R08EB8
+.fa:	move.w	#$89B3,-(a5)		; (a limit: the arcade's timer routine)
+	jmp	R0FA3A
+.tr:	jmp	R08DB0_t
