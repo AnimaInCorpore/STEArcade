@@ -696,3 +696,117 @@ nat_bar2:
 	BAR_CW	R0544B
 nat_bar3:
 	BAR_CW	R05482
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:F694: an object's box (BP, its widths at DS1:IY) against the ship (56h, when its flag is clear), the Force and
+; the bits (76h 136h 156h, F6h 116h), the ship's shots (B6h D6h; A8h C8h by their [+0Ch] / the other's owner), 3
+; objects from 4D6h and 24 from 176h - ~19 times a frame, almost never a hit.  The tests in the arcade's order with its
+; box test (nat_box: AW as the arcade's); the first hit hands over to the translated original from its start (no test
+; has a side effect before it).  No hit: the arcade's end - AW the last test's, BW = IY, IX 476h, CW 0, the flags of the
+; last ADD IX,20h, the return IPs below SP (the last call's at SP-2, the last box test's at SP-4) - then CLR1 CY / RET.
+; ---------------------------------------------------------------------------------------------------------------------
+FBOX	macro				; \1 IX: a hit -> .hit; d0 x, d1 x + [BW+2], d3 x + [BW], d2 y, d6 y + [BW+6], d7 y + [BW+4]
+	move.w	#\1,a1			; (the last box tested)
+	cmp.w	\1+2(a3),d0
+	bcs.s	.l\@
+	cmp.w	\1+4(a3),d0
+	bcs.s	.y\@
+	cmp.w	\1+4(a3),d3
+	bcc.s	.m\@
+	bra.s	.y\@
+.l\@:	cmp.w	\1+2(a3),d1
+	bcs.s	.m\@
+.y\@:	cmp.w	\1+6(a3),d2
+	bcs.s	.t\@
+	cmp.w	\1+8(a3),d2
+	bcs	.hit
+	cmp.w	\1+8(a3),d7
+	bcs	.hit
+	bra.s	.m\@
+.t\@:	cmp.w	\1+6(a3),d6
+	bcc	.hit
+.m\@:
+	endm
+FFLAG	macro				; \1 IX: the box test when the object's flag [IX+1] is set
+	tst.b	\1(a3)
+	beq.s	.n\@
+	FBOX	\1
+.n\@:
+	endm
+
+nat_ecoll:
+	cmp.w	#$2B4,4(a4,d6.l)
+	bcc	.fb			; (x >= 2B4h: the arcade's short way)
+	movem.l	d2/d6,-(sp)		; (BP: 6(sp))
+	lea	(a2,d5.l),a1		; the widths, DS1:IY (BW = IY)
+	move.l	d6,a0
+	move.w	4(a4,a0.l),d0		; x
+	move.w	d0,d1
+	add.w	2(a1),d1
+	move.w	d0,d3
+	add.w	(a1),d3
+	move.w	8(a4,a0.l),d2		; y
+	move.w	d2,d6
+	add.w	6(a1),d6
+	move.w	d2,d7
+	add.w	4(a1),d7
+	tst.b	$56(a3)			; 0040:F485 the ship (when its flag is clear)
+	bne.s	.s2
+	FBOX	$56
+.s2:	FBOX	$76			; 0040:F493 / F4AA
+	FBOX	$136
+	FBOX	$156
+	FBOX	$F6
+	FBOX	$116
+	FFLAG	$B6			; 0040:F4BF
+	FFLAG	$D6
+	tst.w	$B4(a3)			; [A8h+0Ch]
+	bne.s	.c3
+	move.w	$D4(a3),a0
+	cmpa.w	6(sp),a0
+	beq	.c5
+	FBOX	$A8
+.c3:	tst.w	$D4(a3)			; [C8h+0Ch]
+	bne	.c5
+	move.w	$B4(a3),a0
+	cmpa.w	6(sp),a0
+	beq	.c5
+	FBOX	$C8
+.c5:
+k	set	0				; 0040:F548: 3 from 4D6h
+	rept	3
+	FFLAG	$4D6+$20*k
+k	set	k+1
+	endr
+k	set	0				; 0040:F560: 24 from 176h
+	rept	24
+	FFLAG	$176+$20*k
+k	set	k+1
+	endr
+	; no hit: AW from the last box test (nat_box again), its return IP at SP-4, the last call's at SP-2
+	movem.l	(sp)+,d2/d6
+	move.w	d5,d3			; BW = IY
+	move.w	a1,d4
+	bsr	nat_box
+	move.w	#$F56F,d7
+	cmp.w	#$4D6,d4
+	bcs.s	.r1
+	move.w	#$F557,d7
+	bra.s	.r
+.r1:	cmp.w	#$176,d4
+	bcc.s	.r
+	lea	.ips(pc),a0
+.rl:	move.l	(a0)+,d7
+	cmp.w	d7,d4
+	bne.s	.rl
+	swap	d7
+.r:	move.w	d7,-4(a5)
+	move.w	#$F6D4,-2(a5)
+	move.w	#$476,d4
+	moveq	#0,d1
+	move.w	#$456,d7		; (the last ADD IX,20h's flags)
+	add.w	#$20,d7
+	jmp	R0FAD8
+.hit:	movem.l	(sp)+,d2/d6
+.fb:	jmp	R0FA94_t
+.ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
