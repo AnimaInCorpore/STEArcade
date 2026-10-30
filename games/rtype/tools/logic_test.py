@@ -246,7 +246,8 @@ def main():
             bands = [(0, 255, (sc[1], sc[3]), (sc[0], sc[2]), off)]
         st = dict(fg=rd(img + 0xD0000, 0x4000), bg=rd(img + 0xD8000, 0x4000), pal0=rd(img + 0xC8000, 0xC00),
                   pal1=rd(img + 0xCC000, 0xC00), spr=bytes(m.spritebuf), objs=bytes(mem.r_block(sym["m72_objs"], 0x400)),
-                  objs_end=mem.r16(sym["m72_objs_end"]), bands=bands)
+                  objs_end=mem.r16(sym["m72_objs_end"]), bands=bands,
+                  recs=bytes(mem.r16(img + 0x42D34 + 12 * r) & 0xFF for r in range(32)))   # (the rows' targets)
         return zlib.compress(pickle.dumps(st), 1)
 
     def compare(f):

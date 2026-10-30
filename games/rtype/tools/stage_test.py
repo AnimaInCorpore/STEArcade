@@ -130,6 +130,8 @@ class Harness:
             self.mem.w_block(img + base, swap(data))
         m = bytes(self.mem.r_block(self.sym["v30_vmarks"], 0x180))
         self.mem.w_block(self.sym["v30_vmarks"], bytes(a | b for a, b in zip(m, marks)))
+        for r in range(32):                             # (the palette rows' records: their targets, src/stage.s)
+            self.mem.w16(img + 0x42D34 + 12 * r, st["recs"][r])
         self.mem.w_block(self.sym["m72_objs"], st["objs"])
         self.mem.w16(self.sym["m72_objs_end"], st["objs_end"])
         bands = st["bands"]
@@ -179,88 +181,25 @@ class Harness:
 
 
 class Expected:
-    """the model's picture in STE indices as the renderer colours it (src/stage.s st_palette): a pen's index comes from
-    its committed colour - committed when its palette row is loaded (ROWLOAD or more of the row's pens off their
-    committed colours, unless back to its colours before its last load: an animation) or when its new colour stayed STABLE pictures (no colour animation: the user, 2026-10-30), a
-    reserved pen at once, a brighter colour at once (an animation rests on its brightest) -; the scene picked from the committed tile colours (tools/stage_assets.py choose_scene)"""
-    ROWLOAD, STABLE = 8, 50
-
+    """the model's picture in STE indices as the renderer colours it (src/stage.s st_palette): each palette row shows
+    its record's target (st["recs"]), its 16 indices the scene's pre-mapped ones (tools/stage_assets.py scenes); the
+    scene picked by the tile rows' targets when one changes (choose_scene)"""
     def __init__(self):
         import stage_assets as SA
         self.SA = SA
         self.scenes = SA.load_scenes()
         self.model, self.lock = SM.Model(), SM.Lock()
-        self.cur = None
-        self.pcol = np.full(512, 0xFFFF, np.int32)
-        self.ccol = np.full(512, 0xFFFF, np.int32)
-        self.pend, self.stab = [], np.zeros(512, np.int32)
-        self.prev = np.full(512, 0xFFFF, np.int32)      # (each row's committed colours before its last load)
-
-    @staticmethod
-    def bright1(c):
-        return ((c >> 8) & 15) + ((c >> 4) & 15) + (c & 15)
-
-    def bright(self, cols):
-        return sum(self.bright1(int(c)) for c in cols if c != 0xFFFF)
-
-    def colours(self, col):
-        changed = np.nonzero(col != self.ccol)[0]
-        self.ccol[changed] = col[changed]
-        chg = set(changed.tolist())
-        for p in changed.tolist():
-            if p not in self.pend:
-                self.pend.append(p)
-        tilechg = False
-        for r in sorted({p >> 4 for p in chg}):
-            sl = slice(16 * r, 16 * r + 16)
-            if (self.ccol[sl] == self.prev[sl]).all():  # (back to its colours before its last load: an animation,
-                if self.bright(self.ccol[sl]) <= self.bright(self.pcol[sl]):    # the brighter set kept)
-                    continue
-                load = True
-            else:
-                load = (self.ccol[sl] != self.pcol[sl]).sum() >= self.ROWLOAD
-            if load:
-                self.prev[sl] = self.pcol[sl]
-                tilechg |= r >= 16 and bool((self.ccol[sl] != self.pcol[sl]).any())
-                self.pcol[sl] = self.ccol[sl]
-        res = self.scenes[self.cur][5] if self.cur is not None else []
-        keep = []
-        for p in self.pend:
-            if self.ccol[p] == self.pcol[p]:
-                continue
-            if p in res or self.pcol[p] == 0xFFFF or self.bright1(self.ccol[p]) > self.bright1(self.pcol[p]):
-                commit = True                           # (a reserved pen; a brighter colour: an animation rests on
-                                                        # its brightest - the power-up crystal's blue)
-            elif p in chg:
-                self.stab[p] = 0
-                commit = False
-            else:
-                self.stab[p] += 1
-                commit = self.stab[p] >= self.STABLE
-            if commit:
-                tilechg |= p >= 256
-                self.pcol[p] = self.ccol[p]
-            else:
-                keep.append(p)
-        self.pend = keep
-        return tilechg
+        self.cur, self.tiles = None, None
 
     def __call__(self, st):
-        col = self.SA.pen_colours(st)
-        if self.colours(col):
-            new = self.SA.choose_scene(self.pcol[256:], [sc[0] for sc in self.scenes], self.cur)
-            if new != self.cur:
-                self.cur = new
-                self.pcol[:] = 0xFFFF
-                self.ccol[:] = 0xFFFF
-                self.prev[:] = 0xFFFF
-                self.colours(col)
-        ref, pal, hpal, ctab, htab, res, flags = self.scenes[self.cur]
+        t = np.frombuffer(st["recs"], np.uint8).astype(np.int32)
+        if self.tiles is None or (t[16:] != self.tiles).any():
+            self.cur = self.SA.choose_scene(t[16:], [sc[0] for sc in self.scenes], self.cur)
+            self.tiles = t[16:].copy()
+        ref, pal, hpal, spm, tpm, hpm, flags = self.scenes[self.cur]
+        pidx = np.concatenate([spm[t[r]] if r < 16 else tpm[t[r]] for r in range(32)])
+        hidx = np.concatenate([np.zeros(256, np.int32)] + [hpm[t[r]] for r in range(16, 32)])
         pens = self.model.picture(st, self.lock, squeeze=bool(flags & 1), tile_dx=flags >> 8)
-        pidx = ctab[np.minimum(self.pcol, 4095)].copy()
-        for j, rp in enumerate(res):
-            pidx[rp] = 16 - len(res) + j
-        hidx = htab[np.minimum(self.pcol, 4095)]
         bar = any(b[0] == SM.HUD_Y for b in st["bands"])
         pp = np.minimum(pens, 511)
         want = pidx[pp]

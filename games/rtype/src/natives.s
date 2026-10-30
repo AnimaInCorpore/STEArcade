@@ -461,3 +461,42 @@ nat_blink:
 	include	"stage_pal.s"
 	section text,code
     endc
+
+; 0040:525A (STAGE): the palette rows into the arcade's palette RAM (REP MOVBKW from the work RAM's copy, for every
+; row whose record's flag [BP+6] is set) - the STE's renderer takes the rows' targets from the records, nobody shows
+; the arcade's palette: only the flags cleared.  The registers (AW $CC00, CW 0, IX, IY, BP at their loops' ends), the
+; flags (the last ADD IY,20h) and the stack below SP (DS0, DS1, the last copied row's CW / IY / IX) as the arcade's.
+nat_palcopy:
+    ifd STAGE
+	move.w	6(a6),-2(a5)		; (push ds0, push ds1)
+	move.w	(a6),-4(a5)
+	move.w	#$2D3A,d6		; the sprite rows' flags
+	move.w	#$2134,d4
+	moveq	#0,d5
+	bsr.s	.rows
+	move.w	#$2DFA,d6		; the tile rows'
+	move.w	#$2734,d4
+	moveq	#0,d5
+	bsr.s	.rows
+	move.w	#$CC00,d0
+	moveq	#0,d1
+	move.w	d5,d7			; (the flags of the last ADD IY,20h)
+	sub.w	#$20,d7
+	add.w	#$20,d7
+	jmp	R05700
+.rows:	moveq	#16,d1
+.r:	tst.w	(a4,d6.l)
+	beq.s	.n
+	clr.w	(a4,d6.l)
+	move.w	d1,-6(a5)		; (push cw, iy, ix)
+	move.w	d5,-8(a5)
+	move.w	d4,-10(a5)
+.n:	add.w	#$0C,d6
+	add.w	#$20,d4
+	add.w	#$20,d5
+	subq.w	#1,d1
+	bne.s	.r
+	rts
+    else
+	jmp	R0565A_t
+    endc
