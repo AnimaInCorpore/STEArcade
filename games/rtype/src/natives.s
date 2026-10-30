@@ -161,6 +161,20 @@ nat_emit1:
 	EMIT_RECORD d4,d7,1
 	jmp	R0201A
 
+; 0040:1BE9: the one-entry emitter entered with the slot in IX (the ship $3C0 / $3C8, the Force $3E8, $3D0, $3D8:
+; the fixed slots above the list, $3C0-$3FF): no pointer, IY not touched
+nat_emit1f:
+	move.w	4(a4,d6.l),d1
+	move.w	8(a4,d6.l),d2
+	move.w	6(a6),-2(a5)		; (push ds0)
+	EMIT_ENTRY 0,d4
+    ifd SPRITE_LIST
+	EMIT_SIZE 0,d7
+	add.w	d4,d7
+	EMIT_RECORD d4,d7,1
+    endc
+	jmp	R0201A
+
 nat_emit2:
 	move.w	$2EFC(a3),d4
 	move.w	d4,d5

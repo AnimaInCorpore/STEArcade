@@ -50,7 +50,7 @@ def definitions(paths):
         for f, item in pickle.load(open(p, "rb")):
             st = pickle.loads(zlib.decompress(item))
             o, end = st["objs"], st["objs_end"]
-            for slot in range(0xC0, min(end, 0x3C8), 8):
+            for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):
                 bw, n = struct.unpack(">HB", o[slot:slot + 3])
                 if bw:
                     defs.add((bw, n))

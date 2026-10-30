@@ -216,7 +216,12 @@ m72_sprite_dma:
 .c:	move.l	(a0)+,(a1)+
 	move.l	(a0)+,(a1)+
 	dbf	d0,.c
-.none:	movem.l	(sp)+,d0/a0-a1
+.none:	lea	m72_slots+$3C0,a0	; (and the fixed slots above the list: the ship, the Force - natives.s nat_emit1f)
+	lea	m72_objs+$3C0,a1
+	moveq	#$40/4-1,d0
+.f:	move.l	(a0)+,(a1)+
+	dbf	d0,.f
+	movem.l	(sp)+,d0/a0-a1
 	rts
     endc
 	movem.l	d0-d7/a0-a4,-(sp)

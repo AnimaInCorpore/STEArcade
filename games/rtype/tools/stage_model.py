@@ -126,7 +126,7 @@ def objs_to_spr(st):
     rom = _rom[0]
     o, end = st["objs"], st["objs_end"]
     spr = bytearray(0x400)
-    for slot in range(0xC0, min(end, 0x3C8), 8):
+    for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):     # (the fixed slots too)
         bw, n, col, x, y = struct.unpack(">HBBhh", o[slot:slot + 8])
         if not bw:
             continue

@@ -70,7 +70,7 @@ def list_check(objs, end, ref):
     import struct
     want = bytearray(0x400)
     covered = set()
-    for slot in range(0xC0, min(end, 0x3C8), 8):
+    for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):
         bw, n, col, x, y = struct.unpack(">HBBhh", objs[slot:slot + 8])
         if not bw:
             continue
@@ -80,11 +80,13 @@ def list_check(objs, end, ref):
             dx, dy = struct.unpack("<bb", rom[a:a + 2])
             code, attr = struct.unpack("<HH", rom[a + 2:a + 6])
             attr = (attr & 0xFF00) | col
+            if s + 8 > 0x400:
+                break
             want[s:s + 8] = struct.pack("<HHHH", (y + dy) & 0xFFFF, code, attr, (x + dx) & 0xFFFF)
             covered.add(s)
             s += 16 if attr & 0x4000 else 8
     bad = []
-    for slot in range(0xC0, 0x3C0, 8):
+    for slot in range(0xC0, 0x400, 8):
         r = ref[slot:slot + 8]
         if slot in covered:
             if want[slot:slot + 8] != r:

@@ -1195,13 +1195,24 @@ st_sprites:
 	lea	st_dmg,a0
 	add.l	d0,a0
 	move.l	a0,st_dmgp
+	lea	m72_objs,a6		; the fixed slots ($3F8 .. $3C0: last in the list, so under the others), then the list
+	move.w	#$3F8,d7		; (from its end down to $C0)
+.f:	move.w	(a6,d7.w),d0
+	beq.s	.fn
+	movem.l	d7/a6,-(sp)
+	lea	(a6,d7.w),a0
+	bsr	st_object
+	movem.l	(sp)+,d7/a6
+.fn:	subq.w	#8,d7
+	cmp.w	#$3C0,d7
+	bhs.s	.f
 	move.w	m72_objs_end,d7
-	cmp.w	#$3C8,d7
+	cmp.w	#$3C0,d7
 	bls.s	.e
-	move.w	#$3C8,d7
-.e:	sub.w	#$C0+8,d7		; the last slot's offset from $C0
-	bmi	.x
-	lea	m72_objs+$C0,a6
+	move.w	#$3C0,d7
+.e:	subq.w	#8,d7			; the last slot
+	cmp.w	#$C0,d7
+	blt	.x
 .o:	move.w	(a6,d7.w),d0		; the definition
 	beq	.on
 	movem.l	d7/a6,-(sp)
@@ -1209,7 +1220,8 @@ st_sprites:
 	bsr	st_object
 	movem.l	(sp)+,d7/a6
 .on:	subq.w	#8,d7
-	bpl.s	.o
+	cmp.w	#$C0,d7
+	bge.s	.o
 .x:	rts
 
 ; st_object: a0 = the record (BW, entries, colour, x, y)
