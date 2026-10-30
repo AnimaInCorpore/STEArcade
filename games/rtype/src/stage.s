@@ -1079,7 +1079,7 @@ w	set	w+1
 ; ======================================================================================================================
 st_sprites:
 	move.w	#$0203,BLT_HOP.w
-	clr.w	BLT_SXI.w
+	move.w	#2,BLT_SXI.w		; (the plane words of a piece's row, the planes in order: the source runs on)
 	move.w	#2,BLT_SYI.w
 	move.w	#8,BLT_DXI.w
 	move.w	#$FFFF,BLT_END2.w
@@ -1121,7 +1121,13 @@ st_sprites:
 	bge.s	.o
 .x:	rts
 
-; st_object: a0 = the record (BW, entries, colour, x, y)
+; st_object: a0 = the record (BW, entries, colour, x, y): its whole sprite (tools/stage_sprites.py: OX, OY, H, W,
+; its plane bytes / 8, its groups G, the code (word / long destination), its pens, 16 streams (a shift each), G x (class,
+; rows)) coloured (st_bake) and drawn by its code: per group of pieces (rows up to 32 pixels, the same mask and position
+; in their word) one setup - XC, DYI, END1 (+ END2), END3, control - from the shift's stream, then each piece a
+; destination step and a restart (stefastbobs2 / stedaimakaimura's sprite_compiler.js).  Culled when wholly outside
+; the window; drawn whole into the side margins (the window's edges are not on 16-pixel boundaries).  The erase
+; rectangle: its words and lines.
 st_object:
 	moveq	#0,d0
 	move.w	(a0),d0
@@ -1132,11 +1138,10 @@ st_object:
 	beq	.unknown
 	cmp.l	#1,d1
 	beq	.out			; (a star, an empty one)
-	move.l	d1,a2			; the whole sprite: OX, OY, H, NS, strips
+	move.l	d1,a2			; the whole sprite's record
 	moveq	#15,d2
 	and.b	3(a0),d2		; the colour row
-	; the top line: 384 - y + OY; the left buffer x: W + (x - 256 + OX) - 96
-	move.w	#384,d4
+	move.w	#384,d4			; the top line: 384 - y + OY
 	sub.w	6(a0),d4
 	add.w	2(a2),d4
 	move.w	d4,d0
@@ -1145,7 +1150,7 @@ st_object:
 	cmp.w	#ST_PL,d4
 	bge	.out			; (below)
 	cmp.w	#-ST_G,d4
-	blt	.out			; (beyond the guard lines: never visible)
+	blt	.out
 	move.w	4(a0),d1		; x
 	move.l	st_scn,a1
 	btst	#0,SC_FLAGS+1(a1)
@@ -1158,107 +1163,69 @@ st_object:
 .nsq:	move.w	st_W,d3			; (relative to the window: a scene's tile shift leaves the sprites in place)
 	add.w	d1,d3
 	add.w	(a2),d3
-	sub.w	#256+96,d3		; the composite's buffer x
-	; its colouring (the cache)
-	movem.l	d2-d4/a2,-(sp)
-	bsr	st_bake			; -> a3: the strips' plane words' addresses
-	movem.l	(sp)+,d2-d4/a2
-	; the strips
-	move.w	d4,d0
+	sub.w	#256+96,d3		; the sprite's buffer x
+	move.w	st_W,d0
+	sub.w	6(a2),d0
+	cmp.w	d0,d3
+	ble	.out			; (wholly left of the window)
+	add.w	6(a2),d0
+	add.w	#320,d0
+	cmp.w	d0,d3
+	bge	.out			; (right)
+	movem.l	d3-d4/a2,-(sp)
+	bsr	st_bake			; -> a3: its plane words
+	movem.l	(sp)+,d3-d4/a2
+	move.l	a3,BLT_SRC.w
+	move.w	d4,d0			; the destination: the top line, the first word
 	add.w	#ST_G,d0
 	mulu	#ST_LB,d0
-	move.l	st_dbuf,a4
-	add.l	d0,a4			; the top line in the buffer
-	move.w	6(a2),d6		; NS
-	lea	8(a2),a5		; strip: x, shape, rows, pens.l
-	subq.w	#1,d6
-	move.w	#$7FFF,st_omin		; (the drawn strips' buffer x: the object's erase rectangle)
-	move.w	#-$8000,st_omax
-.s:	move.w	d3,d5
-	add.w	(a5),d5			; the strip's buffer x
-	move.w	st_W,d0
-	sub.w	#16,d0
-	cmp.w	d0,d5
-	ble.s	.sn			; (wholly left of the window)
-	add.w	#320+16,d0
-	cmp.w	d0,d5
-	bge.s	.sn			; (right)
-	cmp.w	st_omin,d5
-	bge.s	.mi
-	move.w	d5,st_omin
-.mi:	cmp.w	st_omax,d5
-	ble.s	.ma
-	move.w	d5,st_omax
-.ma:	movem.l	d3/d6/a2-a5,-(sp)
-	bsr	st_strip
-	movem.l	(sp)+,d3/d6/a2-a5
-.sn:	addq.l	#4,a3
-	lea	10(a5),a5
-	dbf	d6,.s
-	; the erase rectangle: the drawn strips' groups (a strip at x covers x >> 4 .. (x + 15) >> 4), H lines
-	move.w	st_omax,d1
-	cmp.w	st_omin,d1
-	blt.s	.out
+	add.l	st_dbuf,d0
+	move.w	d3,d1
+	asr.w	#4,d1
+	lsl.w	#3,d1
+	ext.l	d1
+	add.l	d1,d0
+	; the erase rectangle: words (x >> 4 .. (x + W - 1) >> 4), H lines
 	move.l	st_dmgnp,a1
 	cmp.w	#ST_DMG,(a1)
 	bhs.s	.full
 	addq.w	#1,(a1)
-	add.w	#15,d1
-	asr.w	#4,d1			; the last group
-	move.w	st_omin,d0
-	asr.w	#4,d0			; the first
-	sub.w	d0,d1
+	move.w	d3,d1
+	add.w	6(a2),d1
+	subq.w	#1,d1
+	asr.w	#4,d1
+	move.w	d3,d5
+	asr.w	#4,d5
+	sub.w	d5,d1
 	addq.w	#1,d1
 	lsl.w	#2,d1			; words a line
-	lsl.w	#3,d0
-	ext.l	d0
-	move.l	a4,d2
-	sub.l	st_dbuf,d2
-	add.l	d2,d0			; the offset
 	move.l	st_dmgp,a1
-	move.l	d0,(a1)+
+	move.l	d0,d5
+	sub.l	st_dbuf,d5
+	move.l	d5,(a1)+
 	move.b	d1,(a1)+
-	move.b	5(a2),(a1)+		; (H: lines)
+	move.b	5(a2),(a1)+		; (H)
 	clr.w	(a1)+
 	move.l	a1,st_dmgp
-.out:	rts
+	bra.s	.draw
 .full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
 	lea	st_full,a1
 	st	(a1,d1.w)
-	rts
-.unknown:
-	addq.l	#1,st_unknown
-	rts
-
-; st_strip: d5 = its buffer x, a4 = the buffer's line of the composite's top, (a3) = its plane words, a5 = its entry
-; (x, shape, rows, pens): the shape's code for the shift; its damage listed
-st_strip:
-	move.l	(a3),BLT_SRC.w		; the strip's plane words
-	move.w	2(a5),d6		; the shape
-	lsl.w	#2,d6
-	moveq	#15,d3
-	and.w	d5,d3
-	mulu	#12,d3			; its variant for the shift (code, stream, damage offset, damage size)
-	move.w	d5,d1
-	asr.w	#4,d1
-	lsl.w	#3,d1
-	ext.l	d1
-	add.l	a4,d1			; the strip's destination (row 0, its first word)
-	moveq	#0,d0			; (the code per shape and pass-type pattern steps the destination's low word: a strip
-	move.w	d1,d0			; that would cross a 64 KB boundary takes the long-destination code)
-	move.w	4(a2),d2		; (the composite's rows)
-	mulu	#ST_LB,d2
-	add.l	d2,d0
-	add.l	#16,d0
-	cmp.l	#$10000,d0
+.draw:	moveq	#15,d1			; the shift's stream
+	and.w	d3,d1
+	lsl.w	#2,d1
+	move.l	24(a2,d1.w),-(sp)
+	moveq	#0,d1			; (the code steps the destination's low word: a sprite that would cross a 64 KB
+	move.w	d0,d1			; boundary takes the long-destination code)
+	move.w	4(a2),d5
+	mulu	#ST_LB,d5
+	add.l	d5,d1
+	add.l	#64,d1
+	cmp.l	#$10000,d1
 	bhi.s	.long
-	lea	st_shapes_n,a0
-	move.l	(a0,d6.w),a0
-	add.w	d3,a0
-	move.l	d1,BLT_DST.w		; (the high word; the code writes the low word)
-	move.w	d1,d0
-	move.l	(a0)+,-(sp)		; the code
-	move.l	(a0),a0			; its stream
+	move.l	d0,BLT_DST.w		; (the high word; the code writes the low word)
+	move.l	(sp)+,a0		; the stream
+	move.l	12(a2),-(sp)		; the code
 	lea	BLT_END1.w,a1
 	lea	BLT_END3.w,a6
 	lea	BLT_DYI.w,a3
@@ -1268,14 +1235,11 @@ st_strip:
 	moveq	#-$40,d2
 	move.w	#ST_LB,d4
 	lea	BLT_CTRL.w,a2
-	rts				; (into the code: it returns to st_strip's caller)
+	rts				; (into the code: it returns to st_object's caller)
 .long:	addq.l	#1,st_nlong
-	lea	st_shapes,a0
-	move.l	(a0,d6.w),a0
-	add.w	d3,a0
-	move.l	d1,a3			; (the destination)
-	move.l	(a0)+,-(sp)
-	move.l	(a0),a0
+	move.l	(sp)+,a0
+	move.l	16(a2),-(sp)
+	move.l	d0,a3			; (the destination)
 	lea	BLT_END1.w,a1
 	lea	BLT_END3.w,a6
 	lea	BLT_DST.w,a4
@@ -1285,9 +1249,14 @@ st_strip:
 	move.w	#ST_LB,d4
 	lea	BLT_CTRL.w,a2
 	rts
+.out:	rts
+.unknown:
+	addq.l	#1,st_unknown
+	rts
 
-; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = the address of its strips' plane-word addresses
-; for this colour (cached: the key is the record, the colour and the row's version)
+; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = its plane words in this colour (cached: the key
+; is the record, the colour and the row's version).  A piece's row: 16 pixels -> its 4 plane words; 32 -> the planes
+; in order, each its 2 words (the source of a pass runs on).
 st_bake:
 	lea	st_ver,a0
 	moveq	#0,d0
@@ -1310,22 +1279,11 @@ st_bake:
 .miss:	addq.l	#1,st_nbake
 	move.l	a2,(a0)
 	move.w	d0,4(a0)
-	move.w	6(a2),d5		; NS
-	move.l	st_poolp,a3		; (the pool: the addresses, then the plane words)
-	move.w	d5,d1
-	lsl.w	#2,d1
-	lea	(a3,d1.w),a1
-	moveq	#0,d1			; (the room: every strip's rows x 8)
-	lea	8(a2),a4
-	move.w	d5,d3
-	subq.w	#1,d3
-.sz:	moveq	#0,d4
-	move.w	4(a4),d4
-	lsl.l	#3,d4
-	add.l	d4,d1
-	lea	10(a4),a4
-	dbf	d3,.sz
-	add.l	a1,d1
+	move.l	st_poolp,a3
+	moveq	#0,d1
+	move.w	8(a2),d1
+	lsl.l	#3,d1			; (its plane bytes)
+	add.l	a3,d1
 	cmp.l	#st_pool+ST_POOL,d1
 	blo.s	.room
 	addq.l	#1,st_npool
@@ -1338,43 +1296,66 @@ st_bake:
 	move.l	a2,(a0)
 	move.w	d0,4(a0)
 	lea	st_pool,a3
-	move.w	d5,d1
-	lsl.w	#2,d1
-	lea	(a3,d1.w),a1
 .room:	move.l	a3,6(a0)
-	movem.l	d2/d5-d7/a2/a3,-(sp)
+	movem.l	d2-d7/a2-a3,-(sp)
 	moveq	#10,d0
 	lsl.l	d0,d2
 	lea	st_ta,a5
 	add.l	d2,a5			; the row's tables
 	lea	st_tb,a6
 	add.l	d2,a6
-	lea	8(a2),a4
+	move.l	20(a2),a0		; its pens
+	move.l	a3,a1
+	move.w	10(a2),d5		; its groups
+	lea	88(a2),a4		; (class, rows)
 	subq.w	#1,d5
-.strip:	move.l	a1,(a3)+		; the strip's plane words
-	move.l	6(a4),a0		; its pens
-	move.w	4(a4),d7		; its rows
+.grp:	move.b	(a4)+,d3		; the class
+	moveq	#0,d7
+	move.b	(a4)+,d7		; the rows
 	subq.w	#1,d7
-	bmi	.sx
-.row:	moveq	#0,d0
-	moveq	#0,d1
-	moveq	#0,d6
-	rept	8
-	move.b	(a0)+,d6
-	lsl.l	#2,d0
-	lsl.l	#2,d1
-	lsl.w	#2,d6
-	or.l	(a5,d6.w),d0
-	or.l	(a6,d6.w),d1
-	lsr.w	#2,d6
-	endr
+.row:	bsr.s	.half			; (16 pixels -> d0 planes 0 / 1, d1 planes 2 / 3)
+	tst.b	d3
+	bne.s	.w2
 	move.l	d0,(a1)+
 	move.l	d1,(a1)+
 	dbf	d7,.row
-.sx:	lea	10(a4),a4
-	dbf	d5,.strip
+	bra.s	.gn
+.w2:	move.l	d0,d4			; (32 pixels: the planes in order, each its two words)
+	move.l	d1,d6
+	bsr.s	.half
+	swap	d4
+	swap	d0
+	move.w	d4,(a1)+		; plane 0
+	move.w	d0,(a1)+
+	swap	d4
+	swap	d0
+	move.w	d4,(a1)+		; plane 1
+	move.w	d0,(a1)+
+	swap	d6
+	swap	d1
+	move.w	d6,(a1)+		; plane 2
+	move.w	d1,(a1)+
+	swap	d6
+	swap	d1
+	move.w	d6,(a1)+		; plane 3
+	move.w	d1,(a1)+
+	dbf	d7,.row
+.gn:	dbf	d5,.grp
 	move.l	a1,st_poolp
-	movem.l	(sp)+,d2/d5-d7/a2/a3
+	movem.l	(sp)+,d2-d7/a2-a3
+	rts
+.half:	moveq	#0,d0			; 8 pen bytes at a0 -> d0 (planes 0 : 1), d1 (planes 2 : 3)
+	moveq	#0,d1
+	moveq	#0,d2
+	rept	8
+	move.b	(a0)+,d2
+	lsl.l	#2,d0
+	lsl.l	#2,d1
+	lsl.w	#2,d2
+	or.l	(a5,d2.w),d0
+	or.l	(a6,d2.w),d1
+	lsr.w	#2,d2
+	endr
 	rts
 
 ; ======================================================================================================================
@@ -1634,8 +1615,6 @@ i	set	i+1
 	section data,data
 	even
 st_sstream:	incbin	"stage_sstream.bin"
-	even
-st_nstream:	incbin	"stage_nstream.bin"
 
 	section bss,bss
 	even
@@ -1651,7 +1630,7 @@ st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
 st_npool:	ds.l	1
-st_nlong:	ds.l	1		; (strips drawn with the long-destination code: 64 KB crossings)
+st_nlong:	ds.l	1		; (sprites drawn with the long-destination code: 64 KB crossings)
 st_logn:	ds.l	1
 m72r_shown:	ds.w	1
 m72r_prev:	ds.w	1
@@ -1677,9 +1656,7 @@ st_loghead:	ds.w	1
 st_logstart:	ds.w	1
 st_dmgnp:	ds.l	1
 st_dmgp:	ds.l	1
-st_omin:	ds.w	1
 st_tdx:		ds.w	1
-st_omax:	ds.w	1
 st_poolp:	ds.l	1
 st_bufs:	ds.l	ST_NBUF+1
 st_bar:		ds.l	1
