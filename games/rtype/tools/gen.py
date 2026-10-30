@@ -34,7 +34,8 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x01FE9: "nat_emit1f",                                   # (one entry into a fixed slot)
            0x00A53: "nat_fill",                                     # (the unused slots blanked)
            0x0F960: "nat_coll24", 0x0F948: "nat_coll3",             # the collision scans
-           0x0226C: "nat_fgtile", 0x022B5: "nat_bgtile"}            # the tiles under an object
+           0x0226C: "nat_fgtile", 0x022B5: "nat_bgtile",            # the tiles under an object
+           0x05CB0: "nat_glow", 0x1000A: "nat_blink"}               # (STAGE: the colour animations off)
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

@@ -415,3 +415,49 @@ nat_bgtile:
 	and.w	#$FFF,d1		; (the flags)
 	movem.l	(sp)+,d0/d3		; (pop aw, pop bw: no flags)
 	jmp	R0231A
+
+; ---------------------------------------------------------------------------------------------------------------------
+; STAGE: the colour animations switched off at their source (the user, 2026-10-30: no colour animation with the STE's
+; 16 colours; change the game, not the renderer).  Both keep the brighter of their two targets (the ROM's colour
+; tables, tools/stage_assets.py stage_pal.s):
+;   0040:58B0  the power-up crystal's glow: every 32 frames sprite row [BP+6] fades to target $0A or $0B by bit 5 of
+;              the frame counter - always PAL_GLOW (the brighter);
+;   0040:FC0A  the cave lights: a tile row [BP+20h] fades to [BP+22h] or [BP+24h] by its own frame mask - always
+;              the brighter of the two (pal_tile_bright).
+; Without STAGE the arcade's code runs (the lock-step test).
+; ---------------------------------------------------------------------------------------------------------------------
+nat_glow:
+    ifd STAGE
+	move.w	#PAL_GLOW,d1		; CW: the target
+	jmp	R05CBA
+    else
+	jmp	R05CB0_t
+    endc
+
+nat_blink:
+    ifd STAGE
+	move.w	$22(a4,d6.l),d1		; CW = [BP+22h], unless [BP+24h] is brighter
+	move.w	$24(a4,d6.l),d7
+	move.l	d0,-(sp)
+	lea	pal_tile_bright,a0
+	moveq	#0,d0
+	move.b	d1,d0
+	add.w	d0,d0
+	move.w	(a0,d0.w),a1
+	moveq	#0,d0
+	move.b	d7,d0
+	add.w	d0,d0
+	cmp.w	(a0,d0.w),a1
+	bcc.s	.a
+	move.w	d7,d1
+.a:	move.l	(sp)+,d0
+	jmp	R10012
+    else
+	jmp	R1000A_t
+    endc
+
+    ifd STAGE
+	section data,data
+	include	"stage_pal.s"
+	section text,code
+    endc
