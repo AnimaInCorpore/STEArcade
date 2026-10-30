@@ -103,6 +103,9 @@ main_loop:
 	move.b	#MAX_BEHIND,ticks
 	addq.l	#1,cnt_dropped
 .go:	subq.b	#1,ticks
+    ifd PLAYBACK
+	bsr	play_next
+    endc
 	move.b	#1,main_state
 	bsr	port_frame
 	move.b	#3,main_state
@@ -492,8 +495,31 @@ acia_isr:
 	movem.l	(sp)+,d0-d2/a0
 	rte
 
+    ifd PLAYBACK
+; PLAYBACK (a bench: tools/play_inputs.py): the inputs of a lock-step test's play by arcade frame - runs of (frames,
+; IN0, IN1) - the keyboard and pads ignored; at the table's end the program quits (COUNTERS.BIN: that play alone).
+play_next:
+	move.l	play_ptr,a0
+	tst.w	play_left
+	bne.s	.run
+	move.w	(a0),play_left
+	bne.s	.run
+	st	quit_flag		; (the end: no more arcade frames)
+	move.w	#1,play_left
+	rts
+.run:	move.w	2(a0),in_ports
+	move.w	4(a0),in_ports+2
+	subq.w	#1,play_left
+	bne.s	.x
+	addq.l	#6,play_ptr
+.x:	rts
+    endc
+
 ; in_ports: IN0 (high byte player 2, low byte player 1), IN1 (low byte the coins and starts), active low
 compose:
+    ifd PLAYBACK
+	rts
+    endc
 	move.b	kbd_sys,d0
 	or.b	jp_in,d0
 	not.b	d0
@@ -544,6 +570,12 @@ key_table:
     endc
 
 	section data,data
+    ifd PLAYBACK
+play_ptr:	dc.l	play_table
+play_left:	dc.w	0
+play_table:	incbin	"play_inputs.bin"
+	even
+    endc
     ifnd SIM
 snapshot:
 	incbin	"snapshot.bin"

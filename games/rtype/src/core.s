@@ -256,7 +256,11 @@ m72_sound_latch:
 
 	section data,data
 	even
+    ifd INVULN
+in_ports:	dc.w	$FFFF,$FFFF,$FDFB&~$4000	; (INVULN: DIP SW2:7, Invulnerability - for measurements)
+    else
 in_ports:	dc.w	$FFFF,$FFFF,$FDFB	; IN0 IN1 DSW (active low; IN1 bit 7: the sprite DMA is done)
+    endc
 
 	section bss,bss
 	even
