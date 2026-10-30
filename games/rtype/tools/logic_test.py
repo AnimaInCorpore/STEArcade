@@ -17,6 +17,7 @@ import bisect
 import json
 import os
 import random
+import struct
 import sys
 from pathlib import Path
 
@@ -109,6 +110,8 @@ def main():
     ap.add_argument("--list", action="store_true", help="a SPRITE_LIST build (src/natives.s): the sprite RAM is not "
                     "compared; the object records the picture gets (m72_objs) expanded through their ROM definitions "
                     "must equal the reference's sprite buffer")
+    ap.add_argument("--defs", default="", help="(with --list) collect the object records' (definition, entries) "
+                    "pairs of every frame into this JSON file (tools/stage_sprites.py takes it)")
     ap.add_argument("--record", default="", help="(with --list) save each frame's video state as the stage renderers "
                     "get it to this file (render_test's state format + the object records: tools/stage_model.py)")
     ap.add_argument("--render", type=int, default=0, help="(a STAGE build) a picture of src/stage.s every N arcade "
@@ -116,6 +119,7 @@ def main():
     ap.add_argument("--render-profile", type=int, default=0, help="profile the pictures from this frame on")
     args = ap.parse_args()
     recorded = []
+    defs_seen = set()
     rcost = []
     import collections
     rprof = collections.Counter()
@@ -408,6 +412,13 @@ def main():
             return 1
         if args.record:
             recorded.append((f, record_state()))
+        if args.defs:
+            o = bytes(mem.r_block(sym["m72_objs"], 0x400))
+            end = mem.r16(sym["m72_objs_end"])
+            for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):
+                bw, n = struct.unpack(">HB", o[slot:slot + 3])
+                if bw:
+                    defs_seen.add((bw, n))
         if args.render and f % args.render == 0:
             rcost.append(render_picture(args.render_profile and f >= args.render_profile))
         if f % 100 == 99:
@@ -423,9 +434,15 @@ def main():
                 mem.r32(sym["st_nrows"])))
             print("sprite colourings %d, pool resets %d, long-destination strips %d" % (
                 mem.r32(sym["st_nbake"]), mem.r32(sym["st_npool"]), mem.r32(sym["st_nlong"])))
+            if "st_nobj" in sym:
+                print("objects %d (drawn %d), without a definition %d" % (
+                    mem.r32(sym["st_nobj"]), mem.r32(sym["st_ndrawn"]), mem.r32(sym["st_unknown"])))
         tot = sum(rprof.values())
         for k, v in rprof.most_common(20):
             print("  %-22s %5.1f%%" % (k, 100.0 * v / tot))
+    if args.defs:
+        Path(args.defs).write_text(json.dumps(sorted(defs_seen)))
+        print("%d (definition, entries) pairs -> %s" % (len(defs_seen), args.defs))
     if args.record:
         import pickle
         Path(args.record).write_bytes(pickle.dumps(recorded))

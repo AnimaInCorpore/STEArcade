@@ -23,8 +23,15 @@ st_shapes), and
     st_defs:   per definition: dc.w BW, dc.l its record (0: a star) ... dc.w 0 (the renderer makes its lookup)
     a record:  dc.w OX, OY, H (rows), NS (strips), then per strip: dc.w its x (pixels from the left), its shape,
                the opaque rows R, dc.l its pens (R x 8 bytes)
+
+The definitions: the recordings (logic_test.py --record) and the (definition, entries) pairs of longer lock-step
+runs (logic_test.py --snap --list --defs build/rtype/defs_SEED.json on a STAGE build), e.g.
+    venv/bin/python games/rtype/tools/stage_sprites.py build/rtype/stage_states_1.pkl build/rtype/stage_states_8.pkl \
+        build/rtype/defs_1.json build/rtype/defs_4.json build/rtype/defs_8.json build/rtype/defs_9.json \
+        build/rtype/defs_10.json            (2026-10-30: 767 definitions; seed 8 to 8000: none missing)
 """
 import argparse
+import json
 import pickle
 import struct
 import sys
@@ -46,6 +53,9 @@ def definitions(paths):
     """{(bw, n)} of the recorded object lists"""
     defs = set()
     for p in paths:
+        if p.endswith(".json"):                  # (logic_test.py --defs: the pairs alone)
+            defs |= {tuple(d) for d in json.load(open(p))}
+            continue
         for f, item in pickle.load(open(p, "rb")):
             st = pickle.loads(zlib.decompress(item))
             o, end = st["objs"], st["objs_end"]

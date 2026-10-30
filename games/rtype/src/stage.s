@@ -1182,6 +1182,9 @@ st_sprites:
 ; the window; drawn whole into the side margins (the window's edges are not on 16-pixel boundaries).  The erase
 ; rectangle: its words and lines.
 st_object:
+    ifd SIM
+	addq.l	#1,st_nobj
+    endc
 	moveq	#0,d0
 	move.w	(a0),d0
 	lsr.w	#1,d0
@@ -1225,9 +1228,7 @@ st_object:
 	add.w	#320,d0
 	cmp.w	d0,d3
 	bge	.out			; (right)
-	movem.l	d3-d4/a2,-(sp)
-	bsr	st_bake			; -> a3: its plane words
-	movem.l	(sp)+,d3-d4/a2
+	bsr	st_bake			; -> a3: its plane words (d3, d4, a2 kept)
 	move.l	a3,BLT_SRC.w
 	move.w	d4,d0			; the destination: the top line, the first word
 	add.w	#ST_G,d0
@@ -1264,7 +1265,11 @@ st_object:
 .full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
 	lea	st_full,a1
 	st	(a1,d1.w)
-.draw:	moveq	#15,d1			; the shift's stream
+.draw:
+    ifd SIM
+	addq.l	#1,st_ndrawn
+    endc
+	moveq	#15,d1			; the shift's stream
 	and.w	d3,d1
 	lsl.w	#2,d1
 	move.l	24(a2,d1.w),-(sp)
@@ -1319,10 +1324,10 @@ st_bake:
 	move.l	a2,d1
 	lsr.l	#3,d1
 	eor.w	d0,d1
-	and.w	#ST_HASH-1,d1
-	mulu	#10,d1
+	and.l	#ST_HASH-1,d1
+	lsl.l	#4,d1
 	lea	st_hash,a0
-	add.l	d1,a0			; the slot: record.l, key.w, data.l
+	add.l	d1,a0			; the slot (16 bytes): record.l, key.w, data.l
 	cmp.l	(a0),a2
 	bne.s	.miss
 	cmp.w	4(a0),d0
@@ -1342,7 +1347,7 @@ st_bake:
 	addq.l	#1,st_npool
 	movem.l	d0/a0,-(sp)		; (full: everything coloured again)
 	lea	st_hash,a1
-	move.w	#ST_HASH*10/4-1,d1
+	move.w	#ST_HASH*16/4-1,d1
 .clr:	clr.l	(a1)+
 	dbf	d1,.clr
 	movem.l	(sp)+,d0/a0
@@ -1686,6 +1691,8 @@ st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
 st_npool:	ds.l	1
+st_nobj:	ds.l	1		; (SIM: the objects, those drawn)
+st_ndrawn:	ds.l	1
 st_nlong:	ds.l	1		; (sprites drawn with the long-destination code: 64 KB crossings)
 st_logn:	ds.l	1
 m72r_shown:	ds.w	1
@@ -1757,7 +1764,7 @@ st_tt:		ds.l	256*16
 st_ttf:		ds.l	256*16
 st_tckey:	ds.l	ST_TCN
 st_tcdata:	ds.b	ST_TCN*32
-st_hash:	ds.b	ST_HASH*10
+st_hash:	ds.b	ST_HASH*16
 st_deftab:	ds.l	32768
 st_pool:	ds.b	ST_POOL
 st_mem:		ds.b	(ST_NBUF+1)*ST_BUFSZ+ST_BARLB*16+256
