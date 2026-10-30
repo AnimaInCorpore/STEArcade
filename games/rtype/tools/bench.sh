@@ -6,6 +6,8 @@
 #   FAST=true NOESC=1 games/rtype/tools/bench.sh   (Hatari's fast forward: the counters are emulated VBLs, so the
 #                                                same numbers sooner; NOESC: no Esc after the items - for PLAYBACK
 #                                                runs, which quit at the end of their inputs)
+#   REPLAY=8:3000:8000 FAST=true NOESC=1 EXTRA="-D STAGE -D INVULN -D PLAYBACK -D DEBUG" games/rtype/tools/bench.sh
+#                                                (a replay point: the game from seed 8's arcade frame 3000 to 8000)
 #   MEMSIZE=4 games/rtype/tools/bench.sh ...    (Hatari ST RAM in MB, default 14: the stage-renderer test builds are
 #                                                larger than a 4 MB STE; R-Type only)
 #
@@ -18,6 +20,11 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT"
 PY=venv/bin/python; [ -x $PY ] || PY=python3
 BENCH=run/rtype_bench; mkdir -p $BENCH
+if [ -n "$REPLAY" ]; then                       # REPLAY=seed:frame[:end]: start there, PLAYBACK to end (8000)
+  IFS=: read RSEED RFRAME REND <<< "$REPLAY"
+  $PY games/rtype/tools/play_inputs.py --seed $RSEED --start $RFRAME --frames ${REND:-8000} | tail -1
+  export REPLAY="$RSEED:$RFRAME"
+fi
 $PY games/rtype/tools/build.py $EXTRA 2>&1 | grep -E "^built|rror" | tail -2
 cp run/rtype/RTYPE.PRG $BENCH/
 rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo $BENCH/BORDERS.BIN

@@ -9,7 +9,14 @@ after it.  snapshot.bin holds, in this order (the V30's memory with the bytes of
     words: DS1 PS SS DS0, IE, DF, the parity byte, the AC byte (bytes as words), AW CW DW BW IX IY BP, SP, the CCR,
     the scroll registers (ports $80-$86), the raster register (port $06), port $02
 rtype.s snapshot_load copies them to the image, the context and the port words.
+
+A replay point (REPLAY=seed:frame in the environment, e.g. 8:3000): the reference with a lock-step test's inputs
+(ref/cover.py; seeds 8+ with the Invulnerability DIP switch: build with -D INVULN) at that arcade frame instead; a
+PLAYBACK build then replays the inputs from there (tools/play_inputs.py --start) - every build starts at the same
+moment of the same game.
 """
+import os
+import random
 import struct
 import sys
 from pathlib import Path
@@ -43,9 +50,30 @@ def capture(m=None):
     return data + struct.pack(">%dH" % len(words), *words), m
 
 
+def replay_board(seed, frame):
+    """the reference after `frame` arcade frames of seed's play (as logic_test.py runs it)"""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ref"))
+    import cover
+    m = RType()
+    m.boot()
+    rng, state = random.Random(seed), dict(hold=0, bits=0)
+    if seed >= 8:
+        m.dsw &= ~0x4000
+    for f in range(frame):
+        cover.press(m, f, seed, rng, state)
+        m.run_frame_port()
+    return m
+
+
 def write(build=None):
     build = build or build_dir("rtype")
-    data, m = capture()
+    rp = os.environ.get("REPLAY")
+    if rp:
+        seed, frame = (int(x) for x in rp.split(":"))
+        data, m = capture(replay_board(seed, frame))
+        print("snapshot.bin: seed %d at frame %d" % (seed, frame))
+    else:
+        data, m = capture()
     (build / "snapshot.bin").write_bytes(data)
     return m
 
