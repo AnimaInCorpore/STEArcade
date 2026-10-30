@@ -155,7 +155,9 @@ ST_PHASE macro				; (DEBUG: the phase for the VBL's sampled profile, rtype.s mai
 	endc
 	endm
 	ST_PHASE 4
+	ifnd	ST_NOPAL
 	bsr	st_palette		; the pens' indices (the palette blocks the game wrote)
+	endc
 	ST_PHASE 5
 	bsr	st_vram			; the video RAM rows the game wrote: the changed cells
 	bsr	st_bands		; the window, the bar
@@ -383,6 +385,7 @@ st_palette:
 .pen:	cmp.l	st_plend,a6
 	beq	.pend
 	move.w	(a6)+,d7		; the pen
+	addq.l	#1,st_npens
 	lea	st_pflag,a0
 	clr.b	(a0,d7.w)
 	move.w	d7,d0
@@ -507,6 +510,7 @@ st_palette:
 	beq	.rn
 	lea	st_ver,a0
 	addq.b	#1,(a0,d5.w)
+	addq.l	#1,st_nrows
 	bsr	st_rowtables
 	cmp.w	#16,d5
 	blo.s	.rn
@@ -547,6 +551,7 @@ st_palette:
 ; equals; tools/stage_assets.py choose_scene): d0 = 1 when it becomes the scene (st_scn) - the first time, or when it
 ; matches SCENE_MATCH pens - else 0
 st_scene:
+	addq.l	#1,st_nscene
 	movem.l	d1-d7/a0-a3,-(sp)
 	lea	st_scenes,a0
 	move.w	(a0)+,d7		; the scenes
@@ -576,7 +581,8 @@ st_scene:
 	bmi.s	.sw			; (the first)
 	cmp.w	#SCENE_MATCH,d6
 	blo.s	.x
-.sw:	move.w	d5,st_curscn
+.sw:	addq.l	#1,st_switches
+	move.w	d5,st_curscn
 	mulu	#SC_SIZE,d5
 	lea	st_scenes+2,a0
 	add.l	d5,a0
@@ -590,150 +596,127 @@ st_scene:
 ; the bottom of its byte of a long: movep order), st_ttf (the pens in the other order: flip x).  Sprites: st_ta (planes
 ; 0 / 1: 2 bits at the bottom of each word of a long), st_tb (planes 2 / 3).
 st_rowtables:
-	movem.l	d0-d7/a0-a3,-(sp)
+	movem.l	d0-d1/a0-a4,-(sp)
 	lea	st_pidx,a0
 	move.w	d5,d0
 	lsl.w	#4,d0
 	add.w	d0,a0			; the row's 16 indices
-	move.w	d5,d0
-	and.w	#15,d0
+	moveq	#15,d0
+	and.w	d5,d0
 	moveq	#10,d1
-	lsl.l	d1,d0			; (1 KB a row)
+	lsl.l	d1,d0			; (1 KB a table)
 	cmp.w	#16,d5
-	bhs	.tile
-	lea	st_ta,a1
+	bhs.s	.tile
+	lea	st_ta,a1		; the sprites: planes 0 / 1, planes 2 / 3
 	add.l	d0,a1
-	lea	st_tb,a2
-	add.l	d0,a2
-	moveq	#0,d7			; the byte: pens (d7 >> 4) left, (d7 & 15) right
-.s:	move.w	d7,d1
-	lsr.w	#4,d1
-	moveq	#0,d2
-	tst.w	d1
-	beq.s	.s0
-	move.b	(a0,d1.w),d2		; the left pixel's index
-.s0:	moveq	#15,d1
-	and.w	d7,d1
-	moveq	#0,d3
-	tst.w	d1
-	beq.s	.s1
-	move.b	(a0,d1.w),d3		; the right pixel's
-.s1:	moveq	#0,d4			; plane k: (left bit k) << 1 | right bit k; planes 0 / 1 -> st_ta, 2 / 3 -> st_tb
-	moveq	#0,d6
-	btst	#0,d2
-	beq.s	.a0
-	or.l	#$20000,d4
-.a0:	btst	#0,d3
-	beq.s	.a1
-	or.l	#$10000,d4
-.a1:	btst	#1,d2
-	beq.s	.a2
-	addq.l	#2,d4
-.a2:	btst	#1,d3
-	beq.s	.a3
-	addq.l	#1,d4
-.a3:	btst	#2,d2
-	beq.s	.a4
-	or.l	#$20000,d6
-.a4:	btst	#2,d3
-	beq.s	.a5
-	or.l	#$10000,d6
-.a5:	btst	#3,d2
-	beq.s	.a6
-	addq.l	#2,d6
-.a6:	btst	#3,d3
-	beq.s	.a7
-	addq.l	#1,d6
-.a7:	move.l	d4,(a1)+
-	move.l	d6,(a2)+
-	addq.w	#1,d7
-	cmp.w	#256,d7
-	blo	.s
-	movem.l	(sp)+,d0-d7/a0-a3
+	lea	st_sal,a3
+	lea	st_sar,a4
+	bsr	st_mktab
+	lea	st_tb,a1
+	add.l	d0,a1
+	lea	st_sbl,a3
+	lea	st_sbr,a4
+	bsr	st_mktab
+	movem.l	(sp)+,d0-d1/a0-a4
 	rts
 .tile:	lea	st_tt,a1
 	add.l	d0,a1
 	lea	st_ttf,a2
 	add.l	d0,a2
 	bsr	st_tiletables
-	movem.l	(sp)+,d0-d7/a0-a3
+	movem.l	(sp)+,d0-d1/a0-a4
 	rts
 
 ; st_tiletables: a0 = a colour row's 16 indices: a1 its tile table, a2 its flipped one (see st_rowtables)
 st_tiletables:
-	movem.l	d0-d7/a0-a2,-(sp)
-	moveq	#0,d7
-.t:	move.w	d7,d1
-	lsr.w	#4,d1
-	moveq	#0,d2
-	tst.w	d1
-	beq.s	.t0
-	move.b	(a0,d1.w),d2
-.t0:	moveq	#15,d1
-	and.w	d7,d1
-	moveq	#0,d3
-	tst.w	d1
-	beq.s	.t1
-	move.b	(a0,d1.w),d3
-.t1:	moveq	#0,d4			; long: plane 0 byte (bits 24-25), 1 (16-17), 2 (8-9), 3 (0-1): left bit << 1 | right
-	moveq	#0,d6			; (flipped: right << 1 | left)
-	moveq	#3,d1			; the plane
-.tp:	lsl.l	#8,d4
-	lsl.l	#8,d6
-	btst	d1,d2
-	beq.s	.tq
-	addq.l	#2,d4
-	addq.l	#1,d6
-.tq:	btst	d1,d3
-	beq.s	.tr
-	addq.l	#1,d4
-	addq.l	#2,d6
-.tr:	dbf	d1,.tp
-	; (built plane 3 first: reverse the bytes so plane 0 is the high byte)
-	move.l	d4,d0
-	bsr	st_rev4
-	move.l	d0,(a1)+
-	move.l	d6,d0
-	bsr	st_rev4
-	move.l	d0,(a2)+
-	addq.w	#1,d7
-	cmp.w	#256,d7
-	blo	.t
-	movem.l	(sp)+,d0-d7/a0-a2
+	movem.l	a1/a3-a4,-(sp)
+	lea	st_tl,a3
+	lea	st_tr,a4
+	bsr	st_mktab
+	move.l	a2,a1			; (flipped: the left pixel's bits from the right pixel's table)
+	lea	st_tr,a3
+	lea	st_tl,a4
+	bsr	st_mktab
+	movem.l	(sp)+,a1/a3-a4
 	rts
 
-; st_rowcells: d5 = a tile colour row (16-31): the FG cells of that colour composed again (their columns looked at
-; again), the status bar drawn again
+; st_mktab: a0 = 16 indices (pen 0: 0), a3 / a4 = the left / right pixel's bits of each index (16 longs): a1 = 256
+; longs, entry b = a3[index of b >> 4] | a4[index of b & 15]
+st_mktab:
+	movem.l	d0-d2/d6/a0-a2,-(sp)
+	lea	st_mkr,a2		; (the right pixel's bits by pen)
+	moveq	#0,d1
+	moveq	#16-1,d2
+.r:	moveq	#0,d0
+	tst.w	d1
+	beq.s	.r1			; (pen 0)
+	move.b	(a0,d1.w),d0
+.r1:	add.w	d0,d0
+	add.w	d0,d0
+	move.l	(a4,d0.w),(a2)+
+	addq.w	#1,d1
+	dbf	d2,.r
+	moveq	#0,d1
+	moveq	#16-1,d2
+.l:	moveq	#0,d0
+	tst.w	d1
+	beq.s	.l1
+	move.b	(a0,d1.w),d0
+.l1:	add.w	d0,d0
+	add.w	d0,d0
+	move.l	(a3,d0.w),d0		; the left pixel's bits
+	lea	st_mkr,a2
+	rept	16
+	move.l	d0,d6
+	or.l	(a2)+,d6
+	move.l	d6,(a1)+
+	endr
+	addq.w	#1,d1
+	dbf	d2,.l
+	movem.l	(sp)+,d0-d2/d6/a0-a2
+	rts
+
+; st_rowcells: d5 = a tile colour row (16-31): the FG cells of that colour in the columns it was composed into
+; (st_colused) and the picture's map rows (the clean buffer holds no others) composed again, those columns looked at
+; again
 st_rowcells:
-	movem.l	d0-d3/a0-a2,-(sp)
+	movem.l	d0-d7/a0-a3,-(sp)
 	moveq	#15,d3
 	and.w	d5,d3
-	lea	v30_image+$D0002,a0	; (the attribute words)
+	lea	st_colused,a3
+	move.w	d3,d0
+	lsl.w	#6,d0
+	add.w	d0,a3			; the colour's column flags
 	lea	st_cells,a1
 	lea	st_colok,a2
-	moveq	#0,d0			; the cell
-.c:	moveq	#15,d1
-	and.w	(a0),d1
-	cmp.w	d3,d1
+	moveq	#0,d6			; the column
+.col:	tst.b	(a3,d6.w)
+	beq	.cn
+	clr.b	(a3,d6.w)
+	move.w	st_sy,d4
+	lsr.w	#3,d4			; the picture's first map row (33 of them)
+	moveq	#33-1,d7
+.r:	and.w	#63,d4
+	move.w	d4,d0
+	lsl.w	#6,d0
+	add.w	d6,d0			; the cell
+	move.w	d0,d1
+	lsl.w	#2,d1
+	lea	v30_image+$D0002,a0	; (its attribute word)
+	moveq	#15,d2
+	and.w	(a0,d1.w),d2
+	cmp.w	d3,d2
 	bne.s	.n
 	clr.b	(a1,d0.w)
-	moveq	#63,d2
-	and.w	d0,d2
-	clr.b	(a2,d2.w)
-.n:	addq.l	#4,a0
-	addq.w	#1,d0
-	cmp.w	#4096,d0
-	blo.s	.c
-	st	st_bardirty
-	movem.l	(sp)+,d0-d3/a0-a2
+	clr.b	(a2,d6.w)
+.n:	addq.w	#1,d4
+	dbf	d7,.r
+.cn:	addq.w	#1,d6
+	cmp.w	#64,d6
+	blo	.col
+	movem.l	(sp)+,d0-d7/a0-a3
 	rts
 
-; d0: the bytes of the long reversed
-st_rev4:
-	ror.w	#8,d0
-	swap	d0
-	ror.w	#8,d0
-	rts
 
 ; ======================================================================================================================
 ; Video RAM: the rows the game wrote (v30_vmarks $80-$BF FG, $100-$13F BG): the FG cells whose entries changed are
@@ -899,6 +882,11 @@ st_cell:
 	move.w	(a0,d0.w),d1		; code: tile, flip x (14), flip y (15)
 	move.w	2(a0,d0.w),d2		; attribute: colour 0-3
 	and.w	#15,d2
+	lea	st_colused,a0		; (the columns each colour is composed into: st_rowcells)
+	move.w	d2,d0
+	lsl.w	#6,d0
+	add.w	d6,d0
+	st	(a0,d0.w)
 	bsr	st_tile			; -> a0: 8 longs (movep order)
 	moveq	#8-1,d0
 .w:	move.l	(a0)+,d1
@@ -1143,11 +1131,10 @@ st_copy:
 	move.l	a0,BLT_SRC.w
 	move.l	a1,BLT_DST.w
 	move.w	d0,BLT_XC.w
-	moveq	#32,d5			; the lines a pass: 32 words (or a line)
-	divu	d0,d5
-	tst.w	d5
-	bne.s	.p
-	moveq	#1,d5
+	moveq	#1,d5			; the lines a pass: 32 words (or a line)
+	cmp.w	#32,d0
+	bhi.s	.p
+	move.b	st_lpp(pc,d0.w),d5
 .p:	move.w	d5,d2
 	cmp.w	d1,d2
 	bls.s	.go
@@ -1158,6 +1145,18 @@ st_copy:
 	bne.s	.p
 	movem.l	(sp)+,d0-d5
 	rts
+
+st_lpp:		; (32 / words, the lines of a short pass)
+w	set	0
+	rept	33
+	if	w=0
+	dc.b	1
+	else
+	dc.b	32/w
+	endc
+w	set	w+1
+	endr
+	even
 
 ; ======================================================================================================================
 ; Sprites: the object records from the last to the first
@@ -1236,6 +1235,8 @@ st_object:
 	move.w	6(a2),d6		; NS
 	lea	8(a2),a5		; strip: x, shape, rows, pens.l
 	subq.w	#1,d6
+	move.w	#$7FFF,st_omin		; (the drawn strips' buffer x: the object's erase rectangle)
+	move.w	#-$8000,st_omax
 .s:	move.w	d3,d5
 	add.w	(a5),d5			; the strip's buffer x
 	move.w	st_W,d0
@@ -1245,13 +1246,49 @@ st_object:
 	add.w	#320+16,d0
 	cmp.w	d0,d5
 	bge.s	.sn			; (right)
-	movem.l	d3/d6/a2-a5,-(sp)
+	cmp.w	st_omin,d5
+	bge.s	.mi
+	move.w	d5,st_omin
+.mi:	cmp.w	st_omax,d5
+	ble.s	.ma
+	move.w	d5,st_omax
+.ma:	movem.l	d3/d6/a2-a5,-(sp)
 	bsr	st_strip
 	movem.l	(sp)+,d3/d6/a2-a5
 .sn:	addq.l	#4,a3
 	lea	10(a5),a5
 	dbf	d6,.s
+	; the erase rectangle: the drawn strips' groups (a strip at x covers x >> 4 .. (x + 15) >> 4), H lines
+	move.w	st_omax,d1
+	cmp.w	st_omin,d1
+	blt.s	.out
+	move.l	st_dmgnp,a1
+	cmp.w	#ST_DMG,(a1)
+	bhs.s	.full
+	addq.w	#1,(a1)
+	add.w	#15,d1
+	asr.w	#4,d1			; the last group
+	move.w	st_omin,d0
+	asr.w	#4,d0			; the first
+	sub.w	d0,d1
+	addq.w	#1,d1
+	lsl.w	#2,d1			; words a line
+	lsl.w	#3,d0
+	ext.l	d0
+	move.l	a4,d2
+	sub.l	st_dbuf,d2
+	add.l	d2,d0			; the offset
+	move.l	st_dmgp,a1
+	move.l	d0,(a1)+
+	move.b	d1,(a1)+
+	move.b	5(a2),(a1)+		; (H: lines)
+	clr.w	(a1)+
+	move.l	a1,st_dmgp
 .out:	rts
+.full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
+	lea	st_full,a1
+	st	(a1,d1.w)
+	rts
 .unknown:
 	addq.l	#1,st_unknown
 	rts
@@ -1274,26 +1311,7 @@ st_strip:
 	ext.l	d0
 	add.l	a4,d0			; the strip's destination (row 0, its first word)
 	move.l	d0,a3
-	; the damage: the drawn lines and words
-	move.l	st_dmgnp,a1
-	cmp.w	#ST_DMG,(a1)
-	bhs.s	.full
-	addq.w	#1,(a1)
-	move.l	st_dmgp,a1
-	move.w	8(a0),d1
-	ext.l	d1
-	add.l	d0,d1
-	sub.l	st_dbuf,d1
-	move.l	d1,(a1)+		; the offset
-	move.w	10(a0),d1
-	move.w	d1,(a1)+		; words a line << 8 | lines
-	clr.w	(a1)+
-	move.l	a1,st_dmgp
-	bra.s	.draw
-.full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
-	lea	st_full,a1
-	st	(a1,d1.w)
-.draw:	move.l	d6,BLT_SRC.w
+	move.l	d6,BLT_SRC.w
 	move.l	4(a0),-(sp)		; (the stream)
 	move.l	(a0),a2			; the code
 	move.l	(sp)+,a0
@@ -1542,6 +1560,45 @@ SC_RES		= 576+8192		; a word R, 2 words the reserved pens (indices 16 - R .. 15)
 SC_SIZE		= SC_RES+6
 SCENE_MATCH	= 192
 st_tiles:	incbin	"stage_tiles.bin"
+; the pixel bits of each index for the colour tables (st_mktab): tiles (a long of 4 plane bytes, plane 0 the high
+; byte: the left pixel bit 1, the right bit 0 of each), sprites (st_ta: planes 0 / 1 in the words' bits 1 / 0, st_tb:
+; planes 2 / 3)
+st_tl:
+i	set	0
+	rept	16
+	dc.l	((i&1)<<25)|(((i>>1)&1)<<17)|(((i>>2)&1)<<9)|(((i>>3)&1)<<1)
+i	set	i+1
+	endr
+st_tr:
+i	set	0
+	rept	16
+	dc.l	((i&1)<<24)|(((i>>1)&1)<<16)|(((i>>2)&1)<<8)|((i>>3)&1)
+i	set	i+1
+	endr
+st_sal:
+i	set	0
+	rept	16
+	dc.l	((i&1)<<17)|(((i>>1)&1)<<1)
+i	set	i+1
+	endr
+st_sar:
+i	set	0
+	rept	16
+	dc.l	((i&1)<<16)|((i>>1)&1)
+i	set	i+1
+	endr
+st_sbl:
+i	set	0
+	rept	16
+	dc.l	(((i>>2)&1)<<17)|(((i>>3)&1)<<1)
+i	set	i+1
+	endr
+st_sbr:
+i	set	0
+	rept	16
+	dc.l	(((i>>2)&1)<<16)|((i>>3)&1)
+i	set	i+1
+	endr
 st_q4:		; 5-bit channel -> 4 bits (round(pal5bit(v) / 17))
 v	set	0
 	rept	32
@@ -1566,6 +1623,10 @@ m72r_pictures:	ds.l	1
 m72r_skipped:	ds.l	1
 m72r_lates:	ds.l	1
 st_unknown:	ds.l	1
+st_switches:	ds.l	1		; (scene switches)
+st_npens:	ds.l	1		; (pens looked up)
+st_nscene:	ds.l	1		; (scene checks)
+st_nrows:	ds.l	1		; (colour rows' tables made)
 st_logn:	ds.l	1
 m72r_shown:	ds.w	1
 m72r_prev:	ds.w	1
@@ -1592,6 +1653,8 @@ st_loghead:	ds.w	1
 st_logstart:	ds.w	1
 st_dmgnp:	ds.l	1
 st_dmgp:	ds.l	1
+st_omin:	ds.w	1
+st_omax:	ds.w	1
 st_poolp:	ds.l	1
 st_bufs:	ds.l	ST_NBUF+1
 st_bar:		ds.l	1
@@ -1625,8 +1688,10 @@ st_hidx:	ds.b	256		; the tile pens' status bar indices
 st_ver:		ds.b	32		; the colour rows' versions (sprites 0-15, tiles 16-31)
 st_cells:	ds.b	4096		; the map cells composed in the clean buffer
 st_colok:	ds.b	64		; (a column's window rows all composed)
+st_colused:	ds.b	16*64		; (per tile colour the columns it was composed into)
 st_fgcopy:	ds.b	$4000
 st_bartmp:	ds.l	8
+st_mkr:		ds.l	16
 st_barkey:	ds.l	80		; (the bar's cells as drawn: code << 16 | colour << 8 | st_hver)
 st_hrowchg:	ds.l	1
 st_htt:		ds.l	256*16

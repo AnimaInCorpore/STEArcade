@@ -250,6 +250,12 @@ write_counters:
 	move.l	m72r_pictures,cnt_pictures
 	move.l	m72r_skipped,cnt_skipped
 	move.l	m72r_lates,cnt_lates
+	ifd	STAGE
+	move.l	st_npens,cnt_x
+	move.l	st_nscene,cnt_x+4
+	move.l	st_nrows,cnt_x+8
+	move.l	st_switches,cnt_x+12
+	endc
 	clr.w	-(sp)
 	pea	.name(pc)
 	move.w	#$3C,-(sp)		; Fcreate
@@ -261,7 +267,7 @@ write_counters:
 	lea	start(pc),a0
 	move.l	a0,cnt_base
 	pea	cnt_vbls
-	pea	92.w
+	pea	112.w
 	move.w	d0,-(sp)
 	move.w	#$40,-(sp)		; Fwrite
 	trap	#1
@@ -323,6 +329,15 @@ init_hardware:
 	bset	#5,$fffffa13.w
 	bset	#6,$fffffa09.w		; ACIA
 	bset	#6,$fffffa15.w
+	ifd	PROF
+	move.l	$114.w,old_timer_c	; (PROF: Timer C samples the main loop's state every ~3200 cycles)
+	move.l	#prof_timer_c,$114.w
+	and.b	#$8F,$fffffa1d.w
+	move.b	#61,$fffffa23.w
+	or.b	#$30,$fffffa1d.w	; (/16)
+	bset	#5,$fffffa09.w
+	bset	#5,$fffffa15.w
+	endc
 .w1:	btst	#1,$fffffc00.w
 	beq.s	.w1
 	move.b	#$14,$fffffc02.w	; joystick events
@@ -332,6 +347,9 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	ifd	PROF
+	move.l	old_timer_c,$114.w
+	endc
 	clr.b	$fffffa19.w
 	clr.b	$fffffa1b.w
 	lea	old_mfp,a0
@@ -363,6 +381,19 @@ restore_hardware:
 
 hbl:	rte
 
+	ifd	PROF
+prof_timer_c:
+	movem.l	d0/a0,-(sp)
+	moveq	#0,d0
+	move.b	main_state,d0
+	lsl.w	#2,d0
+	lea	cnt_state,a0
+	addq.l	#1,(a0,d0.w)
+	addq.l	#1,cnt_samples
+	movem.l	(sp)+,d0/a0
+	rte
+	endc
+
 ; the VBL: borders.s' events, the picture published last, the pads, the ticks (11 arcade frames per 10 fields)
 vbl:	borders_vbl
 	bsr	m72r_vbl
@@ -373,6 +404,7 @@ vbl:	borders_vbl
 	movem.l	(sp)+,d0-d2
 	addq.l	#1,cnt_vbls
 	ifd DEBUG
+	ifnd PROF
 	movem.l	d0/a0,-(sp)		; (the main loop's state at this VBL: a sampled profile)
 	moveq	#0,d0
 	move.b	main_state,d0
@@ -380,6 +412,7 @@ vbl:	borders_vbl
 	lea	cnt_state,a0
 	addq.l	#1,(a0,d0.w)
 	movem.l	(sp)+,d0/a0
+	endc
 	endc
 	cmp.b	#32,ticks
 	bhs.s	.r
@@ -540,6 +573,9 @@ cnt_lates:	ds.l	1
 cnt_state:	ds.l	16		; (DEBUG: VBLs that found the main loop waiting / in the logic / drawing / between;
 					; 4-9: the stage renderer's phases, src/stage.s ST_PHASE)
 cnt_base:	ds.l	1		; (DEBUG: the program's text address)
+cnt_samples:	ds.l	1		; (PROF: the Timer C samples)
+cnt_x:		ds.l	4		; (STAGE: pens looked up, scene checks, colour rows made, scene switches)
+old_timer_c:	ds.l	1
 main_state:	ds.b	1
 	even
 old_mfp:	ds.b	14

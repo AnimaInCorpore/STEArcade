@@ -66,5 +66,9 @@ print("%d VBLs (%.1f s): arcade frames %d (%.1f /s, the arcade 55.0: %.0f%%), pi
 if len(raw) >= 40:
     st = struct.unpack('>%dI' % ((len(raw) - 24) // 4), raw[24:])
     names = ["waiting", "logic", "drawing", "between", "palette", "vram", "compose", "sync", "sprites", "bar"]
-    print("VBLs sampled: " + ", ".join("%s %d%%" % (n, 100 * x // max(1, v)) for n, x in zip(names, st) if x))
+    n = st[17] if len(st) > 17 and st[17] else v       # (PROF: Timer C samples, else VBLs)
+    print("%s sampled: " % ("Timer C" if n != v else "VBLs") +
+          ", ".join("%s %d%%" % (k, 100 * x // max(1, n)) for k, x in zip(names, st) if x))
+if len(raw) >= 112:
+    print("stage renderer: pens looked up %d, scene checks %d, colour rows made %d, scene switches %d" % struct.unpack('>4I', raw[96:112]))
 P

@@ -31,7 +31,9 @@ NAME, PREFIX = "main", "R"
 # hand-written replacements (src/natives.s): linear address -> label
 NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette fade's inner loop (FADE_SNAP)
            0x01FCC: "nat_emit1", 0x0201B: "nat_emit2", 0x020A6: "nat_emit3",    # the sprite emitters
-           0x00A53: "nat_fill"}                                     # (the unused slots blanked)
+           0x00A53: "nat_fill",                                     # (the unused slots blanked)
+           0x0F960: "nat_coll24", 0x0F948: "nat_coll3",             # the collision scans
+           0x0226C: "nat_fgtile", 0x022B5: "nat_bgtile"}            # the tiles under an object
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

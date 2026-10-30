@@ -252,3 +252,152 @@ nat_fill:
 	bcs.s	.l
     endc
 	jmp	R00A71
+
+; ---------------------------------------------------------------------------------------------------------------------
+; The collision scans (0040:F560: 24 objects from DS0:176h, 0040:F548: 3 from DS0:4D6h, 32 bytes apart): for each
+; object whose byte [IX+1] is set, the box test 0040:F578 against the object at BP (x [BP+4], y [BP+8], its extents
+; DS1:[BW] .. [BW+6]) and its box [IX+2] .. [IX+8]; a hit returns with carry set, IX at the object.  The same steps
+; as the translation, without its call / return per object and the flags it keeps across DBNZ: the registers (AW, CW,
+; IX) and the flags at the return are the arcade's (a hit: the box test's last compare's, C set; none: the last
+; ADD IX,20h's, C clear).
+; ---------------------------------------------------------------------------------------------------------------------
+COLL_SCAN macro				; \1 the first object, \2 the count, \3 the return, \4 the box test's return IP
+	move.w	#\1,d4
+	moveq	#\2,d1
+.o\@:	tst.b	(a3,d4.l)		; [IX+1] (IX even: the byte at IX in the swapped image)
+	beq.s	.n\@
+	move.w	#\4,-2(a5)		; (the CALL's return IP below SP, as the arcade leaves it)
+	bsr	nat_box
+	bcs.s	.h\@
+.n\@:	add.w	#$20,d4
+	subq.w	#1,d1
+	bne.s	.o\@
+	move.w	d4,d7			; (the last ADD IX,20h's flags, carry clear)
+	sub.w	#$20,d7
+	add.w	#$20,d7
+	andi	#$FE,ccr
+.h\@:	jmp	\3
+	endm
+
+nat_coll24:
+	COLL_SCAN $176,$18,R0F977,$F56F
+nat_coll3:
+	COLL_SCAN $4D6,3,R0F95F,$F557
+
+; the box test 0040:F578: carry set when the point (x [BP+4], y [BP+8]) widened by DS1:[BW] .. [BW+6] meets the box
+; [IX+2] .. [IX+8]; AW and the flags as the arcade's
+nat_box:
+	move.w	4(a4,d6.l),d0		; x
+	cmp.w	2(a3,d4.l),d0
+	bcs.s	.lft
+.x2:	cmp.w	4(a3,d4.l),d0
+	bcc.s	.rgt
+.y:	move.w	8(a4,d6.l),d0		; y
+	cmp.w	6(a3,d4.l),d0
+	bcs.s	.top
+	cmp.w	8(a3,d4.l),d0
+	bcc.s	.bot
+.hit:	ori	#1,ccr
+	rts
+.lft:	add.w	2(a2,d3.l),d0
+	cmp.w	2(a3,d4.l),d0
+	bcs.s	.miss
+	bra.s	.y
+.rgt:	add.w	(a2,d3.l),d0
+	cmp.w	4(a3,d4.l),d0
+	bcs.s	.y
+	bra.s	.miss
+.top:	add.w	6(a2,d3.l),d0
+	cmp.w	6(a3,d4.l),d0
+	bcc.s	.hit
+	bra.s	.miss
+.bot:	add.w	4(a2,d3.l),d0
+	cmp.w	8(a3,d4.l),d0
+	bcs.s	.hit
+.miss:	andi	#$FE,ccr
+	rts
+
+; ---------------------------------------------------------------------------------------------------------------------
+; The tile lookups under an object (BP: x [BP+4h], y [BP+8h]): 0040:1E6C the FG tile (AW = [BW] & $FFF, BW its offset
+; in the FG video RAM $D0000, from the FG scroll [2EC1h]), 0040:1EB5 that and the BG tile (CW = [BW'] & $FFF, IY = BW'
+; in $D8000, from the BG scroll [2EC9h] / [2ECDh]; AW, BW the FG's).  The scroll words are at odd addresses (two
+; bytes).  Registers, the flags (the last AND's) and the stack below SP as the arcade leaves them.
+; ---------------------------------------------------------------------------------------------------------------------
+TILE_AT	macro				; \1 the odd x scroll word's image offset (its low byte; the high byte 3 on), AW -> BW
+	moveq	#0,d0
+	move.b	\1+3(a3),d0
+	lsl.w	#8,d0
+	move.b	\1(a3),d0		; AW = the scroll x
+	move.w	d0,d1
+	and.w	#7,d1			; CW
+	lsr.w	#1,d0
+	and.w	#$FC,d0
+	add.w	#$1020,d0
+	move.w	d0,d3			; BW
+	move.w	4(a4,d6.l),d0
+	add.w	d1,d0
+	sub.w	#$140,d0
+	lsr.w	#1,d0
+	and.w	#$FFFC,d0
+	add.w	d0,d3
+	and.w	#$10FF,d3
+	endm
+
+nat_fgtile:
+	TILE_AT	$2EC0			; ([2EC1h])
+	move.w	#$17F,d0
+	sub.w	8(a4,d6.l),d0
+	bcc.s	.y
+	moveq	#0,d0
+.y:	and.w	#$FFF8,d0
+	lsl.w	#5,d0
+	add.w	d0,d3
+	and.w	#$3FFF,d3
+	move.w	6(a6),-2(a5)		; (push ds0)
+	lea	v30_image+$D0000,a0
+	move.w	(a0,d3.l),d0
+	and.w	#$FFF,d0
+	jmp	R022B4
+
+nat_bgtile:
+	TILE_AT	$2EC0			; the FG tile (0040:1E6C)
+	move.w	#$17F,d0
+	sub.w	8(a4,d6.l),d0
+	bcc.s	.y
+	moveq	#0,d0
+.y:	and.w	#$FFF8,d0
+	lsl.w	#5,d0
+	add.w	d0,d3
+	and.w	#$3FFF,d3
+	lea	v30_image+$D0000,a0
+	move.w	(a0,d3.l),d0
+	and.w	#$FFF,d0
+	move.w	d3,-2(a5)		; (push bw, push aw)
+	move.w	d0,-4(a5)
+	movem.l	d0/d3,-(sp)
+	TILE_AT	$2EC8			; the BG's ([2EC9h])
+	moveq	#0,d0
+	move.b	$2ECF(a3),d0
+	lsl.w	#8,d0
+	move.b	$2ECC(a3),d0		; [2ECDh]: the BG scroll y
+	move.w	d0,d1
+	and.w	#7,d1
+	lsl.w	#5,d0
+	and.w	#$3F00,d0
+	add.w	d0,d3
+	move.w	#$17F,d0
+	add.w	d1,d0
+	sub.w	8(a4,d6.l),d0
+	bcc.s	.by
+	moveq	#0,d0
+.by:	and.w	#$FFF8,d0
+	lsl.w	#5,d0
+	add.w	d0,d3
+	and.w	#$3FFF,d3
+	move.w	6(a6),-6(a5)		; (push ds0)
+	lea	v30_image+$D8000,a0
+	move.w	(a0,d3.l),d1
+	move.w	d3,d5			; IY
+	and.w	#$FFF,d1		; (the flags)
+	movem.l	(sp)+,d0/d3		; (pop aw, pop bw: no flags)
+	jmp	R0231A
