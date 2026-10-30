@@ -208,13 +208,16 @@ SCENE_MAXRES = 2
 # scenes whose sprites are squeezed toward the centre (the user, 2026-10-30: the title's R-TYPE logo, 384 pixels wide
 # on the arcade, fits the STE's 320): an object's x moves by -(its picture x - 192) / 10 (stage_model.squeeze_x)
 SQUEEZE_SCENES = {0}        # (scene 0: the title - the recordings start with it)
+# scenes whose tiles are shown shifted (the window over the tile layers moves, the sprites keep their places): the
+# title's text lines reach the arcade's right edge (x 168-367; the ranking 88-287): 16 shows them whole
+TILE_DX = {0: 16}
 
 
 def scenes(png=False):
     """build/rtype/stage_scenes.bin (big-endian): a word, the scenes; per scene 256 words its reference tile colours
     (12-bit), 16 + 16 words the playfield's and the status bar's STE colours, 4096 + 4096 bytes their colour tables,
     a word R, SCENE_MAXRES words the reserved pens (indices 16 - R .. 15), a word of flags (bit 0: the sprites
-    squeezed, SQUEEZE_SCENES)"""
+    squeezed, SQUEEZE_SCENES; bits 8-15 the tiles' shift in pixels, TILE_DX)"""
     refs, members = [], []
     for path in SCENE_RECORDINGS:
         for i, (_, it) in enumerate(pickle.load(open(path, "rb"))):
@@ -279,7 +282,7 @@ def scenes(png=False):
         data += len(res).to_bytes(2, "big")
         for j in range(SCENE_MAXRES):
             data += (res[j] if j < len(res) else 0).to_bytes(2, "big")
-        data += (1 if k in SQUEEZE_SCENES else 0).to_bytes(2, "big")
+        data += ((1 if k in SQUEEZE_SCENES else 0) | (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
         print("scene %d: %d frames, reserved %s; playfield %s | bar %s" % (
             k, len(frames) * max(1, len(members[k]) // 150), res, " ".join("%03X" % v for v in pal),
             " ".join("%03X" % v for v in hpal)))

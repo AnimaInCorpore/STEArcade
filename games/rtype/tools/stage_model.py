@@ -59,18 +59,19 @@ class Model:
         cols = ((np.arange(bx, bx + W) & 511) >> 3)
         return bool(self.star[w[np.unique(rows)][:, np.unique(cols), 0] & 0x3FFF].all())
 
-    def picture(self, st, lock, squeeze=False):
+    def picture(self, st, lock, squeeze=False, tile_dx=0):
         """the window's pens [256, 320] (BLACK = 512: empty / display off) for a recorded state (render_test's), lock
         a Lock (updated)"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
         out = np.full((256, W), BLACK, np.int32)
-        xs = np.arange(X0, X0 + W)
+        xp = np.arange(X0, X0 + W)
         main = max(st["bands"], key=lambda b: b[1] - b[0])
         lock.update(self, st, main)
         for y0, y1, sx, sy, off in st["bands"]:
             if off:
                 continue
             ys = np.arange(y0, y1 + 1)
+            xs = xp + (tile_dx if y0 < HUD_Y else 0)    # (a scene's playfield tiles shown shifted: TILE_DX; not the bar)
             f = fgm[((ys + sy[0] + 128) & 511)[:, None], ((xs + sx[0]) & 511)[None, :]]
             bx = (sx[0] + lock.L) if y0 < HUD_Y else sx[1]
             b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]

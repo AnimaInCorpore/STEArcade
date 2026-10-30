@@ -801,6 +801,11 @@ st_bands:
 	move.w	m72_scroll+2,st_barx
 .one:	move.w	2(a0),d0		; FG x
 	add.w	#96,d0
+	move.l	st_scn,a1
+	moveq	#0,d1
+	move.b	SC_FLAGS(a1),d1
+	move.w	d1,st_tdx		; (the scene's tile shift: the window moves by it)
+	add.w	d1,d0
 	and.w	#511,d0
 	move.w	d0,st_W
 	move.w	(a0),d0			; FG y
@@ -1258,7 +1263,7 @@ st_object:
 	ext.l	d0
 	divs	#10,d0
 	sub.w	d0,d1
-.nsq:	move.w	st_W,d3
+.nsq:	move.w	st_W,d3			; (relative to the window: a scene's tile shift leaves the sprites in place)
 	add.w	d1,d3
 	add.w	(a2),d3
 	sub.w	#256+96,d3		; the composite's buffer x
@@ -1668,7 +1673,8 @@ SC_HPAL		= 544
 SC_CTAB		= 576			; 4096 bytes the playfield's index of each 12-bit colour
 SC_HTAB		= 576+4096		; the status bar's
 SC_RES		= 576+8192		; a word R, 2 words the reserved pens (indices 16 - R .. 15)
-SC_FLAGS	= SC_RES+6		; a word: bit 0 the sprites squeezed toward the centre (st_object)
+SC_FLAGS	= SC_RES+6		; a word: bit 0 the sprites squeezed toward the centre (st_object), bits 8-15
+					; the tiles' shift (the window over the tiles moves, the sprites keep their places)
 SC_SIZE		= SC_RES+8
 SCENE_MATCH	= 192
 st_tiles:	incbin	"stage_tiles.bin"
@@ -1770,6 +1776,7 @@ st_logstart:	ds.w	1
 st_dmgnp:	ds.l	1
 st_dmgp:	ds.l	1
 st_omin:	ds.w	1
+st_tdx:		ds.w	1
 st_omax:	ds.w	1
 st_poolp:	ds.l	1
 st_bufs:	ds.l	ST_NBUF+1
