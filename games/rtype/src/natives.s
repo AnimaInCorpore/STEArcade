@@ -552,6 +552,16 @@ nat_blink:
 	section text,code
     endc
 
+PALROW	macro				; \1 the row's flag word, \2 CW, \3 IY, \4 IX (a set flag: cleared, the copy's pushes)
+	tst.w	\1(a4)
+	beq.s	.n\@
+	clr.w	\1(a4)
+	move.w	#\2,-6(a5)
+	move.w	#\3,-8(a5)
+	move.w	#\4,-10(a5)
+.n\@:
+	endm
+
 ; 0040:525A (STAGE): the palette rows into the arcade's palette RAM (REP MOVBKW from the work RAM's copy, for every
 ; row whose record's flag [BP+6] is set) - the STE's renderer takes the rows' targets from the records, nobody shows
 ; the arcade's palette: only the flags cleared.  The registers (AW $CC00, CW 0, IX, IY, BP at their loops' ends), the
@@ -560,33 +570,24 @@ nat_palcopy:
     ifd STAGE
 	move.w	6(a6),-2(a5)		; (push ds0, push ds1)
 	move.w	(a6),-4(a5)
-	move.w	#$2D3A,d6		; the sprite rows' flags
-	move.w	#$2134,d4
-	moveq	#0,d5
-	bsr.s	.rows
-	move.w	#$2DFA,d6		; the tile rows'
-	move.w	#$2734,d4
-	moveq	#0,d5
-	bsr.s	.rows
+k	set	0			; the sprite rows' flags, the tile rows' (unrolled)
+	rept	16
+	PALROW	$2D3A+$C*k,16-k,$20*k,$2134+$20*k
+k	set	k+1
+	endr
+k	set	0
+	rept	16
+	PALROW	$2DFA+$C*k,16-k,$20*k,$2734+$20*k
+k	set	k+1
+	endr
+	move.w	#$2DFA+16*$C,d6		; (the registers at the loops' ends)
+	move.w	#$2734+16*$20,d4
+	move.w	#16*$20,d5
 	move.w	#$CC00,d0
 	moveq	#0,d1
-	move.w	d5,d7			; (the flags of the last ADD IY,20h)
-	sub.w	#$20,d7
+	move.w	#15*$20,d7		; (the flags of the last ADD IY,20h)
 	add.w	#$20,d7
 	jmp	R05700
-.rows:	moveq	#16,d1
-.r:	tst.w	(a4,d6.l)
-	beq.s	.n
-	clr.w	(a4,d6.l)
-	move.w	d1,-6(a5)		; (push cw, iy, ix)
-	move.w	d5,-8(a5)
-	move.w	d4,-10(a5)
-.n:	add.w	#$0C,d6
-	add.w	#$20,d4
-	add.w	#$20,d5
-	subq.w	#1,d1
-	bne.s	.r
-	rts
     else
 	jmp	R0565A_t
     endc
@@ -1287,3 +1288,38 @@ nat_h89b0:
 .fa:	move.w	#$89B3,-(a5)		; (a limit: the arcade's timer routine)
 	jmp	R0FA3A
 .tr:	jmp	R08DB0_t
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:5301 / 5330: the palette rows' fades, 16 sprite rows (records 2D34h + 0Ch k, BW 2134h + 20h k) and 16 tile rows
+; (2DF4h.., 2734h..): a row whose word [BP] has bit 15 set fades (the arcade's code from 0040:5312 / 5341 with BP,
+; BW, CW, AW and the TEST's flags as its loop has them there); the others only cost the loop - here an unrolled scan.
+; At the end BP, BW, CW 0, AW (the last row's word) and the flags of the last ADD BW,20h as the arcade's.
+; ---------------------------------------------------------------------------------------------------------------------
+PROWK	macro				; \1 the record, \2 BW, \3 CW, \4 the arcade's code for an active row
+	move.w	\1(a4),d0
+	bpl.s	.n\@
+	move.w	#\1,d6
+	move.w	#\2,d3
+	move.w	#\3,d1
+	move.w	d0,d7			; (TEST AW,8000h: not zero)
+	and.w	#$8000,d7
+	jmp	\4
+.n\@:
+	endm
+PROW	macro				; \1 the records, \2 BW's start, \3 the arcade's code for an active row, \4 the end
+k	set	0
+	rept	16
+	PROWK	\1+$C*k,\2+$20*k,16-k,\3
+k	set	k+1
+	endr
+	move.w	#\1+16*$C,d6
+	move.w	#\2+16*$20,d3
+	moveq	#0,d1
+	move.w	#\2+15*$20,d7		; (the flags of the last ADD BW,20h)
+	add.w	#$20,d7
+	jmp	\4
+	endm
+nat_prow1:
+	PROW	$2D34,$2134,R05712,R05730
+nat_prow2:
+	PROW	$2DF4,$2734,R05741,R0575F
