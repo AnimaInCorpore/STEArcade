@@ -1416,3 +1416,53 @@ nat_he601:
 nat_eco2:
 	clr.b	es_ok
 	jmp	R0FADA_t
+
+; ---------------------------------------------------------------------------------------------------------------------
+; 0040:86EA: a handler of ~8 enemies a frame in stage 1 (its timer, the x scroll, its sprite [BP+22h], the collision
+; test with IY 3AF6h, the screen's left edge 140h, [2FC4h]).  The timer as in nat_h89b0 (a spawn: the arcade's
+; routine); the animation step every 16th frame (0040:86FB), a hit, the left edge and [2FC4h] continue in the
+; translation with the arcade's flags.  BP even (else the translation).
+; ---------------------------------------------------------------------------------------------------------------------
+nat_h86ea:
+	btst	#0,d6
+	bne	.tr
+	lea	(a4,d6.l),a0
+	move.w	$26(a0),d7		; 0040:F63A: the timer (AW)
+	addq.w	#1,d7
+	move.w	d7,d0
+	cmp.w	$2A(a0),d7
+	beq.s	.t1
+	cmp.w	$2C(a0),d7
+	bcs.s	.t2
+	tst.w	$28(a0)
+	bne	.fa
+	moveq	#0,d7
+	bra.s	.t2
+.t1:	tst.w	$28(a0)
+	bne	.fa
+.t2:	move.w	d7,$26(a0)
+	move.w	#$86ED,-2(a5)		; (its CALL)
+	move.w	$2ED0(a3),d0		; 0040:86ED: x + the scroll
+	add.w	d0,4(a0)
+	move.w	$2EB6(a3),d7		; every 16th frame the animation step
+	and.w	#$F,d7
+	bne.s	.sp
+	jmp	R08AFB
+.sp:	move.w	$22(a0),d3		; 0040:870D: the sprite
+	move.w	#$8713,-2(a5)
+	jsr	leaf_emit1
+	move.w	#$3AF6,d5		; IY
+	move.w	#$8719,-2(a5)		; the collision test
+	jsr	leaf_ecoll
+	bcc.s	.h
+	jmp	R08B1B			; (a hit)
+.h:	cmp.w	#$140,4(a4,d6.l)	; [BP+4] - 140h
+	bcc.s	.k
+	jmp	R08B25			; (past the left edge)
+.k:	tst.b	$2FC5(a3)		; [2FC4h]
+	beq.s	.r
+	jmp	R08B2F
+.r:	jmp	R08B32			; (RET)
+.fa:	move.w	#$86ED,-(a5)		; (a spawn: the arcade's timer routine)
+	jmp	R0FA3A
+.tr:	jmp	R08AEA_t

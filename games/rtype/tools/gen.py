@@ -45,7 +45,8 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x08DB0: "nat_h89b0",                                    # the cave crawler's handler
            0x05701: "nat_prow1", 0x05730: "nat_prow2",              # the palette rows' fades (the scan)
            0x0EA01: "nat_he601",
-           0x0FADA: "nat_eco2"}                                     # (the other collision tests: the summary again)                                    # an enemy bullet's handler
+           0x0FADA: "nat_eco2",
+           0x08AEA: "nat_h86ea"}                                    # a stage-1 enemy's handler                                     # (the other collision tests: the summary again)                                    # an enemy bullet's handler
 # CALLs to these: a JSR (src/natives.s); (label, exact flags: usable where the flags after the RET are live)
 LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
               0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
