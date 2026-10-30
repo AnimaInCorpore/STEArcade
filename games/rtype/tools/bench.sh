@@ -70,14 +70,17 @@ sleep 1
 kill $HP 2>/dev/null; wait $HP 2>/dev/null
 [ -f $BENCH/CRASH.TXT ] && { echo "--- CRASH.TXT"; head -3 $BENCH/CRASH.TXT; }
 [ -f $BENCH/COUNTERS.BIN ] || { echo "no COUNTERS.BIN"; exit 1; }
+RATE=50.0; case "$EXTRA" in *TICK55*) RATE=55.017;; esac; export RATE
 python3 - <<'P'
+import os
 import struct
 raw = open('run/rtype_bench/COUNTERS.BIN', 'rb').read()
 v, lg, pic, drop, skip, late = struct.unpack('>6I', raw[:24])
 s = v / 50.0
-print("%d VBLs (%.1f s): arcade frames %d (%.1f /s, the arcade 55.0: %.0f%%), pictures %d (%.1f /s), dropped %d, "
-      "skipped %d, renderer calls without a picture %d" % (v, s, lg, lg / s, lg / s / 55.017 * 100, pic, pic / s, drop,
-                                                            skip, late))
+rate = float(os.environ.get("RATE", "50"))
+print("%d VBLs (%.1f s): arcade frames %d (%.1f /s, the target %.1f: %.0f%%), pictures %d (%.1f /s), dropped %d, "
+      "skipped %d, renderer calls without a picture %d" % (v, s, lg, lg / s, rate, lg / s / rate * 100, pic, pic / s,
+                                                            drop, skip, late))
 if len(raw) >= 40:
     st = struct.unpack('>%dI' % ((len(raw) - 24) // 4), raw[24:])
     names = ["waiting", "logic", "drawing", "between", "palette", "vram", "compose", "sync", "sprites", "bar"]

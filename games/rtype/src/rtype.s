@@ -7,8 +7,9 @@
 ; context, sets in_ports and calls port_frame once an arcade frame.
 ; Otherwise the program: the snapshot loaded, then in turn arcade frames (port_frame: the VBL interrupt's handler - the
 ; game's logic - then the raster interrupt's) and pictures (video.s m72_sync, then the renderer: render.s, the shared
-; engine/rt/m72render.s, the centred 320-pixel window).  Time: the arcade runs at 55.02 Hz; the STE's VBL (50 Hz)
-; counts 11 arcade frames per 10 fields into `ticks`.  The logic runs one arcade frame per tick when it keeps up (it
+; engine/rt/m72render.s, the centred 320-pixel window).  Time: the arcade runs at 55.02 Hz; the STE runs one arcade frame
+; a VBL (50 Hz: the game 9% slower - the user's choice 2026-10-30, the logic's cost; -D TICK55: 11 per 10 fields, the
+; arcade's pace) into `ticks`.  The logic runs one arcade frame per tick when it keeps up (it
 ; does not: ~100k cycles a frame, the picture ~1M); a picture after every PIC_EVERY-th arcade frame (or when no tick
 ; is waiting); arcade frames the logic falls behind by more than MAX_BEHIND are dropped (the game slows down, its
 ; pace stays even).  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
@@ -400,7 +401,7 @@ prof_timer_c:
 	rte
 	endc
 
-; the VBL: borders.s' events, the picture published last, the pads, the ticks (11 arcade frames per 10 fields)
+; the VBL: borders.s' events, the picture published last, the pads, the ticks (one a field; TICK55: 11 per 10 fields)
 vbl:	borders_vbl
 	bsr	m72r_vbl
 	bsr	bd_hud_plan
@@ -423,11 +424,13 @@ vbl:	borders_vbl
 	cmp.b	#32,ticks
 	bhs.s	.r
 	addq.b	#1,ticks
-	addq.b	#1,tick_phase
+    ifd TICK55
+	addq.b	#1,tick_phase		; (TICK55: the arcade's 55.02 Hz - 11 arcade frames per 10 fields)
 	cmp.b	#10,tick_phase
 	blo.s	.r
 	clr.b	tick_phase
 	addq.b	#1,ticks
+    endc
 .r:	rte
 
 ; Keyboard, joystick 1 (player 1), joystick 0 (the mouse port: player 2): IN0 low byte player 1, high byte player 2
