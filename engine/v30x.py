@@ -160,7 +160,8 @@ class Program:
     def __init__(self, name, prefix, rd, roots, exec_cover=(), acc_cover=None, targets=None, io_cover=None,
                  hooks=None, hook_next=None, natives=None, after=None, port_in=None, port_out=None, image="v30_image",
                  code_limit=None, indirect_live=True, pal_sites=None, hook_flags=ALLF, targets_seen=None,
-                 exec_counts=None, ip_table_cs=None, store_marks=None, leaf_calls=None):
+                 exec_counts=None, ip_table_cs=None, store_marks=None, leaf_calls=None,
+                 inline_calls=False):
         self.name, self.prefix, self.rd = name, prefix, rd
         self.roots = list(roots)
         self.exec_cover = set(exec_cover)
@@ -172,9 +173,10 @@ class Program:
         self.store_marks = store_marks              # (pred(lin, ins), base, size, marks): after a store the pred
         #                                             picks, the byte marks[(68000 address - base) >> 8] is set when
         #                                             the address is in base .. base + size (REP: <name>_mark_range)
-        self.leaf_calls = dict(leaf_calls or {})   # (callee linear: a 68000 subroutine doing its body and RET: its
-        #                                             CALLs become a JSR, the return IP written below SP, where the
-        #                                             flags after the return are dead)
+        self.inline_calls = inline_calls
+        self.leaf_calls = dict(leaf_calls or {})   # (callee linear: (a 68000 subroutine doing its body and RET,
+        #                                             exact flags): its CALLs become a JSR, the return IP written below
+        #                                             SP - where the flags after the return are dead unless exact)
         self.io_cover = io_cover or {}
         self.hooks = dict(hooks or {})
         self.hook_next = dict(hook_next or {})
@@ -379,6 +381,10 @@ class Emitter:
         self.entries = set()                    # (linear) labels the dispatcher must know
         self.order = sorted(code)
         self.prev = {next_lin(ins): u for u, ins in code.items() if ins.flow == "seq"}
+        self.inl = None                         # (inlining a callee: its linear -> local label)
+        self.inl_next = None                    # (the body's next instruction in emitted order)
+        self.inl_ret = None                     # (the call's return point)
+        self.inline_bodies = {}
 
     # ---- helpers ---------------------------------------------------------------
     def e(self, s):
@@ -389,10 +395,14 @@ class Emitter:
         return ".L%d" % self.uid
 
     def lab(self, lin):
+        if self.inl is not None and lin in self.inl:
+            return self.inl[lin]
         self.refs.add(lin)
         return self.p.label(lin)
 
     def live(self, v):
+        if self.inl is not None:
+            return self.inl_live[v]
         return self.live_out.get(v, ALLF)
 
     def odd_site(self, v):
@@ -722,6 +732,10 @@ class Emitter:
             for line in self.p.after(v, ins) or ():
                 self.e(line)
         nv = next_lin(ins)
+        if self.inl is not None:
+            if self.inl_next.get(v) != nv:
+                self.e("bra %s" % self.lab(nv))
+            return
         k = bisect.bisect_right(self.order, v)
         later = k < len(self.order) and self.order[k] < nv
         if nv not in self.code or later:
@@ -848,10 +862,101 @@ class Emitter:
         else:
             self.e("movem.w %s,-(a5)" % src)
 
+    INLINE_MAX = 12
+    NO_INLINE = ("push", "pop", "pusha", "popa", "pushf", "popf", "prepare", "dispose", "chkind", "brkem")
+
+    def inline_body(self, t):
+        """the callee at t as a list of linear addresses when it can be translated in place: at most INLINE_MAX
+        instructions reached from t by sequence and direct jumps, ending in plain RETs, no calls, no stack access, no
+        SP operand, no hooks or natives (else None)"""
+        if t in self.inline_bodies:
+            return self.inline_bodies[t]
+        body, work, ok = set(), [t], True
+        while work and ok:
+            x = work.pop()
+            if x in body:
+                continue
+            ins = self.code.get(x)
+            if ins is None or x in self.p.hooks or x in self.p.natives or len(body) >= self.INLINE_MAX:
+                ok = False
+                break
+            body.add(x)
+            fl = ins.flow
+            if fl == "ret":
+                if ins.ops:
+                    ok = False
+                continue
+            if fl not in ("seq", "jcc", "jmp") or ins.mn in self.NO_INLINE or ins.rep or ins.mn == "loop":
+                ok = False
+                break
+            if any(o[0] == "r" and o[1] == SP for o in ins.ops) or ins.mn in ("in", "out"):
+                ok = False
+                break
+            if fl in ("seq", "jcc"):
+                work.append(next_lin(ins))
+            if fl in ("jmp", "jcc"):
+                if ins.target is None:
+                    ok = False
+                    break
+                work.append(lin_of(*ins.target))
+        r = sorted(body) if ok else None
+        self.inline_bodies[t] = r
+        return r
+
+    def emit_inline(self, v, ins, body):
+        """the callee's instructions here (their own flags' liveness: every return point's), RET -> the return point;
+        the return IP written below SP as the CALL leaves it"""
+        ret = (ins.ip + ins.length) & 0xFFFF
+        self.e("move.w #$%04X,-2(a5)" % ret)
+        # the copy's own liveness: its RETs read what this return point reads
+        cont = self.live_in.get(next_lin(ins), ALLF)
+        lin, lout = {b: 0 for b in body}, {}
+        changed = True
+        while changed:
+            changed = False
+            for b in reversed(body):
+                bi = self.code[b]
+                if bi.flow == "ret":
+                    out = cont
+                else:
+                    out = 0
+                    if bi.flow in ("seq", "jcc"):
+                        out |= lin[next_lin(bi)]
+                    if bi.flow in ("jmp", "jcc"):
+                        out |= lin[lin_of(*bi.target)]
+                d, u = defs_uses(bi)
+                li = (out & ~d) | u
+                lout[b] = out
+                if li != lin[b]:
+                    lin[b] = li
+                    changed = True
+        self.inl_live = lout
+        self.inl = {b: self.new_label() for b in body}
+        self.inl_next = {a: b for a, b in zip(body, body[1:])}
+        self.inl_ret = self.lab(next_lin(ins))
+        try:
+            for b in body:
+                self.lines.append(self.inl[b] + ":")
+                bins = self.code[b]
+                self.emit(b, bins)
+        finally:
+            self.inl = self.inl_next = self.inl_ret = None
+
     def emit_call(self, v, ins):
         ret = (ins.ip + ins.length) & 0xFFFF
-        leaf = self.p.leaf_calls.get(lin_of(*ins.target))
-        if leaf and not (self.live_in.get(next_lin(ins), ALLF) & CCR):
+        if self.inl is None and getattr(self.p, "inline_calls", False):
+            body = self.inline_body(lin_of(*ins.target))
+            if body:
+                mark = len(self.lines)
+                try:
+                    self.emit_inline(v, ins, body)
+                    self.stats["inlined call"] += 1
+                    self.entries.add(next_lin(ins))
+                    return
+                except (Unsupported, KeyError, ValueError, IndexError, TypeError):
+                    del self.lines[mark:]
+        leaf, exact = self.p.leaf_calls.get(lin_of(*ins.target), (None, False))
+        if leaf and (exact or not (self.live_in.get(next_lin(ins), ALLF) & CCR)):
             self.stats["leaf call"] += 1
             self.e("move.w #$%04X,-2(a5)" % ret)
             self.e("jsr %s" % leaf)
@@ -944,6 +1049,9 @@ class Emitter:
             self.e("jmp %s_dispatch" % self.p.name)
 
     def emit_ret(self, v, ins):
+        if self.inl is not None:
+            self.e("bra %s" % self.inl_ret)
+            return
         """pop IP: its function's return points (the most executed first, up to two, flags dead), else dispatch (a CS
         with an IP table: straight through it, the flags untouched)"""
         live = self.live(v) & CCR

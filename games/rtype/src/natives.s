@@ -13,6 +13,26 @@
 
 	section text,code
 
+; Natives with a subroutine entry too (tools/gen.py LEAF_CALLS): the CALL is a JSR with the return IP written below
+; SP; the subroutine lowers SP by 2 (the arcade's stack after the CALL), runs the same body and returns with
+; ADDQ #2,A5 / RTS (the RET: the flags as the body leaves them, the arcade's); a fallback into the translated original
+; drops the JSR's return address (the original's RET goes through the IP table).
+NEXIT	macro				; \1 1: the subroutine, \2 the RET's label
+    if \1
+	addq.l	#2,a5
+	rts
+    else
+	jmp	\2
+    endc
+	endm
+NFALL	macro				; \1 1: the subroutine, \2 the translated original
+    if \1
+	addq.l	#4,sp
+    endc
+	jmp	\2
+	endm
+
+
     ifd FADE_SNAP
 FADE_ROW macro
 	movem.l	d2/d5,-(sp)
@@ -144,13 +164,13 @@ EMIT_RECORD macro
     endc
 	endm
 
-nat_emit1:
+EMIT1	macro
 	move.w	$2EFC(a3),d4		; IX = IY = the pointer
 	move.w	d4,d5
 	EMIT_SIZE 0,d0
 	add.w	d5,d0
 	cmp.w	#$3C8,d0
-	bcc	R0201A
+	bcc	.x\@
 	move.w	d0,$2EFC(a3)
 	move.w	d0,-(sp)
 	move.w	4(a4,d6.l),d1		; CW, DW: x, y
@@ -159,11 +179,18 @@ nat_emit1:
 	EMIT_ENTRY 0,d4
 	move.w	(sp)+,d7
 	EMIT_RECORD d4,d7,1
-	jmp	R0201A
+.x\@:	NEXIT	\1,R0201A
+	endm
+
+nat_emit1:
+	EMIT1	0
+leaf_emit1:
+	subq.l	#2,a5
+	EMIT1	1
 
 ; 0040:1BE9: the one-entry emitter entered with the slot in IX (the ship $3C0 / $3C8, the Force $3E8, $3D0, $3D8:
 ; the fixed slots above the list, $3C0-$3FF): no pointer, IY not touched
-nat_emit1f:
+EMIT1F	macro
 	move.w	4(a4,d6.l),d1
 	move.w	8(a4,d6.l),d2
 	move.w	6(a6),-2(a5)		; (push ds0)
@@ -173,7 +200,13 @@ nat_emit1f:
 	add.w	d4,d7
 	EMIT_RECORD d4,d7,1
     endc
-	jmp	R0201A
+	NEXIT	\1,R0201A
+	endm
+nat_emit1f:
+	EMIT1F	0
+leaf_emit1f:
+	subq.l	#2,a5
+	EMIT1F	1
 
 nat_emit2:
 	move.w	$2EFC(a3),d4
@@ -361,15 +394,17 @@ FG_AT	macro				; -> d3 = BW (the FG tile's offset), d1 = CW (FG x & 7); d0, d7 u
 	and.w	#$3FFF,d3
 	endm
 
-nat_fgtile:
+
+FGTILE	macro
 	FG_AT
 	move.w	6(a6),-2(a5)		; (push ds0)
 	lea	v30_image+$D0000,a0
 	move.w	(a0,d3.l),d0
 	and.w	#$FFF,d0
-	jmp	R022B4
+	NEXIT	\1,R022B4
+	endm
 
-nat_bgtile:
+BGTILE	macro
 	FG_AT				; the FG tile (0040:1E6C)
 	lea	v30_image+$D0000,a0
 	move.w	(a0,d3.l),d0
@@ -378,13 +413,13 @@ nat_bgtile:
 	move.w	d0,-4(a5)
 	move.l	$2EC8(a3),d7		; the BG's ([2EC9h], [2ECDh])
 	cmp.l	tc_kbx,d7
-	beq.s	.cx
+	beq.s	.cx\@
 	bsr	tc_bx
-.cx:	move.l	$2ECC(a3),d7
+.cx\@:	move.l	$2ECC(a3),d7
 	cmp.l	tc_kby,d7
-	beq.s	.cy
+	beq.s	.cy\@
 	bsr	tc_by
-.cy:	move.w	4(a4,d6.l),d5
+.cy\@:	move.w	4(a4,d6.l),d5
 	add.w	tc_cxb,d5
 	lsr.w	#1,d5
 	and.w	#$FFFC,d5
@@ -393,9 +428,9 @@ nat_bgtile:
 	add.w	tc_byterm,d5
 	move.w	tc_yb,d7
 	sub.w	8(a4,d6.l),d7
-	bcc.s	.by
+	bcc.s	.by\@
 	moveq	#0,d7
-.by:	and.w	#$FFF8,d7
+.by\@:	and.w	#$FFF8,d7
 	lsl.w	#5,d7
 	add.w	d7,d5			; IY
 	and.w	#$3FFF,d5
@@ -403,7 +438,19 @@ nat_bgtile:
 	lea	v30_image+$D8000,a0
 	move.w	(a0,d5.l),d1
 	and.w	#$FFF,d1		; (the flags)
-	jmp	R0231A
+	NEXIT	\1,R0231A
+	endm
+
+nat_fgtile:
+	FGTILE	0
+leaf_fgtile:
+	subq.l	#2,a5
+	FGTILE	1
+nat_bgtile:
+	BGTILE	0
+leaf_bgtile:
+	subq.l	#2,a5
+	BGTILE	1
 
 tc_word	macro				; d7 = the image long of an odd scroll word -> \1.w = the word (\2 scratch)
 	moveq	#0,\1
@@ -734,7 +781,7 @@ FFLAG	macro				; \1 IX: the box test when the object's flag [IX+1] is set
 .n\@:
 	endm
 
-nat_ecoll:
+ECOLL	macro
 	cmp.w	#$2B4,4(a4,d6.l)
 	bcc	.fb			; (x >= 2B4h: the arcade's short way)
 	movem.l	d2/d6,-(sp)		; (BP: 6(sp))
@@ -795,7 +842,7 @@ k	set	k+1
 	bra.s	.r
 .r1:	cmp.w	#$176,d4
 	bcc.s	.r
-	lea	.ips(pc),a0
+	lea	ecoll_ips,a0
 .rl:	move.l	(a0)+,d7
 	cmp.w	d7,d4
 	bne.s	.rl
@@ -806,10 +853,17 @@ k	set	k+1
 	moveq	#0,d1
 	move.w	#$456,d7		; (the last ADD IX,20h's flags)
 	add.w	#$20,d7
-	jmp	R0FAD8
+	andi	#$FE,ccr		; (CLR1 CY)
+	NEXIT	\1,R0FAD9
 .hit:	movem.l	(sp)+,d2/d6
-.fb:	jmp	R0FA94_t
-.ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
+.fb:	NFALL	\1,R0FA94_t
+	endm
+nat_ecoll:
+	ECOLL	0
+leaf_ecoll:
+	subq.l	#2,a5
+	ECOLL	1
+ecoll_ips:	dc.w	$F499,$76,$F4A1,$136,$F4A9,$156,$F4B0,$F6,$F4B8,$116,$F4CB,$B6,$F4D9,$D6,$F4EE,$A8,$F503,$C8
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; 0040:0672 / 0689: an object's x / y (24 bits: [BP+3] .. [BP+5] / [BP+7] .. [BP+9]) plus the speed AW (signed): the

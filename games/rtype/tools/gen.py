@@ -42,7 +42,10 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
            0x05408: "nat_bar1", 0x0543B: "nat_bar2", 0x05472: "nat_bar3",   # the BEAM gauge's cells
            0x0FA94: "nat_ecoll",                                    # an object's box against the player's side
            0x00A72: "nat_posx", 0x00A89: "nat_posy"}                # an object's x / y plus its speed
-LEAF_CALLS = {0x00A72: "leaf_posx", 0x00A89: "leaf_posy"}   # (CALLs to these: a JSR, src/natives.s)
+# CALLs to these: a JSR (src/natives.s); (label, exact flags: usable where the flags after the RET are live)
+LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
+              0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
+              0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True)}
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 
@@ -320,6 +323,7 @@ def program(regions, cover):
                         exec_counts={v30x.lin_of(*k): n for k, n in exec_.items()}, hooks={idle_lin: "main_idle"},
                         natives={} if os.environ.get("NO_NATIVES") else NATIVES,
                         leaf_calls={} if os.environ.get("NO_NATIVES") else LEAF_CALLS,
+                        inline_calls=not os.environ.get("NO_INLINE"),
                         hook_next={idle_lin: idle_lin}, port_in=port_in, port_out=port_out, code_limit=code_limit,
                         store_marks=None if os.environ.get("NO_MARKS") else store_marks(acc))
     return prog, vbl, raster, idle_lin
