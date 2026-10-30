@@ -119,9 +119,12 @@ main_loop:
 	move.b	#2,main_state
 	bsr	m72r_frame
 	clr.b	main_state
-	bra.s	main_loop
+	bra	main_loop
 .quit:	bsr	restore_hardware
 	bsr	write_counters
+	ifd	DEBUG
+	bsr	bd_report		; (BORDERS.BIN: the frames and events the border code had to correct)
+	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
 	trap	#1
@@ -524,6 +527,7 @@ key_table:
 	even
 	borders_handlers
 	borders_blit_go
+	borders_report
 	jagpad_text
 	jagpad_maps
     endc

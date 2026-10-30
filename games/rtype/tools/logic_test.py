@@ -220,7 +220,7 @@ def main():
                 s.blitter.cycles = 0
                 c = cpu.execute(1).cycles + s.blitter.cycles
                 nm = lab[i][1]
-                rprof["(sprite code)" if nm.startswith("sts_") else nm] += c
+                rprof["(sprite code)" if nm.startswith(("sts_", "stn_")) else nm] += c
                 total += c
         else:
             total = call68("m72r_frame")
@@ -420,7 +420,8 @@ def main():
             print("scene switches: %d; status bar whole checks %d, cells drawn %d; colour rows %d" % (
                 mem.r32(sym["st_switches"]), mem.r32(sym["st_nbarfull"]), mem.r32(sym["st_nbarcells"]),
                 mem.r32(sym["st_nrows"])))
-            print("sprite colourings %d, pool resets %d" % (mem.r32(sym["st_nbake"]), mem.r32(sym["st_npool"])))
+            print("sprite colourings %d, pool resets %d, long-destination strips %d" % (
+                mem.r32(sym["st_nbake"]), mem.r32(sym["st_npool"]), mem.r32(sym["st_nlong"])))
         tot = sum(rprof.values())
         for k, v in rprof.most_common(20):
             print("  %-22s %5.1f%%" % (k, 100.0 * v / tot))

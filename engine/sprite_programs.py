@@ -73,7 +73,7 @@ def clipped_pass(mask, s, clip):
 
 
 def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_shapes', record='shr',
-             stream_sym='tp_sstream', xc_sym='B_XC', stream_mode=False, long_dst=False):
+             stream_sym='tp_sstream', xc_sym='B_XC', stream_mode=False, long_dst=False, clips=3):
     """shapes: {shape id: [row masks] or ([row masks], row map)} -> (assembler lines (text: the code, data: the table and the records), the
     stream's bytes, statistics).  The table: nshapes longs, a record's address or 0.  A record: 48 variants of
     12 bytes (clip * 16 + shift): the code's address, the stream's address, the damage offset (from the destination:
@@ -84,6 +84,8 @@ def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_s
     destination step, END1, END3, the destination Y increment, the X count, the control word with the skew; the
     first two words of a group: `add (a0)+,d0`); the clipped variants are not made (their records' code 0: the port
     draws those with its row path).
+    clips (not stream mode): 1 makes only the unclipped variants (a record of 16; a port that never clips at a side
+    edge - R-Type's stage renderer, whose window edges are not on 16-pixel boundaries).
     long_dst (stream mode only): the destination's whole address in a3 (stepped with adda / lea, written as a long to
     BLT_DST through a4 = BLT_DST), so a sprite may cross a 64 KB boundary (rings larger than 64 KB: Kung-Fu Master);
     the destination Y increment is written as BLT_DYI (an absolute word), d0 is not used."""
@@ -99,7 +101,7 @@ def programs(shapes, nshapes, line=160, plane_bytes=8, prefix='shp', table='tp_s
         if not groups:
             continue
         variants = []
-        for clip in range(3):
+        for clip in range(clips):
             for sh in range(16):
                 passes = [(clipped_pass(masks[g[0]], sh, clip) if clip and sh else pass_of(masks[g[0]], sh))
                           for g in groups]

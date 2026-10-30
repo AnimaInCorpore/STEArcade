@@ -102,6 +102,15 @@ m72r_init:
 	move.w	#512/2-1,d1
 .pc:	move.l	d0,(a0)+
 	dbf	d1,.pc
+	lea	st_ccol,a0		; (no current colour either)
+	move.w	#512/2-1,d1
+.cc:	move.l	d0,(a0)+
+	dbf	d1,.cc
+	move.l	#st_pend,st_pendp
+	lea	st_rowprev,a0		; (no colours before)
+	move.w	#512/2-1,d1
+.rl:	move.l	d0,(a0)+
+	dbf	d1,.rl
 	lea	st_palraw,a0		; (every palette word read)
 	move.w	#2*$C00/4-1,d1
 .pr:	move.l	d0,(a0)+
@@ -110,8 +119,7 @@ m72r_init:
 	moveq	#80-1,d1
 .bk:	move.l	d0,(a0)+
 	dbf	d1,.bk
-	bsr	st_palette
-	st	st_allnew
+	st	st_allnew		; (the first picture reads every palette word: st_palraw all -1)
 	move.w	#-1,st_sy
 	move.w	#-1,m72r_prev
 	movem.l	(sp)+,d0-d7/a0-a6
@@ -372,19 +380,16 @@ st_palette:
 	cmp.w	#2,d6
 	blo	.pals
 	move.l	a6,st_plend
-	lea	st_plist,a6
-	cmp.l	st_plend,a6
-	beq	.pal
-	; the listed pens' colours, indices
-	clr.l	st_rowchg		; (rows changed: bits 0-31 = sprite rows 0-15, tile rows 16-31)
-.pens0:	lea	st_pcol,a1
-	lea	st_pidx,a2
-	move.l	st_scn,a3
-	lea	SC_CTAB(a3),a3
+	; (the colour rule, the user 2026-10-30: no colour animation with 16 colours.  A pen keeps its committed colour
+	; (st_pcol, its index) until its palette row is loaded - ST_ROWLOAD or more of the row's pens off their committed
+	; colours - or its new colour has stayed ST_STABLE pictures; a reserved pen follows its colour at once (fades))
+	clr.l	st_rowchg		; (rows whose indices changed: bits 0-31 = sprite rows 0-15, tile rows 16-31)
+	clr.l	st_rowtch		; (rows with a pen whose colour changed)
+.pens0:	lea	st_plist,a6
 	lea	st_q4,a5
-.pen:	cmp.l	st_plend,a6
-	beq	.pend
-	move.w	(a6)+,d7		; the pen
+.pa:	cmp.l	st_plend,a6		; A: the listed pens' current colours (st_ccol); a changed one is pending
+	beq	.pb
+	move.w	(a6)+,d7
 	addq.l	#1,st_npens
 	lea	st_pflag,a0
 	clr.b	(a0,d7.w)
@@ -406,40 +411,108 @@ st_palette:
 	moveq	#31,d2
 	and.w	$800(a0),d2
 	or.b	(a5,d2.w),d1		; the 12-bit colour
-	move.w	d7,d0
-	add.w	d0,d0
+	lea	st_ccol,a1
 	cmp.w	(a1,d0.w),d1
-	beq	.pen
+	beq	.pa
 	move.w	d1,(a1,d0.w)
-	cmp.w	#256,d7
-	blo.s	.pt
-	st	st_tilechg		; (a tile pen's colour: the scene looked at)
-.pt:	moveq	#0,d2
-	move.b	(a3,d1.w),d2		; the playfield's index
-	cmp.b	(a2,d7.w),d2
-	beq.s	.hud
-	move.b	d2,(a2,d7.w)
+	lea	st_pchg,a0
+	st	(a0,d7.w)		; (changed this picture)
 	move.w	d7,d3
 	lsr.w	#4,d3
-	move.l	st_rowchg,d4
+	move.l	st_rowtch,d4
 	bset	d3,d4
-	move.l	d4,st_rowchg
-.hud:	cmp.w	#256,d7
-	blo	.pen
-	move.l	st_scn,a0
-	lea	SC_HTAB(a0),a0
-	move.b	(a0,d1.w),d2
-	lea	st_hidx-256,a0
-	cmp.b	(a0,d7.w),d2
-	beq	.pen
-	move.b	d2,(a0,d7.w)
-	move.w	d7,d3			; (the status bar's tables of this tile row again)
-	lsr.w	#4,d3
-	sub.w	#16,d3
-	move.l	st_hrowchg,d4
-	bset	d3,d4
-	move.l	d4,st_hrowchg
-	bra	.pen
+	move.l	d4,st_rowtch
+	lea	st_pendf,a0
+	tst.b	(a0,d7.w)
+	bne	.pa
+	st	(a0,d7.w)
+	move.l	st_pendp,a0
+	move.w	d7,(a0)+
+	move.l	a0,st_pendp
+	bra	.pa
+.pb:	move.l	st_rowtch,d4		; B: a touched row with ST_ROWLOAD pens off their committed colours: loaded -
+	beq	.pc			; unless it went back to the colours it had before its last load (an animation,
+	moveq	#0,d5			; A B A: frozen)
+.rb:	btst	d5,d4
+	beq	.rbn
+	lea	st_ccol,a0
+	lea	st_rowprev,a1
+	move.w	d5,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	add.w	d0,a1
+	moveq	#16-1,d3
+.pv:	cmpm.w	(a0)+,(a1)+
+	bne.s	.pvn
+	dbf	d3,.pv
+	bra	.rbn			; (its colours before: an animation)
+.pvn:	lea	st_ccol,a0
+	lea	st_pcol,a1
+	move.w	d5,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	add.w	d0,a1
+	moveq	#0,d2
+	moveq	#16-1,d3
+.cnt:	cmpm.w	(a0)+,(a1)+
+	beq.s	.cn1
+	addq.w	#1,d2
+.cn1:	dbf	d3,.cnt
+	cmp.w	#ST_ROWLOAD,d2
+	blo.s	.rbn
+	lea	st_pcol,a0		; (its committed colours kept as the ones before)
+	lea	st_rowprev,a1
+	move.w	d5,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	add.w	d0,a1
+	moveq	#16/2-1,d3
+.kp:	move.l	(a0)+,(a1)+
+	dbf	d3,.kp
+	move.w	d5,d7
+	lsl.w	#4,d7
+	moveq	#16-1,d6
+.cm:	bsr	st_commit
+	addq.w	#1,d7
+	dbf	d6,.cm
+.rbn:	addq.w	#1,d5
+	cmp.w	#32,d5
+	blo.s	.rb
+.pc:	lea	st_pend,a6		; C: the pending pens (kept in place: a5)
+	move.l	a6,a5
+.pl:	cmp.l	st_pendp,a6
+	beq.s	.pdone
+	move.w	(a6)+,d7
+	move.w	d7,d0
+	add.w	d0,d0
+	lea	st_ccol,a0
+	move.w	(a0,d0.w),d1
+	lea	st_pcol,a0
+	cmp.w	(a0,d0.w),d1
+	beq.s	.pdrop			; (committed, or back to its colour)
+	bsr	st_isres
+	beq.s	.pcom			; (a reserved pen: at once)
+	lea	st_pchg,a0
+	tst.b	(a0,d7.w)
+	beq.s	.pst
+	clr.b	(a0,d7.w)
+	lea	st_pstab,a0
+	clr.b	(a0,d7.w)
+	bra.s	.pkeep
+.pst:	lea	st_pstab,a0
+	addq.b	#1,(a0,d7.w)
+	cmp.b	#ST_STABLE,(a0,d7.w)
+	blo.s	.pkeep
+.pcom:	bsr	st_commit
+.pdrop:	lea	st_pendf,a0
+	clr.b	(a0,d7.w)
+	lea	st_pchg,a0
+	clr.b	(a0,d7.w)
+	bra.s	.pl
+.pkeep:	move.w	d7,(a5)+
+	bra.s	.pl
+.pdone:	move.l	a5,st_pendp
+	lea	st_pidx,a2		; (for the reserved pens below)
 .pend:	tst.b	st_tilechg		; the scene: the best match of the tile palette (st_scene)
 	beq.s	.nosc
 	sf	st_tilechg
@@ -447,15 +520,23 @@ st_palette:
 	tst.w	d0
 	beq.s	.nosc
 	lea	st_pcol,a1		; (another scene: every pen again with its tables, everything composed again)
+	lea	st_ccol,a3
 	lea	st_plist,a6
 	move.l	a6,a0
 	moveq	#0,d7
 .al:	move.w	#$FFFF,(a1)+
+	move.w	#$FFFF,(a3)+
 	move.w	d7,(a0)+
 	addq.w	#1,d7
 	cmp.w	#512,d7
 	blo.s	.al
 	move.l	a0,st_plend
+	clr.l	st_rowtch
+	lea	st_rowprev,a0		; (no colours before: the new scene's committed at once)
+	move.w	#512/2-1,d1
+	moveq	#-1,d0
+.rq:	move.l	d0,(a0)+
+	dbf	d1,.rq
 	st	st_allnew
 	bra	.pens0
 .nosc:	; the reserved pens: their own indices
@@ -546,6 +627,71 @@ st_palette:
 	move.w	(a4,d2.w),(a1)+		; (the STE's bit order)
 	dbf	d0,.rc
 .x:	rts
+
+; st_commit: d7 = a pen: its current colour (st_ccol) committed (st_pcol), its indices from the scene's tables
+st_commit:
+	movem.l	d0-d4/a0-a3,-(sp)
+	move.w	d7,d0
+	add.w	d0,d0
+	lea	st_ccol,a0
+	move.w	(a0,d0.w),d1
+	lea	st_pcol,a0
+	cmp.w	(a0,d0.w),d1
+	beq	.x
+	move.w	d1,(a0,d0.w)
+	cmp.w	#256,d7
+	blo.s	.pt
+	st	st_tilechg		; (a tile pen's colour: the scene looked at)
+.pt:	cmp.w	#$FFFF,d1
+	beq	.x			; (not read yet)
+	move.l	st_scn,a3
+	lea	SC_CTAB(a3),a3
+	moveq	#0,d2
+	move.b	(a3,d1.w),d2		; the playfield's index
+	lea	st_pidx,a2
+	cmp.b	(a2,d7.w),d2
+	beq.s	.hud
+	move.b	d2,(a2,d7.w)
+	move.w	d7,d3
+	lsr.w	#4,d3
+	move.l	st_rowchg,d4
+	bset	d3,d4
+	move.l	d4,st_rowchg
+.hud:	cmp.w	#256,d7
+	blo.s	.x
+	move.l	st_scn,a0
+	lea	SC_HTAB(a0),a0
+	move.b	(a0,d1.w),d2
+	lea	st_hidx-256,a0
+	cmp.b	(a0,d7.w),d2
+	beq.s	.x
+	move.b	d2,(a0,d7.w)
+	move.w	d7,d3			; (the status bar's tables of this tile row again)
+	lsr.w	#4,d3
+	sub.w	#16,d3
+	move.l	st_hrowchg,d4
+	bset	d3,d4
+	move.l	d4,st_hrowchg
+.x:	movem.l	(sp)+,d0-d4/a0-a3
+	rts
+
+; st_isres: d7 = a pen: Z set when it is one of the scene's reserved pens
+st_isres:
+	movem.l	d0/a0,-(sp)
+	move.l	st_scn,a0
+	lea	SC_RES(a0),a0
+	move.w	(a0)+,d0
+	subq.w	#1,d0
+	bmi.s	.no
+.l:	cmp.w	(a0)+,d7
+	beq.s	.yes
+	dbf	d0,.l
+.no:	movem.l	(sp)+,d0/a0
+	andi	#$FB,ccr
+	rts
+.yes:	movem.l	(sp)+,d0/a0
+	ori	#4,ccr
+	rts
 
 ; st_scene: the scene whose reference tile palette has the most pens equal to the current colours (the first of
 ; equals; tools/stage_assets.py choose_scene): d0 = 1 when it becomes the scene (st_scn) - the first time, or when it
@@ -1341,26 +1487,49 @@ st_object:
 ; st_strip: d5 = its buffer x, a4 = the buffer's line of the composite's top, (a3) = its plane words, a5 = its entry
 ; (x, shape, rows, pens): the shape's code for the shift; its damage listed
 st_strip:
-	move.l	(a3),d6			; the strip's plane words
-	move.w	2(a5),d0		; the shape
-	lsl.w	#2,d0
+	move.l	(a3),BLT_SRC.w		; the strip's plane words
+	move.w	2(a5),d6		; the shape
+	lsl.w	#2,d6
+	moveq	#15,d3
+	and.w	d5,d3
+	mulu	#12,d3			; its variant for the shift (code, stream, damage offset, damage size)
+	move.w	d5,d1
+	asr.w	#4,d1
+	lsl.w	#3,d1
+	ext.l	d1
+	add.l	a4,d1			; the strip's destination (row 0, its first word)
+	moveq	#0,d0			; (the code per shape and pass-type pattern steps the destination's low word: a strip
+	move.w	d1,d0			; that would cross a 64 KB boundary takes the long-destination code)
+	move.w	4(a2),d2		; (the composite's rows)
+	mulu	#ST_LB,d2
+	add.l	d2,d0
+	add.l	#16,d0
+	cmp.l	#$10000,d0
+	bhi.s	.long
+	lea	st_shapes_n,a0
+	move.l	(a0,d6.w),a0
+	add.w	d3,a0
+	move.l	d1,BLT_DST.w		; (the high word; the code writes the low word)
+	move.w	d1,d0
+	move.l	(a0)+,-(sp)		; the code
+	move.l	(a0),a0			; its stream
+	lea	BLT_END1.w,a1
+	lea	BLT_END3.w,a6
+	lea	BLT_DYI.w,a3
+	lea	BLT_DST+2.w,a4
+	lea	BLT_YC.w,a5
+	moveq	#4,d1
+	moveq	#-$40,d2
+	move.w	#ST_LB,d4
+	lea	BLT_CTRL.w,a2
+	rts				; (into the code: it returns to st_strip's caller)
+.long:	addq.l	#1,st_nlong
 	lea	st_shapes,a0
-	move.l	(a0,d0.w),a0		; its record: 16 variants of 12 bytes (code, stream, damage offset, damage size)
-	moveq	#15,d0
-	and.w	d5,d0
-	mulu	#12,d0
-	add.w	d0,a0
-	move.w	d5,d0
-	asr.w	#4,d0
-	lsl.w	#3,d0
-	ext.l	d0
-	add.l	a4,d0			; the strip's destination (row 0, its first word)
-	move.l	d0,a3
-	move.l	d6,BLT_SRC.w
-	move.l	4(a0),-(sp)		; (the stream)
-	move.l	(a0),a2			; the code
-	move.l	(sp)+,a0
-	move.l	a3,a3			; (a3: the destination)
+	move.l	(a0,d6.w),a0
+	add.w	d3,a0
+	move.l	d1,a3			; (the destination)
+	move.l	(a0)+,-(sp)
+	move.l	(a0),a0
 	lea	BLT_END1.w,a1
 	lea	BLT_END3.w,a6
 	lea	BLT_DST.w,a4
@@ -1368,9 +1537,8 @@ st_strip:
 	moveq	#4,d1
 	moveq	#-$40,d2
 	move.w	#ST_LB,d4
-	move.l	a2,-(sp)
 	lea	BLT_CTRL.w,a2
-	rts				; (into the code: it returns to st_strip's caller)
+	rts
 
 ; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = the address of its strips' plane-word addresses
 ; for this colour (cached: the key is the record, the colour and the row's version)
@@ -1677,6 +1845,8 @@ SC_FLAGS	= SC_RES+6		; a word: bit 0 the sprites squeezed toward the centre (st_
 					; the tiles' shift (the window over the tiles moves, the sprites keep their places)
 SC_SIZE		= SC_RES+8
 SCENE_MATCH	= 192
+ST_ROWLOAD	= 8			; pens of a row off their committed colours: the row was loaded (committed at once)
+ST_STABLE	= 50			; pictures a single pen's new colour must stay before it is committed
 st_tiles:	incbin	"stage_tiles.bin"
 ; the pixel bits of each index for the colour tables (st_mktab): tiles (a long of 4 plane bytes, plane 0 the high
 ; byte: the left pixel bit 1, the right bit 0 of each), sprites (st_ta: planes 0 / 1 in the words' bits 1 / 0, st_tb:
@@ -1734,6 +1904,8 @@ c	set	c+1
 	section data,data
 	even
 st_sstream:	incbin	"stage_sstream.bin"
+	even
+st_nstream:	incbin	"stage_nstream.bin"
 
 	section bss,bss
 	even
@@ -1749,6 +1921,7 @@ st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
 st_npool:	ds.l	1
+st_nlong:	ds.l	1		; (strips drawn with the long-destination code: 64 KB crossings)
 st_logn:	ds.l	1
 m72r_shown:	ds.w	1
 m72r_prev:	ds.w	1
@@ -1806,6 +1979,14 @@ st_palraw:	ds.b	2*$C00		; (the palettes as last read: st_palette compares the ma
 st_plist:	ds.w	512		; (the pens whose words changed)
 st_plend:	ds.l	1
 st_pflag:	ds.b	512
+st_ccol:	ds.w	512		; (the pens' current colours; st_pcol: the committed ones)
+st_pchg:	ds.b	512		; (changed this picture)
+st_pendf:	ds.b	512		; (pending: current != committed)
+st_pstab:	ds.b	512		; (pictures its colour stayed)
+st_pend:	ds.w	512
+st_pendp:	ds.l	1
+st_rowtch:	ds.l	1
+st_rowprev:	ds.w	512		; (each row's committed colours before its last load)
 st_pidx:	ds.b	512		; their playfield indices
 st_hidx:	ds.b	256		; the tile pens' status bar indices
 st_ver:		ds.b	32		; the colour rows' versions (sprites 0-15, tiles 16-31)

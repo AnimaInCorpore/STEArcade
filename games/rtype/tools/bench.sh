@@ -3,7 +3,8 @@
 #
 #   games/rtype/tools/bench.sh [hatari items ...]          e.g. shot@20 tap:06@25 tap:02@27 down:57@30 shot@60 up:57@61
 #   EXTRA="-D PIC_EVERY=3" WAIT=200 games/rtype/tools/bench.sh ...
-#   MEMSIZE=14 games/rtype/tools/bench.sh ...   (Hatari ST RAM in MB, default 4: test builds larger than a 4 MB STE)
+#   MEMSIZE=4 games/rtype/tools/bench.sh ...    (Hatari ST RAM in MB, default 14: the stage-renderer test builds are
+#                                                larger than a 4 MB STE; R-Type only)
 #
 # Hatari (the F030Arcade build; HATARI / TOS override) is started here and stopped by its PID, never by tools/hatari.sh
 # (that one stops every running "hatari").  Items as in tools/hatari.sh: shot@s, tap:K@s (scancodes in hex: 06 coin 1,
@@ -16,10 +17,10 @@ PY=venv/bin/python; [ -x $PY ] || PY=python3
 BENCH=run/rtype_bench; mkdir -p $BENCH
 $PY games/rtype/tools/build.py $EXTRA 2>&1 | grep -E "^built|rror" | tail -2
 cp run/rtype/RTYPE.PRG $BENCH/
-rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo
+rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo $BENCH/BORDERS.BIN
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
-(cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-4} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+(cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-14} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --statusbar false --cmd-fifo cmd.fifo --log-file hatari.log RTYPE.PRG) > $BENCH/hatari.out 2>&1 &
 HP=$!
 START=$SECONDS
@@ -32,6 +33,9 @@ for ITEM in "$@"; do
   kill -0 $HP 2>/dev/null || { echo "hatari exited"; break; }
   case $WHAT in
     shot)   printf 'hatari-debug screenshot %s\n' "$ROOT/build/rtype/bench_$S.png" > $FIFO ;;
+    burst)  for k in 0 1 2 3 4 5 6 7 8 9; do
+              printf 'hatari-debug screenshot %s\n' "$ROOT/build/rtype/burst_${S}_$k.png" > $FIFO; sleep 0.13
+            done ;;
     tap:*)  printf 'hatari-event keydown %s\n' "${WHAT#tap:}" > $FIFO; sleep 0.3
             printf 'hatari-event keyup %s\n' "${WHAT#tap:}" > $FIFO ;;
     hold:*) printf 'hatari-event keydown %s\n' "${WHAT#hold:}" > $FIFO; sleep 0.7
@@ -69,6 +73,12 @@ if len(raw) >= 40:
     n = st[17] if len(st) > 17 and st[17] else v       # (PROF: Timer C samples, else VBLs)
     print("%s sampled: " % ("Timer C" if n != v else "VBLs") +
           ", ".join("%s %d%%" % (k, 100 * x // max(1, n)) for k, x in zip(names, st) if x))
+import os
+if os.path.exists('run/rtype_bench/BORDERS.BIN'):
+    b = open('run/rtype_bench/BORDERS.BIN', 'rb').read()
+    fb, lt, lo, ll, lf = struct.unpack('>5H', b[:10])
+    print("borders: frames with the top border armed late (fallbacks) %d, late events: top %d, palette on %d, "
+          "bottom %d, off %d" % (fb, lt, lo, ll, lf))
 if len(raw) >= 112:
     print("stage renderer: pens looked up %d, scene checks %d, colour rows made %d, scene switches %d" % struct.unpack('>4I', raw[96:112]))
 P

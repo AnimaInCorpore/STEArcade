@@ -9,6 +9,8 @@
 #                           dbg:COMMAND@50             a debugger command (dbg:profile on, dbg:profile save /tmp/p.txt ...)
 #                           dump:0xADDR:0xSIZE@50      memory dump (debugger savebin) -> $OUT/<game>_<s>_<ADDR>.bin
 #   MACHINE=megaste (default ste), HATARI_ARGS='--cpuclock 16': other Hatari options.
+#   MEMSIZE: Hatari's ST RAM in MB (4; R-Type alone 14: its stage-renderer test builds are larger than a 4 MB STE until
+#   the per-stage data loads from disk - the user, 2026-10-30).
 #   no items: run interactively.   A CRASH.TXT written by the program is printed.
 # The program is started from run/<game>/ (its GEMDOS drive: CRASH.TXT and dumps go there).  $OUT defaults to /tmp/hrun.
 set -e
@@ -20,10 +22,11 @@ OUT=${OUT:-/tmp/hrun}
 PY=$ROOT/venv/bin/python; [ -x "$PY" ] || PY=python3
 PRG=${PRG:-$("$PY" "$ROOT/port.py" prg "$GAME")} || { echo "unknown game $GAME:"; "$PY" "$ROOT/port.py" list; exit 1; }
 RUN=${RUN:-$ROOT/run/$GAME}
+if [ "$GAME" = rtype ]; then MEMSIZE=${MEMSIZE:-14}; fi
 mkdir -p "$OUT"; rm -f "$RUN/CRASH.TXT" "$OUT/cmd.fifo"
 pkill -x hatari 2>/dev/null || true
 cd "$RUN"
-"$HATARI" --machine "${MACHINE:-ste}" --memsize 4 ${HATARI_ARGS:-} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+"$HATARI" --machine "${MACHINE:-ste}" --memsize ${MEMSIZE:-4} ${HATARI_ARGS:-} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --cmd-fifo "$OUT/cmd.fifo" --log-file "$OUT/hatari.log" "$PRG" &
 HP=$!
 if [ $# -eq 0 ]; then wait $HP; exit 0; fi
