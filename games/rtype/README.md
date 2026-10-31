@@ -28,8 +28,18 @@ changes (`src/stage.s` st_fgdraw, st_fgbuild).  Sprites and FG rows are erased w
 scroll into it).  `tools/stage_model.py` (bgscroll) draws both layers at their own scroll.  `stage_test.py
 build/rtype/stage_states_3.pkl` (seed 1 attract, frames 11400-14400: `logic_test.py 14400 --seed 1 --start 11400 --snap
 --list --record ...`): every picture exact.  Hatari, the demo's warship part (REPLAY=1:12600:14400): 23.6 arcade
-frames/s, 13.4 pictures/s (before: 32.6 / 18.9 without the warship).  Open: almost every FG row lies over empty BG
-tiles (24 of ~8700 FG pixels over BG pixels): those rows can be plain copies instead of masked pieces.
+frames/s, 13.4 pictures/s (before: 32.6 / 18.9 without the warship).
+
+**Stage 3: the warship as sprites** (the user, 2026-10-31; the default now: `stage_assets.py` BG_PIECE_SCENES, scene
+flag bit 3).  The FG walls stay the buffer's layer; the warship (BG) is drawn over them each picture with the same
+pieces (`src/stage.s` ST_LAYER bg: a BG image, a non-empty BG cell is opaque as a whole), then the walls' opaque pixels
+are copied again from the clean buffer where a warship row meets wall chunks (st_wallfix: the layers' order).  A
+warship row over no wall chunks is erased by clearing (zeros, no source reads: st_sync clears those before it copies
+the log).  The BG scroll mode stays (flag bit 2 alone).  Hatari, the warship part: 24.0 arcade frames/s, 13.7
+pictures/s; the BG scroll mode with its switch fix 24.3 / 13.8.  Musashi, a picture (CPU + Blitter): warship coming in
+behind the full walls (12900-13100) 316k as sprites, 452k scrolling; warship filling the screen (13400-13600) 394k as
+sprites, 284k scrolling - drawing the smaller layer as pieces (switching at the crossover) would take the better of
+each.
 
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG

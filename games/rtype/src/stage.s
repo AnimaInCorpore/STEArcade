@@ -130,7 +130,8 @@ m72r_init:
 	move.w	#4096/4-1,d1
 .bz:	move.l	d0,(a0)+
 	dbf	d1,.bz
-	move.w	#-1,st_fk0		; (the FG rows' pieces: none made)
+	move.w	#-1,st_fgk0		; (the FG rows' pieces: none made)
+	move.w	#-1,st_bgk0
 	bsr	st_preins
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
@@ -184,6 +185,8 @@ ST_PHASE macro				; (DEBUG: the phase for the VBL's sampled profile, rtype.s mai
 	move.l	st_scn,a0
 	btst	#2,SC_FLAGS+1(a0)
 	beq.s	.fl
+	btst	#3,SC_FLAGS+1(a0)
+	bne.s	.fl
 	move.w	#ST_LINES+ST_LINESB,st_flines	; (a BG scroll scene: whole copies take both regions)
 .fl:	tst.b	st_bgon
 	beq.s	.org
@@ -638,7 +641,16 @@ st_rowcells:
 	moveq	#64/4-1,d0
 .fk:	clr.l	(a0)+
 	dbf	d0,.fk
-	move.w	#-1,st_fk0
+	move.w	#-1,st_fgk0
+	lea	st_bgcells,a0
+	move.w	#4096/4-1,d0
+.bc:	clr.l	(a0)+
+	dbf	d0,.bc
+	lea	st_bgcolok,a0
+	moveq	#64/4-1,d0
+.bk:	clr.l	(a0)+
+	dbf	d0,.bk
+	move.w	#-1,st_bgk0
 	movem.l	(sp)+,d0/a0
 	tst.b	st_bgon
 	beq.s	.fg
@@ -770,10 +782,19 @@ st_vram:
 	ext.w	d1
 	add.w	d1,st_bgn
 	move.l	-4(a0),-4(a1)
-	tst.b	st_bgon
-	beq.s	.bs
 	moveq	#63,d2
 	sub.w	d3,d2
+	move.l	a2,-(sp)		; (the BG image's cell too)
+	lea	st_bgcolok,a2
+	clr.b	(a2,d2.w)
+	move.w	d6,d0
+	lsl.w	#6,d0
+	add.w	d2,d0
+	lea	st_bgcells,a2
+	clr.b	(a2,d0.w)
+	move.l	(sp)+,a2
+	tst.b	st_bgon
+	beq.s	.bs
 	clr.b	(a2,d2.w)
 	clr.b	(a3,d2.w)
 .bs:	dbf	d3,.bc
@@ -816,12 +837,12 @@ st_bands:
 	add.w	d1,d0
 	and.w	#511,d0
 	move.w	d0,d4			; (the FG's window)
-	move.w	d4,st_wf		; (the FG image's window and rows - both modes: a BG scroll scene keeps the image;
+	move.w	d4,st_fgx		; (the FG image's window and rows - both modes: a BG scroll scene keeps the image;
 	move.w	(a0),d0			; its columns looked at again when the first row changes)
 	add.w	#128,d0
 	and.w	#511,d0
-	move.w	st_fy,d1
-	move.w	d0,st_fy
+	move.w	st_fgy,d1
+	move.w	d0,st_fgy
 	eor.w	d0,d1
 	and.w	#$1F8,d1
 	beq.s	.f1
@@ -829,13 +850,32 @@ st_bands:
 	moveq	#64/4-1,d1
 .fk:	clr.l	(a2)+
 	dbf	d1,.fk
-.f1:	move.w	m72_port02,d0
+.f1:	move.w	6(a0),d0		; (the BG image's window and rows)
+	add.w	#96,d0
+	add.w	st_tdx,d0
+	and.w	#511,d0
+	move.w	d0,st_bgx
+	move.w	4(a0),d0
+	add.w	#128,d0
+	and.w	#511,d0
+	move.w	st_bgy,d1
+	move.w	d0,st_bgy
+	eor.w	d0,d1
+	and.w	#$1F8,d1
+	beq.s	.b1
+	lea	st_bgcolok,a2
+	moveq	#64/4-1,d1
+.bk1:	clr.l	(a2)+
+	dbf	d1,.bk1
+.b1:	move.w	m72_port02,d0
 	lsr.w	#3,d0
 	and.b	#1,d0
 	move.b	d0,st_off
-	moveq	#0,d2			; the BG scroll mode: a scene with flag bit 2, the BG map not empty
+	moveq	#0,d2			; the BG scroll mode: a scene with flag bit 2 (not 3), the BG map not empty
 	btst	#2,SC_FLAGS+1(a1)
 	beq.s	.md
+	btst	#3,SC_FLAGS+1(a1)
+	bne.s	.md
 	tst.w	st_bgn
 	sne	d2
 .md:	cmp.b	st_bgon,d2
@@ -921,8 +961,12 @@ st_compose:
 	bsr	st_column
 .cn:	addq.w	#1,d6
 	dbf	d7,.col
-	move.l	st_scn,a0		; (a BG scroll scene: the FG image kept)
-	btst	#2,SC_FLAGS+1(a0)
+	move.l	st_scn,a0		; (a BG piece scene: the BG image)
+	btst	#3,SC_FLAGS+1(a0)
+	beq.s	.nb
+	bsr	st_bgcomp
+	move.l	st_scn,a0
+.nb:	btst	#2,SC_FLAGS+1(a0)	; (a BG scroll scene: the FG image kept)
 	bne	st_fgcomp
 	rts
 
@@ -1112,7 +1156,7 @@ st_cell:
 
 ; ======================================================================================================================
 ; The BG scroll mode's composition: the BG window's map columns (W >> 3, 41 of them) into the clean buffer at their map
-; positions (rows from st_by >> 3, 33 of them), the FG window's (st_wf) into the FG image
+; positions (rows from st_by >> 3, 33 of them), the FG window's (st_fgx) into the FG image
 ; ======================================================================================================================
 st_composeb:
 	move.w	st_W,d6
@@ -1126,21 +1170,7 @@ st_composeb:
 	bsr	st_columnb
 .cn:	addq.w	#1,d6
 	dbf	d7,.col
-; st_fgcomp: the FG image's cells of the window's chunks k0 .. k0 + 21 (both cells of each) where not made
-st_fgcomp:
-	move.w	st_wf,d6
-	lsr.w	#4,d6
-	add.w	d6,d6
-	moveq	#44-1,d7
-.fc:	and.w	#63,d6
-	lea	st_fgcolok,a0
-	tst.b	(a0,d6.w)
-	bne.s	.fn
-	st	(a0,d6.w)
-	bsr	st_fgcolumn
-.fn:	addq.w	#1,d6
-	dbf	d7,.fc
-	rts
+	bra	st_fgcomp
 
 ; st_columnb: d6 = a BG map column: its cells in the window's rows composed where not done
 st_columnb:
@@ -1248,26 +1278,6 @@ st_cellb:
 	add.l	#256,d0
 	bsr	st_logcell
 .x:	movem.l	(sp)+,d5-d7
-	rts
-
-; st_fgcolumn: d6 = a FG map column: its cells in the FG window's rows into the FG image where not done
-st_fgcolumn:
-	movem.l	d6-d7,-(sp)
-	move.w	st_fy,d5
-	lsr.w	#3,d5
-	moveq	#33-1,d7
-.row:	and.w	#63,d5
-	move.w	d5,d0
-	lsl.w	#6,d0
-	add.w	d6,d0
-	lea	st_fgcells,a0
-	tst.b	(a0,d0.w)
-	bne.s	.rn
-	st	(a0,d0.w)
-	bsr	st_fgcell
-.rn:	addq.w	#1,d5
-	dbf	d7,.row
-	movem.l	(sp)+,d6-d7
 	rts
 
 ; st_fgcell: d5 = a FG map row, d6 = a column: the tile into the FG image (st_fgimg: the FG map's 512 lines of ST_LB
@@ -1396,20 +1406,166 @@ ST_FB		= 4			; offset, mask 1, mask 2), the one-chunk ones (count, offset, mask)
 ST_FC		= ST_FB+2+88*6		; (count, n * 2, offset); an offset: line * ST_LB + (chunk - k0) * 8
 ST_FF		= ST_FC+2+176*4
 
-st_fgdraw:
+; st_bgcell: d5 = a BG map row, d6 = a column: the tile into the BG image (st_bgimg, the FG image's layout; black
+; when empty: st_bgstar), its opaque pixels - the whole cell unless empty (the model: pen 0 drawn) - into st_bgmsk,
+; the row's cells and chunks with pixels (st_bgrm, st_bgrc), the row's pieces made again when it has or had pixels
+st_bgcell:
+	movem.l	d5-d7,-(sp)
+	move.w	d5,d0
+	lsl.w	#6,d0
+	add.w	d6,d0
+	lsl.w	#2,d0
+	lea	v30_image+$D8000,a0
+	move.w	(a0,d0.w),d1		; code
+	move.w	2(a0,d0.w),d2		; attribute: the colour
+	and.w	#15,d2
+	moveq	#0,d0
+	move.w	d1,d0
+	and.w	#$FFF,d0
+	lea	st_bgstar,a0
+	moveq	#0,d7
+	tst.b	(a0,d0.w)
+	bne.s	.e
+	moveq	#-1,d7			; (opaque: the whole cell)
+	and.w	#$CFFF,d1
+	or.w	#$1000,d1		; (bit 12: a BG tile)
+	bsr	st_tile			; -> a0
+	bra.s	.t
+.e:	lea	st_zero8,a0
+.t:	moveq	#0,d0
+	move.w	d5,d0
+	moveq	#12,d3
+	lsl.l	d3,d0			; (8 lines of ST_LB a row)
+	moveq	#0,d3
+	move.w	d6,d3
+	lsr.w	#1,d3
+	lsl.w	#3,d3
+	add.l	d3,d0
+	moveq	#1,d3
+	and.w	d6,d3
+	add.l	d3,d0
+	lea	st_bgimg,a1
+	add.l	d0,a1
+	moveq	#8-1,d0
+.i:	move.l	(a0)+,d1
+	movep.l	d1,0(a1)
+	movep.l	d1,256(a1)
+	lea	ST_LB(a1),a1
+	dbf	d0,.i
+	moveq	#0,d0
+	move.w	d5,d0
+	moveq	#10,d3
+	lsl.l	d3,d0			; (8 lines of 128 bytes a row)
+	moveq	#0,d3
+	move.w	d6,d3
+	lsr.w	#1,d3
+	add.w	d3,d3
+	add.l	d3,d0
+	moveq	#1,d3
+	and.w	d6,d3
+	add.l	d3,d0
+	lea	st_bgmsk,a2
+	add.l	d0,a2
+	moveq	#8-1,d0
+.m:	move.b	d7,(a2)
+	move.b	d7,64(a2)
+	lea	128(a2),a2
+	dbf	d0,.m
+	move.b	d7,d3
+	lea	st_bgrm,a2
+	move.w	d5,d0
+	lsl.w	#3,d0
+	add.w	d0,a2
+	move.w	d6,d0
+	lsr.w	#3,d0
+	add.w	d0,a2
+	moveq	#7,d0
+	and.w	d6,d0
+	btst	d0,(a2)			; (the row's pieces change when the cell has opaque pixels or had)
+	sne	d4
+	or.b	d3,d4
+	bclr	d0,(a2)
+	tst.b	d3
+	beq.s	.c
+	bset	d0,(a2)
+.c:	move.b	(a2),d1			; its chunk (cells 2k, 2k + 1): st_bgrc, bit k of the row's long
+	moveq	#6,d0
+	and.w	d6,d0
+	lsr.b	d0,d1
+	lea	st_bgrc,a2
+	move.w	d5,d0
+	lsl.w	#2,d0
+	add.w	d0,a2
+	move.l	(a2),d3
+	move.w	d6,d0
+	lsr.w	#1,d0
+	bclr	d0,d3
+	and.b	#3,d1
+	beq.s	.x
+	bset	d0,d3
+.x:	move.l	d3,(a2)
+	tst.b	d4
+	beq.s	.nd
+	lea	st_bgdirty,a2		; (the row's pieces made again)
+	st	(a2,d5.w)
+.nd:	movem.l	(sp)+,d5-d7
+	rts
+
+; The pieces of a layer drawn over the buffer like sprites (ST_LAYER fg: the BG scroll mode's FG walls; ST_LAYER bg:
+; a BG piece scene's BG - stage 3's warship - over the FG mode's buffer): st_<l>comp / st_<l>column (its image's cells in
+; the window), st_<l>draw, st_<l>build (its rows' pieces); its window st_<l>x, st_<l>y; its cells made by st_<l>cell.
+ST_LAYER	macro
+; st_\1comp: the FG image's cells of the window's chunks k0 .. k0 + 21 (both cells of each) where not made
+st_\1comp:
+	move.w	st_\1x,d6
+	lsr.w	#4,d6
+	add.w	d6,d6
+	moveq	#44-1,d7
+.fc:	and.w	#63,d6
+	lea	st_\1colok,a0
+	tst.b	(a0,d6.w)
+	bne.s	.fn
+	st	(a0,d6.w)
+	bsr	st_\1column
+.fn:	addq.w	#1,d6
+	dbf	d7,.fc
+	rts
+
+; st_\1column: d6 = a FG map column: its cells in the FG window's rows into the FG image where not done
+st_\1column:
+	movem.l	d6-d7,-(sp)
+	move.w	st_\1y,d5
+	lsr.w	#3,d5
+	moveq	#33-1,d7
+.row:	and.w	#63,d5
+	move.w	d5,d0
+	lsl.w	#6,d0
+	add.w	d6,d0
+	lea	st_\1cells,a0
+	tst.b	(a0,d0.w)
+	bne.s	.rn
+	st	(a0,d0.w)
+	bsr	st_\1cell
+.rn:	addq.w	#1,d5
+	dbf	d7,.row
+	movem.l	(sp)+,d6-d7
+	rts
+
+st_\1draw:
 	move.l	a0,st_fgrp
+	move.l	#st_drl,st_drlp
 	movem.l	d0-d7/a0-a6,-(sp)
-	move.w	st_wf,d0		; the window's chunks k0 .. k0 + 21: the rows' pieces again when k0 changes
+	move.w	st_\1x,d0		; the window's chunks k0 .. k0 + 21: the rows' pieces again when k0 changes
 	lsr.w	#4,d0
-	cmp.w	st_fk0,d0
+	cmp.w	st_\1k0,d0
 	beq.s	.k0
-	move.w	d0,st_fk0
-	lea	st_fgdirty,a0
+	move.w	d0,st_\1k0
+	lea	st_\1dirty,a0
 	moveq	#64/4-1,d1
 .dk:	move.l	#$FFFFFFFF,(a0)+
 	dbf	d1,.dk
 .k0:	move.w	st_W,d0			; chunk k (FG x 16k) -> the destination's group st_fgd + k, the skew
-	sub.w	st_wf,d0
+	sub.w	st_\1x,d0
 	moveq	#15,d6
 	and.w	d0,d6
 	asr.w	#4,d0
@@ -1457,7 +1613,7 @@ st_fgdraw:
 	move.w	#$0203,BLT_HOP.w
 	move.w	#8,BLT_SXI.w
 	move.w	#8,BLT_DXI.w
-	move.w	st_fy,d0
+	move.w	st_\1y,d0
 	lsr.w	#3,d0
 	move.w	d0,st_frow
 	move.w	#33-1,st_frows
@@ -1465,7 +1621,7 @@ st_fgdraw:
 	and.w	#63,d0
 	move.w	d0,d1			; its first line in the picture (-7 .. 255)
 	lsl.w	#3,d1
-	sub.w	st_fy,d1
+	sub.w	st_\1y,d1
 	and.w	#511,d1
 	cmp.w	#512-8,d1
 	blo.s	.t
@@ -1473,14 +1629,14 @@ st_fgdraw:
 .t:	cmp.w	#ST_PL,d1
 	bge	.rn
 	move.w	d1,st_ftop
-	lea	st_fgdirty,a0
+	lea	st_\1dirty,a0
 	tst.b	(a0,d0.w)
 	beq.s	.built
 	clr.b	(a0,d0.w)
-	bsr	st_fgbuild
+	bsr	st_\1build
 .built:	move.w	d0,d1			; the row's pieces
 	mulu	#ST_FROW,d1
-	lea	st_fgpcs,a0
+	lea	st_\1pcs,a0
 	add.l	d1,a0
 	tst.w	(a0)
 	bmi	.rn
@@ -1488,9 +1644,9 @@ st_fgdraw:
 	move.w	d0,d1
 	moveq	#12,d2
 	lsl.l	d2,d1
-	lea	st_fgimg,a2
+	lea	st_\1img,a2
 	add.l	d1,a2
-	move.w	st_fk0,d1
+	move.w	st_\1k0,d1
 	lsl.w	#3,d1
 	add.w	d1,a2
 	move.w	st_ftop,d1		; the destination
@@ -1499,7 +1655,7 @@ st_fgdraw:
 	move.l	st_dorg,a3
 	add.l	d1,a3
 	move.w	st_fgd,d1
-	add.w	st_fk0,d1
+	add.w	st_\1k0,d1
 	ext.l	d1
 	lsl.l	#3,d1
 	add.l	d1,a3
@@ -1604,7 +1760,7 @@ st_fgdraw:
 	mulu	#ST_LB,d3
 	add.l	d3,d0
 	move.w	st_fgd,d3
-	add.w	st_fk0,d3
+	add.w	st_\1k0,d3
 	add.w	(a0),d3
 	ext.l	d3
 	lsl.l	#3,d3
@@ -1620,6 +1776,17 @@ st_fgdraw:
 	move.b	#8,(a1)+
 	clr.w	(a1)+
 	move.l	a1,st_fgrp
+	move.l	st_drlp,a1		; (the rows drawn: top, first and last group - st_wallfix)
+	move.w	st_ftop,(a1)+
+	move.w	st_fgd,d3
+	add.w	st_\1k0,d3
+	add.w	(a0),d3
+	move.w	d3,(a1)+
+	add.w	2(a0),d3
+	sub.w	(a0),d3
+	add.w	st_fsf,d3
+	move.w	d3,(a1)+
+	move.l	a1,st_drlp
 .rn:	addq.w	#1,st_frow
 	subq.w	#1,st_frows
 	bpl	.row
@@ -1627,17 +1794,17 @@ st_fgdraw:
 	move.l	st_fgrp,a0
 	rts
 
-; st_fgbuild: d0 = a FG row: its pieces in the window's chunks k0 .. k0 + 21 (st_fgpcs + row * ST_FROW: the first and
+; st_\1build: d0 = a FG row: its pieces in the window's chunks k0 .. k0 + 21 (st_\1pcs + row * ST_FROW: the first and
 ; the last chunk with pieces - relative to k0, -1: none -, then the pieces by kind; see ST_FROW).  Keeps d0, d2, d4-d6,
 ; a2-a5.
-st_fgbuild:
+st_\1build:
 	movem.l	d0-d7/a0-a6,-(sp)
 	move.w	d0,d1
 	mulu	#ST_FROW,d1
-	lea	st_fgpcs,a6
+	lea	st_\1pcs,a6
 	add.l	d1,a6
 	move.w	#-1,(a6)		; (none yet)
-	lea	st_fgrc,a0		; (a row without opaque pixels: none)
+	lea	st_\1rc,a0		; (a row without opaque pixels: none)
 	move.w	d0,d1
 	lsl.w	#2,d1
 	tst.l	(a0,d1.w)
@@ -1655,9 +1822,9 @@ st_fgbuild:
 	moveq	#0,d1
 	move.w	d0,d1
 	lsl.l	#7,d1
-	lea	st_fgmsk,a1
+	lea	st_\1msk,a1
 	add.l	d1,a1
-	move.w	st_fk0,d1
+	move.w	st_\1k0,d1
 	add.w	d1,d1
 	add.w	d1,a1
 	move.l	a1,a4
@@ -1750,6 +1917,105 @@ st_fgbuild:
 	bmi.s	.x
 	move.w	st_fr0,(a6)
 	move.w	d0,2(a6)
+.x:	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+	endm
+
+	ST_LAYER fg
+	ST_LAYER bg
+
+; st_wallfix: the FG walls over a BG piece scene's BG pieces (the layers' order): in each BG row drawn (st_drl), the
+; lines whose groups hold FG opaque pixels (the FG mode's buffer: FG x = buffer x, FG map line = picture line + st_fgy;
+; st_fgmsk, st_fgrc) copied again from the clean buffer with those pixels as the end masks (4 plane words a pass)
+st_wallfix:
+	movem.l	d0-d7/a0-a6,-(sp)
+	move.w	#2,BLT_SXI.w
+	move.w	#2,BLT_DXI.w
+	move.w	#4,BLT_XC.w
+	move.w	#$0203,BLT_HOP.w
+	clr.b	BLT_SKEW.w
+	move.l	st_bufs+4*ST_NBUF,a5
+	move.l	st_dbuf,a6
+	lea	st_drl,a4
+	move.l	st_dmg0,a3		; (its rectangles: the same order)
+	subq.l	#8,a3
+.e:	cmp.l	st_drlp,a4
+	bhs	.x
+	addq.l	#8,a3
+	move.w	(a4)+,d4		; the top line, the first and the last group
+	move.w	(a4)+,d5
+	move.w	(a4)+,d6
+	tst.w	d5
+	bpl.s	.g0
+	moveq	#0,d5
+.g0:	moveq	#0,d7			; the groups' bits (as st_fgrc: group & 31)
+	move.w	d5,d0
+.gb:	bset	d0,d7
+	addq.w	#1,d0
+	cmp.w	d6,d0
+	ble.s	.gb
+	move.w	d4,d0			; the FG rows over its lines
+	add.w	st_fgy,d0
+	and.w	#511,d0
+	move.w	d0,d3			; (the first FG map line)
+	lsr.w	#3,d0
+	lea	st_fgrc,a0
+	lsl.w	#2,d0
+	move.l	(a0,d0.w),d1
+	move.w	d3,d0
+	addq.w	#7,d0
+	and.w	#511,d0
+	lsr.w	#3,d0
+	lsl.w	#2,d0
+	or.l	(a0,d0.w),d1
+	and.l	d7,d1
+	bne.s	.w
+	move.w	#1,6(a3)		; (no FG pixels: its rectangle cleared, st_sync)
+	bra.s	.e
+.w:	moveq	#0,d2			; the lines
+.l:	move.w	d3,d0
+	add.w	d2,d0
+	and.w	#511,d0
+	moveq	#0,d1
+	move.w	d0,d1
+	lsl.l	#7,d1
+	lea	st_fgmsk,a1
+	add.l	d1,a1
+	move.w	d4,d1			; (the line's offset)
+	add.w	d2,d1
+	add.w	#ST_G,d1
+	mulu	#ST_LB,d1
+	move.w	d5,d7
+.g:	moveq	#63,d0
+	and.w	d7,d0
+	add.w	d0,d0
+	move.w	(a1,d0.w),d0
+	beq.s	.gn
+	move.w	d0,BLT_END1.w
+	move.w	d0,BLT_END2.w
+	move.w	d0,BLT_END3.w
+	move.l	d1,d0
+	moveq	#0,d1
+	move.w	d7,d1
+	lsl.w	#3,d1
+	add.l	d0,d1
+	lea	(a5,d1.l),a0
+	move.l	a0,BLT_SRC.w
+	lea	(a6,d1.l),a0
+	move.l	a0,BLT_DST.w
+	move.l	d0,d1
+	move.w	#1,BLT_YC.w
+    ifnd ST_NOCOPY
+	move.b	#$C0,BLT_CTRL.w
+    endc
+.gn:	addq.w	#1,d7
+	cmp.w	d6,d7
+	ble.s	.g
+	addq.w	#1,d2
+	cmp.w	#8,d2
+	blo.s	.l
+	bra	.e
 .x:	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
@@ -1922,6 +2188,50 @@ st_sync:
     else
 	moveq	#-$40,d5		; ($C0: busy, HOG)
     endc
+	movem.l	d6-d7/a3,-(sp)		; the cleared rectangles first (a BG piece scene's rows over no FG pixels: zeros in
+	move.w	st_draw,d0		; the clean buffer; the logged cells after them)
+	add.w	d0,d0
+	lea	st_dmgn,a0
+	move.w	(a0,d0.w),d7
+	beq	.cx
+	lea	st_dmg,a2
+	mulu	#ST_DMG*8/2,d0
+	add.l	d0,a2
+	lea	st_lpp,a3
+	clr.w	BLT_HOP.w		; (HOP 0, OP 0: zeros)
+	moveq	#-1,d0
+	move.w	d0,BLT_END1.w
+	move.w	d0,BLT_END2.w
+	move.w	d0,BLT_END3.w
+	subq.w	#1,d7
+.cr:	tst.w	6(a2)
+	beq.s	.cn
+	move.l	(a2),d0
+	lea	(a6,d0.l),a0
+	move.l	a0,BLT_DST.w
+	moveq	#0,d0
+	move.b	4(a2),d0		; words a line
+	moveq	#0,d1
+	move.b	5(a2),d1		; lines
+    ifd DEBUG
+	move.w	d0,d2
+	mulu	d1,d2
+	add.l	d2,st_nclrw
+    endc
+	move.w	d0,BLT_XC.w
+	move.w	#ST_LB+2,d2
+	sub.w	d0,d2
+	sub.w	d0,d2
+	move.w	d2,BLT_DYI.w
+	moveq	#1,d3
+	cmp.w	#32,d0
+	bhi.s	.cp
+	move.b	(a3,d0.w),d3
+.cp:	ST_PASSES
+.cn:	addq.l	#8,a2
+	dbf	d7,.cr
+	move.w	#$0203,BLT_HOP.w
+.cx:	movem.l	(sp)+,d6-d7/a3
 	; the log: a group's 4 plane words a line, the byte's mask, 8 lines a pass
 	move.w	#4,BLT_XC.w
 	move.w	#ST_LB-6,BLT_SYI.w
@@ -1969,7 +2279,12 @@ st_sync:
 	lea	st_lpp,a3
 	subq.w	#1,d7
 	bmi.s	.dx
-.d:	move.l	(a2)+,d0
+.d:	tst.w	6(a2)			; (cleared before the log)
+	beq.s	.dc
+	addq.l	#8,a2
+	dbf	d7,.d
+	rts
+.dc:	move.l	(a2)+,d0
 	lea	(a5,d0.l),a0
 	move.l	a0,BLT_SRC.w
 	lea	(a6,d0.l),a0
@@ -2144,9 +2459,15 @@ st_sprites:
 	move.l	a0,d6
 	move.l	a0,st_dmg0
 	tst.b	st_bgon
+	bne.s	.fgd
+	move.l	st_scn,a1		; (a BG piece scene: the BG pieces, the walls over them)
+	btst	#3,SC_FLAGS+1(a1)
 	beq.s	.nf
-	bsr	st_fgdraw		; (the BG scroll mode: the FG under the sprites, its rectangles first)
-	move.l	a0,d6
+	bsr	st_bgdraw
+	bsr	st_wallfix
+	bra.s	.fr
+.fgd:	bsr	st_fgdraw		; (the BG scroll mode: the FG under the sprites, its rectangles first)
+.fr:	move.l	a0,d6
 	move.w	#2,BLT_SXI.w
 	move.w	#2,BLT_SYI.w
 	move.w	#8,BLT_DXI.w
@@ -2914,6 +3235,7 @@ st_switches:	ds.l	1		; (scene switches)
 st_nlog:	ds.l	1		; (DEBUG: log entries copied, their lines, the erase rectangles' words, whole copies)
 st_nlogl:	ds.l	1
 st_nrectw:	ds.l	1
+st_nclrw:	ds.l	1		; (DEBUG: the cleared rectangles' words)
 st_nfull:	ds.l	1
 st_nscene:	ds.l	1		; (scene checks)
 st_nrows:	ds.l	1		; (colour rows' tables made)
@@ -2950,14 +3272,17 @@ st_fr0:		ds.w	1		; (st_fgdraw: a row's chunks with opaque pixels in the window, 
 st_fr1:		ds.w	1
 st_bgn:		ds.w	1		; (the BG map's cells that are not empty)
 st_by:		ds.w	1		; (the BG scroll mode: the window's first BG map line, the FG's window, its first line)
-st_wf:		ds.w	1
-st_fy:		ds.w	1
+st_fgx:		ds.w	1
+st_fgy:		ds.w	1
+st_bgx:		ds.w	1		; (a BG piece scene: the BG image's window, its first line, its first chunk)
+st_bgy:		ds.w	1
+st_bgk0:	ds.w	1
 st_flines:	ds.w	1		; (the lines a whole copy copies)
 st_fgd:		ds.w	1		; (st_fgdraw's)
 st_fsf:		ds.w	1
 st_fe1:		ds.w	1
 st_fe3:		ds.w	1
-st_fk0:		ds.w	1
+st_fgk0:		ds.w	1
 st_fkn:		ds.w	1
 st_frow:	ds.w	1
 st_frows:	ds.w	1
@@ -3019,6 +3344,16 @@ st_fgcolok:	ds.b	64		; opaque pixels)
 st_fgrm:	ds.b	512
 st_fgrc:	ds.l	64
 st_fgdirty:	ds.b	64
+st_bgcells:	ds.b	4096		; (a BG piece scene's BG image: as the FG image's)
+st_bgcolok:	ds.b	64
+st_bgrm:	ds.b	512
+st_bgrc:	ds.l	64
+st_bgdirty:	ds.b	64
+st_drlp:	ds.l	1
+st_drl:		ds.w	3*40		; (the rows a layer's pieces drew: top, first and last group)
+st_bgpcs:	ds.b	64*ST_FROW
+st_bgmsk:	ds.b	512*128
+st_bgimg:	ds.b	512*ST_LB
 st_bz:		ds.b	4096		; (the BG scroll mode's cells whose places hold zeros: never drawn, or empty)
 st_fgpcs:	ds.b	64*ST_FROW
 st_fgmsk:	ds.b	512*128

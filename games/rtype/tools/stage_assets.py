@@ -192,6 +192,9 @@ BG_STRIP_SCENES = {3}       # (flag bit 1: the BG from the stage's strip, locked
 # flag bit 2): the buffer holds the BG at its own scroll (x and y), the FG is drawn over it each picture like sprites
 # (stage_model.Model.picture bgscroll; src/stage.s st_bgon)
 BG_SCROLL_SCENES = {4}       # (scene 4: stage 3)
+# BG piece scenes (the user, 2026-10-31: flag bit 3, with bit 2): the FG stays the buffer's layer, the BG is drawn over
+# it each picture like sprites (src/stage.s st_bgdraw) and the FG's opaque pixels again over those (st_wallfix)
+BG_PIECE_SCENES = {4}
 SC_SIZE = 16 + 64 + 3 * 4096 + 2
 
 
@@ -293,7 +296,7 @@ def scenes(png=False):
         for kind, table in ((0, tab), (1, tab), (1, htab)):
             for t in range(256):
                 data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
-        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) |
+        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) | (8 if k in BG_PIECE_SCENES else 0) |
                  (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
         print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
             k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
