@@ -208,13 +208,13 @@ leaf_emit1f:
 	subq.l	#2,a5
 	EMIT1F	1
 
-nat_emit2:
+EMIT2	macro
 	move.w	$2EFC(a3),d4
 	move.w	d4,d5
 	EMIT_SIZE 0,d0
 	add.w	d0,d5			; IY: the second entry's slot
 	cmp.w	#$3C8,d5
-	bcc	R0201A
+	bcc	.x\@
 	move.w	4(a4,d6.l),d1
 	move.w	8(a4,d6.l),d2
 	move.w	6(a6),-2(a5)
@@ -222,13 +222,60 @@ nat_emit2:
 	EMIT_SIZE 6,d0
 	add.w	d5,d0
 	cmp.w	#$3C8,d0
-	bcc	R0201A
+	bcc	.x\@
 	move.w	d0,$2EFC(a4)		; (ss:)
 	move.w	d0,-(sp)
 	EMIT_ENTRY 6,d5
 	move.w	(sp)+,d7
 	EMIT_RECORD d4,d7,2
-	jmp	R0201A
+.x\@:	NEXIT	\1,R0201A
+	endm
+; 0040:0257: the fixed slots' loop (PUSH CW, PUSH BP, CALL [BP+0h], POP BP, POP CW, ADD BP,20h, DBNZ): a slot whose
+; handler is one of the 24 empty shot slots' (0040:395A .. 3CEE: [BP+4h] = 40h, [BP+7h] = [BP+17h] = 0, then a new shot
+; when [98h] is set, else RET) done here while [98h] is clear - their stores, the residues below SP (CW, BP, the CALL's
+; return IP) when the loop ends; any other handler (or [98h] set): the loop's translation (the flags after the loop are
+; dead: its DBNZ is a SUBQ in the translation)
+nat_objloop:
+	tst.b	$99(a3)			; [98h]: the handlers' new shots (set: the translation; the inline slots never
+	bne	R00657_t		; change it)
+	lea	obj_idle,a0
+	moveq	#0,d7
+.l:	move.w	(a4,d6.l),d7		; the handler's IP (d7's upper word 0)
+	tst.b	(a0,d7.l)
+	beq.s	.call
+	move.w	#$40,4(a4,d6.l)
+	moveq	#0,d7
+	move.b	d7,6(a4,d6.l)		; [BP+7h] (BP even)
+	move.b	d7,22(a4,d6.l)		; [BP+17h]
+	add.w	#$20,d6
+	subq.w	#1,d1
+	bne.s	.l
+	move.w	#1,-2(a5)		; (the last slot's residues below SP: CW 1, its BP, the CALL's return IP - a slot
+	move.w	d6,d7			; run by the translation writes all three)
+	sub.w	#$20,d7
+	move.w	d7,-4(a5)
+	move.w	#$025C,-6(a5)
+	jmp	R00663
+.call:	jmp	R00657_t
+
+nat_init:				; (rtype.s / core.s init_image)
+	lea	obj_idle,a0
+	lea	obj_idle_ips(pc),a1
+	moveq	#24-1,d1
+	moveq	#0,d0
+.l:	move.w	(a1)+,d0
+	st	(a0,d0.l)
+	dbf	d1,.l
+	rts
+obj_idle_ips:				; (0040:395A ..: the shot slots' empty handlers, found by their code's pattern)
+	dc.w	$395A,$3980,$39A6,$39CE,$39F6,$3A1E,$3A46,$3A6E,$3A96,$3ABE,$3AE6,$3B0E
+	dc.w	$3B36,$3B5E,$3B86,$3BAE,$3BD6,$3BFE,$3C26,$3C4E,$3C76,$3C9E,$3CC6,$3CEE
+
+nat_emit2:
+	EMIT2	0
+leaf_emit2:				; (tools/gen.py LEAF_CALLS: where the flags after it are dead)
+	subq.l	#2,a5
+	EMIT2	1
 
 nat_emit3:
 	move.w	$2EFC(a3),d4
@@ -1060,6 +1107,108 @@ LEAF24	macro				; \1 3 (x) / 7 (y): the 24 bits at [BP+\1] .. [BP+\1+2] plus AW
 	move.b	d7,\1+3(a0)
 	rts
 	endm
+; 0040:1D6B: the object at BP inside the playfield (12Ch <= x < 2D4h, 7Ch <= y < 194h): carry clear, else set; AW and the
+; flags as the arcade leaves them (the last SUB's, the carry by CLR1 / SET1)
+leaf_onscr:
+	move.w	4(a4,d6.l),d0
+	subi.w	#$12C,d0
+	bcs.s	.s
+	subi.w	#$1A8,d0
+	bcc.s	.s
+	move.w	8(a4,d6.l),d0
+	subi.w	#$7C,d0
+	bcs.s	.s
+	subi.w	#$118,d0
+	bcc.s	.s
+	andi	#$FE,ccr
+	rts
+.s:	ori	#1,ccr
+	rts
+
+; 0040:EDE9: the random numbers [2F28h] .. [2F2Ah]: AL = [2F29h] + [2F2Ah] (the ADD's flags), AH = [2F2Ah], DL = [2F28h];
+; the bytes shifted ([2F2Ah] = [2F29h], [2F29h] = [2F28h], [2F28h] = AL); BW, CW pushed and popped (their residues)
+leaf_rnd:
+	move.w	d3,-4(a5)
+	move.w	d1,-6(a5)
+	move.b	$2F29(a3),d2		; DL = [2F28h]
+	move.b	$2F2B(a3),d0		; AH = CL = [2F2Ah]
+	lsl.w	#8,d0
+	move.b	$2F28(a3),d0		; AL = BL = [2F29h]
+	move.b	d0,$2F2B(a3)		; [2F2Ah] = BL
+	move.b	d2,$2F28(a3)		; [2F29h] = DL
+	move.w	d0,d7
+	lsr.w	#8,d7
+	add.b	d7,d0			; AL = BL + CL
+	move.b	d0,$2F29(a3)		; [2F28h] = AL
+	sub.b	d7,d0			; (the ADD's flags again)
+	add.b	d7,d0
+	rts
+
+; 0040:1D89: the direction from the object at BP to the one at DS0:BW (BW = 0, 4 .. 3Ch); IX, IY, DW, AW, CW as the arcade
+; leaves them (the flags not: tools/gen.py LEAF_CALLS, where they are dead)
+AIM8	macro				; \1 / \2: AW = \1 - \2, CW = \3 - \4; \5 (AW - CW + 20h < 40h), \6 (bit 15 clear), \7
+	move.w	\1,d0
+	sub.w	\2,d0
+	move.w	\3,d1
+	sub.w	\4,d1
+	sub.w	d1,d0
+	add.w	#$20,d0
+	cmp.w	#$40,d0
+	bcs.s	.p\@
+	tst.w	d0
+	bpl.s	.q\@
+	moveq	#\7,d3
+	rts
+.p\@:	moveq	#\5,d3
+	rts
+.q\@:	moveq	#\6,d3
+	rts
+	endm
+leaf_aim:
+	move.w	4(a4,d6.l),d4		; IX, IY: x, y
+	move.w	8(a4,d6.l),d5
+	move.w	4(a3,d3.l),d2		; DW, BW: the other's
+	move.w	8(a3,d3.l),d3
+	move.w	d5,d0
+	addq.w	#8,d0
+	sub.w	d3,d0
+	bcs.s	.a			; (1DB5)
+	move.w	d5,d0
+	subq.w	#8,d0
+	sub.w	d3,d0
+	bcc.s	.b			; (1DCA)
+	move.w	d4,d0
+	sub.w	d2,d0
+	bcc.s	.r30
+	moveq	#$10,d3
+	rts
+.r30:	moveq	#$30,d3
+	rts
+.a:	move.w	d4,d0
+	addq.w	#8,d0
+	sub.w	d2,d0
+	bcs.s	.c			; (1DE0)
+	move.w	d4,d0
+	subq.w	#8,d0
+	sub.w	d2,d0
+	bcc.s	.d			; (1E03)
+	moveq	#0,d3
+	rts
+.b:	move.w	d4,d0
+	addq.w	#8,d0
+	sub.w	d2,d0
+	bcs.s	.e			; (1E26)
+	move.w	d4,d0
+	subq.w	#8,d0
+	sub.w	d2,d0
+	bcc.s	.f			; (1E49)
+	moveq	#$20,d3
+	rts
+.c:	AIM8	d2,d4,d3,d5,8,$C,4
+.d:	AIM8	d4,d2,d3,d5,$38,$34,$3C
+.e:	AIM8	d2,d4,d5,d3,$18,$14,$1C
+.f:	AIM8	d4,d2,d5,d3,$28,$2C,$24
+
 leaf_posx:
 	LEAF24	3
 leaf_posy:
@@ -1160,6 +1309,7 @@ k	set	k+1
 
 	section bss,bss
 es_ok:		ds.b	1
+obj_idle:	ds.b	$10000		; (nat_objloop: the empty shot slots' handler IPs marked)
 	even
 es_n:		ds.w	1
 es_boxes:	ds.w	4*40

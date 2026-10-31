@@ -29,7 +29,7 @@ from paths import build_dir
 
 NAME, PREFIX = "main", "R"
 # hand-written replacements (src/natives.s): linear address -> label
-NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette fade's inner loop (FADE_SNAP)
+NATIVES = {0x00657: "nat_objloop", 0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette fade's inner loop (FADE_SNAP)
            0x01FCC: "nat_emit1", 0x0201B: "nat_emit2", 0x020A6: "nat_emit3",    # the sprite emitters
            0x01FE9: "nat_emit1f",                                   # (one entry into a fixed slot)
            0x00A53: "nat_fill",                                     # (the unused slots blanked)
@@ -50,7 +50,9 @@ NATIVES = {0x05784: "nat_fade_a", 0x05836: "nat_fade_b",          # the palette 
 # CALLs to these: a JSR (src/natives.s); (label, exact flags: usable where the flags after the RET are live)
 LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
               0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
-              0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True), 0x0FADA: ("leaf_eco2", True)}
+              0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True), 0x0FADA: ("leaf_eco2", True),
+              0x0216B: ("leaf_onscr", True), 0x0F1E9: ("leaf_rnd", True), 0x0201B: ("leaf_emit2", False),
+              0x02189: ("leaf_aim", False)}
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

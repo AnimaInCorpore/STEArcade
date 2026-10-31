@@ -20,7 +20,8 @@ init_image:
 	cmp.l	#v30_image+$40000,d0
 	beq.s	.ok
 	illegal
-.ok:	bra	init_ip_table
+.ok:	bsr	nat_init
+	bra	init_ip_table
 
 ; One arcade frame of the main CPU (the CPU idle at the main loop's head): the VBL interrupt (vector $20, the game's
 ; logic), then the raster interrupt (vector $22: the status bar's scroll), each run until the CPU is idle again.
