@@ -19,6 +19,18 @@ guard rows.  Hatari (14 MB, recorded play): stage 2 34.1 -> 34.9 arcade frames/s
 unchanged (38.3, 21.6).  A 16x8-cell column erase (one long per 16-pixel column) was tried and measured slower
 (34.4 / 17.2): its marking and scan cost more than the words it saves; 16x16 cells erase more words than rectangles.
 
+**Stage 3: the warship as the scrolling layer** (the user, 2026-10-31).  In stage 3's scene (`tools/stage_assets.py`
+BG_SCROLL_SCENES) the renderer switches to its BG scroll mode once the BG map holds a tile that is not empty (frame
+12618 of the attract demo): the buffers hold the BG map at its own x and y scroll (512 lines, the first 256 again below:
+896-line buffers), and the FG walls are drawn over it each picture like sprites - stefastbobs2's copy passes from a FG
+image with the opaque pixels as end masks, a pass list per FG row made again when the row or the window's first chunk
+changes (`src/stage.s` st_fgdraw, st_fgbuild).  Sprites and FG rows are erased whole there (the lines outside the window
+scroll into it).  `tools/stage_model.py` (bgscroll) draws both layers at their own scroll.  `stage_test.py
+build/rtype/stage_states_3.pkl` (seed 1 attract, frames 11400-14400: `logic_test.py 14400 --seed 1 --start 11400 --snap
+--list --record ...`): every picture exact.  Hatari, the demo's warship part (REPLAY=1:12600:14400): 23.6 arcade
+frames/s, 13.4 pictures/s (before: 32.6 / 18.9 without the warship).  Open: almost every FG row lies over empty BG
+tiles (24 of ~8700 FG pixels over BG pixels): those rows can be plain copies instead of masked pieces.
+
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG
 python port.py test rtype             # the translation in lock-step with the reference, the renderer's pictures

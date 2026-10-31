@@ -188,6 +188,10 @@ SQUEEZE_SCENES = {0}        # (scene 0: the title - the recordings start with it
 TILE_DX = {0: 16}
 BG_STRIPS = ["s2"]
 BG_STRIP_SCENES = {3}       # (flag bit 1: the BG from the stage's strip, locked to FG - stage 2's tunnel: stage_bg_s2)
+# scenes whose BG is the scrolling layer once it holds a tile that is not empty (the user, 2026-10-31: stage 3's warship;
+# flag bit 2): the buffer holds the BG at its own scroll (x and y), the FG is drawn over it each picture like sprites
+# (stage_model.Model.picture bgscroll; src/stage.s st_bgon)
+BG_SCROLL_SCENES = {4}       # (scene 4: stage 3)
 SC_SIZE = 16 + 64 + 3 * 4096 + 2
 
 
@@ -289,7 +293,7 @@ def scenes(png=False):
         for kind, table in ((0, tab), (1, tab), (1, htab)):
             for t in range(256):
                 data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
-        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) |
+        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) |
                  (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
         print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
             k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
@@ -344,6 +348,10 @@ def tiles():
             rows += bytes([b] * 4)
             rowsf += bytes([bf] * 4)
     (build_dir("rtype") / "stage_tmask.bin").write_bytes(bytes(rows + rowsf))
+    # the BG tiles drawn empty (stage_model's stars): a byte per code (& $FFF), 1 empty - src/stage.s st_bgstar (the
+    # BG cells that are not empty: st_bgn; the BG layer's cells)
+    md = SM.Model()
+    (build_dir("rtype") / "stage_bgstar.bin").write_bytes(bytes(int(x) for x in md.star[:4096]))
     strips()
 
 

@@ -11,6 +11,8 @@ The simplifications, per stage (STAGES):
   * a BG strip (stage 2's tunnel, the user's choice 2026-10-30; tools/stage_bg.py): the stage's whole BG as one strip,
     drawn locked to the FG - the strip's column (unwrapped FG column - the scene's first one) mod its length, the FG's
     rows - instead of the arcade's half-speed BG (decorative there: no parallax, it repeats);
+  * a BG scroll scene (stage 3's warship, the user's choice 2026-10-31; stage_assets.BG_SCROLL_SCENES): while the BG
+    map holds a tile that is not empty (bg_any), both layers at their own scroll (x and y) - no lock;
   * no sprite / tile priority: the sprites are over both layers (the list's first entry on top, as the arcade);
   * no BG-over-FG pixels (BG groups 1-3): FG's opaque pixels are over BG;
   * the colours: a fixed STE palette per stage and a fixed index per pen (tools/stage_assets.py), the status bar's
@@ -62,6 +64,11 @@ class Model:
         cols = ((np.arange(bx, bx + W) & 511) >> 3)
         return bool(self.star[w[np.unique(rows)][:, np.unique(cols), 0] & 0x3FFF].all())
 
+    def bg_any(self, ram):
+        """True when the BG map holds a tile that is not empty (a BG scroll scene's BG is then the scrolling layer)"""
+        w = np.frombuffer(ram, "<u2").reshape(64, 64, 2)
+        return not bool(self.star[w[:, :, 0] & 0x3FFF].all())
+
     def strip_pens(self, strip):
         """a BG strip's pens [64 * 8, n * 8] (-1: an empty tile, as layer)"""
         key = id(strip)
@@ -85,9 +92,9 @@ class Model:
             self._strip_key, self._strip_img = key, img
         return self._strip_img
 
-    def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None):
+    def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None, bgscroll=False):
         """the window's pens [256, 320] (BLACK = 512: empty / display off) for a recorded state (render_test's), lock
-        a Lock (updated); strip: the scene's BG strip (load_strip) or None"""
+        a Lock (updated); strip: the scene's BG strip (load_strip) or None; bgscroll: the BG at its own scroll"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
         out = np.full((256, W), BLACK, np.int32)
         xp = np.arange(X0, X0 + W)
@@ -101,7 +108,7 @@ class Model:
             ys = np.arange(y0, y1 + 1)
             xs = xp + (tile_dx if y0 < HUD_Y else 0)    # (a scene's playfield tiles shown shifted: TILE_DX; not the bar)
             f = fgm[((ys + sy[0] + 128) & 511)[:, None], ((xs + sx[0]) & 511)[None, :]]
-            bx = (sx[0] + lock.L) if y0 < HUD_Y else sx[1]
+            bx = (sx[0] + lock.L) if y0 < HUD_Y and not bgscroll else sx[1]
             if simg is not None and y0 < HUD_Y:     # (the strip: locked to the unwrapped FG column)
                 ap = lock.fgabs + xs                # (the unwrapped FG pixel x)
                 sc = ((ap >> 3) - lock.origin) % (simg.shape[1] // 8)

@@ -24,7 +24,9 @@ These rules apply to every game port and every sprite fallback path.
   the hardware window are still visible. Restore old sprite damage before drawing
   the next picture, including damage in guard areas. Exception (user, 2026-10-31): R-Type's stage renderer
   never shows its guard rows (the display address always skips them), so it draws sprites into them and never
-  erases them; its erase rectangles cover only the visible lines (`games/rtype/src/stage.s`).
+  erases them; its erase rectangles cover only the visible lines (`games/rtype/src/stage.s`). Not in its BG scroll
+  mode (stage 3's warship): there the lines above and below the window are BG lines that scroll into it, so whole
+  sprites and FG rows are erased.
 - Try the reordered-source method from stefastbobs2 for every game's sprites:
   group rows with identical opaque masks, prepare shift masks, reuse Blitter state
   and advancing source addresses. Preserve transparent holes and priority order.
