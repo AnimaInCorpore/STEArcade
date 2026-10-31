@@ -52,7 +52,9 @@ LEAF_CALLS = {0x00A72: ("leaf_posx", False), 0x00A89: ("leaf_posy", False),
               0x0226C: ("leaf_fgtile", True), 0x022B5: ("leaf_bgtile", True), 0x01FCC: ("leaf_emit1", True),
               0x01FE9: ("leaf_emit1f", True), 0x0FA94: ("leaf_ecoll", True), 0x0FADA: ("leaf_eco2", True),
               0x0216B: ("leaf_onscr", True), 0x0F1E9: ("leaf_rnd", True), 0x0201B: ("leaf_emit2", False),
-              0x02189: ("leaf_aim", False)}
+              0x02189: ("leaf_aim", False),
+              # (call sites where AW is dead after 0040:F694 without a hit: AW is written before it is read)
+              (0x0FA94, 0x08CC2): ("leaf_ecoll_naw", True), (0x0FA94, 0x08D69): ("leaf_ecoll_naw", True)}
 NEAR = 0x1000                     # (jump table entries this far from the seen ones count: tools/gen.py table_targets)
 
 

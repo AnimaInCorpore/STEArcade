@@ -179,7 +179,8 @@ class Program:
         #                                             [reg + d] at a fixed image offset, as the word operands)
         self.leaf_calls = dict(leaf_calls or {})   # (callee linear: (a 68000 subroutine doing its body and RET,
         #                                             exact flags): its CALLs become a JSR, the return IP written below
-        #                                             SP - where the flags after the return are dead unless exact)
+        #                                             SP - where the flags after the return are dead unless exact;
+        #                                             a (callee, call site) key: that site's own subroutine)
         self.io_cover = io_cover or {}
         self.hooks = dict(hooks or {})
         self.hook_next = dict(hook_next or {})
@@ -980,7 +981,8 @@ class Emitter:
                     return
                 except (Unsupported, KeyError, ValueError, IndexError, TypeError):
                     del self.lines[mark:]
-        leaf, exact = self.p.leaf_calls.get(lin_of(*ins.target), (None, False))
+        tgt = lin_of(*ins.target)
+        leaf, exact = self.p.leaf_calls.get((tgt, v)) or self.p.leaf_calls.get(tgt, (None, False))
         if leaf and (exact or not (self.live_in.get(next_lin(ins), ALLF) & CCR)):
             self.stats["leaf call"] += 1
             self.e("move.w #$%04X,-2(a5)" % ret)
