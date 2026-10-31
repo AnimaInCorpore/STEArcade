@@ -41,6 +41,13 @@ behind the full walls (12900-13100) 316k as sprites, 452k scrolling; warship fil
 sprites, 284k scrolling - drawing the smaller layer as pieces (switching at the crossover) would take the better of
 each.
 
+**Stage 3: the smaller layer as sprites** (the user, 2026-10-31; `stage_assets.py` BG_HYBRID_SCENES, flag bit 4).  In
+the FG mode the warship is drawn as pieces until it has more 16-pixel chunks with pixels in the window than the walls
+(`src/stage.s` st_meas over st_fgrc / st_bgrc, every picture), then the BG scroll mode with the walls as pieces for the
+rest of the scene (frame 13326 of the demo; the switch picture ~1.2M + 0.27M cycles).  Musashi: the stage-3 recording's
+median 206k -> 187k cycles a picture, 90th percentile 412k -> 338k.  Hatari, the warship part: 25.5 arcade frames/s,
+14.5 pictures/s (24.0 / 13.7 as sprites only, 24.3 / 13.8 scrolling only); the whole stage-3 demo 29.4 / 19.1.
+
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG
 python port.py test rtype             # the translation in lock-step with the reference, the renderer's pictures

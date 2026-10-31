@@ -130,6 +130,20 @@ m72r_init:
 	move.w	#4096/4-1,d1
 .bz:	move.l	d0,(a0)+
 	dbf	d1,.bz
+	lea	st_pop,a0		; (bits a byte)
+	moveq	#0,d1
+.pc:	moveq	#0,d2
+	move.w	d1,d3
+.pb:	tst.w	d3
+	beq.s	.pw
+	lsr.w	#1,d3
+	bcc.s	.pb
+	addq.b	#1,d2
+	bra.s	.pb
+.pw:	move.b	d2,(a0,d1.w)
+	addq.w	#1,d1
+	cmp.w	#256,d1
+	blo.s	.pc
 	move.w	#-1,st_fgk0		; (the FG rows' pieces: none made)
 	move.w	#-1,st_bgk0
 	bsr	st_preins
@@ -186,8 +200,10 @@ ST_PHASE macro				; (DEBUG: the phase for the VBL's sampled profile, rtype.s mai
 	btst	#2,SC_FLAGS+1(a0)
 	beq.s	.fl
 	btst	#3,SC_FLAGS+1(a0)
-	bne.s	.fl
-	move.w	#ST_LINES+ST_LINESB,st_flines	; (a BG scroll scene: whole copies take both regions)
+	beq.s	.fb
+	btst	#4,SC_FLAGS+1(a0)
+	beq.s	.fl
+.fb:	move.w	#ST_LINES+ST_LINESB,st_flines	; (a BG scroll scene: whole copies take both regions)
 .fl:	tst.b	st_bgon
 	beq.s	.org
 	moveq	#0,d1
@@ -874,10 +890,28 @@ st_bands:
 	moveq	#0,d2			; the BG scroll mode: a scene with flag bit 2 (not 3), the BG map not empty
 	btst	#2,SC_FLAGS+1(a1)
 	beq.s	.md
-	btst	#3,SC_FLAGS+1(a1)
-	bne.s	.md
 	tst.w	st_bgn
-	sne	d2
+	beq.s	.md
+	btst	#3,SC_FLAGS+1(a1)
+	beq.s	.m1
+	btst	#4,SC_FLAGS+1(a1)	; (a hybrid scene, flag bit 4: the BG pieces until the BG has more chunks with
+	beq.s	.md			; pixels in the window than the FG - the smaller layer drawn as pieces -, then the
+	tst.b	st_bgon			; BG scroll mode for the rest of the scene)
+	bne.s	.m1
+	movem.l	d2-d7/a0-a1,-(sp)
+	lea	st_fgrc,a0
+	move.w	st_fgy,d0
+	move.w	st_fgx,d1
+	bsr	st_meas
+	move.w	d2,-(sp)
+	lea	st_bgrc,a0
+	move.w	st_bgy,d0
+	move.w	st_bgx,d1
+	bsr	st_meas
+	cmp.w	(sp)+,d2
+	movem.l	(sp)+,d2-d7/a0-a1
+	bls.s	.md
+.m1:	st	d2
 .md:	cmp.b	st_bgon,d2
 	beq.s	.ms
 	move.b	d2,st_bgon
@@ -939,6 +973,34 @@ st_bands:
 .bk:	clr.l	(a2)+
 	dbf	d1,.bk
 	bra	.al
+
+; st_meas: a0 = a layer's rows' chunks with pixels (st_fgrc, st_bgrc), d0 = its window's first line, d1 = its x: d2 =
+; the chunks with pixels in the window (30 rows of 22 chunks; st_bands' layer choice)
+st_meas:
+	lsr.w	#3,d0
+	lsr.w	#4,d1
+	move.l	#$3FFFFF,d3		; (22 chunks from the window's first)
+	and.w	#31,d1
+	rol.l	d1,d3
+	moveq	#0,d2
+	lea	st_pop,a1
+	moveq	#30-1,d7
+.r:	and.w	#63,d0
+	move.w	d0,d4
+	lsl.w	#2,d4
+	move.l	(a0,d4.w),d4
+	and.l	d3,d4
+	beq.s	.n
+	moveq	#4-1,d6
+.b:	moveq	#0,d5
+	move.b	d4,d5
+	move.b	(a1,d5.w),d5
+	add.w	d5,d2
+	lsr.l	#8,d4
+	dbf	d6,.b
+.n:	addq.w	#1,d0
+	dbf	d7,.r
+	rts
 
 ; ======================================================================================================================
 ; Composition into the clean buffer: the window's map columns (W >> 3 .. (W + 319) >> 3) whose flag is not set: their
@@ -3344,6 +3406,7 @@ st_fgcolok:	ds.b	64		; opaque pixels)
 st_fgrm:	ds.b	512
 st_fgrc:	ds.l	64
 st_fgdirty:	ds.b	64
+st_pop:		ds.b	256		; (the bits of a byte)
 st_bgcells:	ds.b	4096		; (a BG piece scene's BG image: as the FG image's)
 st_bgcolok:	ds.b	64
 st_bgrm:	ds.b	512
