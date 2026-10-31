@@ -48,6 +48,17 @@ rest of the scene (frame 13326 of the demo; the switch picture ~1.2M + 0.27M cyc
 median 206k -> 187k cycles a picture, 90th percentile 412k -> 338k.  Hatari, the warship part: 25.5 arcade frames/s,
 14.5 pictures/s (24.0 / 13.7 as sprites only, 24.3 / 13.8 scrolling only); the whole stage-3 demo 29.4 / 19.1.
 
+**Stage 1's middle section: the BG drawn** (the user, 2026-10-31).  From frame ~3000 of seed 8 the BG fills the picture
+locked to the FG (offset 128-129 pixels): it is composed into the buffer with the FG, cell by cell (the FG tile over the
+BG tile through its opaque pixels, `src/stage.s` st_cell as stage 2's strip), composed again when its cells change.
+The model's lock is now in whole cells (`stage_model.py` Lock: the offset rounded to 8 pixels, taken again when off by
+more than 4, free while the BG map is empty).  The BG's colour row (tile row 7) fades in, changes and fades out; its
+changing pens 1, 2, 3, 5 have dedicated STE indices in scene 6 (`stage_assets.py` DEDICATED: 12 colours for the rest)
+whose colours `st_palette` sets from the row's target - no cells composed again (before: ~6M cycles each).  Seed 8 is
+now exact to its end (3500 pictures; before: every picture from 3662 failed).  cols_*.json recorded again for the new
+scene 6 palette (1573 pre-coloured pairs).  Hatari seed 8 3000-8000: 36.4 arcade frames/s, 19.8 pictures/s (37.7 /
+20.9 without the BG).
+
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG
 python port.py test rtype             # the translation in lock-step with the reference, the renderer's pictures

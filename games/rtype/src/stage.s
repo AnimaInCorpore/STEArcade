@@ -413,10 +413,16 @@ st_palette:
 	move.w	d5,d1
 	lsl.w	#4,d1
 	add.w	d1,a1
+	lea	SC_DED(a2),a3		; (the scene's dedicated pens: their own indices, whatever the target)
+	add.w	d1,a3
 	moveq	#16-1,d2
 	moveq	#0,d3			; (any changed)
 .c:	move.b	(a0)+,d4
-	cmp.b	(a1),d4
+	move.b	(a3)+,d7
+	beq.s	.c0
+	move.b	d7,d4
+	subq.b	#1,d4
+.c0:	cmp.b	(a1),d4
 	beq.s	.c1
 	move.b	d4,(a1)
 	moveq	#1,d3
@@ -511,7 +517,30 @@ st_palette:
 .p:	move.w	32(a0),(a2)+
 	move.w	(a0)+,(a1)+
 	dbf	d0,.p
-	rts
+	move.l	st_scn,a0		; the dedicated pens' colours: their rows' targets'
+	move.w	SC_DEDN(a0),d0
+	beq.s	.dx
+	subq.w	#1,d0
+	lea	SC_DEDN+2(a0),a1
+	lea	SC_DEDC(a0),a2
+	moveq	#0,d1
+.d:	moveq	#0,d2
+	move.b	(a1),d2			; (its row)
+	add.w	d2,d2
+	lea	st_rtgt,a3
+	move.w	(a3,d2.w),d2
+	lsl.w	#4,d2
+	add.w	d1,d2
+	move.w	(a2,d2.w),d3
+	moveq	#0,d2
+	move.b	2(a1),d2		; (its index)
+	add.w	d2,d2
+	lea	st_stepal,a3
+	move.w	d3,(a3,d2.w)
+	addq.l	#4,a1
+	addq.w	#2,d1
+	dbf	d0,.d
+.dx:	rts
 
 ; st_scene: the scene whose reference has the most tile-row targets equal to the rows' (st_rtgt 16-31; the first of
 ; equals; tools/stage_assets.py choose_scene): d0 = 1 when it becomes the scene (st_scn) - the first time, or when it
@@ -669,8 +698,10 @@ st_rowcells:
 	move.w	#-1,st_bgk0
 	movem.l	(sp)+,d0/a0
 	tst.b	st_bgon
+	bne.s	.all
+	tst.b	st_lkon			; (the locked BG: its cells' colours are not the FG's)
 	beq.s	.fg
-	st	st_allnew		; (the BG scroll mode: everything composed again)
+.all:	st	st_allnew		; (the BG scroll mode, the locked BG: everything composed again)
 	rts
 .fg:	movem.l	d0-d7/a0-a3,-(sp)
 	moveq	#15,d3
@@ -787,7 +818,7 @@ st_vram:
 	moveq	#64-1,d3
 .bc:	cmpm.l	(a0)+,(a1)+
 	dbne	d3,.bc
-	beq.s	.bn
+	beq	.bn
 	move.w	-4(a1),d0		; (empty before) - (empty now): +1 a cell that is not empty now
 	and.w	#$FFF,d0
 	moveq	#0,d1
@@ -808,7 +839,21 @@ st_vram:
 	add.w	d2,d0
 	lea	st_bgcells,a2
 	clr.b	(a2,d0.w)
-	move.l	(sp)+,a2
+	tst.b	st_lkon			; (the locked BG: the FG cell over it composed again)
+	beq.s	.nl
+	move.w	d6,d0
+	sub.w	st_lkdy,d0
+	and.w	#63,d0
+	lsl.w	#6,d0
+	move.w	d2,d1
+	sub.w	st_lkc,d1
+	and.w	#63,d1
+	add.w	d1,d0
+	lea	st_cells,a2
+	clr.b	(a2,d0.w)
+	lea	st_colok,a2
+	clr.b	(a2,d1.w)
+.nl:	move.l	(sp)+,a2
 	tst.b	st_bgon
 	beq.s	.bs
 	clr.b	(a2,d2.w)
@@ -883,7 +928,55 @@ st_bands:
 	moveq	#64/4-1,d1
 .bk1:	clr.l	(a2)+
 	dbf	d1,.bk1
-.b1:	move.w	m72_port02,d0
+.b1:	move.w	6(a0),d0		; the BG lock (tools/stage_model.py Lock): L, the BG's x offset from the FG rounded
+	sub.w	2(a0),d0		; to whole cells; free while the BG map is empty, else taken again (everything
+	and.w	#511,d0			; composed again) when off by more than LOCK_SLACK (4) pixels
+	move.w	d0,d1
+	addq.w	#4,d1
+	and.w	#$1F8,d1
+	tst.w	st_bgn
+	beq.s	.lf
+	tst.b	st_lkset
+	beq.s	.lf
+	sub.w	st_lkL,d0
+	add.w	#256,d0
+	and.w	#511,d0
+	sub.w	#256,d0
+	bpl.s	.la
+	neg.w	d0
+.la:	cmp.w	#4,d0
+	ble.s	.lk
+	tst.b	st_lkon			; (composed again only where the locked BG is drawn)
+	beq.s	.lf
+	st	st_allnew
+.lf:	move.w	d1,st_lkL
+	st	st_lkset
+.lk:	move.w	st_lkL,d0		; (in cells)
+	lsr.w	#3,d0
+	move.w	d0,st_lkc
+	move.w	4(a0),d0		; the BG's rows: the FG's + st_lkdy
+	sub.w	(a0),d0
+	and.w	#511,d0
+	lsr.w	#3,d0
+	cmp.w	st_lkdy,d0
+	beq.s	.ly
+	move.w	d0,st_lkdy
+	tst.b	st_lkon
+	beq.s	.ly
+	st	st_allnew
+.ly:	moveq	#0,d2			; locked BG composed: not a strip or BG scroll scene, the BG map not empty
+	move.l	st_scn,a2
+	btst	#1,SC_FLAGS+1(a2)
+	bne.s	.lo
+	btst	#2,SC_FLAGS+1(a2)
+	bne.s	.lo
+	tst.w	st_bgn
+	sne	d2
+.lo:	cmp.b	st_lkon,d2
+	beq.s	.l2
+	move.b	d2,st_lkon
+	st	st_allnew
+.l2:	move.w	m72_port02,d0
 	lsr.w	#3,d0
 	and.b	#1,d0
 	move.b	d0,st_off
@@ -1130,6 +1223,8 @@ st_cell:
 	st	(a0,d0.w)
 	tst.b	st_stripon
 	bne.s	.strip
+	tst.b	st_lkon			; (the locked BG: tools/stage_model.py Lock)
+	bne.s	.strip
 	bsr	st_tile			; -> a0: 8 longs (movep order)
 	moveq	#8-1,d0
 .w:	move.l	(a0)+,d1
@@ -1146,7 +1241,30 @@ st_cell:
 	rept	8
 	move.l	(a0)+,(a2)+
 	endr
-	lea	st_colabs,a2		; the strip's column: (the absolute column - the origin) mod its length
+	tst.b	st_lkon
+	beq.s	.ss
+	move.w	d5,d0			; the locked BG's cell: the row + st_lkdy, the column + st_lkc (its entry as a
+	add.w	st_lkdy,d0		; strip's: code, attribute)
+	and.w	#63,d0
+	lsl.w	#6,d0
+	move.w	d6,d3
+	add.w	st_lkc,d3
+	and.w	#63,d3
+	add.w	d3,d0
+	lsl.w	#2,d0
+	lea	v30_image+$D8000,a2
+	add.w	d0,a2
+	move.w	(a2),d1
+	moveq	#0,d0
+	move.w	d1,d0
+	and.w	#$FFF,d0
+	lea	st_bgstar,a0
+	tst.b	(a0,d0.w)
+	bne	.be
+	and.w	#$CFFF,d1
+	or.w	#$1000,d1		; (bit 12: a BG tile)
+	bra.s	.sc
+.ss:	lea	st_colabs,a2		; the strip's column: (the absolute column - the origin) mod its length
 	move.w	d6,d0
 	add.w	d0,d0
 	move.w	(a2,d0.w),d0
@@ -1168,7 +1286,7 @@ st_cell:
 	move.w	(a2),d1			; its code ($FFFF: empty, black)
 	cmp.w	#$FFFF,d1
 	beq.s	.be
-	move.w	2(a2),d2
+.sc:	move.w	2(a2),d2
 	and.w	#15,d2
 	lea	st_colused,a0		; (its colour's columns too)
 	move.w	d2,d0
@@ -3233,7 +3351,10 @@ SC_TILE		= 80+4096		; each tile target's
 SC_HUD		= 80+8192		; each tile target's in the status bar
 SC_FLAGS	= 80+12288		; a word: bit 0 the sprites squeezed toward the centre (st_object), bits 8-15 the tiles'
 					; shift (the window over the tiles moves, the sprites keep their places)
-SC_SIZE		= SC_FLAGS+2
+SC_DED		= SC_FLAGS+2		; 32 x 16 bytes: a row's pen -> its dedicated index + 1 (0: none; stage_assets DEDICATED)
+SC_DEDN		= SC_DED+512		; a word: the dedicated pens, then 8 x (row, pen, index, 0)
+SC_DEDC		= SC_DEDN+2+4*8		; 256 targets x 8 words: each dedicated pen's STE colour
+SC_SIZE		= SC_DEDC+256*8*2
 SCENE_MATCH	= 12
 st_tiles:	incbin	"stage_tiles.bin"
 	even
@@ -3339,6 +3460,12 @@ st_fgy:		ds.w	1
 st_bgx:		ds.w	1		; (a BG piece scene: the BG image's window, its first line, its first chunk)
 st_bgy:		ds.w	1
 st_bgk0:	ds.w	1
+st_lkL:		ds.w	1		; (the BG lock: its offset in pixels, in cells, the BG's rows from the FG's)
+st_lkc:		ds.w	1
+st_lkdy:	ds.w	1
+st_lkset:	ds.b	1
+st_lkon:	ds.b	1
+	even
 st_flines:	ds.w	1		; (the lines a whole copy copies)
 st_fgd:		ds.w	1		; (st_fgdraw's)
 st_fsf:		ds.w	1

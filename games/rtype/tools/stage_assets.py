@@ -198,7 +198,21 @@ BG_PIECE_SCENES = {4}
 # hybrid scenes (the user, 2026-10-31: flag bit 4, with bits 2 and 3): the BG pieces while the BG has fewer chunks with
 # pixels in the window than the FG, then the BG scroll mode with the FG pieces for the rest of the scene
 BG_HYBRID_SCENES = {4}
-SC_SIZE = 16 + 64 + 3 * 4096 + 2
+# dedicated pens (the user, 2026-10-31: stage 1's middle section, "an iconic scene"): per scene, a tile row's pens whose
+# colours the game changes (fades) get STE indices of their own - the scene's last ones -, whatever the row's target;
+# the renderer sets those indices' colours from the row's target (no cells composed again)
+DEDICATED = {6: {23: [1, 2, 3, 5]}}     # (scene 6: stage 1's middle - its BG's colour row 7, faded in, changed, out)
+DED_MAX = 8
+SC_DED = 16 + 64 + 3 * 4096 + 2         # 32 x 16 bytes: row, pen -> its dedicated index + 1 (0: none)
+SC_DEDN = SC_DED + 512                  # a word: the dedicated pens; DED_MAX x (row, pen, index, 0)
+SC_DEDC = SC_DEDN + 2 + 4 * DED_MAX     # 256 targets x DED_MAX words: the STE colour of each dedicated pen
+SC_SIZE = SC_DEDC + 256 * DED_MAX * 2
+
+
+def dedicated(k):
+    """scene k's dedicated pens: [(row, pen, index)] (the last indices, in order)"""
+    ded = [(row, pen) for row, pens in sorted(DEDICATED.get(k, {}).items()) for pen in pens]
+    return [(row, pen, 16 - len(ded) + i) for i, (row, pen) in enumerate(ded)]
 
 
 def q4_12(r, g, b):
@@ -235,7 +249,9 @@ def load_scenes():
         pm = [np.frombuffer(d[o + 80 + 4096 * j:o + 80 + 4096 * (j + 1)], np.uint8).reshape(256, 16).astype(np.int32)
               for j in range(3)]
         flags = int.from_bytes(d[o + 80 + 3 * 4096:o + 82 + 3 * 4096], "big")
-        out.append((ref, pal, hpal, pm[0], pm[1], pm[2], flags))
+        n = int.from_bytes(d[o + SC_DEDN:o + SC_DEDN + 2], "big")
+        ded = [tuple(d[o + SC_DEDN + 2 + 4 * i:o + SC_DEDN + 5 + 4 * i]) for i in range(n)]
+        out.append((ref, pal, hpal, pm[0], pm[1], pm[2], flags, ded))
     return out
 
 
@@ -273,6 +289,8 @@ def scenes(png=False):
         tg = np.array([np.frombuffer(st["recs"][16:], np.uint8) for st in frames])
         ref = [collections.Counter(tg[:, r].tolist()).most_common(1)[0][0] for r in range(16)]
         hist, hhist = collections.Counter(), collections.Counter()
+        ded = dedicated(k)
+        dpens = {256 + (row - 16) * 16 + pen for row, pen, _ in ded}
         pics = []
         for st in frames:
             pens = md.picture(st, SM.Lock())
@@ -281,13 +299,16 @@ def scenes(png=False):
             for hud, rows, h in ((0, slice(0, SM.HUD_Y), hist), (1, slice(SM.HUD_Y, 256), hhist)):
                 v = pens[rows]
                 for p, n in zip(*np.unique(v[v < 512], return_counts=True)):
+                    if hud == 0 and int(p) in dpens:
+                        continue                # (a dedicated pen: its own index)
                     h[int(col[p])] += int(n) * (SPRITE_WEIGHT if p < 256 else 1)
         pal_tab = []
         for hud, h in enumerate((hist, hhist)):
             if not h:
                 h = collections.Counter({0: 1})
             kk = np.array(sorted(h), np.int32)
-            cl, _ = medoids(kk, np.array([h[x] for x in kk.tolist()], float), min(16, max(2, len(kk) + 1)))
+            free = 16 - (len(ded) if hud == 0 else 0)
+            cl, _ = medoids(kk, np.array([h[x] for x in kk.tolist()], float), min(free, max(2, len(kk) + 1)))
             pal = np.zeros(16, np.int32)
             pal[:len(cl)] = cl
             lab_c = MP.lab12(cl).astype(float)
@@ -301,6 +322,16 @@ def scenes(png=False):
                 data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
         data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) | (8 if k in BG_PIECE_SCENES else 0) | (16 if k in BG_HYBRID_SCENES else 0) |
                  (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
+        dtab = bytearray(512)
+        for row, pen, idx in ded:
+            dtab[row * 16 + pen] = idx + 1
+        data += bytes(dtab) + len(ded).to_bytes(2, "big")
+        for i in range(DED_MAX):
+            data += bytes(ded[i]) + b"\0" if i < len(ded) else bytes(4)
+        for t in range(256):
+            cols = target_colours(rom, 1, t)
+            for i in range(DED_MAX):
+                data += (ste12(cols[ded[i][1]]) if i < len(ded) else 0).to_bytes(2, "big")
         print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
             k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
             " ".join("%03X" % v for v in hpal)))

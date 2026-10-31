@@ -5,9 +5,10 @@ pixel (in STE indices); the model itself is compared with the reference only by 
 The simplifications, per stage (STAGES):
   * stars: a BG tile with at least STAR_MIN0 of its 64 pixels at pen 0 is drawn empty (black, index 0), and the star
     sprites (codes STAR_SPRITES, 1-7 pixels, emitted by the one-entry definitions $846C-$848A) are left out;
-  * the BG locked to the FG: BG is drawn at FG x + L, L the locked relative offset (Lock); L follows the arcade's
-    offset (BG x - FG x) only when it is off by LOCK_SLACK pixels or more, or for free while the window's BG holds
-    nothing but empty tiles;
+  * the BG locked to the FG: BG is drawn at FG x + L, L the locked relative offset (Lock) in whole cells (the user,
+    2026-10-31: the renderer composes BG and FG cell by cell - stage 1's middle section): the arcade's offset (BG x -
+    FG x) rounded to 8 pixels, taken again when the offset is off by more than LOCK_SLACK pixels, or for free while
+    the BG map holds nothing but empty tiles; the BG's rows at the arcade's y offset;
   * a BG strip (stage 2's tunnel, the user's choice 2026-10-30; tools/stage_bg.py): the stage's whole BG as one strip,
     drawn locked to the FG - the strip's column (unwrapped FG column - the scene's first one) mod its length, the FG's
     rows - instead of the arcade's half-speed BG (decorative there: no parallax, it repeats);
@@ -34,7 +35,7 @@ from paths import build_dir
 
 STAR_MIN0 = 56
 STAR_SPRITES = range(0xAF2, 0xAF8)
-LOCK_SLACK = 2
+LOCK_SLACK = 4
 BLACK = 512
 X0 = 96                 # the window: MAME's bitmap x 96-415 (picture x 32-351)
 W = 320
@@ -220,18 +221,14 @@ class Lock:
     def update(self, model, st, band):
         y0, y1, sx, sy, off = band
         rel = (sx[1] - sx[0]) & 511
+        cell = (rel + 4) & 0x1F8                # (the nearest whole cell)
         self.redraw = False
-        if self.L is None:
-            self.L = rel
+        if self.L is None or not model.bg_any(st["bg"]):
+            self.L = cell
             return
         d = (rel - self.L + 256) % 512 - 256
-        if d == 0:
-            return
-        if model.bg_empty(st["bg"], y0, min(y1, HUD_Y - 1), sy[1], (sx[0] + self.L + X0) & 511) and \
-                model.bg_empty(st["bg"], y0, min(y1, HUD_Y - 1), sy[1], (sx[0] + rel + X0) & 511):
-            self.L = rel
-        elif abs(d) >= LOCK_SLACK:
-            self.L = rel
+        if abs(d) > LOCK_SLACK:
+            self.L = cell
             self.redraw = True
 
 

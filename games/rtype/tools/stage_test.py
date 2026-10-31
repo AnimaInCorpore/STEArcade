@@ -197,8 +197,10 @@ class Expected:
         if self.tiles is None or (t[16:] != self.tiles).any():
             self.cur = self.SA.choose_scene(t[16:], [sc[0] for sc in self.scenes], self.cur)
             self.tiles = t[16:].copy()
-        ref, pal, hpal, spm, tpm, hpm, flags = self.scenes[self.cur]
+        ref, pal, hpal, spm, tpm, hpm, flags, ded = self.scenes[self.cur]
         pidx = np.concatenate([spm[t[r]] if r < 16 else tpm[t[r]] for r in range(32)])
+        for row, pen, idx in ded:                       # (dedicated pens: their own indices, src/stage.s st_palette)
+            pidx[row * 16 + pen] = idx
         hidx = np.concatenate([np.zeros(256, np.int32)] + [hpm[t[r]] for r in range(16, 32)])
         strip = self.strips.setdefault("s2", SM.load_strip("s2")) if flags & 2 else None
         bgs = bool(flags & 4) and self.model.bg_any(st["bg"])
