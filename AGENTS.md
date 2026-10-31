@@ -22,7 +22,9 @@ These rules apply to every game port and every sprite fallback path.
 - Distinguish the hardware display window from the arcade picture inside it:
   pixels outside the hardware window are hidden automatically; side bands within
   the hardware window are still visible. Restore old sprite damage before drawing
-  the next picture, including damage in guard areas.
+  the next picture, including damage in guard areas. Exception (user, 2026-10-31): R-Type's stage renderer
+  never shows its guard rows (the display address always skips them), so it draws sprites into them and never
+  erases them; its erase rectangles cover only the visible lines (`games/rtype/src/stage.s`).
 - Try the reordered-source method from stefastbobs2 for every game's sprites:
   group rows with identical opaque masks, prepare shift masks, reuse Blitter state
   and advancing source addresses. Preserve transparent holes and priority order.

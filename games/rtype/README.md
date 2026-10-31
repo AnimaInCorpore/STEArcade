@@ -13,6 +13,12 @@ STE port of MAME set `rtype` (Irem M72): the main CPU's NEC V30 program statical
 A 4 MB STE is not a target for now; how to fit the game back into 4 MB (per-stage loading, packing) is decided later.
 `tools/release.py` lets RTYPE.PRG pass the load limit with a warning (`OVER_LOAD`).
 
+**Guard rows are never erased** (the user, 2026-10-31): the stage renderer (`src/stage.s`) draws sprites whole into
+the 64 guard lines above and below the picture but erases only the visible lines 0-255; the display never shows the
+guard rows.  Hatari (14 MB, recorded play): stage 2 34.1 -> 34.9 arcade frames/s, 17.1 -> 17.4 pictures/s; stage 1
+unchanged (38.3, 21.6).  A 16x8-cell column erase (one long per 16-pixel column) was tried and measured slower
+(34.4 / 17.2): its marking and scan cost more than the words it saves; 16x16 cells erase more words than rectangles.
+
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG
 python port.py test rtype             # the translation in lock-step with the reference, the renderer's pictures

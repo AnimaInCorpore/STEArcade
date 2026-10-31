@@ -1467,7 +1467,7 @@ st_obj2:
 	move.l	d3,BLT_SRC.w
 .hit:	move.l	a3,a0			; (the entry)
 	move.w	(sp)+,d3		; x
-	move.w	(sp)+,d0		; the top line
+	move.w	(sp),d0			; the top line (kept on the stack)
 	add.w	#ST_G,d0		; the destination: the line, the first word
 	mulu	d4,d0
 	add.l	st_dbuf,d0
@@ -1476,8 +1476,8 @@ st_obj2:
 	lsl.w	#3,d3
 	ext.l	d3
 	add.l	d3,d0
-	move.l	d6,a3			; the erase rectangle: offset, words a line ((x & 15) + W - 1) / 16 + 1 groups, H
-	move.l	d0,d3
+	move.l	d6,a3			; the erase rectangle: offset, words a line ((x & 15) + W - 1) / 16 + 1 groups, the
+	move.l	d0,d3			; visible lines (the guard rows are drawn into, never erased: never shown)
 	sub.l	st_dbuf,d3
 	move.l	d3,(a3)+
 	move.w	(sp),d3
@@ -1488,14 +1488,30 @@ st_obj2:
 	addq.w	#1,d3
 	lsl.w	#2,d3
 	move.b	d3,(a3)+
-	move.b	5(a4),(a3)+
-	clr.w	(a3)+
+	moveq	#0,d3			; the bottom: min(top + H, ST_PL)
+	move.b	5(a4),d3
+	add.w	2(sp),d3
+	cmp.w	#ST_PL,d3
+	ble.s	.bot
+	move.w	#ST_PL,d3
+.bot:	tst.w	2(sp)
+	bpl.s	.top
+	move.b	d3,(a3)+		; (above the picture: from line 0)
+	move.w	2(sp),d3
+	neg.w	d3
+	mulu	d4,d3
+	add.l	d3,-6(a3)
+	bra.s	.lns
+.top:	sub.w	2(sp),d3
+	move.b	d3,(a3)+
+.lns:	clr.w	(a3)+
 	move.l	a3,d6
 	move.w	10(a0),d3		; (a 64 KB crossing: the long-destination code)
 	add.w	d0,d3
 	scs	d3
 	move.w	d3,a3
 	move.w	(sp)+,d3		; the shift's stream
+	addq.l	#2,sp			; (the top line)
 	and.w	#15,d3
 	lsl.w	#2,d3
 	move.l	24(a4,d3.w),a0
@@ -1601,8 +1617,23 @@ st_object:
 	sub.l	st_dbuf,d5
 	move.l	d5,(a1)+
 	move.b	d1,(a1)+
-	move.b	5(a2),(a1)+		; (H)
-	clr.w	(a1)+
+	moveq	#0,d1			; the visible lines: min(top + H, ST_PL) - max(top, 0)
+	move.b	5(a2),d1
+	add.w	d4,d1
+	cmp.w	#ST_PL,d1
+	ble.s	.bot
+	move.w	#ST_PL,d1
+.bot:	tst.w	d4
+	bpl.s	.top
+	move.b	d1,(a1)+
+	move.w	d4,d1
+	neg.w	d1
+	mulu	#ST_LB,d1
+	add.l	d1,-6(a1)
+	bra.s	.lns
+.top:	sub.w	d4,d1
+	move.b	d1,(a1)+
+.lns:	clr.w	(a1)+
 	move.l	a1,st_dmgp
 	bra.s	.draw
 .full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
