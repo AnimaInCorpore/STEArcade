@@ -39,7 +39,7 @@ ST_NBUF		= 3
 ST_DMG		= 600			; erase rectangles a buffer (more: the whole buffer copied)
 ST_LOG		= 2048			; clean-buffer changes kept (a power of 2)
 ST_POOL		= 1024*1024		; the sprite colour cache
-ST_HASH		= 16384
+ST_HASH		= 65536			; (14 MB development system: room for the pre-coloured sprites)
 ST_TCN		= 4096			; tile conversions cached
 ST_BARLB	= 160			; the status bar's image: 320 x 16
 ST_HUDY		= 240
@@ -115,6 +115,7 @@ m72r_init:
 	st	st_allnew
 	move.w	#-1,st_sy
 	move.w	#-1,m72r_prev
+	bsr	st_preins
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
@@ -435,8 +436,20 @@ st_palette:
 	addq.l	#1,st_nrows
 	bsr	st_rowtables
 	cmp.w	#16,d5
-	blo.s	.rw
-	bsr	st_rowcells
+	bhs.s	.tl
+	move.w	st_curscn,d0		; a sprite row: its colouring's id (tools/stage_sprites.py st_cidtab: the scene's
+	lsl.w	#8,d0			; target -> the id of its 16 indices; the sprites' cache key)
+	lea	st_rtgt,a0
+	move.w	d5,d1
+	add.w	d1,d1
+	add.w	(a0,d1.w),d0
+	add.l	d0,d0
+	lea	st_cidtab,a0
+	move.w	(a0,d0.l),d0
+	lea	st_rcid,a0
+	move.w	d0,(a0,d1.w)
+	bra.s	.rw
+.tl:	bsr	st_rowcells
 .rw:	addq.w	#1,d5
 	cmp.w	#32,d5
 	blo.s	.row
@@ -1434,11 +1447,10 @@ st_obj2:
 	move.w	d3,-(sp)
 	moveq	#15,d3			; the colour: its plane words (the entry's last colouring, else st_bake)
 	and.b	3(a0),d3
-	lea	st_ver,a0
-	moveq	#0,d0
-	move.b	(a0,d3.w),d0
-	lsl.w	#4,d0
-	or.w	d3,d0			; the key: version << 4 | colour
+	lea	st_rcid,a0
+	move.w	d3,d0
+	add.w	d0,d0
+	move.w	(a0,d0.w),d0		; the key: the row's colouring id
 	cmp.w	8(a3),d0
 	bne.s	.miss
 	move.l	4(a3),BLT_SRC.w
@@ -1644,8 +1656,39 @@ st_object:
 	rts
 
 ; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = its plane words in this colour (cached: the key
-; is the record, the colour and the row's version).  A piece's row: 16 pixels -> its 4 plane words; 32 -> the planes
+; is the record and the colouring's id: the same colours in any row, any scene share it; pre-coloured ones from
+; st_preins).  A piece's row: 16 pixels -> its 4 plane words; 32 -> the planes
 ; in order, each its 2 words (the source of a pass runs on).
+; st_preins: the pre-coloured sprites (tools/stage_sprites.py st_precol: BW, colouring id, data; BW 0 ends) into
+; st_hash, each in its slot unless the slot is taken (that pair is coloured at run time then)
+st_preins:
+	movem.l	d0-d2/a0-a2,-(sp)
+	lea	st_precol,a1
+.l:	moveq	#0,d0
+	move.w	(a1)+,d0		; BW
+	beq.s	.x
+	move.w	(a1)+,d2		; the colouring id
+	lsr.w	#1,d0
+	lsl.l	#2,d0
+	lea	st_deftab,a0
+	move.l	(a0,d0.l),a2		; the record
+	move.l	a2,d1
+	lsr.l	#3,d1
+	eor.w	d2,d1
+	and.l	#ST_HASH-1,d1
+	lsl.l	#4,d1
+	lea	st_hash,a0
+	add.l	d1,a0
+	tst.l	(a0)
+	bne.s	.n
+	move.l	a2,(a0)
+	move.w	d2,4(a0)
+	move.l	(a1),6(a0)
+.n:	addq.l	#4,a1
+	bra.s	.l
+.x:	movem.l	(sp)+,d0-d2/a0-a2
+	rts
+
 ; st_dt2inv: every st_dt2 entry's colouring forgotten (the colour pool starts again)
 st_dt2inv:
 	movem.l	d0/a0-a1,-(sp)
@@ -1663,11 +1706,10 @@ st_dt2inv:
 	rts
 
 st_bake:
-	lea	st_ver,a0
-	moveq	#0,d0
-	move.b	(a0,d2.w),d0
-	lsl.w	#4,d0
-	or.w	d2,d0			; version << 4 | colour
+	lea	st_rcid,a0
+	move.w	d2,d0
+	add.w	d0,d0
+	move.w	(a0,d0.w),d0		; the key: the row's colouring id
 	move.l	a2,d1
 	lsr.l	#3,d1
 	eor.w	d0,d1
@@ -1695,9 +1737,14 @@ st_bake:
 	bsr	st_dt2inv		; (st_dt2's colourings too)
 	movem.l	d0/a0,-(sp)		; (full: everything coloured again)
 	lea	st_hash,a1
-	move.w	#ST_HASH*16/4-1,d1
+	move.l	#ST_HASH*16/16-1,d1
 .clr:	clr.l	(a1)+
-	dbf	d1,.clr
+	clr.l	(a1)+
+	clr.l	(a1)+
+	clr.l	(a1)+
+	subq.l	#1,d1
+	bpl.s	.clr
+	bsr	st_preins		; (the pre-coloured ones again)
 	movem.l	(sp)+,d0/a0
 	move.l	a2,(a0)
 	move.w	d0,4(a0)
@@ -2107,6 +2154,7 @@ st_log:		ds.b	ST_LOG*8
 st_rtgt:	ds.w	32		; the targets the rows show (st_palette)
 st_pidx:	ds.b	512		; the pens' playfield indices
 st_hidx:	ds.b	256		; the tile pens' status bar indices
+st_rcid:	ds.w	16		; the sprite rows' colouring ids (st_palette; the sprites' cache key)
 st_ver:		ds.b	32		; the colour rows' versions (sprites 0-15, tiles 16-31)
 st_cells:	ds.b	4096		; the map cells composed in the clean buffer
 st_colok:	ds.b	64		; (a column's window rows all composed)

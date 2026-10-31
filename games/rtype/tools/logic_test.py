@@ -112,6 +112,9 @@ def main():
                     "must equal the reference's sprite buffer")
     ap.add_argument("--defs", default="", help="(with --list) collect the object records' (definition, entries) "
                     "pairs of every frame into this JSON file (tools/stage_sprites.py takes it)")
+    ap.add_argument("--colours", default="", help="(with --list) collect the objects' (definition, entries, colouring) "
+                    "triples - the colouring: the 16 indices of its colour row's target in the scene src/stage.s picks "
+                    "(tools/stage_assets.py) - into this JSON file (tools/stage_sprites.py colours them at build time)")
     ap.add_argument("--record", default="", help="(with --list) save each frame's video state as the stage renderers "
                     "get it to this file (render_test's state format + the object records: tools/stage_model.py)")
     ap.add_argument("--render", type=int, default=0, help="(a STAGE build) a picture of src/stage.s every N arcade "
@@ -120,6 +123,8 @@ def main():
     args = ap.parse_args()
     recorded = []
     defs_seen = set()
+    cols_seen = set()
+    col_state = {}
     import collections as _c
     rpc = _c.Counter()
     rcost = []
@@ -424,6 +429,23 @@ def main():
                 bw, n = struct.unpack(">HB", o[slot:slot + 3])
                 if bw:
                     defs_seen.add((bw, n))
+        if args.colours:
+            if not col_state:
+                import stage_assets as SA
+                col_state.update(SA=SA, scenes=SA.load_scenes(), cur=None, tiles=None)
+            SA, scenes = col_state["SA"], col_state["scenes"]
+            img = sym["v30_image"]
+            t = [mem.r16(img + 0x42D34 + 12 * r) & 0xFF for r in range(32)]
+            if col_state["tiles"] != t[16:]:
+                col_state["cur"] = SA.choose_scene(t[16:], [sc[0] for sc in scenes], col_state["cur"])
+                col_state["tiles"] = t[16:]
+            spm = scenes[col_state["cur"]][3]
+            o = bytes(mem.r_block(sym["m72_objs"], 0x400))
+            end = mem.r16(sym["m72_objs_end"])
+            for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):
+                bw, n, col = struct.unpack(">HBB", o[slot:slot + 4])
+                if bw:
+                    cols_seen.add((bw, n, bytes(int(v) for v in spm[t[col & 15]]).hex()))
         if args.render and f % args.render == 0:
             rcost.append(render_picture(args.render_profile and f >= args.render_profile))
         if f % 100 == 99:
@@ -452,6 +474,9 @@ def main():
     if args.defs:
         Path(args.defs).write_text(json.dumps(sorted(defs_seen)))
         print("%d (definition, entries) pairs -> %s" % (len(defs_seen), args.defs))
+    if args.colours:
+        Path(args.colours).write_text(json.dumps(sorted(cols_seen)))
+        print("%d (definition, entries, colouring) triples -> %s" % (len(cols_seen), args.colours))
     if args.record:
         import pickle
         Path(args.record).write_bytes(pickle.dumps(recorded))

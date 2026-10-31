@@ -29,6 +29,12 @@ runs (logic_test.py --snap --list --defs build/rtype/defs_SEED.json on a STAGE b
     venv/bin/python games/rtype/tools/stage_sprites.py build/rtype/stage_states_1.pkl build/rtype/stage_states_8.pkl \
         build/rtype/defs_1.json build/rtype/defs_4.json build/rtype/defs_8.json build/rtype/defs_9.json \
         build/rtype/defs_10.json            (2026-10-30: 767 definitions; seed 8 to 8000: none missing)
+
+Pre-coloured sprites (2026-10-31, the 14 MB development system): every (definition, colouring) of the recordings and
+of logic_test.py --colours files (the same long runs: --snap --list --colours build/rtype/cols_SEED.json) is coloured
+here (st_precol, stage_precol.bin; st_cidtab: a scene's sprite target -> its colouring's id, the renderer's cache
+key); the renderer colours at run time only pairs no run recorded.  2026-10-31: the recordings above + cols_1/4/8/9/10
+(seeds 1:3000 4:8000 8:20000 9:26000 10:25800): 1524 pairs, 499 KB.
 """
 import argparse
 import json
@@ -49,21 +55,69 @@ import stage_model as SM
 LB = 512                    # the renderer's buffer: bytes a line (src/stage.s ST_LB)
 
 
-def definitions(paths):
-    """{(bw, n)} of the recorded object lists"""
+def definitions(paths, colourings=None):
+    """{(bw, n)} of the recorded object lists; colourings (a dict) gets {bw: {colouring}} - a colouring the 16 STE
+    indices of the object's colour row (pen 0: 0) - from the recordings and logic_test.py --colours files"""
+    import stage_assets as SA
+    scenes = SA.load_scenes()
     defs = set()
+    cols = colourings if colourings is not None else {}
     for p in paths:
-        if p.endswith(".json"):                  # (logic_test.py --defs: the pairs alone)
-            defs |= {tuple(d) for d in json.load(open(p))}
+        if p.endswith(".json"):                  # (logic_test.py --defs: the pairs; --colours: the triples)
+            for d in json.load(open(p)):
+                defs.add((d[0], d[1]))
+                if len(d) > 2:
+                    cols.setdefault(d[0], set()).add((0,) + tuple(bytes.fromhex(d[2])[1:]))
             continue
+        cur = tiles = None
         for f, item in pickle.load(open(p, "rb")):
             st = pickle.loads(zlib.decompress(item))
+            t = list(st["recs"])
+            if tiles != t[16:]:
+                cur = SA.choose_scene(t[16:], [sc[0] for sc in scenes], cur)
+                tiles = t[16:]
+            spm = scenes[cur][3]
             o, end = st["objs"], st["objs_end"]
             for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):
-                bw, n = struct.unpack(">HB", o[slot:slot + 3])
+                bw, n, col = struct.unpack(">HBB", o[slot:slot + 4])
                 if bw:
                     defs.add((bw, n))
+                    cols.setdefault(bw, set()).add((0,) + tuple(int(v) for v in spm[t[col & 15]][1:]))
     return defs
+
+
+def colouring_ids():
+    """{colouring: id} over every scene's sprite targets (id 0: all pens index 0) and the table src/stage.s reads
+    (st_cidtab: per scene 256 words, a target's id)"""
+    import stage_assets as SA
+    ids = {(0,) * 16: 0}
+    table = []
+    for sc in SA.load_scenes():
+        for t in range(256):
+            c = (0,) + tuple(int(v) for v in sc[3][t][1:])
+            table.append(ids.setdefault(c, len(ids)))
+    return ids, table
+
+
+def precolour(pens, shape, c):
+    """the plane words src/stage.s st_bake makes of a record's pens in colouring c: per row of 16 pixels its 4 plane
+    words; of 32 the planes in order, each its 2 words"""
+    def half(b):
+        px = []
+        for v in b:
+            px += [c[v >> 4], c[v & 15]]
+        return [sum(((px[x] >> p) & 1) << (15 - x) for x in range(16)) for p in range(4)]
+    out, k = [], 0
+    for cls, rows in shape:
+        for _ in range(rows):
+            if cls:
+                a, b = half(pens[k:k + 8]), half(pens[k + 8:k + 16])
+                out += [a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]]
+                k += 16
+            else:
+                out += half(pens[k:k + 8])
+                k += 8
+    return struct.pack(">%dH" % len(out), *out)
 
 
 def entries(rom, bw, n):
@@ -280,7 +334,9 @@ def sprite_streams(units):
 def build(paths):
     rom = load_regions("rtype")["main"]
     sprites = m72.Video("rtype").sprites
-    defs = sorted(definitions(paths))
+    cols = {}
+    defs = sorted(definitions(paths, cols))
+    cids, cidtab = colouring_ids()
     codes, streams = {}, {}
     code_lines, stream = [], bytearray()
     recs, pens_out = [], []
@@ -351,8 +407,31 @@ def build(paths):
         out.append("stp_%04x:" % bw)
         for k in range(0, len(pens), 16):
             out.append("\tdc.b " + ",".join("$%02X" % b for b in pens[k:k + 16]))
+    # pre-coloured (the 14 MB development system): every recorded (definition, colouring); st_preins puts them into
+    # the colour cache, so the renderer colours nothing it has seen recorded
+    pre, data, unknown = [], bytearray(), 0
+    for bw, rec in recs:
+        if not rec:
+            continue
+        shape = rec[6]
+        for c in sorted(cols.get(bw, ())):
+            if c not in cids:
+                unknown += 1
+                continue
+            pre.append((bw, cids[c], len(data)))
+            data += precolour(pens_of[bw], shape, c)
+    out.append("\tsection data,data\n\teven\nst_cidtab:")
+    for k in range(0, len(cidtab), 16):
+        out.append("\tdc.w " + ",".join("%d" % v for v in cidtab[k:k + 16]))
+    out.append("st_precol:")
+    for bw, cid, off in pre:
+        out.append("\tdc.w $%04X,%d\n\tdc.l st_pcdata+%d" % (bw, cid, off))
+    out.append("\tdc.w 0\nst_pcdata:\tincbin\t\"stage_precol.bin\"\n\teven")
     out.append("ST_MAXH = %d" % maxh)
     b = build_dir("rtype")
+    (b / "stage_precol.bin").write_bytes(bytes(data))
+    print("pre-coloured: %d (definition, colouring) pairs, %d KB; %d colourings; %d colourings not in a scene" % (
+        len(pre), len(data) // 1024, len(cids), unknown))
     (b / "stage_sprites.s").write_text("\n".join(out) + "\n")
     (b / "stage_sstream.bin").write_bytes(bytes(stream))
     print("%d definitions (%d stars, %d in blocks), the tallest %d rows; %d pieces in %d units (%.1f a unit); %d "

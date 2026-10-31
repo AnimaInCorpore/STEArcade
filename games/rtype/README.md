@@ -6,8 +6,12 @@ table in transfer fallback paths. This also serves Mr. HELI. See [measurements](
 ![R-Type on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `rtype` (Irem M72): the main CPU's NEC V30 program statically translated to 68000 code
-(`engine/v30x.py`), the M72 picture drawn by the shared renderer (`engine/rt/m72render.s`).  Requires a 4 MB STE (the
-program takes 3.5 MB).  No sound yet.
+(`engine/v30x.py`), the M72 picture drawn by the shared renderer (`engine/rt/m72render.s`).  No sound yet.
+
+**Memory: development targets a 14 MB ST RAM system** (the user, 2026-10-31; `tools/bench.sh` runs Hatari with
+`--memsize 14`).  R-Type alone may use it, for speed (e.g. sprites coloured at build time instead of at run time).
+A 4 MB STE is not a target for now; how to fit the game back into 4 MB (per-stage loading, packing) is decided later.
+`tools/release.py` lets RTYPE.PRG pass the load limit with a warning (`OVER_LOAD`).
 
 ```sh
 python port.py build rtype            # verify ROMs, translate, build assets, the snapshot and RTYPE.PRG
