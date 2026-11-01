@@ -157,6 +157,11 @@ Hatari 2026-11-01 evening, every stage (seeds 8+ with `-D INVULN`, as recorded; 
 | 8 (10 74000-77000) | 34.9 | 18.2 | 30% | 20% | 20% | 16% |
 
 The logic is now the largest share in every play stage: the next gains are natives for each stage's busiest routines.
+Then (8a75fce): the collision broad phase for offset boxes (stage 3's logic 119.9k -> 110.0k cycles a frame) and the
+fade rows at their target compared in longs (stage 6 80.4k -> 75.5k): Hatari stage 3 26.9 / 15.4, stage 6 39.9 / 21.6.
+Logic profiles of every stage (profile.py, 30 frames): stage 1 86k (the cave crawler's handler 19%: four tile probes a
+crawler a frame), 2 73k, 3 109k, 4 86k (fades whose targets change every frame), 5 98k, 6 80k, 7 98k, 8 60k cycles an
+arcade frame; the object loops' computed CALL / RET (0040:0600-06FF) 7-10% everywhere, the game's own dispatch.
 
 What costs most, and what is done about it:
 
