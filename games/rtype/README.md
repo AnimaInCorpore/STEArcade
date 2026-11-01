@@ -142,6 +142,22 @@ ANY_PARITY: the ranking and name entry's word accesses test their parity at run 
 `logic_test.py --mortal-at F` / `ref/cover.py SEED FRAMES MORTAL_AT`: the switch off from frame F - the late stages'
 deaths, game over, ranking and name entry, which the invulnerable coverage never reached (badpc 0592E).
 
+Hatari 2026-11-01 evening, every stage (seeds 8+ with `-D INVULN`, as recorded; VBLs sampled):
+
+| stage (recording) | arcade frames / s | pictures / s | logic | sprites | sync | compose |
+|---|---|---|---|---|---|---|
+| title + demo (1 600-3600) | 41.7 | 29.4 | 17% | 16% | 12% | 11% |
+| 1 (8 3000-8000) | 36.8 | 20.1 | 42% | 23% | 15% | 6% |
+| 2 (10 11000-13000) | 35.1 | 17.5 | 33% | 30% | 20% | 8% |
+| 3 warship (1 12600-14400) | 26.3 | 15.0 | 36% | 23% | 15% | 11% |
+| 4 (10 33000-36000) | 41.5 | 23.4 | 37% | 18% | 16% | 8% |
+| 5 (10 46500-49500) | 35.6 | 19.2 | 38% | 22% | 16% | 10% |
+| 6 (10 56000-59000) | 38.9 | 20.6 | 46% | 19% | 15% | 5% |
+| 7 (10 64500-67500) | 30.3 | 15.2 | 45% | 23% | 16% | 7% |
+| 8 (10 74000-77000) | 34.9 | 18.2 | 30% | 20% | 20% | 16% |
+
+The logic is now the largest share in every play stage: the next gains are natives for each stage's busiest routines.
+
 What costs most, and what is done about it:
 
 1. **A BG at its own speed.** The renderer composes the BG with the FG cell by cell, locked to the FG; when the
