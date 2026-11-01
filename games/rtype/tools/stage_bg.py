@@ -68,6 +68,9 @@ def main():
     if missing:
         sys.exit("columns never seen: %s" % missing[:10])
     strip = np.stack([cols[a] for a in range(a0, a1 + 1)])            # [n, 64 rows, 2]
+    walls = int(((strip[:, :, 0] & 0x3FFF) < 0x7D0).sum())
+    if walls:
+        print("warning: %d cells with a tile code below 7D0h (walls)" % walls)
     out = build_dir("rtype") / ("stage_bg_%s.bin" % args.name)
     out.write_bytes(struct.pack(">HhH", len(strip), a0, sorted(ys)[0]) + strip.astype("<u2").tobytes())
     print("%s: %d columns from absolute %d (BG y %s)" % (out, len(strip), a0, sorted(ys)))

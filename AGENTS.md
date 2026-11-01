@@ -56,6 +56,10 @@ These rules apply to every game port and every sprite fallback path.
   independent reference renderer. Keep logic speed and picture rate separate in
   performance reports.
 
+- For maximum speed, check every port against `docs/porting-guide.md`, "Maximum speed on the STE": find a picture's
+  biggest cost per stage (parallax recompositions, colour cycling, two full layers, then the logic), propose dropping
+  costly effects to the user (gameplay kept), and cover the whole game before trusting a figure.
+
 See `docs/architecture.md` and `docs/porting-guide.md` for the runtime contracts.
 
 # Gameplay exploration

@@ -728,6 +728,117 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   renderer's video state, the sprite list after a DMA.  A swapped-order mode in `engine/rt/m72render.s` would make the
   copies unnecessary.
 
+## Maximum speed on the STE: what to look for (all ports; R-Type's stages, 2026-11-01)
+
+R-Type's stage renderer (`games/rtype/src/stage.s`, the measurements in `games/rtype/README.md`, "Speed on the STE")
+showed where an STE picture's time goes once the sprites are prepared stefastbobs2's way.  The same checks apply to
+every port with two tile layers, palette effects or a heavy CPU:
+
+* **Keep logic and picture rates apart, then find the biggest cost first.**  Measure in Hatari with recorded play
+  (`bench.sh` REPLAY / PLAYBACK) per stage or scene, not only the attract demo: R-Type's later stages had costs the
+  first four never showed.  Look at the 90th percentile of a picture's cycles (`stage_test`-style Musashi runs), not
+  only the median: a few whole recompositions decide whether a steady rate is reached.
+* **Parallax costs whole recompositions.**  A second layer composed into the buffer with the first (locked) is cheap
+  only while it keeps its offset; a BG at its own speed forces it again every few pixels.  Per scene, ask the user to
+  drop the parallax (the user's rule: keep the gameplay, drop what only costs work): draw the BG locked to the FG from a
+  strip recorded once from the reference (`games/rtype/tools/stage_bg.py`), or leave a decorative BG out.  Check first
+  that the BG holds no gameplay tiles (R-Type: tile codes below 7D0h are walls) - where it does, keep it at the
+  arcade's place (the locked BG while such tiles are in the map).
+* **Colour cycling costs recomposition when indices change.**  With fixed STE indices per pen, a palette row that
+  switches its target recomposes every cell drawn with it.  Freeze such rows at their scene's reference target
+  (R-Type: FROZEN_ROWS), or, for a fade a scene must show, give the changing pens dedicated STE indices whose colours
+  are set per picture (DEDICATED): a palette write instead of a recomposition.
+* **Two full layers: draw the smaller one as pieces.**  Measure both layers' 16-pixel chunks with pixels in the window
+  and switch which one is the buffer's layer at the crossover (R-Type stage 3's hybrid); clear instead of restoring
+  where a piece layer has nothing under it.
+* **Erase only what can be seen.**  Guard rows the display never shows need no erasing; lines that scroll into view
+  do.
+* **Then the logic.**  When pictures are cheap the translated CPU is the limit (R-Type 68-150k cycles an arcade frame):
+  profile per stage and replace hot routines with natives or leaf calls, each checked in lock-step.  Broad-phase
+  shortcuts (R-Type's collision summary) must reproduce the arcade's test exactly at its edge cases - a "dead" box test
+  was wrong only in stages 7 and 8 - so verify natives over the whole game, not one stage.
+* **Cover the whole game before trusting a speed figure.**  Coverage and lock-step runs through every stage and the
+  ending (R-Type: seeds 10-12 to 86000 frames with invulnerability) find translation gaps and native bugs that early
+  stages never reach.
+* **Memory buys speed on the 14 MB development machine** (pre-coloured sprites, recorded strips); the release's
+  load limit is solved later (per-stage loading, packing).
+
+### What the other ports measured (gathered 2026-11-01)
+
+The figures are the ports' own (their READMEs, `docs/sprite-preparation.md`, `docs/virtual-scroll-performance.md`).
+Lessons already written above in this guide (window-site guards, stamps, composite caches, cmpm.l compares, text
+strips, load-size measures, the fixed-workload rule) are not repeated.
+
+**Pictures**
+* Damage only what was drawn (opaque rows, drawn lines and words), not whole sprite or cell boxes: Commando's
+  opaque-row damage was one step of 205k -> 177k a play picture; Kung-Fu Master skipping blank cells cut its front-tile
+  and span copies by two thirds.
+* A sprite's setup and bookkeeping cost as much as its drawing: Time Pilot's generated code alone 163.9k -> 151.7k,
+  registers kept between sprites, clipped variants and drawn-lines damage then -> 103.6k; Commando's per-slot sprite
+  cache (83% hits) ~680 -> ~560 cycles a sprite.
+* Recompose only the cells whose pens changed (bank maps computed beforehand): Galaga '88 10.62 -> 12.14 arcade
+  frames/s.
+* Prepare twin instances (virtual screens) on first use, not all at once: Black Tiger 26.2 -> 29.5 pictures/s.
+* Don't flush caches at a scroll wrap: Trojan's baking 27k -> 0, a picture 765k -> 695k.
+* Skip the work of pictures that will be skipped (the sprite list copies: Commando, Gun.Smoke).
+* HUD text as character pairs (Commando; part of Trojan's 61-65% -> 90% speed step).
+* Dead ends: code generated on first use when shapes keep changing (Splatterhouse: ~22k a generation, ~134k a picture
+  against ~42k saved, 13.96 -> 12.54 frames/s; Galaga '88 no gain; Gauntlet, Kung-Fu Master reorderings slower) -
+  prepare at build time for the shapes coverage saw, with a row fallback.  Keeping or stamping unchanged content
+  (Splatterhouse: 2.6 sprites a picture kept for 160k; a Kung-Fu Master front-cell stamp 30.21 -> 29.99 pictures/s;
+  Trojan's clean text cells +5k).  The Blitter for 1-2 pixel runs (Galaga '88's stars: a pass costs more than four bit
+  operations).
+
+**Blitter**
+* Set it up once and keep its registers in address registers: Commando's tile copies as two 32-word passes with one
+  setup -13k a picture while scrolling, damage restore -2k; Time Pilot's draw_one.
+* Short HOG passes (the rule) cost a little: 1943 8.4 -> 7.9, Gun.Smoke 24.2 -> 23.0 frames/s; split wide copies at
+  the caller (1943's generic strip path's `muls` cost ~6k a tick).
+* Edge clipping: one compare on the hot path (1943: an inline test +0.1-0.25% a frame, the cheap form +0.02-0.04%).
+* Aligned rows instead of FXSR gain little (-0.05% to -0.6% a picture: Time Pilot, Gyruss, Kung-Fu Master); more
+  specialised code would split over the load budget (Gyruss +320 KB).
+
+**Logic**
+* Natives pay only where the logic is concentrated - profile per routine first: Bubble Bobble's sub CPU 54.5k -> 26.4k
+  + 10.4k, its native MCU 13.4 -> 21.9 pictures/s; 1943's i8751 57.1k -> 48.0k; Hyper Sports 82.7k -> 56.0k; Double
+  Dragon's collision (~25% of its 6809 time) 251k -> 193k; R-Type's crawler handler was 36% of play logic.  Did not
+  pay: Commando's $A498 (the translation is ~14 cycles a Z80 instruction; its top routine only 12%).
+* Small helpers and selectors in place (inline leaves): Trojan's rst $18-$30 + a copy native 61-65% -> 90% speed;
+  Pooyan's sound 31k -> 21k a frame; Double Dragon's bank selectors at 205 sites.
+* Per-call flag summaries (KONAMI-1 `call_summaries`): logic -16..21% Hyper Sports, -10..17% Track & Field.
+* Dead ends: return points ordered by coverage counts, predicting both of an object loop's return points, a native
+  object loop costing what its call/ret saved (R-Type); a shadow return stack (Double Dragon, judged not worth it);
+  FAST for 1942 (0.4% slower).
+* Do the budget arithmetic first: at 60 ticks against 25 pictures a second, 1k cycles saved a tick is ~2.4k a picture
+  (Commando); Bubble Bobble needs ~3-4x cheaper logic, more than translator tweaks give.
+
+**Schedule**
+* MAX_SKIP changes the game's speed, not the picture rate (Commando 2 -> 3: 99% / 26.6 -> 100% / 26.5; scheduling
+  alone ~3%, noise level); Bubble Bobble's TICK60: 0.532 -> 0.668 rounds a VBL but 12.2 -> 5.2 pictures/s.
+* Pictures can lock to a flickering layer's phase (Splatterhouse at PIC_EVERY 2: a whole play on one phase of its
+  30 Hz layer, a "20 fps" build never drew the wall; ~4k cycles of nops changed 13.30 -> 13.69): wait a frame when a
+  layer turns off.
+
+**Measuring**
+* Count late VBLs: Bubble Bobble's bench left them out, every rate before 2026-10-12 ~2x too high (fixed b89956a).
+* Check what a bench ran: Double Dragon's PLAY=1 had no PLAYBACK code (it measured the attract demo); R-Type writes no
+  COUNTERS.BIN without `-D DEBUG`; bench.sh reuses the old PRG when assembly fails (read the "built" line); filters on
+  its output hide "no COUNTERS.BIN" / CRASH.TXT; a REPLAY start late in the game first runs the reference to it (10+
+  minutes, not a hang); other sessions' Hatari runs slow the host.
+* Keep the memory layout fixed in A/B tests: 64 KB crossings and the BSS layout move a picture by +-2k (Time Pilot and
+  Gyruss compared with buffers padded to the same address modulo 64 KB).
+* Profilers: non-stepped figures overshoot by up to 2,000 cycles (compare in profile mode); Hatari's profiler and
+  Musashi agree within ~5-10% a routine; the Hatari / Musashi ratio is 1.35 for 1942, ~1.14 for Commando's play;
+  Musashi picture tests must add the Blitter's cycles (HOG holds the CPU).
+
+**Memory and sound**
+* A smaller layout can be slower on the bus: 1943's front_map as words saved 30 KB, equal in Musashi, 1.5-3% fewer
+  frames in Hatari.
+* Sound costs ~2 ticks and ~2 frames/s (Gun.Smoke, 1943, Black Tiger; capsnd ~9k a tick); Bubble Bobble 8-9% of the
+  CPU; Kung-Fu Master 27.1 vs 29.5 pictures/s without it; Pooyan 47.4 -> 43.5.
+* Move sound work to build time: Double Dragon's ADPCM decoded on the STE cost 98k of 163k a frame (now streams made
+  at build time); Commando's effects as tables -1.7k..-4.2k a tick.  Dead end: Commando's music mix cache (no hits).
+
 ## Port completion claims
 
 For every port, automated exploration can attempt full progression after its

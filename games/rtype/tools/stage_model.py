@@ -12,6 +12,11 @@ The simplifications, per stage (STAGES):
   * a BG strip (stage 2's tunnel, the user's choice 2026-10-30; tools/stage_bg.py): the stage's whole BG as one strip,
     drawn locked to the FG - the strip's column (unwrapped FG column - the scene's first one) mod its length, the FG's
     rows - instead of the arcade's half-speed BG (decorative there: no parallax, it repeats);
+  * a scene without BG (stage 6, the user's choice 2026-11-01: decorative, at twice the FG's speed): the FG only;
+  * more BG strips (stages 5 and 7, the user, 2026-11-01): as stage 2's - except while the BG map holds a wall (a tile
+    code below 7D0h: stage 7's boss), then the scene's BG is the locked one;
+  * frozen tile rows (stage 8's row 2, the user: no colour cycling): the row's colours stay its scene's reference
+    target's (stage_assets.FROZEN_ROWS);
   * a BG scroll scene (stage 3's warship, the user's choice 2026-10-31; stage_assets.BG_SCROLL_SCENES): while the BG
     map holds a tile that is not empty (bg_any), both layers at their own scroll (x and y) - no lock;
   * no sprite / tile priority: the sprites are over both layers (the list's first entry on top, as the arcade);
@@ -70,6 +75,12 @@ class Model:
         w = np.frombuffer(ram, "<u2").reshape(64, 64, 2)
         return not bool(self.star[w[:, :, 0] & 0x3FFF].all())
 
+    def walls(self, ram):
+        """True when the BG map holds a wall: a tile code below 7D0h that is not empty (a strip scene's BG is then the
+        locked one: stage 7's boss)"""
+        c = np.frombuffer(ram, "<u2").reshape(64, 64, 2)[:, :, 0] & 0x3FFF
+        return bool(((c < 0x7D0) & ~self.star[c]).any())
+
     def strip_pens(self, strip):
         """a BG strip's pens [64 * 8, n * 8] (-1: an empty tile, as layer)"""
         key = id(strip)
@@ -93,10 +104,13 @@ class Model:
             self._strip_key, self._strip_img = key, img
         return self._strip_img
 
-    def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None, bgscroll=False):
+    def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None, bgscroll=False, nobg=False):
         """the window's pens [256, 320] (BLACK = 512: empty / display off) for a recorded state (render_test's), lock
-        a Lock (updated); strip: the scene's BG strip (load_strip) or None; bgscroll: the BG at its own scroll"""
+        a Lock (updated); strip: the scene's BG strip (load_strip) or None; bgscroll: the BG at its own scroll; nobg:
+        the playfield without BG (stage 6)"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
+        if strip is not None and self.walls(st["bg"]):
+            strip = None
         out = np.full((256, W), BLACK, np.int32)
         xp = np.arange(X0, X0 + W)
         main = max(st["bands"], key=lambda b: b[1] - b[0])
@@ -116,6 +130,8 @@ class Model:
                 b = simg[((ys + sy[0] + 128) & 511)[:, None], (sc * 8 + (ap & 7))[None, :]]
             else:
                 b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
+            if nobg and y0 < HUD_Y:
+                b = np.full_like(f, -1)
             out[y0:y1 + 1] = np.where(f >= 0, f, np.where(b >= 0, b, BLACK))
         bar = any(b[0] == HUD_Y for b in st["bands"])
         self.sprites(out, objs_to_spr(st, squeeze) if "objs" in st else st["spr"], HUD_Y if bar else 256)

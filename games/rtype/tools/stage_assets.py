@@ -177,6 +177,11 @@ def build(stage, png=False):
 # ---- scenes: the screens told apart by their tile rows' targets (the renderer picks one when a tile row's target
 # changes)
 SCENE_RECORDINGS = ["build/rtype/stage_states_1.pkl", "build/rtype/stage_states_8.pkl", "build/rtype/stage_states_s2.pkl"]
+# later recordings (2026-10-31: stages 4-8, seed 10): their frames only make or join the scenes they add - a frame that
+# matches an earlier recording's scene is left out, so those scenes' palettes (and the colourings recorded for them,
+# cols_*.json) stay as they are
+SCENE_EXTRA = ["build/rtype/stage_states_s4.pkl", "build/rtype/stage_states_s5.pkl", "build/rtype/stage_states_s6.pkl",
+               "build/rtype/stage_states_s7.pkl", "build/rtype/stage_states_s8.pkl"]
 SCENE_DIFF_ROWS = 3         # a frame belongs to the first scene whose tile-row targets differ in fewer rows
 SCENE_STEP = 5
 SCENE_MATCH = 12            # the renderer switches to the best scene only when it matches this many tile rows
@@ -186,8 +191,17 @@ SQUEEZE_SCENES = {0}        # (scene 0: the title - the recordings start with it
 # scenes whose tiles are shown shifted (the window over the tile layers moves, the sprites keep their places): the
 # title's text lines reach the arcade's right edge (x 168-367; the ranking 88-287): 16 shows them whole
 TILE_DX = {0: 16}
-BG_STRIPS = ["s2"]
-BG_STRIP_SCENES = {3}       # (flag bit 1: the BG from the stage's strip, locked to FG - stage 2's tunnel: stage_bg_s2)
+BG_STRIPS = ["s2", "s5", "s7"]
+# BG strip scenes (flag bit 1, the strip's index in BG_STRIPS in bits 6-7): the BG from the stage's strip, locked to the
+# FG - stage 2's tunnel (stage_bg_s2); the user, 2026-11-01: stage 7's BG at the FG's speed like the tunnel's, stage 5's
+# the same (both decorative, at 3/4 and 1/2 of the FG's speed on the arcade).  While the BG map holds a wall (a tile code
+# below 7D0h that is not empty: stage 7's boss) the scene's BG is the locked one instead (stage_model.walls)
+BG_STRIP_SCENES = {3: "s2", 8: "s5", 11: "s7"}
+# scenes without BG (the user, 2026-11-01: stage 6's, decorative at twice the FG's speed; flag bit 5)
+NO_BG_SCENES = {9, 10}
+# frozen tile rows (the user, 2026-11-01: no colour cycling): per scene, tile rows (0-15) whose colours stay their
+# reference target's when the game switches the row's target (stage 8: row 2, 82h / 8Ah) - no cells composed again
+FROZEN_ROWS = {12: {2}}
 # scenes whose BG is the scrolling layer once it holds a tile that is not empty (the user, 2026-10-31: stage 3's warship;
 # flag bit 2): the buffer holds the BG at its own scroll (x and y), the FG is drawn over it each picture like sprites
 # (stage_model.Model.picture bgscroll; src/stage.s st_bgon)
@@ -206,7 +220,8 @@ DED_MAX = 8
 SC_DED = 16 + 64 + 3 * 4096 + 2         # 32 x 16 bytes: row, pen -> its dedicated index + 1 (0: none)
 SC_DEDN = SC_DED + 512                  # a word: the dedicated pens; DED_MAX x (row, pen, index, 0)
 SC_DEDC = SC_DEDN + 2 + 4 * DED_MAX     # 256 targets x DED_MAX words: the STE colour of each dedicated pen
-SC_SIZE = SC_DEDC + 256 * DED_MAX * 2
+SC_FRZ = SC_DEDC + 256 * DED_MAX * 2   # a word: the frozen tile rows (bits 0-15, FROZEN_ROWS)
+SC_SIZE = SC_FRZ + 2
 
 
 def dedicated(k):
@@ -239,7 +254,7 @@ def choose_scene(tile_targets, refs, current):
 
 def load_scenes():
     """[(reference tile targets [16], playfield palette, status bar palette (STE words, bytes), sprite premap
-    [256, 16], tile premap [256, 16], status bar premap [256, 16], flags)] from build/rtype/stage_scenes.bin"""
+    [256, 16], tile premap [256, 16], status bar premap [256, 16], flags, dedicated pens, frozen tile rows)] from build/rtype/stage_scenes.bin"""
     d = (build_dir("rtype") / "stage_scenes.bin").read_bytes()
     out = []
     for k in range(int.from_bytes(d[:2], "big")):
@@ -251,7 +266,8 @@ def load_scenes():
         flags = int.from_bytes(d[o + 80 + 3 * 4096:o + 82 + 3 * 4096], "big")
         n = int.from_bytes(d[o + SC_DEDN:o + SC_DEDN + 2], "big")
         ded = [tuple(d[o + SC_DEDN + 2 + 4 * i:o + SC_DEDN + 5 + 4 * i]) for i in range(n)]
-        out.append((ref, pal, hpal, pm[0], pm[1], pm[2], flags, ded))
+        frz = int.from_bytes(d[o + SC_FRZ:o + SC_FRZ + 2], "big")
+        out.append((ref, pal, hpal, pm[0], pm[1], pm[2], flags, ded, frz))
     return out
 
 
@@ -266,7 +282,10 @@ def scenes(png=False):
     from m72board import load_regions
     rom = load_regions("rtype")["main"]
     refs, members = [], []
-    for path in SCENE_RECORDINGS:
+    nbase = None
+    for path in SCENE_RECORDINGS + [p for p in SCENE_EXTRA if Path(p).exists()]:
+        if path in SCENE_EXTRA and nbase is None:
+            nbase = len(refs)
         for i, (_, it) in enumerate(pickle.load(open(path, "rb"))):
             if i % SCENE_STEP:
                 continue
@@ -276,7 +295,8 @@ def scenes(png=False):
             t = np.frombuffer(st["recs"][16:], np.uint8)
             for k, r in enumerate(refs):
                 if (t != r).sum() < SCENE_DIFF_ROWS:
-                    members[k].append(st)
+                    if nbase is None or k >= nbase:
+                        members[k].append(st)
                     break
             else:
                 refs.append(t.copy())
@@ -320,7 +340,7 @@ def scenes(png=False):
         for kind, table in ((0, tab), (1, tab), (1, htab)):
             for t in range(256):
                 data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
-        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 if k in BG_STRIP_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) | (8 if k in BG_PIECE_SCENES else 0) | (16 if k in BG_HYBRID_SCENES else 0) |
+        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 | BG_STRIPS.index(BG_STRIP_SCENES[k]) << 6 if k in BG_STRIP_SCENES else 0) | (32 if k in NO_BG_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) | (8 if k in BG_PIECE_SCENES else 0) | (16 if k in BG_HYBRID_SCENES else 0) |
                  (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
         dtab = bytearray(512)
         for row, pen, idx in ded:
@@ -332,6 +352,7 @@ def scenes(png=False):
             cols = target_colours(rom, 1, t)
             for i in range(DED_MAX):
                 data += (ste12(cols[ded[i][1]]) if i < len(ded) else 0).to_bytes(2, "big")
+        data += sum(1 << r for r in FROZEN_ROWS.get(k, ())).to_bytes(2, "big")
         print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
             k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
             " ".join("%03X" % v for v in hpal)))

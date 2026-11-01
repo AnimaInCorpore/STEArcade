@@ -403,7 +403,16 @@ st_palette:
 	add.w	d0,d0
 	lea	st_rtgt,a1
 	move.w	(a1,d0.w),d0		; the target
-	lsl.w	#4,d0
+	cmp.w	#16,d5			; (a frozen tile row: its scene's reference target)
+	blo.s	.fz
+	move.w	d5,d1
+	sub.w	#16,d1
+	move.w	SC_FRZ(a2),d3
+	btst	d1,d3
+	beq.s	.fz
+	moveq	#0,d0
+	move.b	SC_REF(a2,d1.w),d0
+.fz:	lsl.w	#4,d0
 	lea	SC_SPR(a2),a0
 	cmp.w	#16,d5
 	blo.s	.k
@@ -723,6 +732,8 @@ st_rowcells:
 	move.w	d4,d0
 	lsl.w	#6,d0
 	add.w	d6,d0			; the cell
+	tst.b	st_stripon		; (a strip scene: the strip's tiles of the colour too - the column's cells all)
+	bne.s	.cl
 	move.w	d0,d1
 	lsl.w	#2,d1
 	lea	v30_image+$D0002,a0	; (its attribute word)
@@ -730,7 +741,7 @@ st_rowcells:
 	and.w	(a0,d1.w),d2
 	cmp.w	d3,d2
 	bne.s	.n
-	clr.b	(a1,d0.w)
+.cl:	clr.b	(a1,d0.w)
 	clr.b	(a2,d6.w)
 .n:	addq.w	#1,d4
 	dbf	d7,.r
@@ -828,6 +839,13 @@ st_vram:
 	sub.b	(a5,d0.w),d1
 	ext.w	d1
 	add.w	d1,st_bgn
+	move.w	-4(a0),d0		; (the walls: st_bgw)
+	bsr	st_wall
+	move.w	d0,d1
+	move.w	-4(a1),d0
+	bsr	st_wall
+	sub.w	d0,d1
+	add.w	d1,st_bgw
 	move.l	-4(a0),-4(a1)
 	moveq	#63,d2
 	sub.w	d3,d2
@@ -964,11 +982,15 @@ st_bands:
 	tst.b	st_lkon
 	beq.s	.ly
 	st	st_allnew
-.ly:	moveq	#0,d2			; locked BG composed: not a strip or BG scroll scene, the BG map not empty
-	move.l	st_scn,a2
-	btst	#1,SC_FLAGS+1(a2)
+.ly:	moveq	#0,d2			; locked BG composed: not a strip (without walls), BG scroll or no-BG scene, the
+	move.l	st_scn,a2		; BG map not empty
+	btst	#5,SC_FLAGS+1(a2)
 	bne.s	.lo
-	btst	#2,SC_FLAGS+1(a2)
+	btst	#1,SC_FLAGS+1(a2)
+	beq.s	.l1
+	tst.w	st_bgw			; (a strip scene's BG map with a wall: stage 7's boss - the locked BG)
+	beq.s	.lo
+.l1:	btst	#2,SC_FLAGS+1(a2)
 	bne.s	.lo
 	tst.w	st_bgn
 	sne	d2
@@ -1020,12 +1042,20 @@ st_bands:
 	beq.s	.y
 	move.w	d0,st_sy
 	st	st_allnew
-.y:	move.l	st_scn,a1		; a BG strip scene (SC_FLAGS bit 1): its origin, the FG column at its first picture
-	btst	#1,SC_FLAGS+1(a1)
+.y:	move.l	st_scn,a1		; a BG strip scene (SC_FLAGS bit 1, no wall in the BG map): its strip (bits 6-7),
+	btst	#1,SC_FLAGS+1(a1)	; its origin, the FG column at its first picture
 	beq.s	.ns
+	tst.w	st_bgw
+	bne.s	.ns
 	tst.b	st_stripon
 	bne.s	.al
 	st	st_stripon
+	moveq	#0,d0
+	move.b	SC_FLAGS+1(a1),d0
+	lsr.b	#6,d0
+	lsl.w	#2,d0
+	lea	st_striptab,a2
+	move.l	(a2,d0.w),st_strp
 	move.l	st_fgabs,d0
 	add.l	#96,d0
 	asr.l	#3,d0
@@ -1066,6 +1096,19 @@ st_bands:
 .bk:	clr.l	(a2)+
 	dbf	d1,.bk
 	bra	.al
+
+; st_wall: d0 = a BG map cell's code word, a5 = st_bgstar: d0 = 1 when it is a wall (a tile code below 7D0h that is
+; not drawn empty: stage_model.walls), else 0
+st_wall:
+	and.w	#$FFF,d0
+	cmp.w	#$7D0,d0
+	bhs.s	.n
+	tst.b	(a5,d0.w)
+	bne.s	.n
+	moveq	#1,d0
+	rts
+.n:	moveq	#0,d0
+	rts
 
 ; st_meas: a0 = a layer's rows' chunks with pixels (st_fgrc, st_bgrc), d0 = its window's first line, d1 = its x: d2 =
 ; the chunks with pixels in the window (30 rows of 22 chunks; st_bands' layer choice)
@@ -1270,18 +1313,19 @@ st_cell:
 	move.w	(a2,d0.w),d0
 	sub.w	st_origin,d0
 	ext.l	d0
-	divs	st_strip,d0
+	move.l	st_strp,a2
+	divs	(a2),d0
 	swap	d0
 	tst.w	d0
 	bpl.s	.sp
-	add.w	st_strip,d0
+	add.w	(a2),d0
 .sp:	and.l	#$FFFF,d0
 	lsl.l	#8,d0			; (256 bytes a column)
 	moveq	#0,d3
 	move.w	d5,d3
 	lsl.w	#2,d3
 	add.l	d3,d0
-	lea	st_strip+2,a2
+	addq.l	#2,a2
 	add.l	d0,a2
 	move.w	(a2),d1			; its code ($FFFF: empty, black)
 	cmp.w	#$FFFF,d1
@@ -3354,14 +3398,20 @@ SC_FLAGS	= 80+12288		; a word: bit 0 the sprites squeezed toward the centre (st_
 SC_DED		= SC_FLAGS+2		; 32 x 16 bytes: a row's pen -> its dedicated index + 1 (0: none; stage_assets DEDICATED)
 SC_DEDN		= SC_DED+512		; a word: the dedicated pens, then 8 x (row, pen, index, 0)
 SC_DEDC		= SC_DEDN+2+4*8		; 256 targets x 8 words: each dedicated pen's STE colour
-SC_SIZE		= SC_DEDC+256*8*2
+SC_FRZ		= SC_DEDC+256*8*2	; a word: the frozen tile rows (bits 0-15; stage_assets FROZEN_ROWS)
+SC_SIZE		= SC_FRZ+2
 SCENE_MATCH	= 12
 st_tiles:	incbin	"stage_tiles.bin"
 	even
 st_tmask:	incbin	"stage_tmask.bin"	; (the FG tiles' opaque pixels: st_cell over a BG strip)
 st_bgstar:	incbin	"stage_bgstar.bin"	; (the BG tiles drawn empty: tools/stage_assets.py)
 	even
-st_strip:	incbin	"stage_strip_s2.bin"	; (stage 2's BG: tools/stage_bg.py, stage_assets.py strips)
+st_striptab:	dc.l	st_strip0,st_strip1,st_strip2	; (stage_assets.py BG_STRIPS)
+st_strip0:	incbin	"stage_strip_s2.bin"	; (stage 2's BG: tools/stage_bg.py, stage_assets.py strips)
+	even
+st_strip1:	incbin	"stage_strip_s5.bin"	; (stage 5's)
+	even
+st_strip2:	incbin	"stage_strip_s7.bin"	; (stage 7's)
 	even
 st_zero8:	dcb.l	8,0
 ; the pixel bits of each index for the colour tables (st_mktab): tiles (a long of 4 plane bytes, plane 0 the high
@@ -3454,6 +3504,8 @@ st_fgrp:	ds.l	1
 st_fr0:		ds.w	1		; (st_fgdraw: a row's chunks with opaque pixels in the window, the first, the last)
 st_fr1:		ds.w	1
 st_bgn:		ds.w	1		; (the BG map's cells that are not empty)
+st_bgw:		ds.w	1		; (its walls: st_wall)
+st_strp:	ds.l	1		; (a strip scene's strip)
 st_by:		ds.w	1		; (the BG scroll mode: the window's first BG map line, the FG's window, its first line)
 st_fgx:		ds.w	1
 st_fgy:		ds.w	1
