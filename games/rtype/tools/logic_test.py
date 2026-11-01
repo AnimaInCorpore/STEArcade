@@ -490,6 +490,11 @@ def main():
         print("%d states -> %s" % (len(recorded), args.record))
     print("%d frames identical; %.0f 68000 cycles a frame" % (args.frames - args.start,
                                                               cycles / max(1, args.frames - args.start)))
+    if "es_ncall" in sym:
+        for k, name in enumerate(("0040:F694", "0040:F6DA")):
+            print("collision %s: calls %d, rejected %d, full tests %d" % (
+                name, mem.r32(sym["es_ncall"] + 4 * k), mem.r32(sym["es_nrej"] + 4 * k),
+                mem.r32(sym["es_nfull"] + 4 * k)))
     return 0
 
 

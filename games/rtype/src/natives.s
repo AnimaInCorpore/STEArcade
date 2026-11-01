@@ -37,6 +37,67 @@ NFALL	macro				; \1 1: the subroutine, \2 the translated original
 FADE_ROW macro
 	movem.l	d2/d5,-(sp)
 	lea	(a3,d3.l),a0		; DS0:[BW]: pen 0's red word (green +$200, blue +$400)
+	cmp.l	#v30_image+$3B000,a2	; (the targets: ROM, DS1 3B00h - fade_tab holds them as the colours' words: a row
+	bne.s	.slow\@			; already at its target, the common case, compared in 24 longs)
+	moveq	#0,d2
+	move.w	d4,d2
+	add.l	d2,d2
+	lea	fade_tab,a1
+	add.l	d2,a1
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	lea	$200-32(a0),a0
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	lea	$200-32(a0),a0
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	cmpm.l	(a1)+,(a0)+
+	bne.s	.slow\@
+	add.w	#48,d4			; (no channel changed: the loop's IX at its end)
+	moveq	#0,d2
+	bra	.tail\@
+.slow\@:	lea	(a3,d3.l),a0
 	moveq	#0,d2			; channels changed
 	moveq	#16-1,d5
 .pen\@:
@@ -69,7 +130,7 @@ FADE_ROW macro
 .n\@:	addq.w	#1,d4
 	addq.l	#2,a0
 	dbf	d5,.pen\@
-	add.w	d2,2(a4,d6.l)		; [BP+2h]
+.tail\@:	add.w	d2,2(a4,d6.l)		; [BP+2h]
 	add.w	#32,d3
 	moveq	#0,d1
 	move.w	d3,d7
@@ -259,6 +320,37 @@ nat_objloop:
 .call:	jmp	R00657_t
 
 nat_init:				; (rtype.s / core.s init_image)
+    ifd FADE_SNAP
+	lea	v30_image+$3B000,a0	; fade_tab: the 256 fade targets (DS1 3B00h:[48 x AL], r g b bytes a pen) as the
+	lea	fade_tab,a1		; colours' words - 16 red, 16 green, 16 blue (FADE_ROW's fast compare)
+	moveq	#0,d2			; (the target's offset)
+	move.w	#256-1,d3
+.ft:	moveq	#0,d1
+.fp:	moveq	#0,d0
+	move.w	d2,d0
+	eor.w	#1,d0
+	move.b	(a0,d0.l),d0
+	move.w	d0,(a1)
+	move.w	d2,d0
+	addq.w	#1,d0
+	eor.w	#1,d0
+	moveq	#0,d4
+	move.b	(a0,d0.l),d4
+	move.w	d4,32(a1)
+	move.w	d2,d0
+	addq.w	#2,d0
+	eor.w	#1,d0
+	moveq	#0,d4
+	move.b	(a0,d0.l),d4
+	move.w	d4,64(a1)
+	addq.l	#2,a1
+	addq.w	#3,d2
+	addq.w	#1,d1
+	cmp.w	#16,d1
+	blo.s	.fp
+	lea	64(a1),a1
+	dbf	d3,.ft
+    endc
 	lea	obj_idle,a0
 	lea	obj_idle_ips(pc),a1
 	moveq	#24-1,d1
@@ -267,6 +359,11 @@ nat_init:				; (rtype.s / core.s init_image)
 	st	(a0,d0.l)
 	dbf	d1,.l
 	rts
+    ifd FADE_SNAP
+	section bss,bss
+fade_tab:	ds.b	256*96
+	section text,code
+    endc
 obj_idle_ips:				; (0040:395A ..: the shot slots' empty handlers, found by their code's pattern)
 	dc.w	$395A,$3980,$39A6,$39CE,$39F6,$3A1E,$3A46,$3A6E,$3A96,$3ABE,$3AE6,$3B0E
 	dc.w	$3B36,$3B5E,$3B86,$3BAE,$3BD6,$3BFE,$3C26,$3C4E,$3C76,$3C9E,$3CC6,$3CEE
@@ -881,6 +978,9 @@ FFLAG	macro				; \1 IX: the box test when the object's flag [IX+1] is set
 	endm
 
 ECOLL	macro
+    ifd SIM
+	addq.l	#1,es_ncall+4*\3	; (SIM: calls, rejections, full tests - per variant)
+    endc
 	cmp.w	#$2B4,4(a4,d6.l)
 	bcc	.fb			; (x >= 2B4h: the arcade's short way)
     if \3=1
@@ -912,14 +1012,14 @@ ECOLL	macro
 	tst.b	es_rej
 	bne	.full
     endc
-	cmp.w	d0,d3			; (proper spans: x + [BW] <= x <= x + [BW+2], y + [BW+4] <= y <= y + [BW+6])
-	bhi	.full
+	cmp.w	d0,d3			; (proper spans: x + [BW] <= x <= x + [BW+2], y + [BW+4] <= y <= y + [BW+6]; else
+	bhi	.imp			; .imp: the spans widened)
 	cmp.w	d0,d1
-	bcs	.full
+	bcs	.imp
 	cmp.w	d2,d7
-	bhi	.full
+	bhi	.imp
 	cmp.w	d2,d6
-	bcs	.full
+	bcs	.imp
 	lea	es_boxes,a0		; the distinct live boxes: none overlapped -> no hit
 	move.w	es_n,d4
 	bra.s	.nx
@@ -936,7 +1036,48 @@ ECOLL	macro
 .m2:	addq.l	#2,a0
 .m3:	addq.l	#2,a0
 .nx:	dbf	d4,.bl
-.rej:	move.w	es_last,d4		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
+	bra.s	.rej
+.imp:	; spans not containing x or y (big enemies' offset boxes, 2026-11-01: stage 3's warship parts went to the full test
+	; two times in three): the arcade's box test hits only where [min(x, x + [BW]), max(x, x + [BW+2])] (unsigned, as
+	; its compares) meets the box, and so for y - the broad phase with those, its spans kept for the full test
+	movem.l	d1/d3/d6/d7,-(sp)
+	cmp.w	d0,d3
+	bls.s	.i1
+	move.w	d0,d3
+.i1:	cmp.w	d0,d1
+	bcc.s	.i2
+	move.w	d0,d1
+.i2:	cmp.w	d2,d7
+	bls.s	.i3
+	move.w	d2,d7
+.i3:	cmp.w	d2,d6
+	bcc.s	.i4
+	move.w	d2,d6
+.i4:	lea	es_boxes,a0
+	move.w	es_n,d4
+	bra.s	.inx
+.ibl:	cmp.w	(a0)+,d1
+	bcs.s	.im1
+	cmp.w	(a0)+,d3
+	bcc.s	.im2
+	cmp.w	(a0)+,d6
+	bcs.s	.im3
+	cmp.w	(a0)+,d7
+	bcs.s	.iov
+	bra.s	.inx
+.im1:	addq.l	#2,a0
+.im2:	addq.l	#2,a0
+.im3:	addq.l	#2,a0
+.inx:	dbf	d4,.ibl
+	movem.l	(sp)+,d1/d3/d6/d7
+	bra.s	.rej
+.iov:	movem.l	(sp)+,d1/d3/d6/d7
+	bra	.full
+.rej:
+    ifd SIM
+	addq.l	#1,es_nrej+4*\3
+    endc
+	move.w	es_last,d4		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
 	beq.s	.r0			; the 3 (its flag still set: an enemy's handler may clear one after es_build - then
 	tst.b	(a3,d4.w)		; the arcade's full test) ...
 	beq	.full
@@ -980,6 +1121,9 @@ ECOLL	macro
     endc
 	bra	.r
 .full:
+    ifd SIM
+	addq.l	#1,es_nfull+4*\3
+    endc
 	tst.b	$56(a3)			; 0040:F485 the ship (when its flag is clear)
 	bne.s	.s2
 	FBOX	$56
@@ -1372,6 +1516,9 @@ es_full:	ds.b	1
 es_rej:		ds.b	1
 	even
 es_pred:	ds.w	1
+es_ncall:	ds.l	2		; (SIM: ECOLL's calls, rejections, full tests: 0040:F694, 0040:F6DA)
+es_nrej:	ds.l	2
+es_nfull:	ds.l	2
 	even
 	section text,code
 
