@@ -12,7 +12,8 @@
 ; arcade's pace) into `ticks`.  The logic runs one arcade frame per tick when it keeps up (it
 ; does not: ~100k cycles a frame, the picture ~1M); a picture after every PIC_EVERY-th arcade frame (or when no tick
 ; is waiting); arcade frames the logic falls behind by more than MAX_BEHIND are dropped (the game slows down, its
-; pace stays even).  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
+; pace stays even).  Game speed first (the user, 2026-11-01): PIC_EVERY 8, MAX_BEHIND 12 - the logic at full rate
+; where it fits, the pictures in the time left (2 / 3 before: more pictures, the game slower).  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
 ; The display: the renderer's buffers, engine/rt/borders.s (top and bottom border open, the picture's palette and the
 ; status bar's own screen and palette: BD_HUD, BD_VSWITCH).  Sound: none yet (the sound latch's bytes are kept in core.s' ring).
 ; Untranslated code reached: CRASH.TXT "BADPC xxxxx" (the linear address), back to the desktop.
@@ -34,10 +35,12 @@ PIC_LINES = 256
 BD_PALETTE = 1
 BD_HUD = 1
 BD_VSWITCH = 1			; (the status bar: its own screen and palette from its first line, borders.s)
-MAX_BEHIND = 3
-      ifnd PIC_EVERY
-PIC_EVERY = 2				; (arcade frames a picture at most: the logic's share against the picture rate)
+      ifnd MAX_BEHIND
+MAX_BEHIND = 12				; (ticks behind before arcade frames are dropped: the game slows)
       endc
+      ifnd PIC_EVERY
+PIC_EVERY = 8				; (arcade frames a picture at most; game speed first, the user 2026-11-01: a picture
+      endc				; when the logic has caught up, at least every 8 arcade frames)
 ; the pads (engine/rt/jagpad.s): SYSTEM (IN1), P1 (IN0 low), P2 (IN0 high) bits as in key_table (bytes 0-2)
 JP_SH1 = 16
 JP_SH2 = 8

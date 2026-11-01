@@ -163,6 +163,13 @@ Logic profiles of every stage (profile.py, 30 frames): stage 1 86k (the cave cra
 crawler a frame), 2 73k, 3 109k, 4 86k (fades whose targets change every frame), 5 98k, 6 80k, 7 98k, 8 60k cycles an
 arcade frame; the object loops' computed CALL / RET (0040:0600-06FF) 7-10% everywhere, the game's own dispatch.
 
+**Game speed first** (the user, 2026-11-01; `src/rtype.s` PIC_EVERY 8, MAX_BEHIND 12, before 2 / 3): a picture when
+the logic has caught up, at least every 8 arcade frames.  Hatari, the same recordings (arcade speed, pictures / s):
+title 89% / 27.3, stage 1 95% / 14.8, 2 97% / 11.9, 3 78% / 8.4, 4 97% / 19.7, 5 93% / 14.5, 6 97% / 16.0, 7 85% / 7.2,
+8 94% / 10.0.  Stages 3 and 7 still drop arcade frames: their logic and minimum pictures do not fit.  Measured and
+dropped: the collision summary's boxes by 64-pixel column (stage 7's logic 108.4k -> 110.4k: the filling costs more
+than the shorter scans save).
+
 What costs most, and what is done about it:
 
 1. **A BG at its own speed.** The renderer composes the BG with the FG cell by cell, locked to the FG; when the
