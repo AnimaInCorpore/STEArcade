@@ -38,7 +38,7 @@ FADE_ROW macro
 	movem.l	d2/d5,-(sp)
 	lea	(a3,d3.l),a0		; DS0:[BW]: pen 0's red word (green +$200, blue +$400)
 	cmp.l	#v30_image+$3B000,a2	; (the targets: ROM, DS1 3B00h - fade_tab holds them as the colours' words: a row
-	bne.s	.slow\@			; already at its target, the common case, compared in 24 longs)
+	bne	.slow\@			; already at its target, the common case, compared in 24 longs)
 	moveq	#0,d2
 	move.w	d4,d2
 	add.l	d2,d2
@@ -94,8 +94,9 @@ FADE_ROW macro
 	bne.s	.slow\@
 	cmpm.l	(a1)+,(a0)+
 	bne.s	.slow\@
-	add.w	#48,d4			; (no channel changed: the loop's IX at its end)
+	add.w	#48,d4			; (no channel changed: the loop's IX at its end, AW 0 as its last SUB leaves it)
 	moveq	#0,d2
+	moveq	#0,d0
 	bra	.tail\@
 .slow\@:	lea	(a3,d3.l),a0
 	moveq	#0,d2			; channels changed
@@ -773,8 +774,10 @@ nat_mscr:
 	lsl.b	#6,d0
 	or.b	d7,d0
 	cmp.w	#1,d1
-	beq	R0F9EA			; (the last step: INC [BP+14h], DBNZ, CLR1 CY, RET)
-	addq.w	#1,20(a1)		; INC [BP+14h]
+	bne.s	.more
+	tst.b	d0			; (the last step: the flags of the last RCL - AL's sign and zero, OV and CY clear -,
+	bra	R0F9EA			; then INC [BP+14h], DBNZ, CLR1 CY, RET)
+.more:	addq.w	#1,20(a1)		; INC [BP+14h]
 	addq.w	#1,d3
 	subq.w	#1,d1
 	bra.s	.l
