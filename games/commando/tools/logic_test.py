@@ -54,15 +54,19 @@ def main():
             if mem.r8(addr(a))!=v:raise RuntimeError(f'Latch {a:04x} differs in frame {f}')
         if bytes(mem.r_block(sym['sprite_buffer'],384))!=m.sprites:raise RuntimeError(f'Sprite latch differs in frame {f}')
     # The renderer compares the tile and character RAM only after a hooked writer (gen.BG_WRITERS / FG_WRITERS):
-    # a change without its flag is a writer missing there.
+    # a change without its flag is a writer missing there.  A character change is also covered by its row's mark
+    # (gen.fg_row_mark: fg_marks + $680, a byte per 32 bytes of D000-D7FF).
     regions=[('bg_written',0xd800,0x800),('fg_written',0xd000,0x800)];last={}
+    rowmark=sym['fg_marks']+0x680
     def hooks(f):
         for flag,a,size in regions:
             now=bytes(mem.r_block(addr(a),size))
             if last.get(flag) is not None and now!=last[flag] and not mem.r8(sym[flag]):
-                i=next(i for i in range(size) if now[i]!=last[flag][i])
-                raise RuntimeError(f'frame {f}: {a+i:04x} changed without {flag} (a writer missing in gen.py)')
+                marks=bytes(mem.r_block(rowmark,64)) if flag=='fg_written' else bytes(64)
+                bad=[i for i in range(size) if now[i]!=last[flag][i] and not marks[i>>5]]
+                if bad:raise RuntimeError(f'frame {f}: {a+bad[0]:04x} changed without {flag} or its row mark (a writer missing in gen.py)')
             last[flag]=now;mem.w8(sym[flag],0)
+            if flag=='fg_written':mem.w_block(rowmark,bytes(64))
     run_to({wait});m.run_to_idle();m.booted=True;compare(-1);hooks(-1)
     for f in range(n):
         if play:

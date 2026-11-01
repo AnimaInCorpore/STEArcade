@@ -15,6 +15,22 @@ FG_WRITERS={0x0073,0x0078,0x0080,0x0085,0x0610,0x0614,0x0640,0x0e75,0x8057,0x806
             0x817b,0x81a9,0x81ad,0x8625,0x8628,0x9c78,0x9c7b,0x9c8f,0x9c93,0x9ca9,0x9cac,0x9cb9,0x9cbd,0x9ce2,
             0x9ce6,0x9d36,0x9d39}
 DIRTY={**{pc:'bg_written' for pc in BG_WRITERS},**{pc:'fg_written' for pc in FG_WRITERS}}
+# The character writers that mark only their character row (fg_rowmark: 32 rows of codes D000-D3FF, then 32 of attributes
+# D400-D7FF; draw_foreground compares only the marked rows): the register that holds the address, or the address.  The
+# address >> 5 indexes fg_marks (2 KB: a writer that also stores elsewhere marks a harmless byte).  The
+# others (the boot's ldir clears) set fg_written: every row is compared.  COMMANDO_FG_ROWS=0: all of them set fg_written.
+FG_ROW_REG={pc:'d3' for pc in FG_WRITERS if pc not in (0x0078,0x0085,0x0e75,0x8057,0x806c)}
+FG_ROW_REG[0x0e75]='d2'                         # ld (de),a
+FG_ROW_ABS={0x8057:0xd22b,0x806c:0xd229}        # ld (nn),a (the operand bytes of maincpu.rom)
+if os.environ.get('COMMANDO_FG_ROWS','1')=='0':FG_ROW_REG,FG_ROW_ABS={},{}
+
+
+def fg_row_mark(pc):
+    """the 68000 lines after a character writer: its row's mark (the CCR kept: the next instruction may branch on it)"""
+    if pc in FG_ROW_ABS:return ['st fg_rowmark+%d'%(((FG_ROW_ABS[pc]-0xd000)>>5)&63)]
+    r=FG_ROW_REG.get(pc)
+    if r is None:return ['st fg_written']
+    return ['move sr,d7','move.w %s,d5'%r,'lsr.w #5,d5','lea fg_marks,a0','st (a0,d5.w)','move d7,ccr']
 
 
 def discover(img,roots,known,tables=None):
@@ -48,7 +64,9 @@ class Emitter(z80x.Emitter):
     def emit_ins(self,pc,*a,**k):
         super().emit_ins(pc,*a,**k)
         if pc in self.buffer_sites:self.e('bsr buffer_sprites')
-        if pc in DIRTY:self.e('st '+DIRTY[pc])        # (Scc leaves the flags alone)
+        if pc in FG_WRITERS:
+            for line in fg_row_mark(pc):self.e(line)
+        elif pc in DIRTY:self.e('st '+DIRTY[pc])        # (Scc leaves the flags alone)
     def x_ld_i_a(self,ins):self.e('move.b d0,g1_ireg')
     def _incdec(self,ins,op):
         if self.lo & z80x.H and ins.ops[0]==('r8','a'):

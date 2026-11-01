@@ -998,13 +998,13 @@ destination:
 
 ; A sprite slot (draw_sprites: one per sprite_buffer entry): the entry's code and attribute as last decoded, and what they give
 SL_KEY = 0			; .w  code, attribute ($00FF: none; attribute $FF is a hidden sprite, its SL_TAB blank)
-SL_YIDX = 2			; .w  attribute bit 0 (y bit 8) << 10: ytab's half
+SL_YTAB = 24			; .l  ytab + attribute bit 0 (y bit 8) << 10: ytab's half
 SL_PLANES = 4			; .l  the baked planes
 SL_TAB = 8			; .l  the shape's 16 spr_code_tab entries (spr_blank_tab: a hidden attribute)
 SL_FR = 12			; .w  the first opaque row * STRIDE
 SL_LINES256 = 14		; .w  the opaque rows * STRIDE
 SL_DMG = 16			; .w x 4  the damage's words and lines: unshifted (4), shifted (8)
-SLOT = 24
+SLOT = 28
 
 ; spr_slots: no slot known (the key $00FF: attribute $FF, a hidden sprite, never drawn).  Keeps all registers.
 spr_slots_clear:
@@ -1086,8 +1086,7 @@ draw_sprites:
  move.b 3(a0),d3
  add.w d3,d3
  add.w d3,d3
- add.w SL_YIDX(a1),d3
- lea ytab,a3
+ move.l SL_YTAB(a1),a3
  move.l (a3,d3.w),d3
  bmi.s .next
  move usp,a3
@@ -1174,7 +1173,9 @@ draw_sprites:
  and.w #1,d2			; (attribute bit 0: y bit 8)
  moveq #10,d3
  lsl.w d3,d2
- move.w d2,SL_YIDX(a1)
+ ext.l d2
+ add.l #ytab,d2
+ move.l d2,SL_YTAB(a1)
  move.b d1,d2			; (a hidden bank: attribute bits 6-7 = 3)
  and.b #$c0,d2
  cmp.b #$c0,d2
@@ -1463,6 +1464,7 @@ draw_foreground:
  beq.s .scan_start
 .full:
  clr.b fg_full
+ bsr fg_marks_clear
  move.w pool_epoch,fg_epoch
  lea fg_pair_tag,a4		; (the pool rolled over: a baked character's address may hold another one now)
  moveq #FG_PAIRS*2-1,d0
@@ -1484,9 +1486,15 @@ draw_foreground:
  bra .scanned
 .scan_start:
  sf fg_dirty
- tst.b fg_written			; (set by the translated writers, gen.FG_WRITERS)
+ tst.b fg_written			; (a writer without a row, gen.fg_row_mark: the boot's clears): every row
  bne.s .written
- move.w fg_roll,d0			; else 128 bytes a frame, in case a writer is missing there
+ lea fg_rowmark,a0			; the rows the translated writers marked (gen.FG_ROW_REG / FG_ROW_ABS)
+ moveq #64/4-1,d0
+.marks:
+ tst.l (a0)+
+ bne.s .marked
+ dbf d0,.marks
+ move.w fg_roll,d0			; none: 128 bytes a frame, in case a writer is missing there
  add.w #128,d0
  and.w #$7ff,d0
  move.w d0,fg_roll
@@ -1499,37 +1507,35 @@ draw_foreground:
  beq .scanned
 .written:
  clr.b fg_written
- lea $400(a2),a4
- lea $400(a3),a5
+ bsr fg_marks_clear
  move.w #255,d6
-.scan:
- cmpm.l (a2)+,(a3)+
- bne.s .diff
- cmpm.l (a4)+,(a5)+
- bne.s .diff2
- dbf d6,.scan
- bra .scanned
-.diff:
- addq.l #4,a4
- addq.l #4,a5
-.diff2:
- move.l -4(a2),-4(a3)
- move.l -4(a4),-4(a5)
- st fg_dirty
- movem.l d6/a2-a5,-(sp)
- move.w #255,d0
- sub.w d6,d0
- lsl.w #2,d0
- move.w d0,d6
- bsr fg_cell
- addq.w #1,d6
- bsr fg_cell
- addq.w #1,d6
- bsr fg_cell
- addq.w #1,d6
- bsr fg_cell
- movem.l (sp)+,d6/a2-a5
- dbf d6,.scan
+ move.w d6,d5
+ bsr fg_scan
+ bra.s .scanned
+.marked:				; a marked row: its 32 codes and 32 attributes compared
+ moveq #0,d7
+.mrow:
+ lea fg_rowmark,a0
+ move.b (a0,d7.w),d0
+ or.b 32(a0,d7.w),d0
+ beq.s .mnext
+ clr.b (a0,d7.w)
+ clr.b 32(a0,d7.w)
+ move.w d7,d0
+ lsl.w #5,d0
+ lea G_Z80-$3000,a2
+ add.w d0,a2
+ lea fg_raw,a3
+ add.w d0,a3
+ moveq #7,d6
+ move.w d7,d5
+ lsl.w #3,d5
+ addq.w #7,d5
+ bsr fg_scan
+.mnext:
+ addq.w #1,d7
+ cmp.w #32,d7
+ blo.s .mrow
 .scanned:
  move.w pool_epoch,d0		; (the pool rolled over while baking: every pointer again, once)
  cmp.w fg_epoch,d0
@@ -1678,6 +1684,50 @@ draw_foreground:
  blo .pair
  rts
 
+; Compare groups of 4 cells (codes and attributes as longs) with fg_raw; a changed group: copied, its cells baked again
+; (fg_cell), fg_dirty set.  a2 / a3 = the first group's codes and its copy, d6 = the groups - 1, d5 = the last group's
+; index.  Keeps d5, d7.
+fg_scan:
+ lea $400(a2),a4
+ lea $400(a3),a5
+.scan:
+ cmpm.l (a2)+,(a3)+
+ bne.s .diff
+ cmpm.l (a4)+,(a5)+
+ bne.s .diff2
+ dbf d6,.scan
+ rts
+.diff:
+ addq.l #4,a4
+ addq.l #4,a5
+.diff2:
+ move.l -4(a2),-4(a3)
+ move.l -4(a4),-4(a5)
+ st fg_dirty
+ movem.l d5-d7/a2-a5,-(sp)
+ move.w d5,d0
+ sub.w d6,d0
+ lsl.w #2,d0
+ move.w d0,d6
+ bsr fg_cell
+ addq.w #1,d6
+ bsr fg_cell
+ addq.w #1,d6
+ bsr fg_cell
+ addq.w #1,d6
+ bsr fg_cell
+ movem.l (sp)+,d5-d7/a2-a5
+ dbf d6,.scan
+ rts
+
+fg_marks_clear:
+ lea fg_rowmark,a0
+ moveq #64/4-1,d0
+.c:
+ clr.l (a0)+
+ dbf d0,.c
+ rts
+
 ; a5 = a pair's buffer (128 bytes), d1 / d4 = the baked characters of its even (left byte) and odd column: per line
 ; the and masks of planes 0-3 interleaved as two longs, then the or data (movep writes every other byte).
 fg_compose:
@@ -1786,6 +1836,8 @@ fg_pair_tag: ds.l 2*FG_PAIRS
 fg_pair_buf: ds.b 128*FG_PAIRS
 bg_raw: ds.b 2048
 fg_raw: ds.b 2048
+fg_marks: ds.b 2048		; the character writers' marks by address >> 5 (gen.fg_row_mark); rows at fg_rowmark
+fg_rowmark = fg_marks+$680	; 32 code rows (D000-D3FF), then 32 attribute rows (D400-D7FF)
 fg_ptr: ds.l 1024
 fg_offsets: ds.l 1024
 fg_list: ds.l 2*28*32
@@ -1838,5 +1890,8 @@ clean_base: ds.l 1
 draw_base: ds.l 1
 flip_addr: ds.l 1
 shown_pal: ds.w 16
+	ifd SCREEN_PAD
+ ds.b SCREEN_PAD		; (A/B builds: the screens at another 64 KB offset)
+	endc
 screen_area: ds.b 3*RING_SIZE+256
  section text,code

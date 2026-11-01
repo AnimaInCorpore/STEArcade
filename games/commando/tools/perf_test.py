@@ -51,6 +51,7 @@ def main():
             pc=cpu.r_pc()
             if pc in targets:return total
             if step and into is not None:      # (PERF_LOGIC=1: the logic's runtime by routine, the translated code as Z)
+                if pc in calls:ncalls[calls[pc]]+=1
                 r=cpu.execute(1);total+=r.cycles+s.blitter.cycles;s.blitter.cycles=0
                 into['Z' if pc in zset else names[bisect.bisect_right(addrs,pc)-1][1]]+=r.cycles
                 if pcs_prof and pc not in zset:by_pc[pc]+=r.cycles

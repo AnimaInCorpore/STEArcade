@@ -172,6 +172,36 @@ instructions a tick (the top routine 12%): natives would have to replace most of
 Note: the simulator does not raise address errors; a byte variable in the BSS moved later longs to odd addresses and
 only Hatari crashed.  Keep BSS flags as words (or `even` after them).
 
+## R-Type's renderer ideas tried (2026-11-01)
+
+Two ideas from R-Type, prototyped and measured on the recorded play.  The baseline profile (`PLAY=1 perf_test.py 2400
+1200 profile`, Musashi, a picture 153.7k): the sprite loop's own CPU 29k, the character layer 24k (its RAM compare ~6k,
+the characters' drawing ~17k, their rows' restore set-up ~3k).
+
+* **Character row marks** (as R-Type's video marks): the 29 `ld (hl)` / `ld (de)` / `ld (nn)` writers of the character
+  RAM mark their row (`gen.fg_row_mark`: address >> 5 into `fg_marks`, 2 KB, rows at `fg_rowmark`; the CCR kept with
+  `move sr` / `move ccr`, the next instruction may branch on it); the boot's two `ldir` clears still set `fg_written`
+  (every row).  `draw_foreground` compares only the marked rows (`fg_scan`), the 128-byte roll stays the safety net.
+  The writers run ~12 times a tick in play.  `logic_test.py` accepts a change covered by its row's mark.
+  `COMMANDO_FG_ROWS=0` builds the old flag everywhere.
+* **Sprite slots keep their y table pointer** (`SL_YTAB`, the slot 24 -> 28 bytes): one `move.l` instead of `lea` +
+  `add.w` a drawn sprite.  The rest of R-Type's lean loop (state kept in registers) does not carry over: the generated
+  sprite routines leave only d0-d3 free, and the walk over all 96 entries (~3.7k a picture) has no cheaper form.
+
+Musashi (same 64 KB offset of the screens, `-D SCREEN_PAD`): a picture 153.7k -> 152.6k (marks) -> 152.3k (both);
+the logic 49.3k -> 49.7k a tick (the marks).  Hatari (`bench.sh PLAY=1`, from VBL 900, single runs):
+
+| build | game speed | pictures/s | slowest 100 VBLs |
+|---|---|---|---|
+| before | 100% | 26.5 | 54 ticks / 18 pictures |
+| row marks | 100% | 27.0 | 53 / 18 |
+| row marks + slot y pointer | 100% | 27.1 | 53 / 19 |
+| the same, no pad (as built) | 100% | 27.0 | 54 / 19 |
+
+About +2% pictures, mostly from the marks; the heavy scenes are not lifted (they need ~15-20% more).  A/B builds must
+keep the screens' 64 KB offset (`-D SCREEN_PAD=n`, before `screen_area`): moving them 2.8 KB moved `generic_part`
+(sprites across a 64 KB boundary) from 1.3k to 5.5k a picture in the profile window.
+
 ## Translator speed (2026-10-09)
 
 `gen.py` goes through `translate.compile_code` with `z80x.FAST` (A' F' BC' DE' HL' in the upper words of d0-d3 / d6,
