@@ -55,7 +55,8 @@ COVER = {
     "commando": [("ref/cover.py", [1, 2, 3], 12000)],
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
     "rtype": [("ref/cover.py", [1], 6000), ("ref/cover.py", [4, 5, 6], 12000),   # 1: attract; 4-6: play
-              ("ref/cover.py", [8], 20000), ("ref/cover.py", [9, 10], 40000)],   # 8-10: Invulnerability (stage 2)
+              ("ref/cover.py", [8], 20000), ("ref/cover.py", [9], 40000),        # 8-12: Invulnerability
+              ("ref/cover.py", [10, 11, 12], 86000)],                            # 10-12: all 8 stages (2026-10-31)
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry

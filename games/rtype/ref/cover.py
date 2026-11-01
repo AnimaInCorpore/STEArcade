@@ -1,6 +1,7 @@
 """Coverage of R-Type's main CPU program (V30) on the reference board (engine/m72board.py).
 
     venv/bin/python games/rtype/ref/cover.py SEED FRAMES      -> build/rtype/cover_SEED.pkl
+    venv/bin/python games/rtype/ref/cover.py SEED FRAMES MORTAL_AT -> build/rtype/cover_SEED_mMORTAL_AT.pkl
 
 Inputs (IN0 / IN1 active low): seeds 1-3 the attract mode (a coin late); 4-7 coin, start and random play (the ship
 dies, the game ends, coin and start again); 8-15 the same with the Invulnerability DIP switch (SW2:7) on and the fire
@@ -158,7 +159,7 @@ def press(m, f, seed, rng, state):
     m.in0 = 0xFFFF & ~bits
 
 
-def run(seed, frames, out=None):
+def run(seed, frames, out=None, mortal_at=-1):
     m = M72("rtype")
     if seed >= 8:
         m.dsw &= ~0x4000                                # Invulnerability
@@ -166,11 +167,13 @@ def run(seed, frames, out=None):
     rng = random.Random(seed)
     state = dict(hold=0, bits=0)
     for f in range(frames):
+        if f == mortal_at:                              # (from here the Invulnerability switch off: the deaths, the
+            m.dsw |= 0x4000                             # game over, the ranking and the name entry of a late stage)
         press(m, f, seed, rng, state)
         m.run_frame()
     data = finish(rec)
     data.update(frames=frames, seed=seed)
-    out = out or build_dir("rtype") / ("cover_%d.pkl" % seed)
+    out = out or build_dir("rtype") / ("cover_%d%s.pkl" % (seed, "_m%d" % mortal_at if mortal_at >= 0 else ""))
     with open(out, "wb") as fh:
         pickle.dump(data, fh)
     return m, data
@@ -179,5 +182,6 @@ def run(seed, frames, out=None):
 if __name__ == "__main__":
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     frames = int(sys.argv[2]) if len(sys.argv) > 2 else 3000
-    m, data = run(seed, frames)
+    mortal = int(sys.argv[3]) if len(sys.argv) > 3 else -1     # (MORTAL_AT: -> cover_SEED_mMORTAL_AT.pkl)
+    m, data = run(seed, frames, mortal_at=mortal)
     print("seed %d: %d frames, %d distinct (cs, ip)" % (seed, frames, len(data["exec"])))

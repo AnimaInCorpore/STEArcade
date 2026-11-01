@@ -639,6 +639,57 @@ k	set	k+1
 	jmp	R0565A_t
     endc
 
+;
+; 0040:F5C1: an object's movement script, [BP+17h] steps a frame from DS1:[BP+14h], a byte a step (RCL AL six times,
+; CY in 0): bit 7 - the animation [BP+16h] = the byte & 1Fh, the step not counted; bits 5 / 6 - x [BP+4h] moved
+; (5 set: +1, with 6 set -1); bits 3 / 4 - y [BP+8h] the same; bit 2 - the segment's end (the translation from
+; 0040:F60E, BW, CW, AL as there).  The last step's INC [BP+14h], DBNZ, CLR1 CY and RET are the translation's
+; (0040:F5EA): the flags as the arcade's.  ~25 callers; stage 7: ~12% of the logic translated.
+nat_mscr:
+	moveq	#0,d1
+	move.b	22(a4,d6.l),d1		; CW = [BP+17h] (CH 0)
+	beq	R0F9C1_t		; (0: the arcade's 65536 steps)
+	lea	(a4,d6.l),a1
+	move.w	20(a1),d3		; BW = [BP+14h]
+.l:	moveq	#1,d7
+	eor.w	d3,d7
+	move.b	(a2,d7.l),d0		; AL = DS1:[BW]
+	bmi.s	.anim
+	btst	#5,d0
+	beq.s	.x0
+	btst	#6,d0
+	bne.s	.xm
+	addq.w	#1,4(a1)
+	bra.s	.x0
+.xm:	subq.w	#1,4(a1)
+.x0:	btst	#3,d0
+	beq.s	.y0
+	btst	#4,d0
+	bne.s	.ym
+	addq.w	#1,8(a1)
+	bra.s	.y0
+.ym:	subq.w	#1,8(a1)
+.y0:	move.b	d0,d7			; AL after the six RCLs: (byte & 3) << 6 | byte >> 3, CY = bit 2
+	lsr.b	#3,d7
+	btst	#2,d0
+	bne.s	.end
+	lsl.b	#6,d0
+	or.b	d7,d0
+	cmp.w	#1,d1
+	beq	R0F9EA			; (the last step: INC [BP+14h], DBNZ, CLR1 CY, RET)
+	addq.w	#1,20(a1)		; INC [BP+14h]
+	addq.w	#1,d3
+	subq.w	#1,d1
+	bra.s	.l
+.end:	lsl.b	#6,d0
+	or.b	d7,d0
+	jmp	R0FA0E
+.anim:	and.b	#$1F,d0			; [BP+16h] = AL & 1Fh, INC CW, then INC [BP+14h], DBNZ: CW as before
+	move.b	d0,23(a1)
+	addq.w	#1,20(a1)
+	addq.w	#1,d3
+	bra.s	.l
+
 ; ---------------------------------------------------------------------------------------------------------------------
 ; 0040:EB20 / EB53 / EB86 / EBBB: a map block into the tile video RAM (DS1:IY), 8 x 6 cells from the ROM (DS0 = $3000,
 ; IX = (AW & $3FFF) * 144: cells of 3 bytes, each copied as 4 bytes - the 4th is the next cell's first), rows $100
@@ -885,10 +936,14 @@ ECOLL	macro
 .m2:	addq.l	#2,a0
 .m3:	addq.l	#2,a0
 .nx:	dbf	d4,.bl
-.rej:	move.w	es_last,a1		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
-	move.w	es_lastip,d7		; the 3 ...
-	move.w	a1,d4
-	bne.s	.rend
+.rej:	move.w	es_last,d4		; the box the arcade tests last (its CALL's return IP): the last active of the 24 /
+	beq.s	.r0			; the 3 (its flag still set: an enemy's handler may clear one after es_build - then
+	tst.b	(a3,d4.w)		; the arcade's full test) ...
+	beq	.full
+	move.w	d4,a1
+	move.w	es_lastip,d7
+	bra	.rend
+.r0:	move.w	d4,a1
 	move.w	$B4(a3),d0		; ... C8h / A8h by their conditions (BP: 6(sp)) ...
 	move.w	$D4(a3),d1
 	move.w	6(sp),d2
@@ -971,7 +1026,9 @@ k	set	k+1
 .chk2:	move.w	es_pred,d7
 	cmp.w	a1,d7
 	beq.s	.chk3
-	addq.b	#1,$1FF2(a3)		; (a wrong last box: 41FF3)
+	addq.b	#1,$1FF2(a3)		; (a wrong last box: 41FF3; the prediction at 41FF4, the last box tested at 41FF6)
+	move.w	d7,$1FF4(a3)
+	move.w	a1,$1FF6(a3)
 .chk3:	clr.b	es_rej
     endc
 	movem.l	(sp)+,d2/d6
@@ -1215,9 +1272,10 @@ leaf_posy:
 	LEAF24	7
 
 ; es_build: the player side's summary for nat_ecoll's broad phase, once a frame (port_frames; again after a hit):
-; the distinct live boxes (R and B not 0: those never meet a proper span) of every box the arcade may test (the ship's when its flag is clear, the Force's and the bits',
-; A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set), es_ok 2 when a box is not ordered (L > R or
-; T > B: the broad phase off), the box tested last when nothing hits (es_last: of the 24 or the 3, else 0;
+; the distinct live boxes (not L = R = 0 or T = B = 0: those never hit) of every box the arcade may test (the ship's
+; when its flag is clear, the Force's and the bits', A8h / C8h, B6h / D6h, 4D6h.. and 176h.. when their flags are set;
+; a box with L > R or T > B with its edges ordered: a superset of where the arcade's test hits it), the box tested last
+; when nothing hits (es_last: of the 24 or the 3, else 0;
 ; es_lastb: D6h / B6h / 116h).  The calls of a frame come from the enemy loop, after the player's objects moved.
 ESB	macro				; \1 IX: its box into the list
 	move.w	#\1,d4
@@ -1269,30 +1327,23 @@ k	set	0
 	ESF	$176+$20*k,$F56F
 k	set	k+1
 	endr
-	tst.w	es_last			; (no slot: with [B4h] and [D4h] 0 the arcade tests C8h last - BP is never 0)
-	bne.s	.x
-	move.w	$B4(a3),d0
-	or.w	$D4(a3),d0
-	bne.s	.x
-	move.w	#$C8,es_last
-	move.w	#$F503,es_lastip
 .x:	movem.l	(sp)+,d0-d4/a0-a1
 	rts
-.box:	movem.l	2(a3,d4.w),d0-d1	; the box at IX d4 into the list (not when dead: R or B 0; once):
-	tst.w	d0			; d0 L:R, d1 T:B
+.box:	movem.l	2(a3,d4.w),d0-d1	; the box at IX d4 into the list (not when dead: L and R 0, or T and B 0 -
+	tst.l	d0			; with only R 0 the arcade still hits from the left; once): d0 L:R, d1 T:B
 	beq.s	.bx
-	tst.w	d1
+	tst.l	d1
 	beq.s	.bx
-	move.l	d0,d2			; (L > R or T > B: the overlap is not the arcade's test)
-	swap	d2
-	cmp.w	d0,d2
+	move.l	d0,d2			; (L > R or T > B: the arcade hits such a box only within [min, max] of its edges -
+	swap	d2			; x < L <= x + [BW+2], or T <= y with y + [BW+4] < B -: the box with its edges
+	cmp.w	d0,d2			; ordered is a superset, still a valid rejection)
 	bls.s	.o1
-	move.b	#2,es_ok
+	swap	d0
 .o1:	move.l	d1,d2
 	swap	d2
 	cmp.w	d1,d2
 	bls.s	.o2
-	move.b	#2,es_ok
+	swap	d1
 .o2:	lea	es_boxes,a1
 	move.w	es_n,d2
 	bra.s	.q

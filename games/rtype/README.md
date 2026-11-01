@@ -82,14 +82,17 @@ DIP switches: MAME's defaults (3 lives, demo sounds on, coin mode 1).
 ## State
 
 * The logic is exact: the translation runs in lock-step with the reference board's port schedule
-  (`tools/logic_test.py`; attract and play, up to 40000 frames, the work RAM, video RAMs, palettes, sprite RAM and
-  registers equal every frame).  The reference board (`engine/m72board.py`) equals MAME 0.289 in all RAM.
+  (`tools/logic_test.py`; attract and play, the work RAM, video RAMs, palettes, sprite RAM and registers equal every
+  frame).  Since 2026-11-01 through all eight stages and the ending: coverage seeds 10-12 to 86000 frames
+  (`ref/cover.py`, Invulnerability), seed 10 in lock-step 45000-84000 with the stage build's natives.  The broad
+  phase of the enemy collision test (`src/natives.s` es_build) dropped a box with only its right (or bottom) edge 0
+  as dead; the arcade still hits it from the left (stages 7 and 8): only L = R = 0 or T = B = 0 is dead now.  The reference board (`engine/m72board.py`) equals MAME 0.289 in all RAM.
 * The port starts after the boot (the ROM and RAM tests are not translated): `tools/snapshot.py` takes the reference's
   state at frame 400 (the title, the CPU idle), embedded in the program.
 * The display is the centred 320-pixel window of the 384-pixel picture (x 32-351): the left part of "1P-" and of the
   title's "R" are cut.  The status bar (lines 240-255, a raster split at line 239) gets its own palette.
-* Speed (Hatari, F030Arcade build, STE 4 MB): attract ~23 arcade frames a second (41% of the arcade's 55), play
-  ~16 (29%), 5.5-6.5 pictures a second.  The game slows down evenly (frames are dropped when the logic falls behind,
+* Speed of the first renderer (`engine/rt/m72render.s`, before the stage renderer; Hatari, STE 4 MB): attract ~23
+  arcade frames a second, play ~16, 5.5-6.5 pictures a second.  The stage renderer's numbers: "Speed on the STE" below.  The game slows down evenly (frames are dropped when the logic falls behind,
   not skipped by the game itself).
 * Palette fades are left out (2026-10-29, `src/natives.s`, FADE_SNAP): the fade loop sets each colour to its target at
   once; the fade's counter still runs, so the game sees each fade end at the same frame.  `logic_test.py --snap` checks
@@ -105,6 +108,68 @@ DIP switches: MAME's defaults (3 lives, demo sounds on, coin mode 1).
   `tools/stage_model.py`: the picture the stage renderers will draw (no stars - BG star tiles and the star sprites
   $AF2-$AF7 -, BG locked to FG within 2 pixels, sprites over the tiles, fixed colours).
 * No sound: the main CPU's commands to the sound CPU (port $00) are kept in a ring (`src/core.s`), for a player.
+
+## Speed on the STE: what is needed
+
+The goal (the user): a steady 25 pictures a second at the arcade's full speed (50 arcade frames a second in the port's
+schedule).  The rule: keep the gameplay, drop what only costs work (effects, parallax, colour cycling); the logic stays
+exact.  Development targets the 14 MB machine.
+
+Measured 2026-10-31 / 11-01 (Hatari, `tools/bench.sh` REPLAY=seed:start:end FAST=true, recorded play; the stage
+renderer `src/stage.s`):
+
+| stage (recording) | arcade frames / s | pictures / s | where the time goes |
+|---|---|---|---|
+| 1, BG middle section (seed 8 3000-8000) | 36.4 | 19.8 | logic 40%, sprites 22%, sync 16% |
+| 2, tunnel (seed 10 11000-13000) | 34.1 | 17.1 | |
+| 3, warship (seed 1 12600-14400) | 25.3 | 14.4 | the slowest: the layer drawn as pieces |
+| 4 (seed 10 33000-36000) | 40.9 | 22.9 | |
+| 5 (seed 10 46500-49500), BG locked | 19.2 | 14.4 | compose 42%: 165 whole recompositions (the BG lock) |
+| 5, BG as a strip (2026-11-01) | 32.5 | 25.3 | waiting 36%, compose 19%, logic 15%: 36 whole recompositions |
+| 6, 7, 8 (seed 10 56000- / 64500- / 74000-) | - | - | crashed: an address error at the ranking (below); measured again with `-D INVULN` |
+
+Musashi, a picture (CPU + Blitter) median / 90th percentile, before -> after the strips, no BG and frozen rows:
+stage 5 198k / 1.07M -> 174k / 404k; stage 6 198k / 6.0M -> 159k / 244k; stage 7 213k / 366k -> 212k / 335k (its
+recording is mostly the boss, the scroll stopped); stage 8 458k / 7.8M -> 144k / 529k.  Logic, stage 7 (seed 10
+65000-65030, profile.py): 122k -> 98k cycles an arcade frame - the collision broad phase no longer switched off by a
+box with L > R (31k -> 13k), the movement script native (`src/natives.s` nat_mscr, 0040:F5C1: 15k -> 8k).
+
+**Benches of seeds 8+ need `-D INVULN`**: their recordings play with the Invulnerability switch; without it the
+player dies in Hatari, the replay ends in a game over.  That showed a bug: **the ranking's records (11 bytes from
+2F51h) put a rank's words at an odd address, and the coverage had never run the ranking** - the translation took the
+word stores as even, the STE raised an address error (Musashi has none, so the lock-step never saw it).  `tools/gen.py`
+ANY_PARITY: the ranking and name entry's word accesses test their parity at run time, their byte accesses too.
+`logic_test.py --mortal-at F` / `ref/cover.py SEED FRAMES MORTAL_AT`: the switch off from frame F - the late stages'
+deaths, game over, ranking and name entry, which the invulnerable coverage never reached (badpc 0592E).
+
+What costs most, and what is done about it:
+
+1. **A BG at its own speed.** The renderer composes the BG with the FG cell by cell, locked to the FG; when the
+   arcade's offset drifts more than 4 pixels the lock is taken again and everything is composed again (~1-6M cycles).
+   Stage 5's BG runs at 1/2 of the FG's speed, stage 6's at 2x, stage 7's at 3/4: relocks every few frames.  The cure
+   (the user, 2026-11-01): no parallax.  Stage 6: no BG (decorative; `stage_assets.py` NO_BG_SCENES, flag bit 5).
+   Stages 5 and 7: the BG as a strip locked to the FG, as stage 2's tunnel (`tools/stage_bg.py`; BG_STRIP_SCENES,
+   the strip's index in flag bits 6-7); while the BG map holds walls (codes below 7D0h: stage 7's boss) the locked BG
+   instead, so walls are never drawn where they are not.
+2. **Colour cycling.** A palette row that switches its target recomposes every cell drawn with it.  Stage 8 switches
+   tile row 2 (82h / 8Ah) 254 times in 3000 frames.  The cure: frozen rows keep their scene's reference target
+   (FROZEN_ROWS, the scene's SC_FRZ word; `st_palette`).  Fades the game makes in a scene that must show them keep
+   dedicated pens instead (stage 1's middle: DEDICATED - colours set, nothing composed again).
+3. **The logic.** 68-150k 68000 cycles an arcade frame (stage 7 117-150k, near a whole STE frame).  Next: profile
+   the heavy stages (`tools/profile.py`, `logic_test.py --render-profile`) and make their hot routines natives or
+   leaf calls (`src/natives.s`, `tools/gen.py` NATIVES / LEAF_CALLS), each checked in lock-step.
+4. **Stage 3's warship.** The scene with two full layers; already the smaller layer as pieces (hybrid).  Next after
+   the logic.
+5. Then the smaller shares: the sprites (6-22%), the log copy into the three buffers (16-17%).
+
+How each change is checked: `logic_test.py` in lock-step (with `--snap --list` for the stage build); the pictures
+against the model (`tools/stage_test.py build/rtype/stage_states_*.pkl --quiet --stop 0`, recordings of every stage:
+`logic_test.py END --seed S --start F --snap --list --record ...`); speed in Hatari, logic and picture rates kept
+apart.  For an instruction-level comparison (`logic_test.py --steplock F`) build with `NO_NATIVES=1 NO_INLINE=1`
+(natives and inlined calls skip the labels the interpreter stops at).
+
+Memory: with every stage's sprites pre-coloured (1112 definitions, 3437 colourings) RTYPE.PRG is 5.9 MB - fine on
+the 14 MB machine, far over the 3.7 MB release limit (per-stage loading or packing, decided later).
 
 ## Method
 

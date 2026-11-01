@@ -101,6 +101,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=600)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--mortal-at", type=int, default=-1, help="from this frame the Invulnerability switch off (seeds 8+): "
+                    "a long run's game over, the ranking and the name entry")
     ap.add_argument("--trace", type=int, default=-1, help="frame whose translated labels are logged")
     ap.add_argument("--start", type=int, default=0, help="frames the reference runs alone before the comparison")
     ap.add_argument("--steplock", type=int, default=-1, help="frame run instruction by instruction against the "
@@ -378,6 +380,8 @@ def main():
         m.dsw &= ~0x4000
     cycles = 0
     for f in range(args.frames):
+        if f == args.mortal_at:
+            m.dsw |= 0x4000
         cover.press(m, f, args.seed, rng, state)
         if f < args.start:
             m.run_frame_port()                          # (--start: the reference alone, then its state)
