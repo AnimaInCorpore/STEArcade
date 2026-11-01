@@ -12,20 +12,17 @@
 m72_sync:
 	movem.l	d0-d7/a0-a6,-(sp)
 	lea	v30_vmarks,a4
-	moveq	#0,d6			; the block
+	moveq	#0,d6			; the 256-byte block: its four 64-byte marks (tools/gen.py MARKS) as a long
 .scan:	cmp.w	#$180,d6
 	bhs	.spr
-	move.l	(a4,d6.w),d0		; (four blocks at a time)
-	bne.s	.some
-	addq.w	#4,d6
-	bra.s	.scan
-.some:	moveq	#4-1,d5
-.four:	tst.b	(a4,d6.w)
+	move.w	d6,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	tst.l	(a4,d0.w)
 	beq.s	.next
-	clr.b	(a4,d6.w)
+	clr.l	(a4,d0.w)
 	bsr	sync_block
 .next:	addq.w	#1,d6
-	dbf	d5,.four
 	bra.s	.scan
 .spr:	tst.b	m72_dma_done
 	beq.s	.bands
@@ -128,7 +125,7 @@ swap_copy:
 ; the whole video state marked (the start)
 m72_sync_all:
 	lea	v30_vmarks,a0
-	move.w	#$180/4-1,d0
+	move.w	#$600/4-1,d0
 .l:	move.l	#-1,(a0)+
 	dbf	d0,.l
 	st	m72_dma_done

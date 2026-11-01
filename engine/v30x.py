@@ -717,11 +717,13 @@ class Emitter:
         return None
 
     def emit_store_mark(self, v, ins):
-        """the store's 256-byte block marked (store_marks): a0 = its 68000 address, then the range check"""
+        """the store's block marked (store_marks; 256 bytes, or 1 << its fifth value): a0 = its 68000 address, then
+        the range check"""
         what = self.marks_store(v, ins)
         if what is None:
             return
-        pred, base, size, marks = self.p.store_marks
+        pred, base, size, marks, *rest = self.p.store_marks
+        shift = rest[0] if rest else 8                  # (a mark per 1 << shift bytes)
         live = self.live(v) & CCR
         self.stats["store mark"] += 1
         if live:
@@ -743,7 +745,7 @@ class Emitter:
             self.e("sub.l #%s,d7" % base)
             self.e("cmp.l #$%X,d7" % size)
             self.e("bcc.s %s" % skip)
-            self.e("lsr.l #8,d7")
+            self.e("lsr.l #%d,d7" % shift)
             self.e("lea %s,a0" % marks)
             self.e("st (a0,d7.l)")
             self.lines.append(skip + ":")

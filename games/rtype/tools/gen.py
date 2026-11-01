@@ -142,7 +142,8 @@ def port_out(p, w):
     return None
 
 
-MARKS = ("v30_image+$C8000", 0x18000, "v30_vmarks")     # (the palettes and the video RAMs: 256-byte blocks)
+MARKS = ("v30_image+$C8000", 0x18000, "v30_vmarks", 6)  # (the palettes and the video RAMs: 64-byte blocks - 16
+#                                                           map cells: src/stage.s st_vram compares only those, 2026-11-01)
 WATCHED = ("fg", "bg", "pal")
 
 

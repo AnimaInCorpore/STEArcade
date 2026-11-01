@@ -781,7 +781,7 @@ nat_tblk:
 	move.l	(sp),a0
 	move.l	d7,(sp)
 	move.l	a0,d7
-	lsr.l	#8,d7
+	lsr.l	#6,d7			; (64-byte blocks)
 	lea	v30_vmarks,a0
 	st	(a0,d7.l)
 	move.l	(sp)+,d7
@@ -796,12 +796,12 @@ nat_tblk:
 ;              the last ADD BW,2h; CW 0).
 ; The video blocks marked once (the first and the last word: at most 64 bytes, two blocks).
 ; ---------------------------------------------------------------------------------------------------------------------
-nat_mark:				; a0 = an address in the image: its 256-byte block marked (as a translated store)
+nat_mark:				; a0 = an address in the image: its 64-byte block marked (as a translated store)
 	move.l	a0,d7
 	sub.l	#v30_image+$C8000,d7
 	cmp.l	#$18000,d7
 	bcc.s	.n
-	lsr.l	#8,d7
+	lsr.l	#6,d7			; (64-byte blocks)
 	lea	v30_vmarks,a0
 	st	(a0,d7.l)
 .n:	rts

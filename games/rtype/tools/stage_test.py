@@ -42,7 +42,7 @@ h_wait:	bra.s	h_wait
 	section	bss,bss
 	even
 v30_image:	ds.b	$E0000
-v30_vmarks:	ds.b	$180
+v30_vmarks:	ds.b	$600
 m72_objs:	ds.b	$400
 m72_objs_end:	ds.w	1
 m72_scroll:	ds.w	4
@@ -120,15 +120,15 @@ class Harness:
 
     def put_state(self, st):
         img = self.sym["v30_image"]
-        marks = bytearray(0x180)
+        marks = bytearray(0x600)                         # (a mark per 64 bytes: tools/gen.py MARKS)
         for base, key in ((0xC8000, "pal0"), (0xCC000, "pal1"), (0xD0000, "fg"), (0xD8000, "bg")):
             data = st[key]
             old = self.prev[key] if self.prev else None
-            for b in range(len(data) // 256):
-                if old is None or data[256 * b:256 * b + 256] != old[256 * b:256 * b + 256]:
-                    marks[((base - 0xC8000) >> 8) + b] = 0xFF
+            for b in range(len(data) // 64):
+                if old is None or data[64 * b:64 * b + 64] != old[64 * b:64 * b + 64]:
+                    marks[((base - 0xC8000) >> 6) + b] = 0xFF
             self.mem.w_block(img + base, swap(data))
-        m = bytes(self.mem.r_block(self.sym["v30_vmarks"], 0x180))
+        m = bytes(self.mem.r_block(self.sym["v30_vmarks"], 0x600))
         self.mem.w_block(self.sym["v30_vmarks"], bytes(a | b for a, b in zip(m, marks)))
         for r in range(32):                             # (the palette rows' records: their targets, src/stage.s)
             self.mem.w16(img + 0x42D34 + 12 * r, st["recs"][r])
@@ -279,6 +279,8 @@ def main():
         print("%d pictures: cycles (CPU + Blitter) median %d, 10%% %d, 90%% %d, max %d (frame %d)" % (
             len(tot), np.median(tot), np.percentile(tot, 10), np.percentile(tot, 90), tot.max(),
             costs[int(tot.argmax())][0]))
+    if "st_nclr" in h.sym:
+        print("sprite rectangles cleared %d" % h.r32("st_nclr"))
     print("FAIL" if fails else "PASS")
     return 1 if fails else 0
 

@@ -181,16 +181,16 @@ main_mark_range:
 	move.l	a0,d7
 	bpl.s	.lo
 	moveq	#0,d7
-.lo:	lsr.l	#8,d7			; the first block
+.lo:	lsr.l	#6,d7			; the first block
 	move.l	a1,-(sp)
 	move.l	(sp)+,a1
 	cmpa.w	#0,a1
 	blt.s	.r			; (wholly below)
 	exg	d7,a1
-	lsr.l	#8,d7			; the last block
-	cmp.l	#$17F,d7
+	lsr.l	#6,d7			; the last block
+	cmp.l	#$5FF,d7
 	bls.s	.in
-	move.l	#$17F,d7
+	move.l	#$5FF,d7
 .in:	exg	d7,a1
 	lea	v30_vmarks,a0
 .l:	cmpa.l	d7,a1
@@ -275,7 +275,7 @@ m72_raster:	ds.w	1		; port $06: the raster interrupt's line + 128
 m72_port02:	ds.w	1		; port $02: bit 3 display off, bit 2 flip
 m72_dma_done:	ds.b	1		; (a sprite DMA since the last picture: video.s)
 	even
-v30_vmarks:	ds.b	$180		; (a byte per 256 bytes of $C8000-$DFFFF, the palettes and video RAMs: set after the
+v30_vmarks:	ds.b	$600		; (a byte per 64 bytes of $C8000-$DFFFF, the palettes and video RAMs: set after the
 					; translated stores there, tools/gen.py store_marks; video.s copies the marked blocks)
 sound_head:	ds.w	1
 sound_cmds:	ds.b	64

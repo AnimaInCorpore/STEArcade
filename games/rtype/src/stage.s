@@ -758,11 +758,15 @@ st_rowcells:
 ; BG cells that are not empty - what the model draws and this renderer does not).
 ; ======================================================================================================================
 st_vram:
-	lea	v30_vmarks+$80,a4
-	moveq	#0,d6			; the row
-.r:	tst.b	(a4,d6.w)
-	beq	.n
-	clr.b	(a4,d6.w)
+	lea	v30_vmarks+$200,a4	; (a mark per 64 bytes: a row's four, 16 cells each)
+	moveq	#64-1,d4		; (the rows left: the rows without marks skipped 4 marks at a time)
+.f:	tst.l	(a4)+
+	dbne	d4,.f
+	beq	.fx
+	move.l	-4(a4),d5
+	clr.l	-4(a4)
+	moveq	#63,d6			; the row
+	sub.w	d4,d6
 	move.w	d6,d0
 	lsl.w	#8,d0			; (256 bytes a row)
 	lea	v30_image+$D0000,a0
@@ -777,12 +781,26 @@ st_vram:
 	lea	st_fgcells,a5
 	add.w	d1,a5
 	lea	st_fgcolok,a6
-	moveq	#64-1,d3		; (the cells left: the column = 63 - d3)
+	moveq	#15,d7			; (the quarter's last column)
+.q:	rol.l	#8,d5			; (its mark)
+	tst.b	d5
+	bne.s	.qm
+	lea	64(a0),a0
+	lea	64(a1),a1
+	bra	.qe
+.qm:
+    ifd SIM
+	addq.l	#1,st_nvq
+    endc
+	moveq	#16-1,d3		; (the cells left: the column = d7 - d3)
 .c:	cmpm.l	(a0)+,(a1)+		; (the unchanged cells: 30 cycles each)
 	dbne	d3,.c
-	beq.s	.n			; (the row's end, the last cell equal)
+	beq	.qe			; (the quarter's end, the last cell equal)
+    ifd SIM
+	addq.l	#1,st_nvc
+    endc
 	move.l	-4(a0),-4(a1)
-	moveq	#63,d2			; the column
+	move.w	d7,d2			; the column
 	sub.w	d3,d2
 	clr.b	(a2,d2.w)		; (composed again: its column looked at again)
 	clr.b	(a3,d2.w)
@@ -806,15 +824,20 @@ st_vram:
 	move.l	(sp)+,a1
 	st	st_bardirty
 .cs:	dbf	d3,.c
-.n:	addq.w	#1,d6
-	cmp.w	#64,d6
-	blo	.r
-	lea	v30_vmarks+$100,a4	; BG: the cells that are not empty counted (st_bgn), a changed one composed again in
+.qe:	add.w	#16,d7
+	cmp.w	#64+15,d7
+	blo	.q
+	dbf	d4,.f
+.fx:	lea	v30_vmarks+$400,a4	; BG: the cells that are not empty counted (st_bgn), a changed one composed again in
 	lea	st_bgstar,a5		; the BG scroll mode
-	moveq	#0,d6
-.br:	tst.b	(a4,d6.w)
-	beq	.bn
-	clr.b	(a4,d6.w)
+	moveq	#64-1,d4
+.bf:	tst.l	(a4)+
+	dbne	d4,.bf
+	beq	.bx
+	move.l	-4(a4),d5
+	clr.l	-4(a4)
+	moveq	#63,d6
+	sub.w	d4,d6
 	move.w	d6,d0
 	lsl.w	#8,d0
 	lea	v30_image+$D8000,a0
@@ -826,10 +849,21 @@ st_vram:
 	lsl.w	#6,d1
 	add.w	d1,a2
 	lea	st_colok,a3
-	moveq	#64-1,d3
+	moveq	#15,d7
+.bq:	rol.l	#8,d5
+	tst.b	d5
+	bne.s	.bm
+	lea	64(a0),a0
+	lea	64(a1),a1
+	bra	.bqe
+.bm:
+    ifd SIM
+	addq.l	#1,st_nvbq
+    endc
+	moveq	#16-1,d3
 .bc:	cmpm.l	(a0)+,(a1)+
 	dbne	d3,.bc
-	beq	.bn
+	beq	.bqe
 	move.w	-4(a1),d0		; (empty before) - (empty now): +1 a cell that is not empty now
 	and.w	#$FFF,d0
 	moveq	#0,d1
@@ -847,7 +881,7 @@ st_vram:
 	sub.w	d0,d1
 	add.w	d1,st_bgw
 	move.l	-4(a0),-4(a1)
-	moveq	#63,d2
+	move.w	d7,d2
 	sub.w	d3,d2
 	move.l	a2,-(sp)		; (the BG image's cell too)
 	lea	st_bgcolok,a2
@@ -877,10 +911,11 @@ st_vram:
 	clr.b	(a2,d2.w)
 	clr.b	(a3,d2.w)
 .bs:	dbf	d3,.bc
-.bn:	addq.w	#1,d6
-	cmp.w	#64,d6
-	blo	.br
-	rts
+.bqe:	add.w	#16,d7
+	cmp.w	#64+15,d7
+	blo	.bq
+	dbf	d4,.bf
+.bx:	rts
 
 ; ======================================================================================================================
 ; The bands: the playfield's scroll (before the raster interrupt when it splits the picture), the status bar (a band
@@ -1014,16 +1049,7 @@ st_bands:
 	tst.b	st_bgon			; BG scroll mode for the rest of the scene)
 	bne.s	.m1
 	movem.l	d2-d7/a0-a1,-(sp)
-	lea	st_fgrc,a0
-	move.w	st_fgy,d0
-	move.w	st_fgx,d1
-	bsr	st_meas
-	move.w	d2,-(sp)
-	lea	st_bgrc,a0
-	move.w	st_bgy,d0
-	move.w	st_bgx,d1
-	bsr	st_meas
-	cmp.w	(sp)+,d2
+	bsr	st_meas2
 	movem.l	(sp)+,d2-d7/a0-a1
 	bls.s	.md
 .m1:	st	d2
@@ -1110,6 +1136,44 @@ st_wall:
 .n:	moveq	#0,d0
 	rts
 
+; st_meas2: the hybrid's crossover test: the flags of (the BG's chunks with pixels in its window) - (the FG's), each
+; layer counted again (st_meas) only when a row's chunks changed (st_mdirty) or a window moved to another chunk or row
+st_meas2:
+	move.w	st_fgy,d0		; the key: each layer's window in rows and chunks
+	lsr.w	#3,d0
+	lsl.w	#5,d0
+	move.w	st_fgx,d1
+	lsr.w	#4,d1
+	and.w	#31,d1
+	or.w	d1,d0
+	swap	d0
+	move.w	st_bgy,d0
+	lsr.w	#3,d0
+	lsl.w	#5,d0
+	move.w	st_bgx,d1
+	lsr.w	#4,d1
+	and.w	#31,d1
+	or.w	d1,d0
+	tst.b	st_mdirty
+	bne.s	.m
+	cmp.l	st_mkey,d0
+	beq.s	.c
+.m:	sf	st_mdirty
+	move.l	d0,st_mkey
+	lea	st_fgrc,a0
+	move.w	st_fgy,d0
+	move.w	st_fgx,d1
+	bsr	st_meas
+	move.w	d2,st_mfg
+	lea	st_bgrc,a0
+	move.w	st_bgy,d0
+	move.w	st_bgx,d1
+	bsr	st_meas
+	move.w	d2,st_mbg
+.c:	move.w	st_mbg,d2
+	cmp.w	st_mfg,d2
+	rts
+
 ; st_meas: a0 = a layer's rows' chunks with pixels (st_fgrc, st_bgrc), d0 = its window's first line, d1 = its x: d2 =
 ; the chunks with pixels in the window (30 rows of 22 chunks; st_bands' layer choice)
 st_meas:
@@ -1144,6 +1208,10 @@ st_meas:
 ; ======================================================================================================================
 st_compose:
 	move.w	st_loghead,st_logstart
+	move.b	st_bgon,d0		; (the sprites' rectangles may be cleared: no BG drawn - st_clrtest)
+	or.b	st_stripon,d0
+	or.b	st_lkon,d0
+	seq	st_clrok
 	tst.b	st_bgon
 	bne	st_composeb
 	tst.b	st_stripon
@@ -1259,6 +1327,20 @@ st_cell:
 	move.w	2(a0,d0.w),d2		; attribute: colour 0-3
 	and.w	#15,d2
 	and.w	#$CFFF,d1		; (bits 12, 13 unused: bit 12 marks a BG strip's tile in st_tile)
+	movem.l	d3-d4,-(sp)		; the cell black or not (st_cz) and its chunk's bit (st_crc: st_clrtest) - a FG
+	moveq	#1,d3			; tile without an opaque pixel, nothing under it (a strip or the locked BG: not
+	tst.b	st_stripon		; black)
+	bne.s	.cz
+	tst.b	st_lkon
+	bne.s	.cz
+	move.w	d1,d0
+	and.w	#$FFF,d0
+	lea	st_fgempty,a0
+	tst.b	(a0,d0.w)
+	beq.s	.cz
+	moveq	#0,d3
+.cz:	bsr	st_czset
+	movem.l	(sp)+,d3-d4
 	lea	st_colused,a0		; (the columns each colour is composed into: st_rowcells)
 	move.w	d2,d0
 	lsl.w	#6,d0
@@ -1608,7 +1690,10 @@ st_fgcell:
 	and.b	#3,d1
 	beq.s	.x
 	bset	d0,d3
-.x:	move.l	d3,(a2)
+.x:	cmp.l	(a2),d3			; (changed: st_meas2 counts again)
+	beq.s	.xs
+	st	st_mdirty
+.xs:	move.l	d3,(a2)
 	tst.b	d4
 	beq.s	.nd
 	lea	st_fgdirty,a2		; (the row's pieces made again)
@@ -1727,7 +1812,10 @@ st_bgcell:
 	and.b	#3,d1
 	beq.s	.x
 	bset	d0,d3
-.x:	move.l	d3,(a2)
+.x:	cmp.l	(a2),d3			; (changed: st_meas2 counts again)
+	beq.s	.xs
+	st	st_mdirty
+.xs:	move.l	d3,(a2)
 	tst.b	d4
 	beq.s	.nd
 	lea	st_bgdirty,a2		; (the row's pieces made again)
@@ -2842,8 +2930,8 @@ st_obj2:
 	bra.s	.lns
 .top:	sub.w	2(sp),d3
 	move.b	d3,(a3)+
-.lns:	clr.w	(a3)+
-	move.l	a3,d6
+.lns:	clr.w	(a3)+			; (no clear test here: measured twice, 2026-11-01 - the test and the exact black
+	move.l	a3,d6			; cells cost what clearing saves; st_object's sprites - the title - have it)
 	move.w	10(a0),d3		; (a 64 KB crossing: the long-destination code)
 	add.w	d0,d3
 	scs	d3
@@ -2977,6 +3065,9 @@ st_object:
 	move.b	d1,(a1)+
 .lns:	clr.w	(a1)+
 	move.l	a1,st_dmgp
+	tst.b	st_clrok		; (over black chunks only: cleared, not copied)
+	beq.s	.draw
+	bsr	st_clrtest
 	bra.s	.draw
 .full:	move.w	st_draw,d1		; (too many: the whole buffer again next time)
 	lea	st_full,a1
@@ -3027,6 +3118,83 @@ st_object:
 .unknown:
 	addq.l	#1,st_unknown
 	rts
+
+; st_czset: d3 not 0 when the cell (d5 the map row, d6 the column) may have a pixel that is not black, else 0:
+; st_cz, its chunk's bit in st_crc (st_clrtest, st_obj2).  Keeps a0, d1, d2, d5, d6, d7 (d0, d3, d4 changed)
+st_czset:
+	move.l	a0,-(sp)
+	lea	st_cz,a0
+	move.w	d5,d0
+	lsl.w	#6,d0
+	add.w	d6,d0
+	cmp.b	(a0,d0.w),d3
+	beq.s	.s
+	move.b	d3,(a0,d0.w)
+	eor.w	#1,d0			; (the chunk's other cell)
+	or.b	(a0,d0.w),d3
+	lea	st_crc,a0
+	move.w	d5,d0
+	lsl.w	#2,d0
+	add.w	d0,a0
+	move.l	(a0),d4
+	move.w	d6,d0
+	lsr.w	#1,d0
+	bclr	d0,d4
+	tst.b	d3
+	beq.s	.b
+	bset	d0,d4
+.b:	move.l	d4,(a0)
+.s:	move.l	(sp)+,a0
+	rts
+
+; st_clrtest: the erase rectangle just recorded (a1 past it; d3 the sprite's buffer x, d4 its top line, a2 its
+; record: W, H) cleared instead of copied (its flag, st_sync) when the clean buffer is black under it - the FG mode
+; without a BG drawn (no strip, no locked BG, not the BG scroll mode), above the status bar, and no chunk of its rows
+; with a composed pixel (st_crc; the cells composed since are in the log, copied after the clearing)
+st_clrtest:
+	movem.l	d0-d2/d5-d7/a0,-(sp)
+	move.w	d4,d1			; (past the last line)
+	add.w	4(a2),d1
+	cmp.w	#ST_HUDY,d1
+	bgt.s	.no
+	move.w	d4,d0
+	bpl.s	.t
+	moveq	#0,d0
+.t:	subq.w	#1,d1			; the last line
+	cmp.w	d0,d1
+	blt.s	.no
+	add.w	st_sy,d0		; the rows: (line + sy) >> 3
+	lsr.w	#3,d0
+	add.w	st_sy,d1
+	lsr.w	#3,d1
+	sub.w	d0,d1			; (the rows - 1)
+	move.w	d3,d5			; the chunks: x >> 4 .. (x + W - 1) >> 4 (mod 32: the map's)
+	asr.w	#4,d5
+	move.w	d3,d6
+	add.w	6(a2),d6
+	subq.w	#1,d6
+	asr.w	#4,d6
+	sub.w	d5,d6
+	moveq	#2,d7
+	lsl.l	d6,d7
+	subq.l	#1,d7
+	and.w	#31,d5
+	rol.l	d5,d7
+	lea	st_crc,a0
+.r:	and.w	#63,d0
+	move.w	d0,d2
+	lsl.w	#2,d2
+	move.l	(a0,d2.w),d2
+	and.l	d7,d2
+	bne.s	.no
+	addq.w	#1,d0
+	dbf	d1,.r
+	move.w	#1,-2(a1)		; (cleared)
+    ifd SIM
+	addq.l	#1,st_nclr
+    endc
+.no:	movem.l	(sp)+,d0-d2/d5-d7/a0
+.x:	rts
 
 ; st_bake: d2 = the colour row, a2 = the whole sprite's record: a3 = its plane words in this colour (cached: the key
 ; is the record and the colouring's id: the same colours in any row, any scene share it; pre-coloured ones from
@@ -3139,11 +3307,46 @@ st_bake:
 	moveq	#0,d7
 	move.b	(a4)+,d7		; the rows
 	subq.w	#1,d7
-.row:	bsr.s	.half			; (16 pixels -> d0 planes 0 / 1, d1 planes 2 / 3)
+.row:	cmp.b	#1,d3
+	bhi.s	.wn
+	bsr	.half			; (16 pixels -> d0 planes 0 / 1, d1 planes 2 / 3)
 	tst.b	d3
 	bne.s	.w2
 	move.l	d0,(a1)+
 	move.l	d1,(a1)+
+	dbf	d7,.row
+	bra	.gn
+.wn:	lea	st_bkbuf,a2		; (a wide run, class + 1 words: the planes in order, each its words)
+	moveq	#0,d4
+	move.b	d3,d4
+.wh:	bsr	.half
+	move.l	d0,(a2)+
+	move.l	d1,(a2)+
+	dbf	d4,.wh
+	lea	st_bkbuf+0,a2		; (plane 0)
+	moveq	#0,d4
+	move.b	d3,d4
+.wp0:	move.w	(a2),(a1)+
+	addq.l	#8,a2
+	dbf	d4,.wp0
+	lea	st_bkbuf+2,a2		; (plane 1)
+	moveq	#0,d4
+	move.b	d3,d4
+.wp1:	move.w	(a2),(a1)+
+	addq.l	#8,a2
+	dbf	d4,.wp1
+	lea	st_bkbuf+4,a2		; (plane 2)
+	moveq	#0,d4
+	move.b	d3,d4
+.wp2:	move.w	(a2),(a1)+
+	addq.l	#8,a2
+	dbf	d4,.wp2
+	lea	st_bkbuf+6,a2		; (plane 3)
+	moveq	#0,d4
+	move.b	d3,d4
+.wp3:	move.w	(a2),(a1)+
+	addq.l	#8,a2
+	dbf	d4,.wp3
 	dbf	d7,.row
 	bra.s	.gn
 .w2:	move.l	d0,d4			; (32 pixels: the planes in order, each its two words)
@@ -3405,6 +3608,7 @@ st_tiles:	incbin	"stage_tiles.bin"
 	even
 st_tmask:	incbin	"stage_tmask.bin"	; (the FG tiles' opaque pixels: st_cell over a BG strip)
 st_bgstar:	incbin	"stage_bgstar.bin"	; (the BG tiles drawn empty: tools/stage_assets.py)
+st_fgempty:	incbin	"stage_fgempty.bin"	; (the FG tiles without an opaque pixel)
 	even
 st_striptab:	dc.l	st_strip0,st_strip1,st_strip2	; (stage_assets.py BG_STRIPS)
 st_strip0:	incbin	"stage_strip_s2.bin"	; (stage 2's BG: tools/stage_bg.py, stage_assets.py strips)
@@ -3472,6 +3676,9 @@ st_nclrw:	ds.l	1		; (DEBUG: the cleared rectangles' words)
 st_nfull:	ds.l	1
 st_nscene:	ds.l	1		; (scene checks)
 st_nrows:	ds.l	1		; (colour rows' tables made)
+st_nvq:		ds.l	1		; (SIM: st_vram's FG quarters scanned, FG cells changed, BG quarters scanned)
+st_nvc:		ds.l	1
+st_nvbq:	ds.l	1
 st_nbarfull:	ds.l	1		; (status bar: whole checks, cells drawn)
 st_nbarcells:	ds.l	1
 st_nbake:	ds.l	1		; (sprite colourings, pool resets)
@@ -3505,6 +3712,17 @@ st_fr0:		ds.w	1		; (st_fgdraw: a row's chunks with opaque pixels in the window, 
 st_fr1:		ds.w	1
 st_bgn:		ds.w	1		; (the BG map's cells that are not empty)
 st_bgw:		ds.w	1		; (its walls: st_wall)
+st_crc:		ds.l	64		; (a map row's chunks composed with a pixel: st_cell, st_clrtest)
+st_cz:		ds.b	4096		; (a map cell composed with a pixel)
+st_nclr:	ds.l	1		; (SIM: the sprite rectangles cleared)
+st_clrok:	ds.b	1		; (this picture: no BG drawn)
+	even
+st_bkbuf:	ds.l	2*7		; (st_bake: a wide run's words, planes 0 : 1 and 2 : 3 each)
+st_mkey:	ds.l	1		; (st_meas2: the windows counted, the counts, a row's chunks changed since)
+st_mfg:		ds.w	1
+st_mbg:		ds.w	1
+st_mdirty:	ds.b	1
+	even
 st_strp:	ds.l	1		; (a strip scene's strip)
 st_by:		ds.w	1		; (the BG scroll mode: the window's first BG map line, the FG's window, its first line)
 st_fgx:		ds.w	1

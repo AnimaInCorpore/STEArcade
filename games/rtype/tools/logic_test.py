@@ -219,7 +219,7 @@ def main():
     def render_picture(prof):
         """m72r_frame (+ m72r_vbl twice: the flip, the buffer before free) on the program's state: its cycles"""
         if not rcost:
-            mem.w_block(sym[MARKS[2]], bytes([0xFF]) * (MARKS[1] >> 8))      # (the first: everything new)
+            mem.w_block(sym[MARKS[2]], bytes([0xFF]) * (MARKS[1] >> MARKS[3]))      # (the first: everything new)
         if prof:
             lab = sorted((v, k) for k, v in sym.items() if not k.startswith(".") and k[:1] != "R")
             la = [v for v, k in lab]
@@ -402,8 +402,8 @@ def main():
         cpu.w_reg(R.A7, sp7)
         cpu.w_pc(sym["port_frame"])
         video0 = bytes(mem.r_block(img + 0xC8000, MARKS[1]))
-        pending = bytes(mem.r_block(sym[MARKS[2]], MARKS[1] >> 8))      # (--render: the marks not consumed yet)
-        mem.w_block(sym[MARKS[2]], bytes(MARKS[1] >> 8))
+        pending = bytes(mem.r_block(sym[MARKS[2]], MARKS[1] >> MARKS[3]))      # (--render: the marks not consumed yet)
+        mem.w_block(sym[MARKS[2]], bytes(MARKS[1] >> MARKS[3]))
         try:
             if PROFILE and PROFILE["start"] <= f < PROFILE["start"] + PROFILE["frames"]:
                 cycles += PROFILE["stepper"](cpu, mem, sym, labels, sym["sim_wait"])
@@ -413,9 +413,9 @@ def main():
             print("frame %d (%d after the start): %s" % (m.frame, f, ex))
             return 1
         video1 = bytes(mem.r_block(img + 0xC8000, MARKS[1]))
-        marks = bytes(mem.r_block(sym[MARKS[2]], MARKS[1] >> 8))
-        for k in range(MARKS[1] >> 8):
-            if video1[256 * k:256 * k + 256] != video0[256 * k:256 * k + 256] and not marks[k] and not os.environ.get("NO_MARKS"):
+        marks = bytes(mem.r_block(sym[MARKS[2]], MARKS[1] >> MARKS[3]))
+        for k in range(MARKS[1] >> MARKS[3]):
+            if video1[(k << MARKS[3]):(k + 1) << MARKS[3]] != video0[(k << MARKS[3]):(k + 1) << MARKS[3]] and not marks[k] and not os.environ.get("NO_MARKS"):
                 print("frame %d: video block %05X changed without its mark" % (f, 0xC8000 + 256 * k))
                 return 1
         if args.render:
@@ -460,6 +460,9 @@ def main():
         print("pictures: %d, cycles (CPU + Blitter) median %d, 10%% %d, 90%% %d, max %d" % (
             len(a), np.median(a), np.percentile(a, 10), np.percentile(a, 90), a.max()))
         if "st_switches" in sym:
+            print("st_vram: FG quarters scanned %d, FG cells changed %d, BG quarters scanned %d; sprite rectangles "
+                  "cleared %d" % (mem.r32(sym["st_nvq"]), mem.r32(sym["st_nvc"]), mem.r32(sym["st_nvbq"]),
+                                  mem.r32(sym["st_nclr"])))
             print("scene switches: %d; status bar whole checks %d, cells drawn %d; colour rows %d" % (
                 mem.r32(sym["st_switches"]), mem.r32(sym["st_nbarfull"]), mem.r32(sym["st_nbarcells"]),
                 mem.r32(sym["st_nrows"])))

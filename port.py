@@ -56,7 +56,11 @@ COVER = {
     "gunsmoke": [("ref/cover.py", list(range(1, 15)), 20000)],    # 4-14: cheats, one round each
     "rtype": [("ref/cover.py", [1], 6000), ("ref/cover.py", [4, 5, 6], 12000),   # 1: attract; 4-6: play
               ("ref/cover.py", [8], 20000), ("ref/cover.py", [9], 40000),        # 8-12: Invulnerability
-              ("ref/cover.py", [10, 11, 12], 86000)],                            # 10-12: all 8 stages (2026-10-31)
+              ("ref/cover.py", [10, 11, 12], 86000),                             # 10-12: all 8 stages (2026-10-31)
+              ("ref/cover.py", [10], 52000, [46000]), ("ref/cover.py", [10], 62000, [56000]),   # the Invulnerability
+              ("ref/cover.py", [10], 70500, [64500]), ("ref/cover.py", [10], 80000, [74000]),   # switch off from the
+              ("ref/cover.py", [11], 70500, [64000]), ("ref/cover.py", [12], 62000, [56000])], # 3rd value: late-stage
+                                                                                 # deaths, game over, ranking (2026-11-01)
     "dkong": [("ref/cover.py", [11, 12, 13, 14], 60000), ("ref/cover_stages.py", [21, 22, 23, 24], 40000),
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry
@@ -304,9 +308,9 @@ def main():
     if cmd == "cover":
         jobs = []
         wanted = [int(x) for x in rest]
-        for script, seeds, frames in COVER[game]:
+        for script, seeds, frames, *extra in COVER[game]:     # (extra: the script's further arguments)
             for s in [x for x in wanted if x in seeds] if wanted else seeds:   # (a seed given: its group's frames)
-                jobs.append([PY, game_script(game, script), str(s), str(frames)])
+                jobs.append([PY, game_script(game, script), str(s), str(frames)] + [str(x) for x in (extra[0] if extra else [])])
         if wanted and len(jobs) < len(wanted):
             sys.exit("port.py cover %s: not every seed is in COVER[%r]" % (game, game))
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as ex:

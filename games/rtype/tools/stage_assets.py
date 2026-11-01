@@ -406,6 +406,12 @@ def tiles():
             rows += bytes([b] * 4)
             rowsf += bytes([bf] * 4)
     (build_dir("rtype") / "stage_tmask.bin").write_bytes(bytes(rows + rowsf))
+    # the FG tiles without an opaque pixel: a byte per code (& $FFF), 1 empty - src/stage.s st_fgempty (a composed
+    # cell of such a tile is black: a sprite's rectangle over black chunks is erased by clearing, st_clrtest)
+    emp = bytearray(4096)
+    for code, tile in enumerate(v.tiles[0][:4096]):
+        emp[code] = 0 if any(any(r) for r in tile) else 1
+    (build_dir("rtype") / "stage_fgempty.bin").write_bytes(bytes(emp))
     # the BG tiles drawn empty (stage_model's stars): a byte per code (& $FFF), 1 empty - src/stage.s st_bgstar (the
     # BG cells that are not empty: st_bgn; the BG layer's cells)
     md = SM.Model()

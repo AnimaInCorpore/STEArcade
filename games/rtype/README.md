@@ -171,6 +171,22 @@ apart.  For an instruction-level comparison (`logic_test.py --steplock F`) build
 Memory: with every stage's sprites pre-coloured (1112 definitions, 3437 colourings) RTYPE.PRG is 5.9 MB - fine on
 the 14 MB machine, far over the 3.7 MB release limit (per-stage loading or packing, decided later).
 
+## Sound: the plan (agreed 2026-11-01, not started)
+
+R-Type's sound is the YM2151 alone (MAME 0.286 `irem/m72.cpp`: `rtype()` removes the DAC, the set has no samples
+region, `rtype_sound_portmap` has only the YM2151 and the latch; the Z80's program is RAM, loaded by the main CPU).
+The port keeps the main CPU's sound commands in a ring (`src/core.s`).  The plan:
+
+* **Effects as PCM through the DMA sound**: each effect command rendered once at build time from the exact FM sound
+  (MAME, one latch command at a time, `-wavwrite`; or a Python port of ymfm), 8-bit mono ~12.5 kHz (~12 KB a second).
+  Starting one is a few DMA register writes, no CPU while it plays.  One DMA channel: a priority rule first (a more
+  important effect replaces a lesser one); Kung-Fu Master's mixing ring (`games/kungfum`, `snd_mix`) if overlaps matter.
+* **Music on the YM2149**: the driver's register writes with the effect commands left out, through `engine/opm.py`
+  (carriers' pitch and loudness, Commando's way: 8 FM channels mixed down to 3).
+* **Care**: the driver lends music channels to effects - record effects and music apart; identify which commands are
+  effects and which are tunes; check against MAME by ear and by register logs.  Memory: a few hundred KB of effects
+  (fine on the 14 MB machine; the release size later).
+
 ## Method
 
 * **Translation** (`tools/gen.py`, `engine/v30x.py`; the design in the module's docstring and

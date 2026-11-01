@@ -101,7 +101,7 @@ def colouring_ids():
 
 def precolour(pens, shape, c):
     """the plane words src/stage.s st_bake makes of a record's pens in colouring c: per row of 16 pixels its 4 plane
-    words; of 32 the planes in order, each its 2 words"""
+    words; of 32 or more (class + 1 words) the planes in order, each its words"""
     def half(b):
         px = []
         for v in b:
@@ -111,9 +111,9 @@ def precolour(pens, shape, c):
     for cls, rows in shape:
         for _ in range(rows):
             if cls:
-                a, b = half(pens[k:k + 8]), half(pens[k + 8:k + 16])
-                out += [a[0], b[0], a[1], b[1], a[2], b[2], a[3], b[3]]
-                k += 16
+                hs = [half(pens[k + 8 * j:k + 8 * j + 8]) for j in range(cls + 1)]
+                out += [h[p] for p in range(4) for h in hs]
+                k += 8 * (cls + 1)
             else:
                 out += half(pens[k:k + 8])
                 k += 8
@@ -164,13 +164,37 @@ def compose(sprites, ents):
     return img, x0 + xs[0], y0 + ys[0]
 
 
+WIDE_MAX = 112          # (a wide run's pixels a pass at most: 7 source words, 8 with NFSR x 4 planes = 32 words)
+
+
+def cls_of(w):
+    """a piece's class: its source words - 1 (0: <= 16 pixels, 1: <= 32, 2-6: a wide run)"""
+    return 0 if w <= 16 else 1 if w <= 32 else (w + 15) // 16 - 1
+
+
 def pieces(img):
-    """the opaque pixels of a whole sprite's rows as pieces of at most 32 pixels: [(y, x0, width, aligned mask)]
-    (a row split greedily: a piece takes the opaque pixels of up to 32 columns from its first one; the mask's bit
-    width - 1 is the piece's first pixel)"""
+    """the opaque pixels of a whole sprite's rows as pieces: [(y, x0, width, aligned mask)].  A contiguous opaque run
+    wider than 32 pixels is a wide piece (stedaimakaimura's sprite_compiler.js, the user 2026-11-01: END2 $FFFF - its
+    inner words are opaque), at most WIDE_MAX pixels; the rest of a row split greedily: a piece takes the opaque
+    pixels of up to 32 columns from its first one.  The mask's bit 16 * (class + 1) - 1 is the piece's first pixel"""
     out = []
     for y in range(img.shape[0]):
         cols = np.flatnonzero(img[y])
+        if len(cols):
+            brk = np.flatnonzero(np.diff(cols) > 1)
+            rest = []
+            for a, b in zip(np.r_[cols[0], cols[brk + 1]], np.r_[cols[brk], cols[-1]]):
+                a, b = int(a), int(b)
+                if b - a + 1 <= 32:
+                    rest += range(a, b + 1)
+                    continue
+                while b - a + 1 > 32:                   # (a remainder of <= 32 pixels: the greedy pieces)
+                    w = min(WIDE_MAX, b - a + 1)
+                    n = 16 * (cls_of(w) + 1)
+                    out.append((y, a, w, ((1 << w) - 1) << (n - w)))
+                    a += w
+                rest += range(a, b + 1)
+            cols = np.array(sorted(rest), dtype=int)
         i = 0
         while i < len(cols):
             a = cols[i]
@@ -193,13 +217,21 @@ def groups_of(pcs):
     Blitter values at every shift (one setup a group: stefastbobs2's mask order) - in order of their first row"""
     g = {}
     for y, x0, w, m in pcs:
-        g.setdefault((w > 16, m, x0 & 15, w), []).append((y, x0))
+        g.setdefault((cls_of(w), m, x0 & 15, w), []).append((y, x0))
     return sorted(g.items(), key=lambda kv: kv[1][0])
 
 
 def pass_values(cls2, m, w, k):
-    """(XC, DYI, END1, END2, END3, control) of a piece (aligned mask m, width w) at skew k (stefastbobs2: a <= 16
-    piece one word when it fits, else two with NFSR; a 17-32 piece two words, or three with NFSR)"""
+    """(XC, DYI, END1, END2, END3, control) of a piece (aligned mask m, width w, class cls2) at skew k (stefastbobs2:
+    a <= 16 piece one word when it fits, else two with NFSR; a 17-32 piece two words, or three with NFSR; a wide run
+    of n words n, or n + 1 with NFSR, END2 $FFFF: its inner words are opaque)"""
+    if cls2 >= 2:
+        nw = cls2 + 1
+        xc = nw if k + w <= 16 * nw else nw + 1
+        mm = (m << (16 * (xc - nw))) >> k               # (the mask over the pass's xc destination words)
+        words = [(mm >> (16 * (xc - 1 - j))) & 0xFFFF for j in range(xc)]
+        assert all(x == 0xFFFF for x in words[1:-1]), (m, w, k)
+        return xc, (2 - 8 * (xc - 1)) & 0xFFFF, words[0], 0xFFFF, words[-1], (0xC040 if xc > nw else 0xC000) | k
     if not cls2:
         if k + w <= 16:
             xc, e1, e2, e3, ctl = 1, m >> k, 0xFFFF, 0, 0xC000 | k
@@ -216,7 +248,7 @@ def pass_values(cls2, m, w, k):
 
 def units_of_groups(grps):
     """the groups (one mask a group) as units: (cls2, width, [(y, x0, mask)])"""
-    return [(cls2, w, [(y, x0, m) for y, x0 in rows]) for (cls2, m, k15, w), rows in grps]
+    return [(cls, w, [(y, x0, m) for y, x0 in rows]) for (cls, m, k15, w), rows in grps]
 
 
 def units_of_blocks(pcs):
@@ -224,7 +256,8 @@ def units_of_blocks(pcs):
     row aligned to the block's left (one XC, DYI, control word a block at every shift), the rows sorted by their mask
     (an end mask written again only where it changes) - as units (cls2, the block's width, [(y, block left, mask)])"""
     blocks = []
-    for y, x0, w, m in pcs:
+    wide = [p for p in pcs if p[2] > 32]
+    for y, x0, w, m in [p for p in pcs if p[2] <= 32]:
         mw = 16 if w <= 16 else 32
         for blk in blocks:
             if blk["mw"] == mw and blk["R"] - mw + 1 <= x0 and blk["L"] + mw - 1 >= x0 + w - 1:
@@ -242,7 +275,8 @@ def units_of_blocks(pcs):
             full = m << (n - pw) if n >= pw else m      # (the piece's mask, its first pixel at bit n - 1 ...)
             rows.append((y, blk["L"], full >> (x0 - blk["L"])))   # (... moved to the block's left)
         rows.sort(key=lambda r: (r[2], r[0]))
-        units.append((n == 32, blk["R"] - blk["L"] + 1, rows))
+        units.append((1 if n == 32 else 0, blk["R"] - blk["L"] + 1, rows))
+    units += units_of_groups(groups_of(wide))
     units.sort(key=lambda u: u[2][0][0])
     return units
 
@@ -378,9 +412,9 @@ def build(paths):
         pens = bytearray()
         shape = []
         for cls2, uw, rows in units:
-            shape.append((1 if cls2 else 0, len(rows)))
+            shape.append((cls2, len(rows)))
             for y, x0, m in rows:
-                n_px = 32 if cls2 else 16
+                n_px = 16 * (cls2 + 1)
                 p = [int(v) for v in img[y, x0:x0 + n_px]] + [0] * n_px
                 p = p[:n_px]
                 pens += bytes((p[2 * k] << 4) | p[2 * k + 1] for k in range(n_px // 2))

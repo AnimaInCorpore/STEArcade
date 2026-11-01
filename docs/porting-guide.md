@@ -790,6 +790,30 @@ strips, load-size measures, the fixed-workload rule) are not repeated.
   operations).
 
 **Blitter**
+* A word with an end mask of 0 is not skipped: the Blitter still reads the destination and writes it back, every
+  plane (4 words a pass row, ~32 bus cycles).  Count Blitter words, not passes: a pass's X count must fit the row at
+  that shift.  R-Type's sprites (2026-11-01): 10.3% of their Blitter words (440 a picture) are such masked-off words
+  of rows narrower than their unit's X count at a shift; avoiding them costs XC / DYI writes at each run of such rows
+  (code per pass-type pattern, Time Pilot's `sprite_programs`), so measure both.  Likewise END2 = $FFFF only where
+  every inner word is opaque in the destination after the shift (a layer's partial chunks at a run's ends merge only
+  at some skews).
+* Measured in R-Type (2026-11-01), dead ends for its sprites: narrower passes for the rows that fit a word fewer at a
+  shift (XC / DYI / NFSR written where the type changes) saved the masked-off words but cost 1-3% a picture more (more
+  units, 2.1 -> 3.2 MB of streams); clearing every sprite's rectangle over black (40-65% of them in stages 1, 3, 4, 6)
+  with an inline test and exact black cells cost what it saved (-1% to +1%).  What paid: the black test only where it is
+  cheap (the title's squeezed sprites, `st_object`: -10% on the attract recording), END2 $FFFF wide runs (-0..3%),
+  64-byte video marks with a skip loop over unmarked rows (-3%), the crossover count cached (-5% in stage 3's warship).
+  Halftone restoring: no R-Type background qualifies (no one-colour area other than black, the textures do not repeat
+  every 16 x 4 pixels).
+* Restore repeated background with the halftone RAM (the user, 2026-11-01): HOP 1 takes the source from the 16
+  halftone words ($FF8A00-$FF8A1E) - no source reads, so with full end masks a word costs a write, as a clear (HOP 0)
+  does.  LINE_NUM (the control byte's bits 0-3, written with BUSY at each start) picks the word and steps once a pass
+  line; in the 4-planes-a-pass layout (Y count 4, DXI 8) a pass line is a plane, so the 16 words hold 4 screen lines x
+  4 planes of a 16-pixel pattern.  A one-colour area (any colour, not only black: 4 words) or a pattern repeating every
+  16 pixels across and every 1, 2 or 4 lines down is restored at clearing speed instead of copying from a clean buffer.
+  Loading the 16 words costs CPU time: worth it for batches of rectangles over the same pattern.  Black is the special
+  case clearing covers (R-Type: sprite rectangles over black chunks, `st_clrtest`).  Verify the line-number stepping
+  in the pinned Hatari before relying on it.
 * Set it up once and keep its registers in address registers: Commando's tile copies as two 32-word passes with one
   setup -13k a picture while scrolling, damage restore -2k; Time Pilot's draw_one.
 * Short HOG passes (the rule) cost a little: 1943 8.4 -> 7.9, Gun.Smoke 24.2 -> 23.0 frames/s; split wide copies at
