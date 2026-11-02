@@ -105,6 +105,10 @@ for the name entry), `mame_cmp_dkongjr.py` + `mame184_dump.lua` (the MAME check)
   driver's rules on Musashi (backgrounds, one-shots giving the channel back, pin priority, the five patches frame by
   frame, fall cut when `$7D81` drops); a build with the pin priority broken fails it.  In Hatari (`--sound 44100`,
   AVI) the music starts with the game.  Not compared by ear with the arcade.
+- Sound on the Mac (2026-11-01): `tools/sound_capture.py` runs the MAME found on the path (0.289) when WolfMAME 0.184 is
+  missing, at `-volume 0`: 0.286's source routes the board at 0.5 itself (`nintendo/dkong_a.cpp` `dkongjr_audio`), the
+  -6 dB were only 0.184's 1.0 route (`MAME_VOLUME` overrides).  The clips came out 570,240 bytes (91.1 s; scale 430.1),
+  the length of the 0.184 recording; `port.py test dkongjr` passes with them.  Not compared by ear with the 0.184 clips.
 - Palette: 22 colours besides black are shown; the 7 rarest (each < 2% of the pixels) are merged into neighbours by
   Donkey Kong's fit.  Fit per stage (see the porting guide) if they look wrong.
 

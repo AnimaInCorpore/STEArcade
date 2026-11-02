@@ -24,7 +24,17 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine"))
 from paths import ROMS, build_dir
 
-MAME = os.environ.get("MAME") or "C:/Arbeit/F030Arcade-private/third_party/wolfmame-0184/mamearcade64.exe"
+WOLF184 = "C:/Arbeit/F030Arcade-private/third_party/wolfmame-0184/mamearcade64.exe"
+MAME = os.environ.get("MAME") or (WOLF184 if os.path.exists(WOLF184) else shutil.which("mame"))
+
+
+def mame_volume():
+    """-volume for -wavwrite: WolfMAME 0.184 routes the board at 1.0, -6 dB gives 0.286's 0.5; a newer MAME (0.289 on
+    the Mac) routes it at 0.5 itself (dkong_a.cpp dkongjr_audio, as 0.286)."""
+    if os.environ.get("MAME_VOLUME"):
+        return os.environ["MAME_VOLUME"]
+    v = subprocess.run([MAME, "-version"], capture_output=True, text=True).stdout.strip()
+    return "-6" if v.startswith("0.184") else "0"
 OUT = build_dir("dkongjr") / "sound"
 FPS = 60.606                    # the VBL rate (MAME: 6.144 MHz pixel clock, 384 x 264)
 
@@ -98,8 +108,8 @@ def capture(name, events, seconds, settle=1.0, rate=48000):
         f.write(LUA % dict(settle_frames=int(round(settle * FPS)), tail_frames=int(round(tail * FPS)) + 2,
                            events=", ".join("{%d, 0x%x, %d}" % e for e in ev)))
     r = subprocess.run([MAME, "dkongjr", "-rompath", str(ROMS), "-video", "none", "-nothrottle", "-skip_gameinfo",
-                        "-autoboot_delay", "0", "-samplerate", str(rate), "-wavwrite", raw, "-volume", "-6",
-                        "-autoboot_script", lua], capture_output=True, text=True, cwd=os.path.dirname(MAME))
+                        "-autoboot_delay", "0", "-samplerate", str(rate), "-wavwrite", raw, "-volume", mame_volume(),
+                        "-autoboot_script", lua], capture_output=True, text=True, cwd=os.path.dirname(MAME) or None)
     t0 = [l for l in r.stdout.splitlines() if l.startswith("CAPTURE_START")]
     if not t0 or not os.path.exists(raw):
         sys.exit("MAME failed:\n" + r.stdout + r.stderr)
