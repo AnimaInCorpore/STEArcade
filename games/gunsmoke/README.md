@@ -172,6 +172,26 @@ Musashi, ticks 1000-3000 of the play: a picture 159.2k -> 133.0k cycles (mean; m
 mostly their passes) and the damage restore (~25k), both near what the method allows; the sound player (~9k a tick,
 `engine/rt/capsnd.s`, shared with 1943 and Trojan).
 
+## Sprite damage and inline leaves (2026-11-02)
+
+- **Sprite damage, opaque rows only**: a sprite part's rectangle covers the rows from its code's first to its last
+  opaque row (`spr_vrange`, 2 bytes a code from `tools/assets.py`), not the whole 16-line box: 32% of the restored
+  words were whole clean lines.
+- **Side-by-side parts merged**: a part one chunk beside the last rectangle, on the same lines with the same rows,
+  extends it to 12 words instead of adding 8 (the two shared their middle chunk: 22-25% of the restored words were
+  restored twice).
+- **Inline leaves**: calls of leaf functions of up to 32 instructions in the fixed ROM are emitted in place (`gen.py`
+  `INLINE`, z80x `inline_leaves` with `inline_rst` / `inline_jumps`, Commando's setting; 188 sites); `logic_test.py`
+  leaves out the return address such a call writes below SP in the reference (dead, as for the merged push/pop).
+
+Musashi CPU + Blitter, the whole recording after the boot (`PERF_NOBUILD=1 tools/perf_test.py 9000 1000`, 8000
+ticks): a picture 153,765 -> 148,600 cycles (mean, -3.4%; median 144,082 -> 136,718, p90 231,126 -> 225,106), the logic
+39,343 -> 38,806 a tick (-1.4%).  `logic_test.py 3000 --play`: 32,664 -> 32,102 cycles a tick, all 3000 ticks exact.
+`render_test.py 300 seq --first 1500`, seeds 1 / 6 / 12: all 900 pictures exact, mean 131.4k -> 131.4k / 272.6k ->
+266.0k / 281.7k -> 276.1k; `sprite_test.py` passes (3600 edge cases, damage covers every changed byte); `logic_test.py` 3000 and 4000 with seeds
+4 / 9 / 12 and `render_test.py` 40 seq / 20 scroll / 4 edges exact.  Not measured
+in Hatari (by the budget about +1 picture a second).
+
 ## Text drawn like sprites (2026-10-24)
 
 The text rows were drawn with an AND pass (the strip's opaque plane) and an OR pass (the planes) per plane. Now

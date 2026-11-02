@@ -85,6 +85,11 @@ def build():
     (BUILD / 'tile_planes.bin').write_bytes(planes(tiles, 4, '>u4').tobytes())
     sprites = v.sprites.transpose(0, 2, 1)[:, ::-1]
     (BUILD / 'spr_planes.bin').write_bytes(planes(sprites, 4, '>u2').tobytes())
+    vr = bytearray()                          # each code's first opaque row and its row count (sprite damage)
+    for s in sprites:
+        rows = [r for r in range(16) if (s[r] != 0).any()]
+        vr += bytes((rows[0], rows[-1] - rows[0] + 1)) if rows else bytes((0, 16))
+    (BUILD / 'spr_vrange.bin').write_bytes(bytes(vr))
     chars = v.chars.transpose(0, 2, 1)[:, ::-1]
     (BUILD / 'chr_planes.bin').write_bytes(planes(chars, 2, np.uint8).tobytes())
     (BUILD / 'chr_pens.bin').write_bytes(bytes(int(sum(1 << p for p in np.unique(c))) for c in chars))

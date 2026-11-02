@@ -25,7 +25,7 @@ def main():
         import assets
     except ImportError:
         assets = None
-    if assets and (args.assets or not (build / 'spr_code.s').exists()):
+    if assets and (args.assets or not all((build / f).exists() for f in ('spr_code.s', 'spr_vrange.bin'))):
         assets.build()
     if True:                                    # (from the recordings, build/gunsmoke/fx.pkl and music.pkl)
         import sound

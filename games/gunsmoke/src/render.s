@@ -1103,7 +1103,7 @@ draw_sprites:
 ; or, for the shapes without one, the generic path.
 sprite_part:
  bsr destination
- move.l dmg_ptr,a0		; damage: 16 lines of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
+ move.l dmg_ptr,a0		; damage: the opaque rows (spr_vrange) of 1 or 2 chunks, the twin as source (split at line RING_H: add_damage)
  move.w dest_y,d0
  add.w cur_top,d0
  moveq #4,d3
@@ -1112,27 +1112,65 @@ sprite_part:
  beq.s .one
  moveq #8,d3
 .one:
- cmp.w #RING_H-16,d0
+ move.w spr_shape_n,d1
+ lsr.w #1,d1
+ add.w d1,d1
+ lea spr_vrange,a2
+ moveq #0,d6
+ move.b (a2,d1.w),d6		; the first opaque row
+ moveq #0,d5
+ move.b 1(a2,d1.w),d5		; the rows to the last
+ add.w d6,d0
+ lsl.w #8,d6
+ add.l d2,d6			; the damage's first line
+ cmp.l dmg_start,a0		; (a part one chunk beside the last rectangle of the same lines shares its middle chunk:
+ bls.s .nomerge			; one rectangle of 12 words instead of two of 8)
+ cmp.w -2(a0),d5
+ bne.s .nomerge
+ cmp.w #8,-4(a0)
+ bne.s .nomerge
+ cmp.w #8,d3
+ bne.s .nomerge
+ move.l -12(a0),d1
+ sub.l d6,d1
+ subq.l #8,d1
+ bne.s .notleft
+ subq.l #8,-12(a0)
+ subq.l #8,-8(a0)
+ move.w #12,-4(a0)
+ bra .damaged
+.notleft:
+ add.l #16,d1
+ bne.s .nomerge
+ move.w #12,-4(a0)
+ bra .damaged
+.nomerge:
+ move.w #RING_H,d1
+ sub.w d5,d1
+ cmp.w d1,d0
  bgt.s .lower
- move.l d2,(a0)+
- move.l d2,d1
+ move.l d6,(a0)+
+ move.l d6,d1
  add.l #RING_H*STRIDE,d1
  bra.s .store
 .lower:
  cmp.w #RING_H,d0
  blt.s .split
- move.l d2,(a0)+
- move.l d2,d1
+ move.l d6,(a0)+
+ move.l d6,d1
  sub.l #RING_H*STRIDE,d1
 .store:
  move.l d1,(a0)+
  move.w d3,(a0)+
- move.w #16,(a0)+
+ move.w d5,(a0)+
  move.l a0,dmg_ptr
  bra.s .damaged
 .split:
- moveq #16,d1
+ move.l d2,-(sp)
+ move.l d6,d2
+ move.w d5,d1
  bsr add_damage
+ move.l (sp)+,d2
 .damaged:
  move.w dest_x,d3
  and.w #15,d3
@@ -2307,6 +2345,7 @@ chr_pens: incbin "chr_pens.bin"
 chr_trans: incbin "chr_trans.bin"
  even
 spr_shape: incbin "spr_shape.bin"
+spr_vrange: incbin "spr_vrange.bin"
 spr_order: incbin "spr_order.bin"
  even
 spr_plan_offsets: incbin "spr_plan_offsets.bin"

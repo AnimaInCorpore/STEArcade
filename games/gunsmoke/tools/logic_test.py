@@ -3,8 +3,8 @@
     python logic_test.py [frames] [--seed N]     (seeds as ref/cover.py: 4-14 play with MAME's cheats from a round on)
 
 Compared every frame: the RAM E000-FFFF, the video RAM D000-D802, the latches C804 / D806, the bank and the sprite
-latch; the stack bytes only a merged `push rr; pop rr'` would have written (dead below SP) are left out.  Every change
-of the text RAM must come with fg_written (the translated writers, gen.py text_sites).
+latch; the stack bytes only a merged `push rr; pop rr'` or an inlined call would have written (dead below SP) are left
+out.  Every change of the text RAM must come with fg_written (the translated writers, gen.py text_sites).
 """
 from pathlib import Path
 import argparse
@@ -84,6 +84,13 @@ def main():
         if hit:
             pc = int(hit[1], 16)
             merged.add(pc)
+    # Calls of short leaf functions are emitted in place (gen.INLINE): the return address such a call (or rst) writes
+    # below SP in the reference is a dead stack word too.
+    lines = (build_dir('gunsmoke') / 'code_gunsmoke.s').read_text().splitlines()
+    for l, n in zip(lines, lines[1:]):
+        hit = re.match(r'^Z([0-9A-F]{4,5}):', l)
+        if hit and n.strip() == '; (inline)':
+            merged.add(int(hit[1], 16))
     dead, site = set(), [0]
     step0, write0 = m.cpu.step, m.cpu.wr8
 

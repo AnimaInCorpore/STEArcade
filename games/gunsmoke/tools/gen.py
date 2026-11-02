@@ -44,6 +44,9 @@ ZE0FB:
 	ror.w #8,d7
 	jmp gs_dispatch'''
 BUILD = build_dir('gunsmoke')
+# calls of leaf functions of up to this many instructions in the fixed ROM (0000-7FFF) are emitted in place
+# (z80x Config.inline_leaves, as Commando)
+INLINE = 32
 
 
 def virt(pc, bank):
@@ -211,7 +214,8 @@ def generate():
     code = {pc: ins for pc, ins in code.items() if pc < WIN_LO or pc >= VBASE}
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0xc000,
                       iyaddr=0x10000, fshadow=0x10002, io_read_redirect={}, write_hooks=[(0xc806, 0xc806, 'buffer_sprites', None)],
-                      rst28_tables=False, bit_s=True, **z80x.FAST)
+                      rst28_tables=False, bit_s=True, inline_leaves=INLINE, inline_limit=0x8000, inline_rst=True,
+                      inline_jumps=True, **z80x.FAST)
     joins = set(roots)                        # (compile_code adds the return points and the code addresses held as numbers)
     for nxt, targets in tables.values():
         joins |= set(targets)
