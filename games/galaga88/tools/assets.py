@@ -14,8 +14,8 @@ Files:
   ren_chr.bin   8192 characters x 64 bytes: R[dr][dc] (8 bit pens), row by row
   ren_mask.bin  8192 x 8 bytes: per row dr the opaque pixels, bit 7 = column 0
   ren_cvals.bin 8192 x 8 bytes: the pens a character uses in groups of 4 (pen >> 2), two longs: bit g of the first
-                for groups 0-31, bit g - 32 of the second for groups 32-63 (render.s REN_BANKDIFF: the cells a bank
-                change affects)
+                for groups 0-31, bit g - 32 of the second for groups 32-63 (render.s ren_bank_diff: the cells a
+                bank change affects)
   ren_spr.bin   1536 sprites x 512 bytes: S[dr][dc] (4 bit pens, two a byte, the left one high), row by row
   ren_pal.bin   16 STE colour words (index 0 black): a fixed palette from the recorded reference pictures
                 (build/galaga88/render_states.pkl; the first milestone, before the colours are chosen per scene)

@@ -1359,9 +1359,7 @@ ren_bg_check:
 	move.l	8(a1),d1
 	cmp.l	d1,d0
 	beq	.b
-	ifd	REN_BANKDIFF
 	move.l	d1,ren_bkold
-	endc
 	move.l	d0,8(a1)
 	eor.l	d0,d1
 	tst.b	d1			; layer 5
@@ -1374,21 +1372,13 @@ ren_bg_check:
 	lsr.l	#8,d1
 	tst.b	d1			; layer 4
 	beq	.b3
-	ifd	REN_BANKDIFF
 	moveq	#4,d2
-	bsr	ren_bank_diff
-	else
-	bsr	ren_mark4_all
-	endc
+	bsr	ren_bank_diff		; (only the cells using a pen the banks differ in)
 .b3:	lsr.l	#8,d1
 	tst.b	d1			; layer 3
 	beq	.b
-	ifd	REN_BANKDIFF
 	moveq	#3,d2
 	bsr	ren_bank_diff
-	else
-	bsr	ren_mark3_all
-	endc
 	endc
 .b:	move.l	12(a0),d0		; layer 3's scroll
 	cmp.l	(a1),d0
@@ -1540,7 +1530,6 @@ ren_mark_fixed:
 	movem.l	(sp)+,d0-d2/a2
 	rts
 
-	ifd	REN_BANKDIFF
 ; d2.w = layer 3 or 4, its bank changed (ren_bkold: the banks before, ren_bgpar + 8 now): the cells whose characters
 ; use a pen whose index differs between the two banks' maps (ren_bmap, this choice of colours) dirty, the others keep
 ; their converted lines.  The pens compared in groups of 4 (a long of the maps), the characters' groups from
@@ -1597,7 +1586,7 @@ ren_bank_diff:
 	bsr	ren_mark3
 .n3:	dbf	d7,.l3
 	bra	.r
-.l4:	lea	ren_tcopy4,a0		; layer 4 (as ren_mark4_all)
+.l4:	lea	ren_tcopy4,a0		; layer 4 (its whole map)
 	lea	ren_nonempty,a1
 	moveq	#0,d6
 .w4:	moveq	#0,d0
@@ -1634,26 +1623,6 @@ ren_bank_diff:
 	move.w	d6,(a0,d1.w)
 	bsr	ren_bmap_make
 .mr:	rts
-	endc
-
-; layer 4's non-empty cells dirty (its bank changed)
-ren_mark4_all:
-	movem.l	d0-d7/a0-a2,-(sp)
-	lea	ren_tcopy4,a0
-	lea	ren_nonempty,a1
-	moveq	#0,d6
-.l:	move.w	(a0)+,d0
-	and.w	#$3FFF,d0
-	cmp.w	#8192,d0
-	bhs	.n
-	tst.b	(a1,d0.w)
-	beq	.n
-	bsr	ren_mark_fixed
-.n:	addq.w	#1,d6
-	cmp.w	#36*28,d6
-	bne	.l
-	movem.l	(sp)+,d0-d7/a0-a2
-	rts
 
 ; layer 3's non-empty cells dirty at its scroll in ren_bgpar (its copy's words)
 ren_mark3_all:
@@ -4104,9 +4073,7 @@ ren_sqrt:	incbin	"ren_sqrt.bin"
 	even
 ren_chr:	incbin	"ren_chr.bin"
 ren_mask:	incbin	"ren_mask.bin"
-	ifd	REN_BANKDIFF
 ren_cvals:	incbin	"ren_cvals.bin"
-	endc
 ren_spr:	incbin	"ren_spr.bin"
 ren_epoch:	dc.w	1
 ren_zero32:	dcb.l	8,0
@@ -4131,7 +4098,7 @@ ren_cur:	ds.w	1
 ren_vbl_pal:	ds.w	16
 ren_bpal:	ds.w	16*REN_NBUF
 ren_bgpar:	ds.l	4		; layer 3's scroll, the priorities, the banks
-ren_bkold:	ds.l	1		; (REN_BANKDIFF: the banks before a change)
+ren_bkold:	ds.l	1		; (the banks before a change, for ren_bank_diff)
 ren_bgl:	ds.b	3*6
 ren_bgn:	ds.w	1
 ren_bgkey:	ds.w	1

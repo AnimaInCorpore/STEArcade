@@ -34,6 +34,8 @@ standalone scripts and is not registered in `port.py` or included in releases.
 Results (2026-10-13): 1500 frames of play (seed 5: coin, start, random left / right / fire) identical, 98k 68000
 cycles a frame for the two CPUs (54k in the attract mode); main 7247, sub 3653 instructions translated, none
 unsupported (coverage: seeds 1, 4-7 6000 frames, seed 2 400).
+2026-11-02: `tools/gen.py` sets `fast_forms` and `call_summaries` (m6809x, as Hyper Sports and Double Dragon):
+seed 5, 1600 frames identical, 104.2k -> 100.7k cycles a frame (-3.4%; `call_summaries` alone changes nothing here).
 
 Test: `tools/build.py --sim`, then `tools/logic_test.py FRAMES --seed N` (frame by frame against the reference: work
 RAM, TRIRAM, the CUS30 RAM, tile RAM, palette, sprite RAM, CUS123 control, the key custom, both CPUs' registers and
@@ -108,19 +110,23 @@ Measurement switches (2026-10-13, Hatari BENCH, arcade frames 600-1600, a pictur
 | `-D REN_NOSTARS=1` (no star layers) | 16.10 | 8.06 | 2262 | 8 |
 | `-D REN_NOCYCLE=1` (layer 3 / 4 bank changes ignored, no re-choice for a worse fit) | 15.08 | 7.55 | 2499 | 3 |
 | both | 25.06 | 12.57 | 1176 | 3 |
-| `-D REN_BANKDIFF=1` (exact: a bank change composes only the cells it changes) | 12.14 | 6.08 | 3292 | 10 |
+| bank maps (then `-D REN_BANKDIFF=1`, the default since 2026-11-02) | 12.14 | 6.08 | 3292 | 10 |
 
 The logic stays ~810-840 VBLs in the baseline and the first three variants.  Both off, a picture is ~291k cycles in Musashi (BENCH states), sprites
 the largest part (draw 48k, conversion 40k, geometry 28k).
 
-Precomputed bank maps (`-D REN_BANKDIFF=1`, a prototype): layer 3's bank cycles 0-7 every 8 arcade frames (the BENCH
-game from frame 966), and the banks differ in a few of the pens its characters use (51 of ~220 non-empty cells use
+Precomputed bank maps (`ren_bank_diff`, the default since 2026-11-02; before a `-D REN_BANKDIFF=1` prototype): layer
+3's bank cycles 0-7 every 8 arcade frames (the BENCH game from frame 966), and the banks differ in a few of the pens its characters use (51 of ~220 non-empty cells use
 one).  A layer 3 or 4 bank change compares the two banks' index maps (ren_bmap, this choice of colours) four pens at a
 time and marks only the cells whose character uses a differing group (`ren_cvals.bin`, assets.py: 64 KB, the pens'
 groups per character; groups of 4 are as good as single pens here: 2856 vs 2844 cells over the BENCH changes); the
 other cells keep their converted lines.  Exact (render_test --bench, --every 3, --edges); Musashi on the BENCH states
 911M -> 827M cycles, the cycling pictures 1000-1200 649k -> 468k a picture (ren_cell 103k -> 23k); Hatari 10.62 ->
 12.14 arcade frames/s.  Left: the scan of layer 3's 2048 words per change (ren_bank_diff ~14k a picture).
+2026-11-02 (with the NFSR fix, 769c6fb), `render_test.py --bench --play 300-1600 --attract "" --every 2`: 693M ->
+613M cycles (-11.5%), median 595k -> 569k a picture, 90% 2381k -> 1527k, big pictures 102 -> 59; exact (650 / 650),
+and the default test (`--every 3`: play 500 / 500, attract 167 / 167) and `--edges` (252) exact.  BENCH profile
+600-1600: 890k a picture (the audit's 1053k before), the stars 334k of it (37.5%).
 
 The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
 and shift on first use: pieces ordered by their shifted masks, the reordered source, generated code); exact
