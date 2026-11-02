@@ -60,6 +60,15 @@ def main():
     ap.add_argument("--stop", action="store_true", help="stop at the first difference")
     ap.add_argument("--debug", type=int, default=None, help="print the colour slots at this frame")
     ap.add_argument("--prof", action="store_true", help="sample render_frame's pc every 64 cycles: cycles by routine")
+    ap.add_argument("--phases", action="store_true", help="with --prof: the cycles by render_frame's calls instead")
+    ap.add_argument("--autoplay", action="store_true",
+                    help="the inputs of the bench builds' AUTOPLAY script (mpatrol.s: coin, start, driving) instead of the "
+                         "seed's (its DIP switches stay)")
+    ap.add_argument("--buckets", type=int, default=0, help="the mean cycles a picture per this many frames")
+    ap.add_argument("--within", help="with --prof: this routine's cycles by pc offset (16-byte buckets)")
+    ap.add_argument("--vbl", type=float, default=1.0,
+                    help="the share of pictures a VBL shows before the next one is drawn (vbl_video's buffer rotation; "
+                         "less than 1: some pictures dropped, their buffer drawn again at once)")
     args = ap.parse_args()
     layers = tuple(args.layers.split(","))
     program = ROOT / "run" / "mpatrol_sim" / "MPATROL.PRG"
@@ -79,7 +88,9 @@ def main():
 
     put_inputs()
     rnd = random.Random(args.seed)
-    cyc = {"render": 0, "n": 0}
+    vrnd = random.Random(args.seed + 1000)
+    cyc = {"render": 0, "n": 0, "blit": 0}
+    per_pic = []
     import bisect
     import collections
     import re as _re
@@ -88,16 +99,52 @@ def main():
     labels = sorted((val, k) for k, val in sym.items() if not k.startswith("Z") and k not in absolute)
     lv = [x for x, _ in labels]
     prof = collections.Counter()
+    rf_lo = sym["render_frame"]
+
+    def where():
+        if args.phases:             # the routine render_frame called: its return address on the stack
+            sp = cpu.r_reg(R.A7)
+            key = None
+            for a in range(sp, sp + 160, 2):
+                ret = mem.r32(a)
+                t = None
+                if rf_lo < ret < rf_hi and mem.r16(ret - 4) == 0x6100:
+                    t = ret - 2 + ((mem.r16(ret - 2) ^ 0x8000) - 0x8000)
+                elif rf_lo < ret < rf_hi and mem.r8(ret - 2) == 0x61 and mem.r8(ret - 1):
+                    t = ret + ((mem.r8(ret - 1) ^ 0x80) - 0x80)
+                if t is not None:
+                    i = bisect.bisect_right(lv, t) - 1
+                    key = labels[i][1] if i >= 0 else "?"
+            return key or "render_frame"
+        i = bisect.bisect_right(lv, cpu.r_pc()) - 1
+        if i >= 0 and labels[i][1] == args.within:
+            return "%s+%03X" % (args.within, (cpu.r_pc() - labels[i][0]) & ~15)
+        return labels[i][1] if i >= 0 else "?"
+
+    if args.prof:                   # (a Blitter pass's cycles go to the routine that started it)
+        brun = s.blitter.run
+
+        def run_blit():
+            c0 = s.blitter.cycles
+            brun()
+            if prof_on[0]:
+                prof[where()] += s.blitter.cycles - c0
+                cyc["blit"] += s.blitter.cycles - c0
+        s.blitter.run = run_blit
+    prof_on = [False]
+    rf_hi = min(x for x in lv if x > rf_lo)
 
     def run_to(targets, count=None):
         total = 0
         chunk = 64 if (args.prof and count == "render") else 2000
         while total < 2_000_000_000:
-            n = cpu.execute(chunk).cycles
+            prof_on[0] = chunk == 64
+            n = cpu.execute(chunk).cycles + s.blitter.cycles     # (CPU and Blitter: a HOG pass holds the CPU)
+            blit_n = s.blitter.cycles
+            s.blitter.cycles = 0
             total += n
             if chunk == 64:
-                i = bisect.bisect_right(lv, cpu.r_pc()) - 1
-                prof[labels[i][1] if i >= 0 else "?"] += n
+                prof[where()] += n - blit_n
             pc = cpu.r_pc()
             if pc in targets:
                 if count:
@@ -130,8 +177,23 @@ def main():
     m.frame = 0
     state = {}
     bad_frames, worst, checked = [], 0, 0
+    over16 = []
     for f in range(args.frames):
-        m.in0, m.in1 = cover.inputs(f, rnd, state, args.seed)
+        if args.autoplay:                   # (mpatrol.s AUTOPLAY, by the arcade frame)
+            t = f % 4000
+            m.in0, m.in1 = 0xFF, 0xFF
+            if 700 <= t < 710:
+                m.in0 &= ~0x08
+            if 790 <= t < 800:
+                m.in0 &= ~0x01
+            if t >= 900:
+                m.in1 = 0xFF if t & 0x80 else 0xFE
+                if (t & 15) < 3:
+                    m.in1 &= 0x7F
+                if (f & 63) < 4:
+                    m.in1 &= 0xDF
+        else:
+            m.in0, m.in1 = cover.inputs(f, rnd, state, args.seed)
         put_inputs()
         before = bytes(m.mem[0xE000:0xE800])
         cover.cheats(args.seed, f, m, state)
@@ -140,13 +202,32 @@ def main():
             if before[i] != after[i]:
                 mem.w8(sym["g_block"] + 0x8000 + 0xE000 - 0x10000 + i, after[i])
         mem.w8(sym["vbl_pending"], 1)
+        if f == args.start:                 # (the SIM counters from --start on)
+            for k in [k for k in sym if k.startswith("cnt_")]:
+                for i in range(32 if k == "cnt_rows" else 1):
+                    mem.w32(sym[k] + 4 * i, 0)
         m.frame = f
         m.run_frame_port()
         resume()
         if run_to({done, sym["sim_render_start"]}) != done:
             resume()
-            run_to({done}, "render")
-            cyc["n"] += 1
+            if f >= args.start:             # (the cycles and the profile from --start on)
+                r0 = cyc["render"]
+                run_to({done}, "render")
+                cyc["n"] += 1
+                per_pic.append((cyc["render"] - r0, f))
+            else:
+                run_to({done})
+            if vrnd.random() < args.vbl:    # the VBL shows it (render.s vbl_video): the buffers rotate as on the STE
+                mem.w16(sym["prev_idx"], mem.r16(sym["shown_idx"]))
+                ready = mem.r8(sym["frame_ready"])
+                if ready:
+                    mem.w16(sym["shown_idx"], ready - 1)
+                    mem.w8(sym["frame_ready"], 0)
+        if args.debug == f and "lkind" in sym:
+            print("lkind", "".join("." if mem.r8(sym["lkind"] + i) == 255 else str(mem.r8(sym["lkind"] + i))
+                                   for i in range(202)))
+            print("lovl ", "".join("%x" % (mem.r8(sym["lovl"] + i) >> 4) for i in range(202)))
         if args.debug == f:
             nc = len(assets.colour_ids(v)[1])
             cslot = [mem.r8(sym["cid_slot"] + i) for i in range(nc)]
@@ -188,6 +269,11 @@ def main():
             n = int(diff.sum())
             checked += 1
             if n:
+                ncol = len(np.unique(want[PF_TOP:].reshape(-1, 3), axis=0))
+                if ncol > 16:                   # (more than 16 colours on the playfield: a borrowed slot, known)
+                    over16.append(f)
+                    n = 0
+            if n:
                 bad_frames.append(f)
                 worst = max(worst, n)
                 ys = np.nonzero(diff.any(axis=1))[0]
@@ -206,14 +292,32 @@ def main():
         run_to({wait})
     print("%s: %d frames checked (layers %s, seed %d), %d with differences (worst %d pixels)%s" % (
         "PASS" if not bad_frames else "FAIL", checked, ",".join(layers), args.seed, len(bad_frames), worst,
-        "" if not bad_frames else ", first " + " ".join(map(str, bad_frames[:10]))))
+        "" if not bad_frames else ", first " + " ".join(map(str, bad_frames[:10]))) +
+          ("; %d frames with more than 16 colours on the playfield differ (borrowed slots: known), first %s" % (
+              len(over16), " ".join(map(str, over16[:5]))) if over16 else ""))
     if cyc["n"]:
         print("68000 cycles a picture (Musashi: render_frame with its Blitter passes): %d" % (cyc["render"] // cyc["n"]))
+        if args.buckets:
+            bk = {}
+            for c, fr in per_pic:
+                bk.setdefault(fr // args.buckets, []).append(c)
+            print("  by %d frames:" % args.buckets, " ".join("%d:%dk" % (k * args.buckets, sum(v) / len(v) / 1000)
+                                                          for k, v in sorted(bk.items())))
+        srt = sorted(per_pic)
+        print("  median %d, 90th percentile %d, max %d (frame %d)" % (
+            srt[len(srt) // 2][0], srt[len(srt) * 9 // 10][0], srt[-1][0], srt[-1][1]))
     if "cnt_bake" in sym and cyc["n"]:
         print("sprites drawn %.1f, baked %.2f a picture" % (mem.r32(sym["cnt_drawn"]) / cyc["n"], mem.r32(sym["cnt_bake"]) / cyc["n"]))
+    if "cnt_rows" in sym:
+        rows = [mem.r32(sym["cnt_rows"] + 4 * r) for r in range(32)]
+        print("text cells baked: %.1f a picture (by row: %s)" % (sum(rows) / max(1, cyc["n"]), rows[7:]))
+    if "cnt_full" in sym and cyc["n"]:
+        print("playfield: %d whole redraws; lines a picture: %.1f whole segments, %.1f changed (%.1f runs), %.1f ground"
+              % (mem.r32(sym["cnt_full"]), *(mem.r32(sym[k]) / cyc["n"] for k in ("cnt_lw", "cnt_ld", "cnt_rd", "cnt_lg"))))
     if args.prof and cyc["n"]:
         tot = sum(prof.values())
-        for k, n in prof.most_common(25):
+        print("  (the Blitter: %d a picture)" % (cyc["blit"] // cyc["n"]))
+        for k, n in prof.most_common(60 if args.within else 25):
             print("  %-22s %7d a picture  %5.1f%%" % (k, n // cyc["n"], 100.0 * n / tot))
 
 

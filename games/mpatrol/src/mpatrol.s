@@ -8,7 +8,7 @@
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 2				; arcade frames in a row that are not drawn while the game is behind
+MAX_SKIP = 3				; arcade frames in a row that are not drawn while the game is behind (2: 50.8 arcade frames / 27.2 pictures a second in bench.sh, 3: 54.1 / 27.0)
 	endc
 	ifnd FRAMES
 FRAMES = 0				; (a test build quits after this many VBLs)

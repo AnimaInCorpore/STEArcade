@@ -1,7 +1,10 @@
-# Moon Patrol (Irem, 1982) for Atari STE — work in progress
+# Moon Patrol (Irem, 1982) for Atari STE
+
+![Moon Patrol on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `mpatrol` (Irem M52, the parent set; `assets/roms/mpatrol.zip` also holds the Williams clone `mpatrolw`).
-Started 2026-10-29.  Not in `port.py list` yet: the scripts here run on their own.
+Started 2026-10-29.  Registered 2026-11-01: `port.py cover|build|test mpatrol`, `tools/release.py`, the README's
+table (Verification pending: the full-game checks of `docs/port-status.md`).
 
 ```sh
 python games/mpatrol/tools/prepare.py              # verify assets/roms/mpatrol.zip, unpack to assets/roms/extracted/mpatrol/
@@ -12,6 +15,8 @@ python games/mpatrol/tools/build.py [--sim]          # -> run/mpatrol/MPATROL.PR
 python games/mpatrol/tools/shots.py 250 1000        # Hatari screenshots at those VBLs (no window: engine/mamewin.py)
 python games/mpatrol/tools/logic_test.py 20000 --seed 1   # the translation in lock-step with MoonPatrolPort
 python games/mpatrol/tools/sound_test.py 20000 --seed 1   # the STE's sound player against its model (--random: all commands)
+python games/mpatrol/tools/render_test.py 4000 --seed 3 --vbl 0.8   # the STE picture against the reference (--prof, --autoplay)
+python games/mpatrol/tools/sprite_test.py [--quick]        # sprites at the edges, every shift, holes, guards, 64 KB crossings
 games/mpatrol/tools/bench.sh [VBLs]                 # Hatari speed (own Hatari, its PID); SOUND=1 AVI=1: the audio as WAV
 ```
 
@@ -130,20 +135,32 @@ clipping applies); the borders are open (engine/rt/borders.s, PIC_TOP 10, PIC_LI
   BD_VSWITCH, as Kung-Fu Master's), its cells drawn with `movep.l` rows when the text RAM changes (`hud_update`).
   Picture lines 250-251 show tile row 0's first lines (the tilemap wraps): only the RAM clear writes that row, so
   they stay black (slot 0).
-* **The playfield** (lines 50-251) is drawn each picture with the Blitter into one of three buffers (one neither
-  shown nor shown in the frame before), each with its own 16 colours, and published for the VBL:
-  - cleared to slot 0; the mountains (rows 0-63 of their image twice side by side: any x is one stretch with the
-    Blitter's skew and pre-read; opaque copies of planes 0-1), their fill below them;
-  - the hills or the city over them, each row as what lies behind it allows: over the mountains' image in passes
-    from prepared lists (runs of opaque words with a partial word at either end, END1 / END3 the end words' masks;
-    HOP 2 / OP 3), over the mountains' fill or nothing as opaque copies (a version of the image with the fill's slot
-    in its holes); then their fill.  The city needs 150 passes a picture instead of 709 word by word;
+* **The playfield** (lines 50-251) is drawn with the Blitter into one of three buffers (one neither shown nor shown
+  in the frame before), each with its own 16 colours, and published for the VBL.  A buffer keeps its picture
+  (2026-11-01, `pf_draw`): its scene (control, x / y registers, scroll: `bstate`) and its changed 16-pixel groups a
+  line (`pf_dirty`: set by baked text cells in every buffer, by drawn sprites in the buffer) say what must be drawn
+  again.  The lines fall into segments (the boundaries of the mountains' rows and fill, the hills' / city's rows with
+  transparent pixels, their opaque rows, their fill, the ground at line 186); a segment whose background's x changed
+  is drawn whole, the others only in their changed groups (runs of lines with the same groups).  Each drawn line
+  starts with its frontmost opaque layer, so every word is written once or twice, not four times:
+  - slot 0, or a fill (the mountains' or the hills' / city's slot: a pass a plane, 4 lines a start);
+  - the mountains' rows (their image twice side by side: any x is one stretch with the Blitter's skew and pre-read):
+    planes 0-1 copied, 2-3 cleared;
+  - the hills' or the city's rows: copies of planes 0-2 (plane 3 cleared) where nothing, slot 0 or the mountains'
+    fill lies behind them (a version of the image with the fill's slot in its holes); over the mountains' image the
+    mountains' row first, then the row's passes, prepared in `tools/assets.py` (`bg_pieces`: runs of opaque words
+    with a partial word at either end, END1 / END3 and both Y increments ready, per row and shift; clipped at the
+    range's ends only; HOP 2 / OP 3);
   - the text (`src/text.s`): images of the fixed rows and of the ground ring (twice side by side), baked when a cell
-    changes, with mask planes and counts of opaque pixels a line; a line without pixels skipped, a full one one pass,
-    the others in pieces (row_pieces); the ground's partial lines' masks shifted for the 15 words when drawn;
+    changes, with mask planes, counts of opaque pixels and group bits a line (groups with pixels, groups without a
+    transparent pixel); the ground also baked with the hills' / city's fill slot in its holes (`gr_imgf`), so the
+    ground's lines over that fill (the craters, the edge) are plain 4-plane copies; full text lines copies without a
+    background; the others in pieces from the group bits ([partial] full* [partial] a pass, 4 planes);
   - the sprites (`src/sprites.s`): listed in the arcade's order, baked per (code, colour, flip x) on first use (their
     opaque rows aligned at the source word, engine/sprite_programs.py's layout), drawn a row a pass as `pass_of` /
-    `clipped_pass` would (the inner word only at the side edges), whole into the guard lines above and below.
+    `clipped_pass` would (the inner word only at the side edges), whole into the guard lines above and below; their
+    groups marked changed in the buffer's lines.
+  Every pass is HOG and at most 64 bus accesses (BLIT_STATS=256: the longest 248 bus cycles, no shared-bus pass).
 * **Colours.**  The playfield shows up to 18 colours a frame (34 distinct STE colours over the game).  Its palette:
   slots 0 .. MP_NPIN - 1 (5) pinned to the scene (the background and the mountains' and the hills' or the city's
   colours: `tools/assets.py pinned()`, black ones folded into slot 0), the rest (11) given to colour ids while text
@@ -151,15 +168,48 @@ clipping applies); the borders are open (engine/rt/borders.s, PIC_TOP 10, PIC_LI
   when one changed.  With more than 16 colours on the playfield an id borrows the nearest colour's slot (seed 5:
   4 of 800 sampled frames have 17 or 18); a borrowed text colour gets a slot of its own once one is free.  Two
   palettes (a split at picture line 186 or 196) would make those frames exact too: measured, not done.
-* **Tests.**  `tools/render_test.py` (the STE picture against the reference in the shown colours, frame by frame;
-  `--layers` for one layer at a time, `--prof` for the cycles by routine): exact but in the frames with more than 16
-  colours.  Hatari (`tools/shots.py`): the attract mode as the arcade's.
-* **Speed (not done).**  369k 68000 cycles a picture in the attract mode (Musashi, CPU and Blitter): the text's
-  pieces 85k, the hills' passes 53k, the Blitter's long passes (clear, mountains, fills) ~50k.  In Hatari the game
-  runs at about two thirds of the arcade's speed (`tools/bench.sh`, AUTOPLAY: 35 arcade frames, 12 pictures a
-  second).  Next: redraw only the lines whose content changed (each buffer's damage:
-  the sky only where text or sprites were, the mountains when their x changed), the ground's full lines as one pass
-  for all of them, generated sprite code (engine/sprite_programs.py) for the coverage's shapes.
+* **Tests.**  `tools/render_test.py` (the STE picture against the reference in the shown colours, frame by frame,
+  the buffers rotating as the VBL shows them, `--vbl` < 1: some pictures dropped; `--layers` for one layer at a time,
+  `--prof` / `--phases` / `--within` for the cycles by routine, `--autoplay` the bench builds' inputs, `--buckets`):
+  exact but in the frames with more than 16 colours on the playfield (counted apart).  `tools/sprite_test.py`
+  (pictures made up for it: every sprite x 0-255, i.e. both side edges at all 16 shifts, inside, clipped, culled;
+  flips, codes with transparent holes, the order of overlapping sprites, the guard lines above and below, the lines of
+  each buffer crossing a 64 KB boundary, 240 consecutive pictures of moving sprites over scrolling backgrounds and
+  ground in the hills, the city, without mountains / backgrounds, other y; the side bands checked clean): 520
+  pictures exact.  Hatari (`tools/shots.py`): the attract mode as the arcade's.
+
+## Speed on the STE (2026-11-01)
+
+68000 cycles a picture (Musashi, CPU and Blitter: `render_test.py`; until 2026-11-01 it counted only the CPU, the
+README's earlier 369k was that):
+
+| | before | now |
+|---|---|---|
+| attract mode (seed 1, frames 0-599) | 531k | 240k (median 241k, 90th percentile 273k) |
+| play (seed 3, frames 900-1999) | 492k | 228k (median 259k, 90th percentile 317k) |
+| play, bench inputs (`--autoplay`, frames 900-3999) | | 181k (median 173k, 90th percentile 297k) |
+
+Hatari (`tools/bench.sh`, 6000 VBLs of AUTOPLAY, with sound): before 35 arcade frames / 12 pictures a second; now
+54.1 arcade frames a second (median 56, the arcade's 56.7; 10th percentile 48) and 27.0 pictures a second (median 22,
+10th percentile 14.5; 50 in the attract mode's quiet stretches).  MAX_SKIP is 3 now (2: 50.8 / 27.2): the game keeps
+the arcade's speed more often, the picture rate stays.
+
+What paid (each measured with `render_test.py --prof`, every picture exact): the per-buffer damage and the frontmost
+layer first (531k -> 363k in the attract mode); the text pieces from group bits instead of shifting 15 masks a line
+and scanning every word (the ground's text 80k -> 45k a picture in play); the ground over the fill as copies of
+`gr_imgf` (-> 12k); segments instead of a classification a line (the per-line loops cost as much as they saved);
+changed groups instead of whole lines (the sky is dirtied every frame by the buggy's shots, text cells); prepared
+passes for the hills over the mountains and their tables set once a picture (67k -> 56k); the sprite list without a
+call an entry, the colours' slots only for the colours shown (45k -> 15k of bookkeeping); the text RAM compare
+unrolled (17k -> 14k); the bake with a byte-to-four-planes table (24k -> 17k); blank tiles where there were blank
+tiles not baked, and the scene (the hills' / city's pinned colours) kept while no background shows (it flipped at
+every control $FF and baked all 800 cells again: 3-8M cycles a picture).
+
+Left (play, seed 3 frames 1200-1599, 284k: the Blitter 70k): the copies 65k (mostly Blitter), the hills over the
+mountains 56k (30 lines, ~2.5 passes a line; the CPU per pass), the sprites' rows 30k (a pass a row; generated code
+as engine/sprite_programs.py was not tried here), the text bakes 17k, fills 17k, the text RAM compare 14k (writer
+marks from gen.py would remove it), the segments' bookkeeping ~30k.  A new scene (the hills to the city) and the
+game's start (the panel and every cell) still bake everything once: 2.4-3.4M cycles, a hitch of about half a second.
 
 ## Sound (`tools/sound.py`, `tools/sndgen.py`, `src/sound.s`, 2026-10-29)
 
@@ -208,7 +258,8 @@ Kung-Fu Master's method (its `tools/sound.py`, `sndgen.py`, `src/sound.s`) on th
 
 ## Next steps (docs/porting-guide.md)
 
-1. The picture's speed (above), then `tools/sprite_test.py` (edges, all 16 shifts, holes) and the BLIT_STATS check of
-   the HOG passes (engine/sim.py).
+1. Speed: the hills over the mountains (fewer, cheaper passes), generated sprite code (engine/sprite_programs.py, as
+   Time Pilot and Mr. Do!), writer marks for the text RAM (gen.py), the scene change and the game's start baked over
+   several pictures.  Then a play recording (`bench.sh` REPLAY / PLAYBACK) for the Hatari figures per course.
 2. Sound: compare the reference board with MAME's sound board (a trace of the 6803 or the AY writes from
    `mpatrol.exe`); not done on the Mac (no M52 MAME build there).

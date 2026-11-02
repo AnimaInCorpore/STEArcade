@@ -14,7 +14,8 @@
   words: the word j of shift s holds the doubled row's pixels 16 j + s .. 16 j + s + 15 (bit 15 the first); a table
   of 64 words (mp_bgr1, mp_bgr2) gives a row's block number + 1, 0 for a row without transparent pixels;
 * the hills' and the city's version over the mountains' fill (mp_bg1f, mp_bg2f: transparent pixels in its slot)
-  and their rows' passes (mp_bgp1 / mp_bgp2, indexed by mp_bgpi1 / mp_bgpi2: bg_pieces());
+  and their rows' passes ready for the Blitter (mp_bgp1 / mp_bgp2, indexed by mp_bgpi1 / mp_bgpi2 (longs):
+  bg_pieces());
 * the scenes' pinned slots (pinned(): MP_NPIN of them, mp_pincid / mp_pincol: the hills' scene, then the city's) and
   the backgrounds' fill slots (mp_bgfill: their pixel value 3's slot).
 """
@@ -137,9 +138,11 @@ def pinned(v, cids):
 
 
 def bg_pieces(img):
-    """for each row with a transparent pixel and each shift: the passes over the doubled row's 32 words (bytes: first
-    word, end word; $FF ends a list): a run of opaque words, a partial word before it and one after it taken in (the
-    pass's END1 and END3 are the end words' masks); -> (the lists, an index: block * 16 + shift -> the list's offset)"""
+    """for each row with a transparent pixel and each shift s: the passes over the doubled row's 32 words at s (a run of
+    opaque words, a partial word before it and one after it taken in), each ready for the Blitter (render.s
+    bg_row_list): first word, end word (bytes), END1, END3 (the end words' masks), the source's and the destination's
+    Y increments of a 3-plane pass (c words: back to the next plane, with the pre-read when s > 0); $FF ends a list
+    -> (the lists, an index: block * 16 + shift -> the list's offset)"""
     data, index = bytearray(), []
     for row in img[:64]:
         op = [1 if int(p) else 0 for p in row]
@@ -147,10 +150,11 @@ def bg_pieces(img):
             continue
         bits = op * 3
         for sh in range(16):
-            kinds = []
+            kinds, masks = [], []
             for j in range(32):
                 w = bits[16 * j + sh:16 * j + sh + 16]
                 kinds.append("F" if all(w) else ("E" if not any(w) else "P"))
+                masks.append(sum(b << (15 - i) for i, b in enumerate(w)))
             index.append(len(data))
             i = 0
             while i < 32:
@@ -162,7 +166,10 @@ def bg_pieces(img):
                     j += 1
                 if j < 32 and kinds[j] == "P":
                     j += 1
+                c, pre = j - i, 1 if sh else 0
                 data += bytes((i, j))
+                for w in (masks[i], masks[j - 1], (2 - 8 * (c - 1 + pre)) & 0xFFFF, (2 - 8 * (c - 1)) & 0xFFFF):
+                    data += w.to_bytes(2, "big")
                 i = j
             data.append(0xFF)
             if len(data) & 1:
@@ -203,7 +210,7 @@ def build():
         (out / ("mp_bg%df.bin" % i)).write_bytes(bg_image(v.bgs[i], vslots[i], vslots[0][3]))
         data, index = bg_pieces(v.bgs[i])
         (out / ("mp_bgp%d.bin" % i)).write_bytes(data)
-        (out / ("mp_bgpi%d.bin" % i)).write_bytes(b"".join(x.to_bytes(2, "big") for x in index))
+        (out / ("mp_bgpi%d.bin" % i)).write_bytes(b"".join(x.to_bytes(4, "big") for x in index))
     masks = {}
     for i in (1, 2):
         blocks, rows = bg_masks(v.bgs[i])

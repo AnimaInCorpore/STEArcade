@@ -31,114 +31,102 @@ SPR_RAM = Z_RAM+$C800
 	section text,code
 
 ; spr_need: the shown sprites listed in the drawing order (spr_list: the entry's address, colour, transparent
-; values, picture line, screen x), the ids they need flagged in cid_need (keeps all)
+; values, picture line, screen x), the ids they need flagged in cid_need (keeps all).  An entry shows when it lies on
+; the picture's lines (235 - y >= PF_TOP - 15: y <= 200) and columns (x + 25 < 272) and its colour shows one of its
+; code's pixel values (code 0 of the empty entries has none).
 spr_need:
-	movem.l	d0-d7/a0-a4,-(sp)
+	movem.l	d0-d7/a0-a6,-(sp)
 	lea	cid_need,a0
-	moveq	#MP_NCID-1,d0
-.cl:	clr.b	(a0)+
+	moveq	#(MP_NCID+3)/4-1,d0
+.cl:	clr.l	(a0)+
 	dbf	d0,.cl
+	lea	cid_need,a0
+	lea	SPR_RAM+$40,a5		; (the groups of 16, each from its last entry to its first)
 	lea	spr_list,a3
+	lea	mp_sused,a2
+	lea	mp_sptr,a4
+	lea	mp_pencid+512,a6
 	moveq	#0,d7
-	move.w	#$3C,d2			; the groups' last entries
-.g:	move.w	d2,d1
-.e:	lea	SPR_RAM,a1
-	add.w	d1,a1
-	movem.w	d1-d2,-(sp)
-	bsr	spr_shown
+	moveq	#3,d6
+.g:	move.l	a5,a1
+	moveq	#15,d5
+.e:	subq.w	#4,a1
+	moveq	#$7F,d0
+	and.b	2(a1),d0
+	move.b	(a2,d0.w),d0		; the values its code has
+	beq.s	.n
+	cmp.b	#200,(a1)
+	bhi.s	.n
+	cmp.b	#247,3(a1)
+	bhs.s	.n
+	moveq	#15,d3
+	and.b	1(a1),d3		; the colour
+	moveq	#0,d4
+	move.b	(a4,d3.w),d4		; its transparent values
+	move.b	d4,d1
+	not.b	d1
+	and.b	d1,d0
 	beq.s	.n
 	move.l	a1,(a3)+
-	movem.w	d3-d6,(a3)
-	movem.w	(a3),d3-d6		; (d5 is used below: the entry keeps the line)
-	addq.w	#8,a3
-	addq.w	#1,d7
-	move.w	d3,d0			; pens 512 + colour * 8 + value
-	lsl.w	#3,d0
-	lea	mp_pencid+512,a2
-	add.w	d0,a2
-	moveq	#0,d0			; the values its code has, but the transparent ones
-	move.b	2(a1),d0
-	and.w	#$7F,d0
-	lea	mp_sused,a0
-	move.b	(a0,d0.w),d5
-	not.b	d4
-	and.b	d4,d5
-	not.b	d4
-	lea	cid_need,a0
-	moveq	#1,d0
-.v:	btst	d0,d5
-	beq.s	.nv
+	move.w	d3,(a3)+
+	move.w	d4,(a3)+
 	moveq	#0,d1
-	move.b	(a2,d0.w),d1
-	st	(a0,d1.w)
-.nv:	addq.w	#1,d0
-	cmp.w	#4,d0
-	blo.s	.v
-.n:	movem.w	(sp)+,d1-d2
-	move.w	d1,d0
-	and.w	#$C0,d0
-	cmp.w	d0,d1
-	beq.s	.gn
-	subq.w	#4,d1
-	bra.s	.e
-.gn:	add.w	#$40,d2
-	cmp.w	#$100,d2
-	blo	.g
+	move.b	(a1),d1
+	move.w	#235,d2
+	sub.w	d1,d2
+	move.w	d2,(a3)+		; the picture line
+	moveq	#0,d1
+	move.b	3(a1),d1
+	add.w	#25,d1
+	move.w	d1,(a3)+		; the screen x
+	addq.w	#1,d7
+	lsl.w	#3,d3			; the ids of its shown values (pens 512 + colour * 8 + value)
+	moveq	#0,d2
+	btst	#1,d0
+	beq.s	.v2
+	move.b	1(a6,d3.w),d2
+	st	(a0,d2.w)
+.v2:	btst	#2,d0
+	beq.s	.v3
+	move.b	2(a6,d3.w),d2
+	st	(a0,d2.w)
+.v3:	btst	#3,d0
+	beq.s	.n
+	move.b	3(a6,d3.w),d2
+	st	(a0,d2.w)
+.n:	dbf	d5,.e
+	lea	$40(a5),a5
+	dbf	d6,.g
 	move.w	d7,spr_count
-	movem.l	(sp)+,d0-d7/a0-a4
+	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
-; spr_colours: the slots of the 16 colours' pixel values 1-3 for this picture (spr_cslots: 4 bytes a colour; $FF a
-; transparent value), after the slots were given (spr_alloc)
+; spr_colours: the slots of the pixel values 1-3 of this picture's sprites' colours (spr_cslots: 4 bytes a colour;
+; $FF a transparent value), after the slots were given (spr_alloc)
 spr_colours:
-	movem.l	d3-d4/a0/a2,-(sp)
-	lea	spr_cslots,a2
-	lea	mp_sptr,a0
-	moveq	#0,d3
-.c:	move.b	(a0,d3.w),d4
-	bsr	spr_slots
-	addq.w	#4,a2
-	addq.w	#1,d3
-	cmp.w	#16,d3
-	blo.s	.c
-	movem.l	(sp)+,d3-d4/a0/a2
-	rts
-
-; spr_shown: the entry at a1: ne if it shows (on the picture's lines and columns, a colour that shows one of its
-; code's pixel values);
-; d3 = its colour (0-15), d4 = its transparent values, d5 = its picture line, d6 = its screen x.  d0-d6 changed.
-spr_shown:
-	moveq	#0,d5
-	move.b	(a1),d5
-	move.w	#235,d0
-	sub.w	d5,d0
-	move.w	d0,d5			; the picture line
-	cmp.w	#PF_TOP-15,d5
-	blt.s	.no
-	cmp.w	#PF_BOT,d5
-	bge.s	.no
-	moveq	#0,d6
-	move.b	3(a1),d6
-	add.w	#25,d6			; the screen x
-	cmp.w	#272,d6
-	bge.s	.no
-	moveq	#15,d3
-	and.b	1(a1),d3
+	movem.l	d0-d4/a0-a3,-(sp)
+	lea	spr_cdone,a1
+	clr.l	(a1)
+	clr.l	4(a1)
+	clr.l	8(a1)
+	clr.l	12(a1)
+	lea	spr_list,a3
+	move.w	spr_count,d2
+	bra.s	.nx
+.s:	move.w	4(a3),d3
+	lea	12(a3),a3
+	tst.b	(a1,d3.w)
+	bne.s	.nx
+	st	(a1,d3.w)
 	lea	mp_sptr,a0
 	move.b	(a0,d3.w),d4
-	moveq	#0,d0			; any value of its code that the colour shows? (code 0 of the empty entries has none)
-	move.b	2(a1),d0
-	and.w	#$7F,d0
-	lea	mp_sused,a0
-	move.b	(a0,d0.w),d0
-	not.b	d4
-	and.b	d4,d0
-	not.b	d4
-	tst.b	d0
-	beq.s	.no
-	moveq	#1,d0			; (ne)
-	rts
-.no:	moveq	#0,d0
+	lea	spr_cslots,a2
+	move.w	d3,d0
+	lsl.w	#2,d0
+	add.w	d0,a2
+	bsr	spr_slots
+.nx:	dbf	d2,.s
+	movem.l	(sp)+,d0-d4/a0-a3
 	rts
 
 ; spr_release: the slots of ids that no text cell uses and no sprite of this picture needs are free again (and a
@@ -214,7 +202,7 @@ spr_draw:
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
-; spr_one: the sprite at a1 (spr_shown: d3 colour, d4 transparent values, d5 picture line, d6 screen x)
+; spr_one: the sprite at a1 (spr_need's list: d3 colour, d4 transparent values, d5 picture line, d6 screen x)
 spr_one:
 	moveq	#0,d0
 	move.b	2(a1),d0		; the code (0-127)
@@ -480,6 +468,7 @@ spr_bake:
 sc_index:	ds.w	4096		; key (code << 5 | colour << 1 | flip x) -> entry + 1
 sc_used:	ds.w	1
 spr_cslots:	ds.b	16*4
+spr_cdone:	ds.b	16		; (spr_colours: the colours done this picture)
 sb_planes:	ds.w	4
 spr_count:	ds.w	1
 	ifd SIM
@@ -487,7 +476,7 @@ cnt_bake:	ds.l	1		; (the tests: bakes so far)
 cnt_drawn:	ds.l	1
 	endc
 spr_list:	ds.b	64*12
-cid_need:	ds.b	MP_NCID
+cid_need:	ds.b	(MP_NCID+3)&-4	; (cleared by longs: even, whole longs)
 	even
 sc_data:	ds.b	SC_MAX*SC_SIZE
 	section text,code

@@ -4,20 +4,21 @@
 ; lines 50-185) in picture coordinates (st_img: 136 lines x 15 groups; column c at picture x 8c - 8), the ground rows
 ; 24-31 (lines 186-249, scrolled) in tilemap coordinates twice side by side (gr_img: 64 lines x 32 groups: any window
 ; of 15 groups and the Blitter's pre-read is one stretch).  Each has a mask plane of its opaque pixels (st_mask,
-; gr_mask: bit 15 the first pixel) and a count of the opaque pixels a line (st_cnt over the 240 shown, gr_cnt over the
-; 256 of the ring).  Drawn each picture over the backgrounds (tx_draw): a line without pixels skipped, a full one one
-; pass of 15 words, the others in pieces (row_pieces: runs of opaque words, a partial word a one-word pass with its
-; mask as END1; four planes a pass, HOP 2 / OP 3: no AND + OR pairs).  The fixed rows need no shift; the ground's
-; window starts at tilemap x u = (8 - scroll) mod 256 (group u >> 4, the skew u & 15 with a pre-read), and the masks
-; of its partial lines are shifted for the 15 words when drawn (cheaper than 16 prepared shifts: the ground's cells
-; change every few frames, its partial lines are few).
+; gr_mask: bit 15 the first pixel), a count of the opaque pixels a line (st_cnt over the 240 shown, gr_cnt over the
+; 256 of the ring) and a line's group bits (tx_nz: groups with pixels, tx_opq: groups without a transparent pixel; the
+; ground's 32 groups, twice).  The ground also has a version with the hills' / city's fill slot in its holes (gr_imgf:
+; the lines over that fill are drawn as copies of it).  A baked cell marks its 8 lines changed in every buffer
+; (pf_dirty: its group; a ground cell the whole line); a tile without pixels where there was none is not baked.
+; render.s draws the text (ovl_text: pieces from the group bits; full lines as copies, no background under them).
+; The fixed rows need no shift; the ground's window starts at tilemap x u = (8 - scroll) mod 256 (group u >> 4, the
+; skew u & 15 with a pre-read).
 ;
 ; Colours: a cell's pens (colour * 4 + the tile's pixel values: mp_tused) have colour ids (mp_pencid: pens that look
 ; the same on the STE share one), and the ids hold the playfield's slots: 0 .. MP_NPIN - 1 pinned to the scene
 ; (mp_pincid: the background, the mountains, the hills or the city), the others given to an id while a cell of the
 ; images uses it (cid_ref counts them; the last one gone frees the slot).  An id that finds no free slot borrows the nearest colour's slot
 ; (mp_cidnear: an approximation, more than 16 colours on the playfield; flagged $80 in cid_slot).  A new scene (the
-; hills / the city) pins other colours: everything is baked again.
+; hills / the city) pins other colours: everything is baked again (no background shown: the scene stays).
 
 ST_LINES = 136
 ST_LB = 120				; (15 groups)
@@ -33,13 +34,44 @@ TX_CELLS = 25*32
 tx_reset:
 	movem.l	d0-d2/a0-a1,-(sp)
 	move.b	d0,tx_scene
+	movem.l	d3-d5,-(sp)		; the hills' / city's fill slot as plane bytes (tb_fill: plane 0 in the high
+	lea	mp_bgfill+1,a0		; byte, as movep.l writes it first); gr_imgf all of it (empty cells are not baked)
+	move.b	(a0,d0.w),d2
+	moveq	#0,d1
+	moveq	#3,d3
+.tf:	lsl.l	#8,d1
+	lsr.b	#1,d2
+	bcc.s	.tf0
+	st	d1
+.tf0:	dbf	d3,.tf
+	move.l	d1,tb_fill
+	moveq	#0,d3			; (as ST words: planes 0-1, 2-3)
+	moveq	#0,d4
+	btst	#31,d1
+	beq.s	.w0
+	move.l	#$FFFF0000,d3
+.w0:	btst	#23,d1
+	beq.s	.w1
+	or.w	#$FFFF,d3
+.w1:	btst	#15,d1
+	beq.s	.w2
+	move.l	#$FFFF0000,d4
+.w2:	btst	#7,d1
+	beq.s	.w3
+	or.w	#$FFFF,d4
+.w3:	lea	gr_imgf,a0
+	move.w	#GR_LINES*GR_LB/8-1,d5
+.wf:	move.l	d3,(a0)+
+	move.l	d4,(a0)+
+	dbf	d5,.wf
+	movem.l	(sp)+,d3-d5
 	lea	st_img,a0
 	move.w	#(ST_LINES*ST_LB+ST_LINES*30+GR_LINES*GR_LB+GR_LINES*64)/4-1,d1
 .cl:	clr.l	(a0)+
 	dbf	d1,.cl
-	lea	st_cnt,a0
-	move.w	#ST_LINES+GR_LINES-1,d1
-.cc:	clr.w	(a0)+
+	lea	st_cnt,a0		; (the counts, the group bits)
+	move.w	#(ST_LINES+GR_LINES)*5/2-1,d1
+.cc:	clr.l	(a0)+
 	dbf	d1,.cc
 	lea	cid_ref,a0
 	move.w	#MP_NCID-1,d1
@@ -79,10 +111,17 @@ tx_reset:
 ; they were baked (every one after a reset)
 tx_update:
 	movem.l	d0-d7/a0-a6,-(sp)
-	moveq	#0,d0
-	btst	#1,io_regs+6		; the scene: the city when the hills are off
-	beq.s	.sc
+	moveq	#0,d0			; the scene: the city when the hills are off (no background at all: the scene
+	move.b	io_regs+6,d1		; stays, its pinned colours too: a new scene bakes every cell again)
+	btst	#1,d1
+	beq.s	.s1
 	moveq	#1,d0
+	btst	#2,d1
+	bne.s	.s0
+.s1:	btst	#5,d1
+	beq.s	.sc
+.s0:	tst.b	tx_scene
+	bpl.s	.same			; (but the first picture's)
 .sc:	cmp.b	tx_scene,d0
 	beq.s	.same
 	bsr	tx_reset
@@ -92,16 +131,24 @@ tx_update:
 	lea	tx_cram,a3
 	move.w	#TX_FIRST,d6		; the cell
 	tst.b	tx_full
-	bne.s	.all
-.long:	cmpm.l	(a0)+,(a2)+		; (four cells at a time: equal longs skipped)
-	bne.s	.diff4
+	bne	.all
+.long:	rept	5			; (four cells at a time: equal longs skipped)
+	cmpm.l	(a0)+,(a2)+
+	bne.s	.dc
 	cmpm.l	(a1)+,(a3)+
-	bne.s	.diff4
-	addq.w	#4,d6
-	cmp.w	#TX_FIRST+TX_CELLS,d6
+	bne.s	.dk
+	endr
+	cmp.l	#tx_vram+TX_CELLS,a2
 	blo.s	.long
 	bra.s	.out
-.diff4:	lea	Z_RAM+$8000,a0		; (the four pointers at the long's first cell again)
+.dc:	move.l	a3,d6			; (the codes differ: the colours' pointer is at the long)
+	bra.s	.diff4
+.dk:	move.l	a3,d6			; (the colours differ)
+	subq.l	#4,d6
+.diff4:	sub.l	#tx_cram-TX_FIRST,d6	; the long's first cell (past the end: the unrolled compares overran)
+	cmp.w	#TX_FIRST+TX_CELLS,d6
+	bhs.s	.out
+	lea	Z_RAM+$8000,a0		; (the four pointers at the long's first cell again)
 	add.w	d6,a0
 	lea	Z_RAM+$8400,a1
 	add.w	d6,a1
@@ -122,7 +169,7 @@ tx_update:
 	addq.w	#1,d6
 	dbf	d7,.cell
 	cmp.w	#TX_FIRST+TX_CELLS,d6
-	blo.s	.long
+	blo	.long
 	bra.s	.out
 .all:	moveq	#0,d7			; (every cell: the old one counts as nothing)
 .al:	move.b	(a0)+,d0
@@ -151,7 +198,24 @@ tx_cell:
 	beq.s	.copy			; (fixed rows: columns 1-30 are shown)
 	cmp.w	#31,d3
 	beq.s	.copy
-.vis:	tst.b	tx_full
+.vis:	moveq	#0,d4			; (a tile without pixels where there was none: nothing to bake)
+	move.b	d0,d4
+	btst	#7,d1
+	beq.s	.e1
+	bset	#8,d4
+.e1:	lea	mp_tused,a0
+	tst.b	(a0,d4.w)
+	bne.s	.e3
+	tst.b	tx_full
+	bne.s	.copy
+	moveq	#0,d4
+	move.b	(a2),d4
+	btst	#7,(a3)
+	beq.s	.e2
+	bset	#8,d4
+.e2:	tst.b	(a0,d4.w)
+	beq.s	.copy
+.e3:	tst.b	tx_full
 	bne.s	.new
 	move.b	(a2),d4			; the old cell's ids released
 	move.b	(a3),d5
@@ -348,6 +412,34 @@ tx_rebake:
 ; ground: gr_img, both copies): 8 lines of plane bytes (the pens' slots) and the mask byte; the lines' counts.
 tx_bake:
 	movem.l	d0-d7/a0-a6,-(sp)
+	ifd SIM
+	lea	cnt_rows,a0
+	move.w	d2,d4
+	lsl.w	#2,d4
+	addq.l	#1,(a0,d4.w)
+	endc
+	lea	pf_dirty-7*8*2,a0	; (its 8 lines changed in every buffer: render.s pf_draw; a fixed row's cell in
+	move.w	d2,d4			; its group (column - 1) >> 1, a ground cell everywhere)
+	lsl.w	#4,d4
+	add.w	d4,a0
+	move.w	#$7FFF,d5
+	cmp.w	#24,d2
+	bhs.s	.dg
+	move.w	d3,d4
+	subq.w	#1,d4
+	asr.w	#1,d4
+	bmi.s	.dn			; (columns 0 and 31 are not shown)
+	cmp.w	#14,d4
+	bhi.s	.dn
+	moveq	#0,d5
+	bset	d4,d5
+.dg:	moveq	#2,d4
+.db:	rept	8
+	or.w	d5,(a0)+
+	endr
+	lea	(PF_NL-8)*2(a0),a0
+	dbf	d4,.db
+.dn:
 	lea	mp_pencid,a0		; the slots of pixel values 1-3 (bits 0-3; a borrowed one's too)
 	lea	cid_slot,a1
 	lsl.w	#2,d1
@@ -363,7 +455,13 @@ tx_bake:
 	move.b	3(a0,d1.w),d6
 	move.b	(a1,d6.w),d6
 	and.w	#15,d6
-	movem.w	d4-d6,tb_idx
+	lea	slot_long,a0		; (each value's planes as bytes $FF / 0: tb_s1-3)
+	lsl.w	#2,d4
+	move.l	(a0,d4.w),tb_s1
+	lsl.w	#2,d5
+	move.l	(a0,d5.w),tb_s2
+	lsl.w	#2,d6
+	move.l	(a0,d6.w),tb_s3
 	lsl.w	#4,d0			; the tile's rows
 	lea	mp_tiles,a3
 	add.w	d0,a3
@@ -382,6 +480,7 @@ tx_bake:
 	subq.w	#1,d3
 	move.w	d3,d0
 	lsr.w	#1,d0
+	move.w	d0,tb_grp		; (the cell's group)
 	move.w	d0,d1
 	lsl.w	#3,d0
 	add.w	d1,d1
@@ -409,6 +508,7 @@ tx_bake:
 	add.w	d0,a5
 	move.w	d3,d0
 	lsr.w	#1,d0
+	move.w	d0,tb_grp		; (the cell's group)
 	move.w	d0,d1
 	lsl.w	#3,d0
 	add.w	d1,d1
@@ -424,26 +524,52 @@ tx_bake:
 	move.w	#1,a2			; (the twin: 128 bytes / 32 mask bytes further)
 	moveq	#64,d3
 .lines:	moveq	#7,d2
-.row:	move.b	(a3)+,d4		; the high plane (the pixel value's bit 1)
+	lea	rep4,a1
+.row:	moveq	#0,d4
+	move.b	(a3)+,d4		; the high plane (the pixel value's bit 1)
+	moveq	#0,d5
 	move.b	(a3)+,d5		; the low plane
-	moveq	#0,d6			; the planes (plane 0 in the high byte)
-	move.b	d4,d0			; pixel 3: high and low
-	and.b	d5,d0
-	move.w	tb_idx+4,d1
-	bsr.s	.add
-	move.b	d5,d0			; pixel 2: high, not low
-	not.b	d0
-	and.b	d4,d0
-	move.w	tb_idx+2,d1
-	bsr.s	.add
-	move.b	d4,d0			; pixel 1: low, not high
-	not.b	d0
-	and.b	d5,d0
-	move.w	tb_idx,d1
-	bsr.s	.add
+	move.w	d4,d0			; value 3: high and low, its slot's planes
+	and.w	d5,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	move.l	(a1,d0.w),d6		; (the byte in all four planes)
+	and.l	tb_s3,d6
+	move.w	d5,d0			; value 2: high, not low
+	not.w	d0
+	and.w	d4,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	move.l	(a1,d0.w),d1
+	and.l	tb_s2,d1
+	or.l	d1,d6
+	move.w	d4,d0			; value 1: low, not high
+	not.w	d0
+	and.w	d5,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	move.l	(a1,d0.w),d1
+	and.l	tb_s1,d1
+	or.l	d1,d6
 	movep.l	d6,0(a4)
 	or.b	d5,d4			; the mask: any pixel but 0
-	and.w	#$FF,d4
+	cmp.w	#0,a2
+	beq.s	.nf
+	move.b	d4,d0			; (the ground: the version with the fill's slot in the holes, gr_imgf)
+	not.b	d0
+	move.l	tb_fill,d1
+	and.b	d0,d1
+	ror.l	#8,d1
+	and.b	d0,d1
+	ror.l	#8,d1
+	and.b	d0,d1
+	ror.l	#8,d1
+	and.b	d0,d1
+	ror.l	#8,d1
+	or.l	d6,d1
+	movep.l	d1,gr_imgf-gr_img(a4)
+	movep.l	d1,gr_imgf-gr_img+128(a4)
+.nf:	and.w	#$FF,d4
 	moveq	#0,d0			; the line's count: + the new pixels - the old
 	moveq	#0,d1
 	move.b	(a5),d1
@@ -460,102 +586,47 @@ tx_bake:
 .nt:	add.w	d7,a4
 	add.w	d3,a5
 	dbf	d2,.row
-	movem.l	(sp)+,d0-d7/a0-a6
-	rts
-.add:	lsr.b	#1,d1			; d0 = the pixels, d1 = their slot: its bits into planes 0-3 of d6 (movep.l
-	bcc.s	.a1			; writes bits 31-24 first: plane 0)
-	rol.l	#8,d6
-	or.b	d0,d6
-	ror.l	#8,d6
-.a1:	lsr.b	#1,d1
-	bcc.s	.a2
-	swap	d6
-	or.b	d0,d6
-	swap	d6
-.a2:	lsr.b	#1,d1
-	bcc.s	.a3
-	ror.l	#8,d6
-	or.b	d0,d6
-	rol.l	#8,d6
-.a3:	lsr.b	#1,d1
-	bcc.s	.a4
-	or.b	d0,d6
-.a4:	rts
-
-; tx_draw: the text over the backgrounds in the drawn buffer: the fixed lines, then the ground at its scroll
-tx_draw:
-	movem.l	d0-d7/a0-a6,-(sp)
-	move.w	#4,pc_planes
-	clr.b	pc_skew
-	lea	st_img,a0
-	move.l	draw_buf,a1
-	lea	PF_TOP*PF_LB+PF_X(a1),a1
-	lea	st_mask,a2
-	lea	st_cnt,a3
-	move.w	#ST_LINES-1,d7
-.st:	move.w	(a3)+,d0
-	beq.s	.sn
-	cmp.w	#240,d0
-	bne.s	.sp
-	bsr	row_full
-	bra.s	.sn
-.sp:	bsr	row_pieces
-.sn:	lea	ST_LB(a0),a0
-	lea	PF_LB(a1),a1
-	lea	30(a2),a2
-	dbf	d7,.st
-	moveq	#8,d0			; the ground: u = (8 - scroll) mod 256
-	sub.b	io_regs,d0
-	and.w	#$FF,d0
-	move.w	d0,d1
-	lsr.w	#4,d1			; g
-	and.w	#15,d0			; s
-	moveq	#0,d2
-	tst.w	d0
-	beq.s	.sk
-	moveq	#16,d2
-	sub.w	d0,d2
-	or.w	#$80,d2
-.sk:	move.b	d2,pc_skew
-	move.w	d0,d5			; s
-	moveq	#16,d6
-	sub.w	d0,d6			; 16 - s
-	lea	gr_img,a0
-	move.w	d1,d2
-	lsl.w	#3,d2
-	add.w	d2,a0			; the source's group g
-	move.l	draw_buf,a1
-	lea	(PF_TOP+ST_LINES)*PF_LB+PF_X(a1),a1
-	lea	gr_mask,a4
-	add.w	d1,a4
-	add.w	d1,a4			; the masks from group g
-	lea	gr_cnt,a3
-	move.w	#GR_LINES-1,d7
-.gr:	move.w	(a3)+,d0
-	beq.s	.gn
-	cmp.w	#256,d0
-	bne.s	.gp
-	bsr	row_full
-	bra.s	.gn
-.gp:	lea	tx_m15,a2		; the shown words' masks: (M[w] << s) | (M[w + 1] >> (16 - s))
-	move.l	a4,a5
-	moveq	#14,d4
-.m:	move.w	(a5)+,d0
-	lsl.w	d5,d0
-	move.w	(a5),d1
-	lsr.w	d6,d1
-	tst.w	d5
-	bne.s	.m1
-	moveq	#0,d1			; (s = 0: lsr #16 leaves the word on the 68000)
-.m1:	or.w	d1,d0
-	move.w	d0,(a2)+
-	dbf	d4,.m
-	lea	tx_m15,a2
-	bsr	row_pieces
-.gn:	lea	GR_LB(a0),a0
-	lea	PF_LB(a1),a1
-	lea	64(a4),a4
-	dbf	d7,.gr
+	move.l	a6,d0			; the 8 lines' group bits (tx_nz: any pixel, tx_opq: all 16; the ground's twin
+	sub.l	#st_cnt+16,d0		; group too, 16 further): the line index (st_cnt, gr_cnt: a word a line)
+	add.w	d0,d0
+	lea	tx_nz,a0
+	add.w	d0,a0
+	lea	tx_opq,a1
+	add.w	d0,a1
+	move.w	d3,d0			; the group's mask word in the first line
+	lsl.w	#3,d0
+	sub.w	d0,a5
+	move.l	a5,d0
+	bclr	#0,d0
+	move.l	d0,a5
+	move.w	tb_grp,d1
+	moveq	#16,d5
+	add.w	d1,d5			; (the twin's bit)
+	moveq	#7,d2
+.nb:	move.l	(a0),d6
+	move.l	(a1),d7
+	bclr	d1,d6
+	bclr	d1,d7
+	move.w	(a5),d0
+	beq.s	.nb1
+	bset	d1,d6
+	cmp.w	#-1,d0
+	bne.s	.nb1
+	bset	d1,d7
+.nb1:	cmp.w	#0,a2
+	beq.s	.nb2
+	bclr	d5,d6
+	bclr	d5,d7
+	btst	d1,d6
+	beq.s	.nb2
+	bset	d5,d6
+	btst	d1,d7
+	beq.s	.nb2
+	bset	d5,d7
+.nb2:	move.l	d6,(a0)+
+	move.l	d7,(a1)+
+	add.w	d3,a5
+	dbf	d2,.nb
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
@@ -581,6 +652,32 @@ pf_slots:
 
 ; popcnt: the bits set in a byte (made by init_render)
 make_popcnt:
+	lea	rep4,a0			; (and rep4, slot_long)
+	moveq	#0,d0
+.r:	move.b	d0,d1
+	lsl.w	#8,d1
+	move.b	d0,d1
+	move.w	d1,d2
+	swap	d1
+	move.w	d2,d1
+	move.l	d1,(a0)+
+	addq.w	#1,d0
+	cmp.w	#256,d0
+	blo.s	.r
+	lea	slot_long,a0
+	moveq	#0,d0
+.sl:	moveq	#0,d1
+	moveq	#3,d3
+	move.w	d0,d2
+.s1:	lsl.l	#8,d1
+	lsr.w	#1,d2
+	bcc.s	.s2
+	st	d1
+.s2:	dbf	d3,.s1
+	move.l	d1,(a0)+
+	addq.w	#1,d0
+	cmp.w	#16,d0
+	blo.s	.sl
 	lea	popcnt,a0
 	moveq	#0,d0
 .b:	moveq	#0,d1
@@ -596,7 +693,6 @@ make_popcnt:
 	blo.s	.b
 	rts
 
-ones15:	dcb.w	15,$FFFF
 
 	section bss,bss
 	even
@@ -604,11 +700,22 @@ st_img:		ds.b	ST_LINES*ST_LB
 st_mask:	ds.b	ST_LINES*30
 gr_img:		ds.b	GR_LINES*GR_LB
 gr_mask:	ds.b	GR_LINES*64
+gr_imgf:	ds.b	GR_LINES*GR_LB	; (the ground with the hills' / city's fill in its holes)
 st_cnt:		ds.w	ST_LINES
 gr_cnt:		ds.w	GR_LINES
+tx_nz:		ds.l	ST_LINES+GR_LINES	; a line's groups with text pixels (bit k: group k; the ground: 32, twice)
+tx_opq:		ds.l	ST_LINES+GR_LINES	; and those without a transparent pixel
+tb_grp:		ds.w	1
+tb_fill:	ds.l	1
 cid_ref:	ds.w	MP_NCID
-tb_idx:		ds.w	3
-tx_m15:		ds.w	15
+tb_s1:		ds.l	1		; (tx_bake: the values' planes)
+tb_s2:		ds.l	1
+tb_s3:		ds.l	1
+rep4:		ds.l	256		; a byte in all four bytes of a long
+slot_long:	ds.l	16		; a slot's planes as bytes $FF / 0 (plane 0 the high byte)
+	ifd SIM
+cnt_rows:	ds.l	32
+	endc
 tx_vram:	ds.b	TX_CELLS
 tx_cram:	ds.b	TX_CELLS
 cid_slot:	ds.b	MP_NCID		; an id's slot (0: none, but id 0's; $80 + n: borrowed)
