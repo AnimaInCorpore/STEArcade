@@ -301,24 +301,37 @@ nat_objloop:
 	tst.b	$99(a3)			; [98h]: the handlers' new shots (set: the translation; the inline slots never
 	bne	R00657_t		; change it)
 	lea	obj_idle,a0
+	lea	(a4,d6.l),a1		; (the slot)
 	moveq	#0,d7
-.l:	move.w	(a4,d6.l),d7		; the handler's IP (d7's upper word 0)
+.l:	move.w	(a1),d7			; the handler's IP (d7's upper word 0)
 	tst.b	(a0,d7.l)
 	beq.s	.call
-	move.w	#$40,4(a4,d6.l)
+	move.w	#$40,4(a1)
 	moveq	#0,d7
-	move.b	d7,6(a4,d6.l)		; [BP+7h] (BP even)
-	move.b	d7,22(a4,d6.l)		; [BP+17h]
-	add.w	#$20,d6
+	move.b	d7,6(a1)		; [BP+7h] (BP even)
+	move.b	d7,22(a1)		; [BP+17h]
+	lea	$20(a1),a1
 	subq.w	#1,d1
 	bne.s	.l
+	move.l	a1,d6
+	sub.l	a4,d6			; (BP: d6's upper word 0)
 	move.w	#1,-2(a5)		; (the last slot's residues below SP: CW 1, its BP, the CALL's return IP - a slot
 	move.w	d6,d7			; run by the translation writes all three)
 	sub.w	#$20,d7
 	move.w	d7,-4(a5)
 	move.w	#$025C,-6(a5)
 	jmp	R00663
-.call:	jmp	R00657_t
+.call:	move.l	a1,d6			; PUSH CW, PUSH BP, CALL [BP+0h] (the IP table as the translation's)
+	sub.l	a4,d6
+	move.w	d1,-(a5)
+	move.w	d6,-(a5)
+	move.w	#$025C,-(a5)
+	ext.l	d7
+	add.l	d7,d7
+	add.l	d7,d7
+	lea	main_ip_mid,a1
+	move.l	(a1,d7.l),a1
+	jmp	(a1)
 
 nat_init:				; (rtype.s / core.s init_image)
     ifd FADE_SNAP
@@ -980,6 +993,13 @@ FFLAG	macro				; \1 IX: the box test when the object's flag [IX+1] is set
 .n\@:
 	endm
 
+    ifd ES_COUNT
+CNT	macro				; (ES_COUNT: es_ncmp[\1] += 1, the flags kept)
+	move	sr,-(sp)
+	addq.l	#1,es_ncmp+4*\1
+	move	(sp)+,sr
+	endm
+    endc
 ECOLL	macro
     ifd SIM
 	addq.l	#1,es_ncall+4*\3	; (SIM: calls, rejections, full tests - per variant)
@@ -1026,7 +1046,11 @@ ECOLL	macro
 	lea	es_boxes,a0		; the distinct live boxes: none overlapped -> no hit
 	move.w	es_n,d4
 	bra.s	.nx
-.bl:	cmp.w	(a0)+,d1		; x + [BW+2] < L
+.bl:
+    ifd ES_COUNT
+	CNT	0
+    endc
+	cmp.w	(a0)+,d1		; x + [BW+2] < L
 	bcs.s	.m1
 	cmp.w	(a0)+,d3		; x + [BW] >= R
 	bcc.s	.m2
@@ -1034,10 +1058,25 @@ ECOLL	macro
 	bcs.s	.m3
 	cmp.w	(a0)+,d7		; y + [BW+4] < B: overlap
 	bcs	.full
+    ifd ES_COUNT
+	CNT	4
+    endc
 	bra.s	.nx
-.m1:	addq.l	#2,a0
-.m2:	addq.l	#2,a0
-.m3:	addq.l	#2,a0
+.m1:
+    ifd ES_COUNT
+	CNT	1
+    endc
+	addq.l	#2,a0
+.m2:
+    ifd ES_COUNT
+	CNT	2
+    endc
+	addq.l	#2,a0
+.m3:
+    ifd ES_COUNT
+	CNT	3
+    endc
+	addq.l	#2,a0
 .nx:	dbf	d4,.bl
 	bra.s	.rej
 .imp:	; spans not containing x or y (big enemies' offset boxes, 2026-11-01: stage 3's warship parts went to the full test
@@ -1522,6 +1561,7 @@ es_pred:	ds.w	1
 es_ncall:	ds.l	2		; (SIM: ECOLL's calls, rejections, full tests: 0040:F694, 0040:F6DA)
 es_nrej:	ds.l	2
 es_nfull:	ds.l	2
+es_ncmp:	ds.l	5		; (ES_COUNT: boxes scanned, rejected by L / R / T, B-only misses)
 	even
 	section text,code
 

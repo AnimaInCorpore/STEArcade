@@ -204,6 +204,18 @@ main_mark_range:
 m72_sprite_dma:
 	st	m72_dma_done
     ifd SPRITE_LIST
+      ifnd SIM
+	tst.b	ticks			; (no copy when no picture can follow this arcade frame: the logic still behind
+	beq.s	.cp			; after it - ticks only grow while it runs - and not the PIC_EVERY-th: rtype.s)
+	move.l	d0,-(sp)
+	move.b	since_pic,d0
+	addq.b	#1,d0
+	cmp.b	#PIC_EVERY,d0
+	movem.l	(sp)+,d0		; (the flags kept)
+	bhs.s	.cp
+	rts
+.cp:
+      endc
 	movem.l	d0/a0-a1,-(sp)		; the objects' records (src/natives.s) from slot $C0 up to the list's pointer
 	move.w	v30_image+$40000+$2EFC,d0	; (DS0 $4000: [2EFCh])
 	cmp.w	m72_slots_hw,d0

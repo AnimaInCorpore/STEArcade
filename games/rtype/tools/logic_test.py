@@ -495,6 +495,10 @@ def main():
             print("collision %s: calls %d, rejected %d, full tests %d" % (
                 name, mem.r32(sym["es_ncall"] + 4 * k), mem.r32(sym["es_nrej"] + 4 * k),
                 mem.r32(sym["es_nfull"] + 4 * k)))
+        n = [mem.r32(sym["es_ncmp"] + 4 * k) for k in range(5)] if "es_ncmp" in sym else [0]
+        if n[0]:        # (ES_COUNT builds: the broad phase's box compares; .m1 falls through .m2 and .m3)
+            print("broad phase: %d boxes scanned; rejected by L %d, R %d, T %d, B %d" % (
+                n[0], n[1], n[2] - n[1], n[3] - n[2], n[4]))
     return 0
 
 
