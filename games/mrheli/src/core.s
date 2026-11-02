@@ -1,0 +1,303 @@
+; The runtime of Mr. HELI's translated main CPU program (included by mrheli.s): the context, the schedule of one arcade
+; frame (port_frame), the idle point, the dispatcher, the ports.  engine/v30x.py describes the register map and the
+; image (the V30's 1 MB, the bytes of each word swapped).  As R-Type's (games/rtype/src/core.s), with Mr. HELI's map:
+; the work RAM at $A0000, the MCU's dual-port RAM at $B0000, the ROM to $7FFFF, a second sound latch (port $C0).
+
+; ---- the context block (V30_SEG ... V30_AX: engine/rt/v30rt.s) ----
+R_D0 = 16			; the registers while the CPU is idle: d0-d6 (7 longs)
+R_A2 = 44			; a2-a5 (4 longs)
+R_SR = 60			; the CCR
+CTXSIZE = 64
+IDLE_TASK = $3323		; [3712] while no foreground task runs (tools/machine.py)
+V30_RAM = v30_image+$A0000	; (the work RAM)
+VTOTAL = 284			; (the lines of a frame: a raster line beyond them never comes)
+
+	include	"gen_info.s"
+
+	section text,code
+; The image: v30_image is the ROM (rom_image.bin, its words as the 68000 reads them: the last thing in the data
+; section, mrheli.s), v30_tail the rest ($80000-$DFFFF: the first thing in the BSS, which follows the data directly; the
+; sound RAM and the reset vector's ROM above $E0000 are the boot's, not mapped).  init_image checks that they meet.
+init_image:
+	move.l	#v30_tail,d0
+	cmp.l	#v30_image+$80000,d0
+	beq.s	.ok
+	illegal
+.ok:	bra	init_ip_table
+
+; One arcade frame of the main CPU (the CPU idle at the main loop's head): the VBL interrupt (vector $20, the game's
+; logic), then the raster interrupt (vector $22: the playfield's FG scroll below the top panel), each run until the CPU
+; is idle again; the raster interrupt again while its handler moves the raster line further down (the cave's second
+; FG split), as tools/machine.py MrHeli.run_frame_port.  m72_scroll_vbl keeps the scroll the top panel is drawn with
+; (the values before the first raster interrupt), m72_scroll_r1 the values after it (with a second split).
+port_frame:
+	addq.l	#1,port_frames
+	movem.l	d0-d7/a0-a6,-(sp)
+	lea	ctx_main,a6
+	movem.l	R_D0(a6),d0-d6
+	movem.l	R_A2(a6),a2-a5
+	lea	VBL_LABEL,a0
+	bsr	v30_irq
+	move.l	m72_scroll,m72_scroll_vbl
+	move.l	m72_scroll+4,m72_scroll_vbl+4
+	move.w	m72_raster,m72_raster_vbl
+	clr.w	m72_rasters
+	move.w	#-1,-(sp)		; (the last raster line run)
+.ras:	move.w	m72_raster,d7
+	and.w	#$1FF,d7
+	sub.w	#128,d7
+	cmp.w	(sp),d7
+	ble.s	.done
+	cmp.w	#VTOTAL,d7
+	bge.s	.done
+	cmp.w	#4,m72_rasters
+	bhs.s	.done
+	move.w	d7,(sp)
+	addq.w	#1,m72_rasters
+	cmp.w	#1,m72_rasters
+	bne.s	.r2
+	move.l	m72_scroll,m72_scroll_r1	; (before the second raster interrupt: the band after the first)
+	move.l	m72_scroll+4,m72_scroll_r1+4
+.r2:	lea	RASTER_LABEL,a0
+	bsr	v30_irq
+	bra.s	.ras
+.done:	addq.l	#2,sp
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; a0 = an interrupt handler's label: the PSW, CS and IP of the idle point on the V30 stack, IE cleared, the handler;
+; back (rts) through main_idle when the CPU is idle again
+v30_irq:
+	move.w	R_SR(a6),ccr
+	move.l	a0,-(sp)
+	jsr	v30_psw_out
+	move.w	d7,-(a5)
+	move.w	#IDLE_CS,-(a5)
+	move.w	#IDLE_IP,-(a5)
+	sf	V30_IE(a6)
+	move.l	(sp)+,a0
+	jmp	(a0)
+
+; The idle point (0040:01F2, the translated label jumps here): idle when the foreground queue is empty ([27C0] =
+; [27C2]), no foreground task runs ([3712] = the idle task) and the busy flag [27C4] is clear: the state saved, back to
+; v30_irq's caller; else the loop goes on (its own translation)
+main_idle:
+	move.w	sr,-(sp)
+	move.w	V30_RAM+$27C0,d7
+	cmp.w	V30_RAM+$27C2,d7
+	bne.s	.go
+	cmp.w	#IDLE_TASK,V30_RAM+$3712
+	bne.s	.go
+	tst.w	V30_RAM+$27C4
+	bne.s	.go
+	move.w	(sp)+,R_SR(a6)
+	movem.l	d0-d6,R_D0(a6)
+	movem.l	a2-a5,R_A2(a6)
+	rts
+.go:	move.w	(sp)+,ccr
+	jmp	IDLE_CONT
+
+; ---- the dispatcher: d7.l = a linear address -> its label (main_disp_table: slot = address & $1FFF, linear
+; probing; the table is laid out for a .w index around its middle); the CCR is kept ----
+main_dispatch:
+	move.w	sr,-(sp)
+	move.l	d7,a1
+	and.w	#$1FFF,d7
+	lsl.w	#3,d7
+	lea	main_disp_table+$8000,a0
+.probe:	cmpa.l	(a0,d7.w),a1
+	beq.s	.hit
+	tst.l	(a0,d7.w)
+	beq.s	.bad
+	addq.w	#8,d7
+	bra.s	.probe
+.hit:	move.l	4(a0,d7.w),a0
+	move.w	(sp)+,ccr
+	jmp	(a0)
+.bad:	move.l	a1,d7
+	addq.l	#2,sp
+	bra.s	main_badpc
+
+; d7.w = an IP of CS $0040 (the code's main segment): its label from main_ip_table (64K longs, built at the start;
+; IP i at main_ip_mid + 4 * i sign-extended: the translation indexes it with a0 = IP, `move.w`); the CCR is kept
+main_dispatch_ip:
+	move.w	d7,a0
+	add.l	a0,a0
+	add.l	a0,a0
+	add.l	#main_ip_mid,a0
+	move.l	(a0),a1
+	jmp	(a1)
+; (no entry at that IP: the linear address to main_badpc)
+main_ip_bad:
+	move.l	a0,d7			; (a0 = its slot: the linear address back from it)
+	sub.l	#main_ip_mid,d7
+	asr.l	#2,d7
+	and.l	#$FFFF,d7
+	add.l	#$400,d7
+	bra.s	main_badpc
+
+; main_ip_table from main_ip_entries (tools/gen.py: a count, then IP word, label long)
+init_ip_table:
+	lea	main_ip_table,a0
+	move.l	#main_ip_bad,d0
+	move.w	#$10000/4-1,d1
+.fill:	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	dbf	d1,.fill
+	lea	main_ip_entries,a1
+	lea	main_ip_table,a0
+	move.w	(a1)+,d1
+	subq.w	#1,d1
+.e:	moveq	#0,d0
+	move.w	(a1)+,d0
+	eor.w	#$8000,d0
+	add.l	d0,d0
+	add.l	d0,d0
+	move.l	(a1)+,(a0,d0.l)
+	dbf	d1,.e
+	rts
+
+; untranslated code reached (d7 = its linear address)
+main_badpc:
+main_unsupported:
+	move.l	d7,badpc
+	move.l	a6,badctx
+    ifnd SIM
+	bra	port_crash		; (mrheli.s: CRASH.TXT, back to the desktop)
+    endc
+sim_badpc:
+	bra.s	sim_badpc
+
+; ---- I/O: the ports the translation does not fold (v30x port_in / port_out: tools/gen.py) ----
+; d7.w = the port; IN: AL / AW in d0
+v30_inb:
+	cmp.w	#6,d7
+	bcc.s	.none
+	lea	in_ports,a0
+	eor.w	#1,d7
+	move.b	(a0,d7.w),d0
+	rts
+.none:	clr.b	d0
+	rts
+v30_inw:
+	cmp.w	#6,d7
+	bcc.s	.none
+	lea	in_ports,a0
+	move.w	(a0,d7.w),d0
+	rts
+.none:	moveq	#0,d0
+	rts
+v30_outb:
+v30_outw:
+	addq.l	#1,cnt_other_out
+	rts
+
+; a REP string store into the palettes / video RAMs: a0 = its first destination, a1 = past its last (either order:
+; DF set runs down) -> the blocks between marked
+main_mark_range:
+	cmpa.l	a0,a1
+	bcc.s	.up
+	exg	a0,a1
+	addq.l	#2,a1
+.up:	suba.l	#v30_image+$C8000,a0
+	suba.l	#v30_image+$C8000+1,a1	; (the last byte)
+	move.l	a0,d7
+	bpl.s	.lo
+	moveq	#0,d7
+.lo:	lsr.l	#6,d7			; the first block
+	move.l	a1,-(sp)
+	move.l	(sp)+,a1
+	cmpa.w	#0,a1
+	blt.s	.r			; (wholly below)
+	exg	d7,a1
+	lsr.l	#6,d7			; the last block
+	cmp.l	#$5FF,d7
+	bls.s	.in
+	move.l	#$5FF,d7
+.in:	exg	d7,a1
+	lea	v30_vmarks,a0
+.l:	cmpa.l	d7,a1
+	blt.s	.r
+	st	(a0,d7.l)
+	addq.l	#1,d7
+	bra.s	.l
+.r:	rts
+
+; port $04: the sprite DMA (the sprite RAM to the buffer the picture shows)
+m72_sprite_dma:
+	st	m72_dma_done
+	movem.l	d0-d7/a0-a4,-(sp)
+	lea	v30_image+$C0000,a0
+	lea	m72_spritebuf,a1
+	moveq	#$400/32-1,d0
+.l:	movem.l	(a0)+,d1-d7/a2
+	movem.l	d1-d7/a2,(a1)
+	lea	32(a1),a1
+	dbf	d0,.l
+	movem.l	(sp)+,d0-d7/a0-a4
+	rts
+
+; port $00: the sound latch (AL): kept in a ring for the sound side (sound_cmds, 64 bytes, sound_head the next)
+m72_sound_latch:
+	move.l	a0,-(sp)
+	move.w	sound_head,d7
+	lea	sound_cmds,a0
+	move.b	d0,(a0,d7.w)
+	addq.w	#1,d7
+	and.w	#63,d7
+	move.w	d7,sound_head
+	move.l	(sp)+,a0
+	rts
+
+; port $C0: the second sound latch (AL; the sound CPU's NMI on the board): its own ring (sound2_cmds, sound2_head)
+m72_sound_latch2:
+	move.l	a0,-(sp)
+	move.w	sound2_head,d7
+	lea	sound2_cmds,a0
+	move.b	d0,(a0,d7.w)
+	addq.w	#1,d7
+	and.w	#63,d7
+	move.w	d7,sound2_head
+	move.l	(sp)+,a0
+	rts
+
+V30_SUB4S = 1			; (engine/rt/v30rt.s: SUB4S / CMP4S)
+	include	"v30rt.s"
+	include	"code_main.s"
+	include	"tables_main.s"
+
+	section data,data
+	even
+port_frames:	dc.l	1		; (port_frame calls)
+    ifd INVULN
+in_ports:	dc.w	$FFFF,$FFFF,$FDFF&~$4000	; (INVULN: DIP SW2:7, Invulnerability - for measurements)
+    else
+in_ports:	dc.w	$FFFF,$FFFF,$FDFF	; IN0 IN1 DSW (active low; IN1 bit 7: the VBLANK, read as set)
+    endc
+
+	section bss,bss
+	even
+ctx_main:	ds.b	CTXSIZE
+m72_scroll:	ds.w	4		; the ports $80-$86: FG y, FG x, BG y, BG x (the last written)
+m72_scroll_vbl:	ds.w	4		; (the values before the first raster interrupt: the top panel's)
+m72_scroll_r1:	ds.w	4		; (the values before the second raster interrupt, if any)
+m72_raster:	ds.w	1		; port $06: the raster interrupt's line + 128
+m72_raster_vbl:	ds.w	1		; (its value after the VBL handler: the first split)
+m72_rasters:	ds.w	1		; (raster interrupts run in the last arcade frame)
+m72_port02:	ds.w	1		; port $02: bit 3 display off, bit 2 flip
+m72_dma_done:	ds.b	1		; (a sprite DMA since the last picture)
+	even
+v30_vmarks:	ds.b	$600		; (a byte per 64 bytes of $C8000-$DFFFF, the palettes and video RAMs: set after the
+					; translated stores there, tools/gen.py store_marks)
+sound_head:	ds.w	1
+sound_cmds:	ds.b	64
+sound2_head:	ds.w	1
+sound2_cmds:	ds.b	64
+badpc:		ds.l	1
+badctx:		ds.l	1
+cnt_other_out:	ds.l	1
+m72_spritebuf:	ds.b	$400		; (the sprite list the picture shows)
+main_ip_table:	ds.l	$8000		; (main_dispatch_ip: the labels of CS $0040's entry points by IP)
+main_ip_mid:	ds.l	$8000
