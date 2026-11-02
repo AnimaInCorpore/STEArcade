@@ -178,6 +178,8 @@ def program(cpu, regions, cover):
     # the slots one code page runs from (in all the coverage): returns and jumps into them need no page check
     pages_in = collections.Counter(prog.slot_of.values())
     prog.fixed_slots = tuple(sorted(k for k, n in pages_in.items() if n == 1))
+    prog.fast_forms = True                      # (m6809x Program.fast_forms: flags fixed through d7, returns compared)
+    prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
     return prog, irq_v, idle_v
 
 
