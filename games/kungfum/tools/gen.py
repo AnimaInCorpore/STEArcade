@@ -26,6 +26,9 @@ BUILD = build_dir('kungfum')
 HOOKS = sorted(KungFuPort.HOOKS)
 TOKEN = KungFuPort.TOKEN
 SEEDS = range(1, 14)
+# calls of leaf functions of up to this many instructions are emitted in place, rst helpers and inner jumps too
+# (the whole program ROM 0000-7FFF is fixed)
+INLINE = 16
 # Jump tables whose entries the coverage did not all run (the porting guide: every translated `jp (hl)`'s table):
 # (table, entries).  28DC: the 5th floor's boss (`ld hl,$28DC; jp $1F23`, indexed by (ix+1)), 11 words up to the code
 # at 28F2.  (The others: 0156 by the state E000 < 11 (9 words, the states 9 and 10 never come), 1897 (11 words, three of
@@ -156,7 +159,8 @@ def generate():
         roots |= missing
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0x10000, iyaddr=0xF7F0, fshadow=0xF7F2,
                       io_read_redirect={}, write_hooks=[], nmi_token=TOKEN, token_sym='z80_irq_ret',
-                      rst28_tables=False, bit_s=True, **z80x.FAST)
+                      rst28_tables=False, bit_s=True,
+                      inline_leaves=INLINE, inline_limit=0x8000, inline_rst=True, inline_jumps=True, **z80x.FAST)
     joins = set(roots)
     for nxt, targets in tables.values():
         joins |= set(targets)

@@ -66,6 +66,8 @@ and the pictures a second, separately; per 100 VBLs in RATE.BIN.
 | run | logic | pictures |
 |---|---|---|
 | recorded play (`PLAY=1`), the whole run, 2026-10-25 (the generated sprite path, below) | 52.6 /s (93%) | 33.2 /s |
+| recorded play (`PLAY=1`), the whole run, 2026-11-02 (inline calls, below) | 52.6 /s (93%) | 33.6 /s |
+| the same before (measured the same day) | 52.5 /s (93%) | 33.0 /s |
 | the same before (measured the same day) | 52.1 /s (93%) | 27.4 /s |
 | recorded play (`PLAY=1`), the whole run | 51.9 /s (92%) | 27.1 /s |
 | recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 20-34 /s |
@@ -92,6 +94,13 @@ loop.  A blank cell (no opaque row) is now skipped before its damage is listed: 
 damage rectangle and with it the span copies and the front tiles drawn again.  `tools/render_test.py 1200 --seed 4
 --start 600` (Musashi, exact): 131.3k CPU + 25.1k Blitter -> 89.0k + 20.0k cycles a picture; seed 7 95.4k + 20.4k.
 The streams take 978 KB (the program 1.63 -> 2.8 MB, the limit 3.7 MB).
+
+**Inline calls** (2026-11-02, as Time Pilot's and Pooyan's): the main CPU's leaf calls up to 16 instructions, its
+`rst` helpers and their inner jumps in place (logic_test leaves out the 64 bytes below SP, which the inlined calls no
+longer write).  `tools/logic_test.py 4000` (Musashi, exact): seed 4 53.3k -> 51.5k cycles a frame, seed 7 49.7k ->
+48.0k (-3.4%).  Hatari (`PLAY=1 bench.sh 6000`, the tree before 7d63539): 33.0 -> 33.6 pictures a second, the logic at
+93% both.  (`--play` fails at frame 700 before and after this change: the recording's infinite-lives poke reaches only
+the reference.)
 
 ## The schedule (src/kungfum.s)
 

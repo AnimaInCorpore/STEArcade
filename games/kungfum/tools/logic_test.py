@@ -98,7 +98,8 @@ def main():
     def compare(f):
         want = bytes(m.mem[0xD000:0xF000])
         got = bytes(mem.r_block(addr(0xD000), 0x2000))
-        diff = [0xD000 + i for i in range(0x2000) if want[i] != got[i] and 0xD000 + i not in dead]
+        diff = [0xD000 + i for i in range(0x2000) if want[i] != got[i] and 0xD000 + i not in dead
+                and not (m.cpu.sp - 64 <= 0xD000 + i < m.cpu.sp)]   # (inlined calls write no return address)
         if diff:
             raise RuntimeError('frame %d: %d RAM differences, ref pc %04x %s' % (
                 f, len(diff), m.cpu.pc, [(hex(a), hex(got[a - 0xD000]), hex(want[a - 0xD000])) for a in diff[:12]]))
