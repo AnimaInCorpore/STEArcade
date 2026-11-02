@@ -323,6 +323,93 @@ v30_add4s:
 	add.w	d7,d4
 	rts
 
+    ifd V30_SUB4S
+; SUB4S / CMP4S as MAME's nec core (bcd4s): (CL + 1) / 2 BCD bytes of DS1:IY -= DS0:IX (CMP4S: not written), low
+; byte first; the registers unchanged; C the last borrow, Z when every result byte is 0; S O kept (the digits taken
+; as MAME takes them, invalid ones too).  (Mr. HELI: V30_SUB4S defined)
+v30_cmp4s:
+	move.w	sr,-(sp)
+	movem.l	d0-d6,-(sp)		; (the saved SR at 28(sp))
+	moveq	#0,d6			; (d6's upper word: 0 compares, -1 writes)
+	bra.s	v30_sub4s_go
+v30_sub4s:
+	move.w	sr,-(sp)
+	movem.l	d0-d6,-(sp)
+	moveq	#-1,d6
+v30_sub4s_go:
+	clr.w	d6
+	move.b	d1,d6
+	addq.w	#1,d6
+	lsr.w	#1,d6
+	move.w	d4,d0			; si
+	move.w	d5,d1			; di
+	moveq	#0,d2			; C
+	moveq	#0,d3			; a result byte not 0
+	tst.w	d6
+	beq.s	.end
+.l:	moveq	#0,d7
+	move.w	d0,d7
+	eori.w	#1,d7
+	moveq	#0,d4
+	move.b	(a3,d7.l),d4
+	move.w	d1,d7
+	eori.w	#1,d7
+	lea	(a2,d7.l),a0
+	moveq	#0,d5
+	move.b	(a0),d5
+	bsr.s	.bin4
+	exg	d4,d5			; d5 = the source's value
+	bsr.s	.bin4			; d4 = the destination's
+	add.w	d2,d5
+	moveq	#0,d2
+	sub.w	d5,d4
+	bcc.s	.nb
+	add.w	#100,d4
+	moveq	#1,d2
+.nb:	tst.w	d4
+	bpl.s	.pos
+	neg.w	d4			; (below 0, from invalid digits: C's / and % truncate towards 0)
+	divu	#10,d4
+	move.w	d4,d7
+	neg.w	d7
+	lsl.w	#4,d7
+	swap	d4
+	neg.w	d4
+	or.w	d4,d7
+	bra.s	.st
+.pos:	divu	#10,d4			; q (low) r (high)
+	move.w	d4,d7
+	lsl.w	#4,d7
+	swap	d4
+	or.w	d4,d7
+.st:	tst.l	d6
+	bpl.s	.nw
+	move.b	d7,(a0)
+.nw:	tst.w	d7			; (the whole value: MAME tests it before the byte is stored)
+	beq.s	.zero
+	moveq	#1,d3
+.zero:	addq.w	#1,d0
+	addq.w	#1,d1
+	subq.w	#1,d6
+	bne.s	.l
+.end:	move.w	28(sp),d7
+	and.w	#$0A,d7			; S O kept
+	or.b	d2,d7
+	tst.b	d3
+	bne.s	.nz
+	or.b	#4,d7
+.nz:	movem.l	(sp)+,d0-d6
+	addq.l	#2,sp
+	move.w	d7,ccr
+	rts
+.bin4:	move.w	d4,d7
+	lsr.w	#4,d7
+	mulu	#10,d7
+	and.w	#$0F,d4
+	add.w	d7,d4
+	rts
+    endc
+
 ; the parity of a byte: 1 when it has an even number of bits set (the V30's P)
 v30_parity:
 	dc.b	1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1

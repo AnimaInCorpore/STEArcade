@@ -210,7 +210,7 @@ def run_batch(args, rng, batch):
             "v30_outb:\trts", "v30_outw:\trts"]
     for h in sorted(set(hooks.values())):
         src += ["%s:\tmove.w sr,stopsr" % h, "\tmove.l #$%s,stopreg" % h[2:], "\tbra stopper"]
-    src.append('\tinclude "v30rt.s"')
+    src += ["V30_SUB4S = 1", '\tinclude "v30rt.s"']
     src += lines
     (tmp / "t.s").write_text("\n".join(src) + "\n")
     r = subprocess.run([VASM, "-Fbin", "-quiet", "-nowarn=2047", "-I", str(RT_INCLUDE), "-o", str(tmp / "t.bin"),

@@ -161,7 +161,7 @@ class Program:
                  hooks=None, hook_next=None, natives=None, after=None, port_in=None, port_out=None, image="v30_image",
                  code_limit=None, indirect_live=True, pal_sites=None, hook_flags=ALLF, targets_seen=None,
                  exec_counts=None, ip_table_cs=None, store_marks=None, leaf_calls=None,
-                 inline_calls=False, byte_parity=None):
+                 inline_calls=False, byte_parity=None, flag_uses=None):
         self.name, self.prefix, self.rd = name, prefix, rd
         self.roots = list(roots)
         self.exec_cover = set(exec_cover)
@@ -181,6 +181,8 @@ class Program:
         #                                             exact flags): its CALLs become a JSR, the return IP written below
         #                                             SP - where the flags after the return are dead unless exact;
         #                                             a (callee, call site) key: that site's own subroutine)
+        self.flag_uses = dict(flag_uses or {})     # (linear: the flags the instruction reads, instead of its own:
+        #                                             a LAHF whose AH the program uses only in part, Mr. HELI's)
         self.io_cover = io_cover or {}
         self.hooks = dict(hooks or {})
         self.hook_next = dict(hook_next or {})
@@ -362,6 +364,8 @@ def liveness(prog, code, ret_points):
                     for t in succ[v]:
                         out |= live_in.get(t, UNKNOWN)
                 d, u = defs_uses(ins)
+                if v in prog.flag_uses:
+                    u = prog.flag_uses[v]
                 li = (out & ~d) | u
                 outs[k][v] = out
                 if li != live_in[v]:
@@ -953,6 +957,8 @@ class Emitter:
                     if bi.flow in ("jmp", "jcc"):
                         out |= lin[lin_of(*bi.target)]
                 d, u = defs_uses(bi)
+                if b in self.p.flag_uses:
+                    u = self.p.flag_uses[b]
                 li = (out & ~d) | u
                 lout[b] = out
                 if li != lin[b]:
@@ -963,6 +969,9 @@ class Emitter:
         self.inl_next = {a: b for a, b in zip(body, body[1:])}
         self.inl_ret = self.lab(next_lin(ins))
         try:
+            t = lin_of(*ins.target)
+            if body[0] != t:                            # (the callee's entry is not its lowest address: a branch
+                self.e("bra %s" % self.inl[t])          # back to a RET before it, Mr. HELI 0040:0271)
             for b in body:
                 self.lines.append(self.inl[b] + ":")
                 bins = self.code[b]
@@ -1238,6 +1247,9 @@ class Emitter:
         if mn == "add4s":
             self.e("jsr v30_add4s")
             return
+        if mn in ("sub4s", "cmp4s"):
+            self.e("jsr v30_%s" % mn)                   # (engine/rt/v30rt.s with V30_SUB4S defined)
+            return
         if mn in ("clr1cy", "set1cy", "not1cy"):
             if self.live(v) & C:
                 self.e({"clr1cy": "andi #$FE,ccr", "set1cy": "ori #1,ccr", "not1cy": "eori #1,ccr"}[mn])
@@ -1478,11 +1490,23 @@ class Emitter:
                 self.aux_after(r)
             self.parity(v, r)
             return
-        self.no_aux(v)
+        hraux = dst[0] == "r" and w == 1 and self.live(v) & A and (src[0] == "i" or src[0] == "r" and
+                                                                   not self.dst_is_hreg(src, w))
+        if not hraux:
+            self.no_aux(v)
         if self.odd_word(v, dst, w):
             raise Unsupported("%s to an odd word" % mn)
         if dst[0] == "r" and w == 2:
             raise Unsupported("%s sp" % mn)
+        if hraux:                                       # (AC: dst ^ src to the context, ^ the result after)
+            self.stats["aux"] += 1
+            self.e("move.w sr,-(sp)")
+            self.e("move.w %s,-(sp)" % REGW[dst[1] - 4])
+            self.e("move.b (sp)+,d7")
+            s = "#$%X" % (src[1] & 0xFF) if src[0] == "i" else REGW[src[1]]
+            self.e("eor.b %s,d7" % s)
+            self.e("move.b d7,%d(a6)" % AX_OFF)
+            self.e("move.w (sp)+,ccr")
         self.e("move.w sr,-(sp)")                      # (C)
         k = 3
         if dst[0] == "m":
@@ -1506,6 +1530,11 @@ class Emitter:
         if dst[0] == "r":
             self.parity(v, "(sp)")
             self.e("move.w sr,d7")
+            if hraux:
+                self.e("move.w d7,-(sp)")               # (the flags)
+                self.e("move.b 2(sp),d7")               # (the result: the high byte of the register's word)
+                self.e("eor.b d7,%d(a6)" % AX_OFF)
+                self.e("move.w (sp)+,d7")
             self.e("move.w (sp)+,%s" % hr)
             self.e("move.w d7,ccr")
         else:
@@ -1949,6 +1978,7 @@ class Emitter:
                 self.e("move.w d7,ccr")
             self.shift_flags(v, ins, mn, one, via_d7)
             return
+        rotv = one and mn in ("rol", "ror", "rolc", "rorc") and live & V and o[0] == "r"
 
         def direct():
             loc, wb = self.rmw_operand(v, ins, o, w)
@@ -1962,8 +1992,10 @@ class Emitter:
                 self.shift_reg(v, mn, loc, n, sz, w, one=one)
             if one and mn == "shr" and self.live(v) & V:
                 self.shr_v(loc, w)
+            if rotv:
+                self.rot_v(mn, loc, w)
             self.finish_rmw(v, loc, wb, w, par=par)
-        self.shift_flags(v, ins, mn, one, direct)
+        self.shift_flags(v, ins, mn, one, direct, rot_v=rotv)
 
     def shr_v(self, loc, w):
         """SHR by one: O = the old top bit (the result's next one)"""
@@ -1998,7 +2030,7 @@ class Emitter:
         else:
             self.e("%s.%s #%d,%s" % (m68, sz, n, loc))
 
-    def shift_flags(self, v, ins, mn, one, body):
+    def shift_flags(self, v, ins, mn, one, body, rot_v=False):
         """the flags of a shift / rotate by an immediate count around its body"""
         live = self.live(v) & CCR
         if mn in ("shl", "shr", "shra"):
@@ -2011,8 +2043,37 @@ class Emitter:
             return
         # rotates: C (and V for one bit); Z N unchanged
         if one and live & V:
-            raise Unsupported("rotate V")
+            if not rot_v:
+                raise Unsupported("rotate V")
+            self.wrap(v, C | V, body)
+            return
         self.wrap(v, C, body)
+
+    def rot_v(self, mn, loc, w):
+        """a rotate by one of a data register: O = the top bit changed (MAME: (src ^ dst) & top) - for ROR / RORC the
+        result's top two bits differ, for ROL / ROLC its top bit differs from the new C"""
+        sz = "b" if w == 1 else "w"
+        skip = self.new_label()
+        self.e("move.w sr,-(sp)")
+        self.e("bclr #1,1(sp)")
+        if mn in ("ror", "rorc"):
+            self.e("move.%s %s,d7" % (sz, loc))
+            self.e("add.%s d7,d7" % sz)
+            self.e("eor.%s %s,d7" % (sz, loc))
+            self.e("bpl.s %s" % skip)
+        else:
+            c = self.new_label()
+            self.e("tst.%s %s" % (sz, loc))
+            self.e("smi d7")
+            self.e("btst #0,1(sp)")
+            self.e("beq.s %s" % c)
+            self.e("not.b d7")
+            self.lines.append(c + ":")
+            self.e("tst.b d7")
+            self.e("beq.s %s" % skip)
+        self.e("bset #1,1(sp)")
+        self.lines.append(skip + ":")
+        self.e("move.w (sp)+,ccr")
 
     def const_reg(self, v, o):
         """a word register's value when the instruction before (straight code, no join here) is MOV reg, imm"""
@@ -2037,7 +2098,77 @@ class Emitter:
         return None
 
     def shift_cl(self, v, ins, mn, o, w):
-        raise Unsupported("shift by CL")
+        """a shift / rotate by CL (MAME's nec core: nothing at all for CL = 0; SHL by CL & 31, SHR / SHRA by
+        ((CL - 1) & 31) + 1, rotates CL times: C, and of the shifts S Z P, from the result, O and AC kept)"""
+        sz = "b" if w == 1 else "w"
+        live = self.live(v)
+        rot = mn in ("rol", "ror", "rolc", "rorc")
+        carry = mn in ("rolc", "rorc")
+        defined = C if rot else C | Z | N
+        m68 = {"shl": "lsl", "shr": "lsr", "shra": "asr", "rol": "rol", "ror": "ror", "rolc": "roxl", "rorc": "roxr"}[mn]
+        mem = o[0] == "m"
+        if mem and self.odd_word(v, o, w):
+            raise Unsupported("shift odd word")
+        if o[0] == "r" and w == 2 and o[1] == SP:
+            raise Unsupported("shift sp")
+        hreg = o[0] == "r" and self.dst_is_hreg(o, w)
+        direct = o[0] == "r" and not hreg
+        t = REGW[o[1]] if direct else "d6"
+        zero, done = self.new_label(), self.new_label()
+        if not direct:
+            self.e("movem.l d6,-(sp)")
+        self.e("move.w sr,-(sp)")
+        if mem:
+            self.mem(v, ins, o, w, in_a0=True)
+            self.e("move.%s (a0),d6" % sz)
+        elif hreg:
+            self.e("move.w %s,d6" % REGW[o[1] - 4])
+            self.e("lsr.w #8,d6")
+        if carry:
+            self.e("move.w (sp),ccr")
+            self.x_from_c()                              # (X = C; moveq, move, divu and swap keep X)
+        self.e("moveq #0,d7")
+        self.e("move.b d1,d7")
+        self.e("beq.s %s" % zero)
+        if mn == "shl":
+            self.e("and.w #31,d7")
+        elif mn in ("shr", "shra"):
+            self.e("subq.w #1,d7")
+            self.e("and.w #31,d7")
+            self.e("addq.w #1,d7")
+        elif not carry:
+            k = self.new_label()
+            self.e("and.w #%d,d7" % (8 * w - 1))
+            self.e("bne.s %s" % k)
+            self.e("moveq #%d,d7" % (8 * w))
+            self.lines.append(k + ":")
+        else:
+            self.e("divu #%d,d7" % (8 * w + 1))
+            self.e("swap d7")                            # (the count modulo the width + 1)
+        self.e("%s.%s d7,%s" % (m68, sz, t))
+        self.e("move.w sr,-(sp)")
+        if live & P and not rot:
+            self.e("move.b %s,%d(a6)" % (t, PB_OFF))
+        if mem:
+            self.e("move.%s d6,(a0)" % sz)
+        elif hreg:
+            hr = REGW[o[1] - 4]
+            self.e("move.w %s,-(sp)" % hr)
+            self.e("move.b d6,(sp)")
+            self.e("move.w (sp)+,%s" % hr)
+        self.e("andi.w #%d,(sp)" % defined)
+        self.e("andi.w #%d,2(sp)" % (0x1F & ~defined))
+        self.e("move.w (sp)+,d7")
+        self.e("or.w d7,(sp)")
+        self.e("move.w (sp)+,ccr")
+        if not direct:
+            self.e("movem.l (sp)+,d6")
+        self.e("bra.s %s" % done)
+        self.lines.append(zero + ":")
+        self.e("move.w (sp)+,ccr")
+        if not direct:
+            self.e("movem.l (sp)+,d6")
+        self.lines.append(done + ":")
 
     # -- stack -----------------------------------------------------------------------------------------------
     def emit_push(self, v, ins, o):
@@ -2112,18 +2243,76 @@ class Emitter:
             self.e("move.w (a5)+,a0")
             self.e("jsr v30_psw_in")
             return
+        if mn == "lahf":
+            # AH = the PSW's low byte: S Z 0 AC 0 P 1 C (AC from the context's AC byte: the liveness asks every
+            # producer for it unless Program.flag_uses says less)
+            aux = v not in self.p.flag_uses or self.p.flag_uses[v] & A
+
+            def b():
+                self.e("jsr v30_psw_out")
+                if aux:
+                    skip = self.new_label()
+                    self.e("btst #4,%d(a6)" % AX_OFF)
+                    self.e("beq.s %s" % skip)
+                    self.e("bset #4,d7")
+                    self.lines.append(skip + ":")
+                self.e("move.w d0,-(sp)")
+                self.e("move.b d7,(sp)")
+                self.e("move.w (sp)+,d0")
+            self.keep_all(v, b)
+            return
+        if mn == "sahf":
+            # S Z AC P C from AH (bits 7 6 4 2 0), O kept
+            live = self.live(v)
+            self.e("move.w sr,-(sp)")
+            self.e("move.w d0,-(sp)")
+            self.e("move.b (sp)+,d7")
+            if live & P:
+                self.e("btst #2,d7")
+                self.e("seq %d(a6)" % PB_OFF)
+                self.e("andi.b #1,%d(a6)" % PB_OFF)
+            if live & A:
+                self.e("move.b d7,%d(a6)" % AX_OFF)
+            if live & CCR:
+                skip = self.new_label()
+                self.e("move.b d7,-(sp)")
+                self.e("lsr.b #4,d7")
+                self.e("andi.b #$0C,d7")
+                self.e("btst #0,(sp)")
+                self.e("beq.s %s" % skip)
+                self.e("addq.b #1,d7")
+                self.lines.append(skip + ":")
+                self.e("addq.l #2,sp")
+                skip = self.new_label()
+                self.e("btst #1,1(sp)")
+                self.e("beq.s %s" % skip)
+                self.e("addq.b #2,d7")
+                self.lines.append(skip + ":")
+                self.e("addq.l #2,sp")
+                self.e("move.w d7,ccr")
+            else:
+                self.e("addq.l #2,sp")
+            return
         raise Unsupported(mn)
 
     def emit_frame(self, v, ins, mn):
         raise Unsupported(mn)
 
     # -- bits -------------------------------------------------------------------------------------------------
+    def mem_keeps_flags(self, v, ins, o, w):
+        """the memory operand's setup (mem(..., in_a0=True)) leaves the CCR as it is (only LEA / MOVEA)"""
+        n, st = len(self.lines), collections.Counter(self.stats)
+        self.mem(v, ins, o, w, in_a0=True)
+        new = self.lines[n:]
+        del self.lines[n:]
+        self.stats = st
+        return all(x.split()[0] in ("lea", "adda.l") or (x.split()[0] == "move.l" and x.endswith(",a0")) for x in new)
+
     def emit_bit(self, v, ins, mn, o, bit, w):
-        if bit[0] != "i":
-            raise Unsupported("bit number in CL")
+        if bit[0] != "i" or mn == "test1":
+            self.emit_bit2(v, ins, mn, o, bit, w)
+            return
         b = bit[1]
-        if mn == "test1":
-            raise Unsupported("test1")
         op = {"clr1": "bclr", "set1": "bset", "not1": "bchg"}[mn]
 
         def body():
@@ -2141,7 +2330,55 @@ class Emitter:
             else:
                 self.e("%s #%d,%s" % (op, b, ea))
         hreg = o[0] == "r" and self.dst_is_hreg(o, w)
-        self.wrap(v, 0 if hreg else C | V | N, body)          # (bclr / bset / bchg change only Z)
+        safe = o[0] == "r" or self.mem_keeps_flags(v, ins, o, w)
+        self.wrap(v, 0 if hreg or not safe else C | V | N, body)  # (bclr / bset / bchg change only Z; the operand's
+        #                                                             setup may change them all)
+
+    def emit_bit2(self, v, ins, mn, o, bit, w):
+        """TEST1 (Z = the bit clear, C = O = 0, S P AC kept: MAME's nec core) and CLR1 / SET1 / NOT1 with the bit number
+        in CL (CL & 7, of a word CL & 15; no flag changed)"""
+        op = {"test1": "btst", "clr1": "bclr", "set1": "bset", "not1": "bchg"}[mn]
+        test = mn == "test1"
+        cl = bit[0] != "i"
+        hreg = o[0] == "r" and self.dst_is_hreg(o, w)
+        if o[0] == "r" and w == 2 and o[1] == SP:
+            raise Unsupported("bit op on sp")
+        if o[0] == "m" and self.odd_word(v, o, w):
+            raise Unsupported("bit op on an odd word")
+        mask = 15 if w == 2 else 7
+        safe = o[0] == "r" or self.mem_keeps_flags(v, ins, o, w)
+
+        def body():
+            if o[0] == "r":
+                reg = REGW[o[1] - 4] if hreg else REGW[o[1]]
+                if cl:
+                    self.e("moveq #%d,d7" % mask)
+                    self.e("and.w d1,d7")
+                    if hreg:
+                        self.e("addq.w #8,d7")
+                    self.e("%s d7,%s" % (op, reg))
+                else:
+                    self.e("%s #%d,%s" % (op, (bit[1] & mask) + (8 if hreg else 0), reg))
+                return
+            self.mem(v, ins, o, w, in_a0=True)
+            if cl:
+                self.e("moveq #%d,d7" % mask)
+                self.e("and.w d1,d7")
+                if w == 2:
+                    hi = self.new_label()
+                    self.e("btst #3,d7")              # (the V30 word's low byte is the image word's second)
+                    self.e("bne.s %s" % hi)
+                    self.e("addq.l #1,a0")
+                    self.lines.append(hi + ":")
+                self.e("%s d7,(a0)" % op)             # (a memory bit number counts modulo 8)
+            else:
+                b = bit[1] & mask
+                self.e("%s #%d,%d(a0)" % (op, b & 7, 0 if b >= 8 or w == 1 else 1))
+        if test:
+            ok = Z | (N if safe and not cl else 0)
+            self.wrap(v, ok, body, const_clear=C | V)
+        else:
+            self.wrap(v, 0, body)
 
     # -- I/O --------------------------------------------------------------------------------------------------
     def emit_io(self, v, ins):
