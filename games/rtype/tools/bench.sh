@@ -26,7 +26,8 @@ if [ -n "$REPLAY" ]; then                       # REPLAY=seed:frame[:end]: start
   $PY games/rtype/tools/play_inputs.py --seed $RSEED --start $RFRAME --frames ${REND:-8000} | tail -1
   export REPLAY="$RSEED:$RFRAME"
 fi
-$PY games/rtype/tools/build.py $EXTRA 2>&1 | grep -E "^built|rror" | tail -2
+OUT=$($PY games/rtype/tools/build.py $EXTRA 2>&1); echo "$OUT" | grep -E "^built|rror" | tail -2
+echo "$OUT" | grep -q "^built" || { echo "build failed: no bench"; exit 1; }   # (else the last program is benched)
 cp run/rtype/RTYPE.PRG $BENCH/
 rm -f $BENCH/COUNTERS.BIN $BENCH/CRASH.TXT $BENCH/cmd.fifo $BENCH/BORDERS.BIN
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
@@ -95,4 +96,7 @@ if os.path.exists('run/rtype_bench/BORDERS.BIN'):
           "bottom %d, off %d" % (fb, lt, lo, ll, lf))
 if len(raw) >= 112:
     print("stage renderer: log entries copied %d (lines %d), erase words %d, whole copies %d" % struct.unpack('>4I', raw[96:112]))
+if len(raw) >= 128:
+    g = struct.unpack('>4I', raw[112:128])
+    print("gaps between shown pictures (fields): 1: %d, 2: %d, 3: %d, more: %d" % g)
 P

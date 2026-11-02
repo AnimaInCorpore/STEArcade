@@ -13,7 +13,11 @@
 ; does not: ~100k cycles a frame, the picture ~1M); a picture after every PIC_EVERY-th arcade frame (or when no tick
 ; is waiting); arcade frames the logic falls behind by more than MAX_BEHIND are dropped (the game slows down, its
 ; pace stays even).  Game speed first (the user, 2026-11-01): PIC_EVERY 8, MAX_BEHIND 12 - the logic at full rate
-; where it fits, the pictures in the time left (2 / 3 before: more pictures, the game slower).  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
+; where it fits, the pictures in the time left (2 / 3 before: more pictures, the game slower).  In heavy scenes at
+; least a picture every PIC_VBLS fields (the user, 2026-11-02: 3, a steady 50/3 per second; the game slows instead): after
+; each arcade frame, a picture now when one more frame and the picture would end after the field PIC_VBLS after the
+; last flip (pic_due: the time from MFP Timer D running free, 81 us ticks, and the VBLs; the frame's and the picture's
+; times their recent maxima).  PIC_VBLS 0: off.  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
 ; The display: the renderer's buffers, engine/rt/borders.s (top and bottom border open, the picture's palette and the
 ; status bar's own screen and palette: BD_HUD, BD_VSWITCH).  Sound: none yet (the sound latch's bytes are kept in core.s' ring).
 ; Untranslated code reached: CRASH.TXT "BADPC xxxxx" (the linear address), back to the desktop.
@@ -41,6 +45,14 @@ MAX_BEHIND = 12				; (ticks behind before arcade frames are dropped: the game sl
       ifnd PIC_EVERY
 PIC_EVERY = 8				; (arcade frames a picture at most; game speed first, the user 2026-11-01: a picture
       endc				; when the logic has caught up, at least every 8 arcade frames)
+      ifnd PIC_VBLS
+PIC_VBLS = 3				; (fields between pictures at most, where the picture itself fits: the game slows)
+      endc
+      ifnd EST_DECAY
+EST_DECAY = 1				; (the time estimates: the recent maximum, losing 1 / 2^EST_DECAY a sample; the user, 2026-11-02:
+					; 1 - stage 2 87% / 15.1 pictures a second, 4: 77% / 19.2, more gaps of 2 fields)
+      endc
+TPF = 245				; (Timer D ticks a field: 2.4576 MHz / 200, 19.97 ms)
 ; the pads (engine/rt/jagpad.s): SYSTEM (IN1), P1 (IN0 low), P2 (IN0 high) bits as in key_table (bytes 0-2)
 JP_SH1 = 16
 JP_SH2 = 8
@@ -99,7 +111,7 @@ sim_wait:
 	bsr	init_hardware
 main_loop:
 	tst.b	quit_flag
-	bne.s	.quit
+	bne	.quit
 	tst.b	ticks
 	beq.s	main_loop
 	cmp.b	#MAX_BEHIND,ticks	; (behind: drop arcade frames)
@@ -111,20 +123,43 @@ main_loop:
 	bsr	play_next
     endc
 	move.b	#1,main_state
+    if PIC_VBLS
+	bsr	clock
+	movem.w	d0-d1,-(sp)
+    endc
 	bsr	port_frame
+    if PIC_VBLS
+	lea	est_logic,a0		; (the frame's time: its recent maximum)
+	bsr	estimate
+    endc
 	move.b	#3,main_state
 	addq.l	#1,cnt_logic
 	addq.b	#1,since_pic		; a picture after every PIC_EVERY-th arcade frame, or when the logic caught up
 	cmp.b	#PIC_EVERY,since_pic
 	bhs.s	.pic
 	tst.b	ticks
+    if PIC_VBLS
+	beq.s	.pic
+	bsr	pic_due			; (heavy scenes: a picture now when one more arcade frame could miss PIC_VBLS)
+	bne.s	.pic
+	bra	main_loop
+    else
 	bne	main_loop
+    endc
 .pic:	clr.b	since_pic
     ifnd STAGE
 	bsr	m72_sync
     endc
 	move.b	#2,main_state
+    if PIC_VBLS
+	bsr	clock
+	movem.w	d0-d1,-(sp)
+    endc
 	bsr	m72r_frame
+    if PIC_VBLS
+	lea	est_pic,a0
+	bsr	estimate
+    endc
 	clr.b	main_state
 	bra	main_loop
 .quit:	bsr	restore_hardware
@@ -277,7 +312,7 @@ write_counters:
 	lea	start(pc),a0
 	move.l	a0,cnt_base
 	pea	cnt_vbls
-	pea	112.w
+	pea	128.w
 	move.w	d0,-(sp)
 	move.w	#$40,-(sp)		; Fwrite
 	trap	#1
@@ -294,6 +329,57 @@ write_counters:
 
 ; ---- the hardware: the VBL (borders, the picture, the ticks, the pads), the timers (borders.s), the ACIA (keys,
 ; joysticks) ----
+; the main loop's clock: d0.w = the VBL count (low word), d1.w = Timer D ticks since that VBL
+clock:	move.w	cnt_vbls+2,d0
+	moveq	#0,d1
+	move.b	td_vbl,d1
+	sub.b	$fffffa25.w,d1		; (Timer D counts down)
+	cmp.w	cnt_vbls+2,d0
+	bne.s	clock
+	rts
+
+; (sp+4).w / (sp+6).w: a clock reading -> the time since, in ticks; the estimate at a0: the larger of the time and
+; 15/16 of the estimate; the reading popped
+estimate:
+	bsr.s	clock
+	sub.w	4(sp),d0		; fields
+	cmp.w	#8,d0
+	bls.s	.f
+	moveq	#8,d0
+.f:	mulu	#TPF,d0
+	add.w	d1,d0
+	sub.w	6(sp),d0
+	move.w	(a0),d1
+	move.w	d1,d2
+	lsr.w	#EST_DECAY,d2
+	sub.w	d2,d1
+	cmp.w	d1,d0
+	bls.s	.k
+	move.w	d0,d1
+.k:	move.w	d1,(a0)
+	move.l	(sp)+,(sp)		; (the return address over the reading)
+	rts
+
+; Z clear: a picture is due - one more arcade frame and the picture would end after PIC_VBLS fields after the last
+; flip (or the coming one: a picture ready)
+pic_due:
+	bsr.s	clock
+	sub.w	flip_vbl,d0		; the fields since the flip
+	tst.b	m72r_ready
+	beq.s	.n
+	moveq	#-1,d0			; (the flip at the next VBL)
+.n:	cmp.w	#8,d0
+	ble.s	.c
+	moveq	#8,d0
+.c:	muls	#TPF,d0
+	add.w	d1,d0
+	add.w	est_logic,d0
+	add.w	est_pic,d0
+	cmp.w	#PIC_VBLS*TPF-6,d0	; (a margin: 0.5 ms)
+	sgt	d0
+	tst.b	d0
+	rts
+
 init_hardware:
 	move	#$2700,sr
 	movem.l	$ffff8240.w,d0-d7
@@ -322,6 +408,17 @@ init_hardware:
 	clr.b	$fffffa13.w
 	clr.b	$fffffa15.w
 	bclr	#3,$fffffa17.w		; (automatic end of interrupt)
+	moveq	#0,d1			; Timer D (the serial clock; no interrupt): its reload value kept - the largest of
+	moveq	#63,d2			; 64 reads - then free running, 2.4576 MHz / 200, 256 counts (main loop clock)
+.tdr:	move.b	$fffffa25.w,d0
+	cmp.b	d1,d0
+	bls.s	.tdn
+	move.b	d0,d1
+.tdn:	dbf	d2,.tdr
+	move.b	d1,old_tdd
+	and.b	#$F0,$fffffa1d.w
+	clr.b	$fffffa25.w
+	or.b	#7,$fffffa1d.w
 	clr.b	$fffffa19.w
 	clr.b	$fffffa1b.w
 	moveq	#0,d0
@@ -362,6 +459,8 @@ restore_hardware:
 	endc
 	clr.b	$fffffa19.w
 	clr.b	$fffffa1b.w
+	and.b	#$F0,$fffffa1d.w	; (Timer D's reload value back; its control with the MFP's registers)
+	move.b	old_tdd,$fffffa25.w
 	lea	old_mfp,a0
 	lea	$fffffa07.w,a1
 	moveq	#$21-$07,d0
@@ -405,8 +504,27 @@ prof_timer_c:
 	endc
 
 ; the VBL: borders.s' events, the picture published last, the pads, the ticks (one a field; TICK55: 11 per 10 fields)
-vbl:	borders_vbl
-	bsr	m72r_vbl
+vbl:	move.b	$fffffa25.w,td_vbl	; (Timer D at the VBL: main loop times, clock)
+	borders_vbl
+	tst.b	m72r_ready		; (flip_vbl: the VBL count after a flip - m72r_vbl shows a ready picture)
+	beq.s	.shw
+    ifd DEBUG
+	movem.l	d0/a0,-(sp)		; (the gaps between flips: 1, 2, 3, more fields)
+	move.w	cnt_vbls+2,d0
+	addq.w	#1,d0
+	sub.w	flip_vbl,d0
+	subq.w	#1,d0
+	cmp.w	#3,d0
+	bls.s	.gp
+	moveq	#3,d0
+.gp:	lsl.w	#2,d0
+	lea	cnt_gaps,a0
+	addq.l	#1,(a0,d0.w)
+	movem.l	(sp)+,d0/a0
+    endc
+	move.w	cnt_vbls+2,flip_vbl
+	addq.w	#1,flip_vbl
+.shw:	bsr	m72r_vbl
 	bsr	bd_hud_plan
 	movem.l	d0-d2,-(sp)
 	bsr	jagpad_poll
@@ -617,6 +735,7 @@ cnt_state:	ds.l	16		; (DEBUG: VBLs that found the main loop waiting / in the log
 cnt_base:	ds.l	1		; (DEBUG: the program's text address)
 cnt_samples:	ds.l	1		; (PROF: the Timer C samples)
 cnt_x:		ds.l	4		; (STAGE: pens looked up, scene checks, colour rows made, scene switches)
+cnt_gaps:	ds.l	4		; (DEBUG: the gaps between shown pictures: 1, 2, 3, more than 3 fields)
 old_timer_c:	ds.l	1
 main_state:	ds.b	1
 	even
@@ -628,6 +747,12 @@ old_fine:	ds.b	1
 ticks:		ds.b	1
 tick_phase:	ds.b	1
 since_pic:	ds.b	1
+td_vbl:		ds.b	1
+old_tdd:	ds.b	1
+	even
+flip_vbl:	ds.w	1
+est_logic:	ds.w	1
+est_pic:	ds.w	1
 kbd_sys:	ds.b	1
 kbd_p1:		ds.b	1
 kbd_p2:		ds.b	1
