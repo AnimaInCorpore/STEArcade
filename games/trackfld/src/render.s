@@ -13,8 +13,9 @@
 ; lines below the picture (and PIC_TOP above) for whole sprites.  A buffer is brought to the new picture row by row:
 ; tile row r (raw row 2 + r, picture lines 8r-8r+7) is copied from the playfield at its scroll ($1840 + row, bit 8 at
 ; $1C40 + row: screen x shows playfield x + scroll) when the scroll differs from what the buffer holds there, or a cell
-; of the row changed, or the buffer's last sprites covered it; one HOG pass per plane and line (16 words, the source
-; shifted with FXSR: ~132 bus cycles; the addresses run on to the next plane).  Then the sprites: the 32 entries from
+; of the row changed (one HOG pass per plane and line: 16 words, the source shifted with FXSR, ~132 bus cycles; the
+; addresses run on to the next plane), or only the 16-pixel groups the buffer's last sprites covered when nothing else
+; changed in the row (X count n, FXSR's pre-read kept).  Then the sprites: the 32 entries from
 ; the last to the first (the first on top), each at x and at x - 256 (MAME's wrap); the rows they cover and the guard
 ; lines they reach are noted for the buffer's next picture.
 ;
@@ -474,6 +475,8 @@ draw_rows:
 	lea	row_dirty,a0
 	move.l	(a0,d1.w),d6		; the rows to draw whatever their scroll
 	clr.l	(a0,d1.w)
+	lea	row_sdirty,a0
+	move.l	(a0,d1.w),sd_rows	; the rows only the buffer's last sprites covered: their groups
 	mulu	#56,d0
 	lea	row_scroll,a2
 	add.w	d0,a2			; the buffer's rows' scrolls
@@ -507,7 +510,11 @@ draw_rows:
 .s:	cmp.w	(a2),d0
 	bne.s	.draw
 	btst	d7,d6
-	beq	.next
+	bne.s	.draw
+	move.l	sd_rows,d1
+	btst	d7,d1
+	bne	.part
+	bra	.next
 .draw:	move.w	d0,(a2)
 	moveq	#15,d1
 	and.w	d0,d1			; the shift
@@ -548,6 +555,58 @@ draw_rows:
 	cmp.w	#28,d7
 	bne	.row
 	rts
+.part:	moveq	#0,d5			; d0 = the scroll (the buffer's): groups g0 .. g1 of the row (row_span)
+	move.b	row_span-row_scroll(a2),d5
+	moveq	#0,d2
+	move.b	row_span-row_scroll+1(a2),d2
+	sub.w	d5,d2			; n - 1
+	move.w	d2,d1
+	addq.w	#1,d1
+	move.w	d1,B_XC.w		; n
+	lsl.w	#3,d2
+	moveq	#2,d1
+	sub.w	d2,d1
+	move.w	d1,B_DYI.w		; 2 - (n - 1) * 8
+	moveq	#15,d2
+	and.w	d0,d2			; the shift
+	beq.s	.p0
+	subq.w	#8,d1
+	move.w	d1,B_SYI.w		; 2 - n * 8 (FXSR: n + 1 source words)
+	moveq	#16,d1
+	sub.w	d2,d1
+	or.b	#FXSR,d1
+	move.b	d1,B_SKEW.w
+	bra.s	.pk
+.p0:	move.w	d1,B_SYI.w
+	clr.b	B_SKEW.w
+.pk:	lsr.w	#4,d0
+	add.w	d5,d0
+	lsl.w	#3,d0
+	lea	(a0,d0.w),a1		; the source's group g0
+	lsl.w	#3,d5
+	move.w	d7,d1
+	mulu	#8*LB,d1
+	add.l	d5,d1
+	move.l	draw_base,d2
+	add.l	#PIC0+16,d2
+	add.l	d1,d2			; the destination's group g0
+	moveq	#8-1,d5
+.pl:	move.l	a1,(a3)
+	move.l	d2,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	lea	PF_LB(a1),a1
+	add.l	#LB,d2
+	dbf	d5,.pl
+	move.w	#16,B_XC.w
+	move.w	#2-15*8,B_DYI.w
+	bra	.next
 
 ; ======================================================================================================================
 ; draw_sprites: the 32 entries, the last first (the first on top), each at x and x - 256; the rows they cover and the
@@ -556,6 +615,11 @@ draw_rows:
 draw_sprites:
 	clr.l	spr_rows
 	clr.b	spr_guard
+	move.w	draw_idx,d0
+	mulu	#56,d0
+	lea	row_span,a0
+	add.w	d0,a0
+	move.l	a0,spr_span		; (a row's span is written when a sprite first covers it)
 	move.w	#-1,last_mode
 	move.w	#$0203,B_HOP.w
 	moveq	#$3E,d0
@@ -595,9 +659,8 @@ draw_sprites:
 	move.w	d0,d1
 	add.w	d1,d1
 	add.w	d1,d1
-	lea	row_dirty,a0
-	move.l	spr_rows,d2
-	or.l	d2,(a0,d1.w)
+	lea	row_sdirty,a0
+	move.l	spr_rows,(a0,d1.w)
 	lea	guard_dirty,a0
 	move.b	spr_guard,d2
 	or.b	d2,(a0,d0.w)
@@ -625,9 +688,32 @@ draw_cell:
 	move.w	#223,d1
 .r1:	lsr.w	#3,d0
 	lsr.w	#3,d1
+	move.w	d3,d6			; the groups: X >> 4 .. (X + 15) >> 4 within 0-15
+	asr.w	#4,d6
+	bpl.s	.g0
+	moveq	#0,d6
+.g0:	move.w	d3,d7
+	add.w	#15,d7
+	asr.w	#4,d7
+	cmp.w	#15,d7
+	ble.s	.g1
+	moveq	#15,d7
+.g1:	move.l	spr_span,a1
+	add.w	d0,a1
+	add.w	d0,a1
 	move.l	spr_rows,d5
 .rb:	bset	d0,d5
-	addq.w	#1,d0
+	bne.s	.ru
+	move.b	d6,(a1)+		; (the row's first sprite)
+	move.b	d7,(a1)+
+	bra.s	.rn
+.ru:	cmp.b	(a1)+,d6
+	bhs.s	.ru0
+	move.b	d6,-1(a1)
+.ru0:	cmp.b	(a1)+,d7
+	bls.s	.rn
+	move.b	d7,-1(a1)
+.rn:	addq.w	#1,d0
 	cmp.w	d1,d0
 	bls.s	.rb
 	move.l	d5,spr_rows
@@ -1076,6 +1162,10 @@ tc_used:	ds.w	1
 spr_rows:	ds.l	1			; draw_sprites: the rows the sprites drawn now cover
 row_dirty:	ds.l	NBUF			; per buffer: rows to draw whatever their scroll
 row_scroll:	ds.w	NBUF*28			; per buffer and row: the scroll it was drawn at (-1: never)
+row_span:	ds.b	NBUF*56			; per buffer and row: the groups g0, g1 its last sprites covered
+row_sdirty:	ds.l	NBUF			; per buffer: the rows its last sprites covered (only their groups drawn)
+sd_rows:	ds.l	1			; draw_rows: the buffer's row_sdirty
+spr_span:	ds.l	1			; draw_sprites: the buffer's row_span
 guard_dirty:	ds.b	4			; per buffer: bit 0 the top guard lines, bit 1 the bottom ones hold sprites
 spr_guard:	ds.b	1
 frame_ready:	ds.b	1

@@ -74,7 +74,20 @@ first, what it passes through) instead of every caller's needs, which halved the
   error 0.8 a channel, weighted by pixels; the worst-matched pens are rare (magenta, a dark grey).
 * Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (IN1).
 
-## Speed (2026-10-29)
+## Speed (2026-10-29, 2026-11-02)
+
+2026-11-02 (Musashi, seed 6's play, `render_test.py 4000 --seed 6 --start 1000 --every 4` with per-picture
+percentiles; the logic `logic_test.py 3000 --seed N`):
+* **Video RAM stores inline** (`tools/gen.py` video_inline, engine/m6809x.py): a byte store at an I/O site whose address
+  is in $3000-$3FFF writes the byte and lists its cell itself; main_io_w only for other addresses (246 of 344 sites;
+  word stores still call it).  The logic 42.3k -> **39.7k** cycles an arcade frame (seed 6, -6.0%), seed 1 35.1k ->
+  33.4k (-4.9%); in the render run median 30.1k -> 26.1k, the screen changes' maximum 1.24M -> 0.94M.
+* **Sprite damage restores only the sprites' groups**: a row that only the buffer's last sprites covered (its scroll
+  and cells unchanged) is copied over the 16-pixel groups g0 .. g1 they touched (X count n, FXSR's pre-read kept); the
+  spans are noted per buffer and row where the sprites are drawn.  A picture, CPU + Blitter: mean 75.5k -> **66.1k**
+  (-12.5%), median 60.8k -> **52.5k** (-13.6%), **p90 105.0k -> 106.5k** (+1.5%: the pictures with many changed rows
+  pay the span bookkeeping and gain little); the Blitter 32.9k -> 19.9k, the CPU 42.6k -> 46.2k.  Not yet measured in
+  Hatari (the figures below are 2026-10-29's).
 
 `tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): **95% of the arcade's speed
 (median 60 arcade frames a second), pictures 41.9 a second on average, median 47.5, 10th percentile 23** with the
@@ -90,7 +103,8 @@ bus cycles (every sprite on the row path, `-D REN_GEN=0`: 69.7k + 36.7k).  Of th
   row) and written with movep.l.
 * **Rows**: a tile row is copied from the playfield into a buffer only when its scroll differs from what that buffer
   holds there, a cell of it changed, or the buffer's last sprites covered it: one HOG pass per plane and line (16
-  words, FXSR and the skew for the scroll: 132 bus cycles, the addresses running on to the next plane).
+  words, FXSR and the skew for the scroll: 132 bus cycles, the addresses running on to the next plane); a row only
+  the sprites covered only over their 16-pixel groups.
 * **Sprites**: baked on first use per (code, colour, flips) into a cache slot (the opaque rows grouped by mask, their
   masks, the plane words in that order, the same aligned).  The generated path (`tools/assets.py` sprite_programs,
   `engine/sprite_programs.py`, as Time Pilot's and Pooyan's): a shape is (transparency class, code, flips): 5 classes

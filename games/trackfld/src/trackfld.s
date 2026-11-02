@@ -535,7 +535,8 @@ main_io_r:
 	move.l	(sp)+,a0
 	rts
 
-; the video and colour RAM ($3000-$3FFF): the byte stored, the cell (address & $7FF) listed once for render.s
+; the video and colour RAM ($3000-$3FFF): the byte stored, the cell (address & $7FF) listed once for render.s (byte
+; stores do this inline at their sites: tools/gen.py video_inline)
 main_io_w:
 	cmp.w	#$3000,d7
 	bhs	.vid
