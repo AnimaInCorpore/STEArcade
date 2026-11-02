@@ -115,9 +115,35 @@ borders_vbl	macro
 .c\@:
 	endm
 
+; The 60 Hz pulse's margins (2026-11-02, real STE report: one-word plane slips): the 50 Hz write must come after the
+; vertical check (line 33's cycle 500, an STF's 504) and before the STE's line start check of line 34 (its preload,
+; cycle 36 at 60 Hz: 16 cycles before an STF's 52).  Hatari's trace (video_sync) put it at line 34's cycle 4-8 with
+; the 60 Hz write at line 33's 468-472; BD_TOP_EARLY moves the 60 Hz write earlier (line 33 is not displayed) and the
+; longer pulse puts the 50 Hz write near the middle of its window (line 34's cycle ~12-16).
+BD_TOP_EARLY = 4			; nops taken from before the 60 Hz write
+BD_TOP_PULSE = 14			; nops between the 60 Hz and the 50 Hz write (9 before)
+
+; The bottom border's 60 Hz pulse: after Timer B's poll (its ~20-cycle loop decides the jitter) the 60 Hz write comes at
+; line 262's cycle ~436-456, the 50 Hz write at line 263's ~4-24 (Hatari's trace, 2026-11-02): in the middle of the
+; window from line 262's cycle 500 (60 Hz there opens the border) to the STE's line start check at line 263's 36 (50 Hz
+; by then, else the line starts at the 60 Hz position: 2 bytes more, every line below a plane off; an STF: 52).  The
+; 60 Hz write must not come before line 262's 376 (its display end at 60 Hz: 2 bytes less).  2 nops shorter than
+; before 2026-11-02 (the 50 Hz write came at 12-28, 8 cycles from the STE's limit).
+bd_low_open	macro
+	bd_poll
+	clr.b	$ffff820a.w		; 60 Hz
+	moveq	#2,d2
+.w\@:	nop
+	dbf	d2,.w\@
+	nop
+	nop
+	nop
+	move.b	#2,$ffff820a.w		; 50 Hz
+	endm
+
 bd_top_open	macro
 	clr.b	$ffff820a.w		; Remove the top border
-	rept 9
+	rept BD_TOP_PULSE
 	nop
 	endr
 	move.b	#2,$ffff820a.w
@@ -159,7 +185,7 @@ timer_a:
 	stop	#$2100			; Wait for HBL
 	move	#$2700,sr		; Stop all interrupts
 	clr.b	$fffffa19.w		; Stop Timer A
-	rept TA_NOPS
+	rept TA_NOPS-BD_TOP_EARLY
 	nop
 	endr
 	bd_top_open
@@ -176,7 +202,7 @@ bd_ta_chain:
 	dbls	d1,.line		; (an earlier HBL: the reload reads 3 counts more)
 	move	#$2700,sr		; Stop all interrupts
 	clr.b	$fffffa19.w		; Stop Timer A
-	rept TA_NOPS-BD_TA_LOOP
+	rept TA_NOPS-BD_TA_LOOP-BD_TOP_EARLY
 	nop
 	endr
 	bd_top_open
@@ -260,17 +286,7 @@ timer_b:
 	movem.l	(sp)+,d0-d7/a0-a6
 	rte
 	endc
-.low:	bd_poll
-	clr.b	$ffff820a.w		; Remove the bottom border
-	moveq	#2,d2
-.w2:	nop
-	dbf	d2,.w2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
+.low:	bd_low_open			; Remove the bottom border
 	clr.b	$fffffa19.w		; Timer A to the next frame's top border
 	move.b	#BD_TA_P1,$fffffa1f.w
 	move.b	#4,$fffffa19.w
@@ -432,17 +448,7 @@ timer_b:
 	else
 	move.b	#BD_LOW-2*BD_K,d0
 	endc
-	bd_poll
-	clr.b	$ffff820a.w		; Remove the bottom border
-	moveq	#2,d2
-.w2:	nop
-	dbf	d2,.w2
-	nop
-	nop
-	nop
-	nop
-	nop
-	move.b	#2,$ffff820a.w
+	bd_low_open			; Remove the bottom border
 	clr.b	$fffffa19.w		; Timer A to the next frame's top border
 	move.b	#BD_TA_P1,$fffffa1f.w
 	move.b	#4,$fffffa19.w
