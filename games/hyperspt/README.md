@@ -87,7 +87,18 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
   worst-matched pens are rare (a pink, a brown).
 * Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (P3_P4).
 
-## Speed (2026-10-29)
+## Speed (2026-10-29, 2026-11-02)
+
+2026-11-02 (Musashi, seed 5's skeet shooting, `render_test.py 4000 --seed 5 --start 1000 --every 4` with per-picture
+percentiles; the logic `logic_test.py 3000 --seed N`):
+* **Video RAM stores inline** (`tools/gen.py` video_inline, engine/m6809x.py): a byte store at an I/O site whose address
+  is in $2000-$2FFF writes the byte and lists its cell itself; main_io_w only for other addresses (218 of 264 sites;
+  word stores still call it).  The logic 74.0k -> **62.4k** cycles an arcade frame (seed 5, -15.7%), seed 9 59.2k ->
+  52.4k (-11.5%); in the render run mean 96.2k -> 84.0k, median 104.3k -> 90.2k, **p90 118.3k -> 102.3k**, the screen
+  changes' maximum 1.24M -> 0.94M.  The program +12 KB.
+* **Sprite damage restores only the sprites' groups** (Track & Field's renderer, see its README): a picture, CPU +
+  Blitter, mean 100.0k -> **92.3k** (-7.6%), median 100.0k -> 94.5k, p90 206.2k -> 202.7k; the Blitter 35.1k -> 24.7k,
+  the CPU 64.8k -> 67.7k.  Not yet measured in Hatari (the figures below are 2026-10-29's).
 
 `tools/bench.sh 6000` (DEBUG build, the AUTOPLAY script: coin, start, the name, running): with the sound and the
 generated sprite code and the sound's natives **85% of the arcade's speed (median 57 arcade frames a second),

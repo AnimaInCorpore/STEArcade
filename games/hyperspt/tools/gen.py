@@ -80,6 +80,7 @@ def program(cover):
     prog.fast_forms = True
     prog.ret_weights = dict(returns) or dict(exec_)
     prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
+    prog.video_inline = (0x2000, 0x3000, set(io))   # (m6809x: video RAM byte stores inline, main_io_w outside)
     return prog
 
 

@@ -188,6 +188,11 @@ class Program:
         self.inline_calls = dict(inline_calls or {})
         self.static_write = dict(static_write or {})
         self.wrap_sites = set(wrap_sites)
+        # video_inline (set after construction): (lo, hi, sites): a byte store at one of these I/O sites whose address
+        # is in lo .. hi - 1 goes into the 64 KB block at a4 and lists its cell (address & $7FF) once in cell_dirty /
+        # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
+        # stores still call io_w.
+        self.video_inline = None
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -958,11 +963,41 @@ class Emitter:
                 self.ea_to_d7(v, ins)
                 if off:
                     self.e("addq.w #%d,d7" % off)
+            vi = self.p.video_inline
+            if vi and v in vi[2] and src not in ("d7", "a0"):
+                self.video_store(src, vi[0], vi[1])
+                return
             self.e("move.b %s,d5" % src)
             self.e("bsr %s_io_w" % self.p.name)
             self.e("tst.b %s" % src)
             return
         self.e("move.b %s,%s" % (src, self.ea(v, ins, off)))
+
+    def video_store(self, src, lo, hi):
+        """Program.video_inline: the byte in src to the address in d7, inline when it lies in lo .. hi - 1"""
+        self.stats["io write video inline"] += 1
+        slow, done = self.new_label(), self.new_label()
+        e = self.e
+        e("cmp.w #$%04X,d7" % lo)
+        e("blo.s %s" % slow)
+        e("cmp.w #$%04X,d7" % hi)
+        e("bhs.s %s" % slow)
+        e("move.b %s,(a4,d7.w)" % src)
+        e("and.w #$7FF,d7")
+        e("lea cell_dirty,a0")
+        e("tst.b (a0,d7.w)")
+        e("bne.s %s" % done)                 # (listed already)
+        e("st (a0,d7.w)")
+        e("move.l cell_ptr,a0")
+        e("move.w d7,(a0)+")
+        e("move.l a0,cell_ptr")
+        e("bra.s %s" % done)
+        self.lines.append(slow + ":")
+        e("move.b %s,d5" % src)
+        e("bsr %s_io_w" % self.p.name)
+        self.lines.append(done + ":")
+        self._a0 = None
+        e("tst.b %s" % src)
 
     def load16(self, v, ins, dst="d7"):
         """dst.w = the 16 bit operand (flags: N Z of the word, V C cleared)"""
