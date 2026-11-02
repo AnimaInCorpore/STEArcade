@@ -8,7 +8,7 @@ sprite RAM and the latches are compared.
 --cheat: MAME's cheats for 1942b, applied to both machines before every frame: lives E101, invincibility E0A5 and every 600 frames
 (from frame 1000) "Finish Current Level Now!" (EBD0, E099, E102), to reach the later stages, bosses and the ending.
 """
-import argparse, os, random, sys
+import argparse, os, random, re, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
 from sim import Sim, TRAP1
 from machine68k import Register as R
@@ -137,7 +137,7 @@ def main():
     audit = {}
     ref = Machine1942()
     if a.audit:
-        import bisect, pickle, re
+        import bisect, pickle
         labels = sorted((v, k) for k, v in sym.items() if re.fullmatch(r"Z[0-9A-F]{4,5}", k))
         lv = [v for v, _ in labels]
         on_access = s.on_access
@@ -172,12 +172,27 @@ def main():
         print("  a0-a7", " ".join("%08X" % cpu.r_reg(r) for r in (R.A0, R.A1, R.A2, R.A3, R.A4, R.A5, R.A6, R.A7)))
 
     prev = {}
+    # Calls of short leaf functions are emitted in place (gen.INLINE): the return address such a call (or rst) writes
+    # below SP in the reference is a dead stack word, not compared until another instruction writes it.
+    lines = (build_dir("1942") / "code_1942.s").read_text().splitlines()
+    inline = {int(l[1:5], 16) for l, n in zip(lines, lines[1:]) if re.match(r"Z[0-9A-F]{4}:", l) and n.strip() == "; (inline)"}
+    dead, site = set(), [None]
+    step0, write0 = ref.cpu.step, ref.cpu.wr8
+
+    def ref_step():
+        site[0] = ref.cpu.pc
+        return step0()
+
+    def ref_write(a, v):
+        (dead.add if site[0] in inline else dead.discard)(a)
+        return write0(a, v)
+    ref.cpu.step, ref.cpu.wr8 = ref_step, ref_write
 
     def compare(f):
         errs = 0
         for name, addr, want in ref_ranges(ref):
             got = bytes(mem.r_block(z80(addr), len(want)))
-            d = [i for i in range(len(want)) if got[i] != want[i]]
+            d = [i for i in range(len(want)) if got[i] != want[i] and addr + i not in dead]
             if d:
                 errs += 1
                 print("frame %d: %s differs in %d bytes, first %s" % (f, name, len(d), ["%04X got %02X want %02X" % (addr + i, got[i], want[i]) for i in d[:8]]))

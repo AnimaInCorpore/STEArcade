@@ -276,6 +276,16 @@ exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -
 rest is spread thin: `ret`, `ldir` (by longs already), `push`/`pop af` around calls, `bit n,(ix+d)` with the exact S.
 Tests: `logic_test.py 6000`, `sprite_test.py`, `render_test.py seq 200 1 1200` pass; Hatari runs the attract mode.
 
+Inline leaves (2026-11-02): calls of leaf functions of up to 32 instructions in the fixed ROM are emitted in place
+(`gen.py` `INLINE`, z80x `inline_leaves` with `inline_rst` / `inline_jumps`, Commando's setting; 274 sites).
+`logic_test.py` leaves out the return address such a call writes below SP in the reference (a dead stack word, as for
+the merged push/pop).  Musashi, the logic alone (`perf_test.py 3000 0 900 norender`, stage 1, ticks 900-3000): 41,743
+-> 40,632 cycles a tick (-2.7%), median 40,100 -> 40,074, p90 58,094 -> 56,114; with level skips (`perf_test.py 6000
+600 900 norender`): 33,196 -> 32,356 (-2.5%).  `logic_test.py 6000` 37,581 -> 36,684 a frame and `9000 --cheat`
+33,964 -> 33,169, both 0 differences; `6000 --two`, `sprite_test.py`, `sound_test.py 3000` and `render_test.py seq
+200 1 1200` pass.  Not measured in Hatari (the game already runs at full speed there; by the
+budget about +0.6 pictures a second).
+
 ## Standard PPO exploration
 
 Use `venv/bin/python port.py ppo 1942 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
