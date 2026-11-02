@@ -6379,7 +6379,8 @@ ren_ocell_img:
 	move.w	d1,BLT_E3.w
 	swap	d1
 	move.w	d1,BLT_E1.w
-	move.w	#8,BLT_SXI.w		; (a line's one read: with NFSR its increment is SXI)
+	move.w	#8,BLT_SXI.w		; a line's one read: with NFSR Hatari steps it by SYI, so both 8
+	move.w	#8,BLT_SYI.w
 	move.w	#REN_LINEB-8,BLT_DYI.w
 	moveq	#4-1,d2
 .pl:	move.l	a4,BLT_SRC.w
@@ -6390,6 +6391,7 @@ ren_ocell_img:
 	addq.l	#2,a3
 	dbf	d2,.pl
 	move.w	#2,BLT_SXI.w
+	move.w	#2,BLT_SYI.w
 	bra	.done
 .lines:	move.w	#-6,BLT_DYI.w		; a pass a line (the four planes); empty rows left out, a row's end masks
 	lea	BLT_DST.w,a1		; kept when its mask is the row before's

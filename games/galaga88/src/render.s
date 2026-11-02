@@ -3743,7 +3743,7 @@ ren_sb2_draw:
 	moveq	#2,d0
 	moveq	#0,d2
 	bra	.set
-.s3:	clr.w	(a3)+			; (NFSR: the last word is neither read nor stepped)
+.s3:	move.w	#2,(a3)+		; source Y increment 2: with NFSR the read before the skipped one steps by it (Hatari)
 	move.l	(a2),(a3)+
 	addq.l	#6,a3
 	move.w	#8,(a3)+
@@ -3997,9 +3997,9 @@ ren_draw:
 	rts
 .rows:
 	endc
-	lea	$ffff8a20.w,a3		; the Blitter: source X inc 2, Y inc 0, destination X inc 8, Y inc -14 (the next plane)
+	lea	$ffff8a20.w,a3		; the Blitter: source X inc 2, Y inc 2, destination X inc 8, Y inc -14 (the next plane)
 	move.w	#2,(a3)+
-	clr.w	(a3)+			; (NFSR: the last word is neither read nor stepped; the next plane follows)
+	move.w	#2,(a3)+		; (with NFSR the read before the skipped one steps by the Y increment, as in Hatari)
 	addq.l	#4,a3
 	addq.l	#6,a3			; (end masks per row)
 	move.w	#8,(a3)+

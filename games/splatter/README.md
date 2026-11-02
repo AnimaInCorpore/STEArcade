@@ -87,7 +87,7 @@ control, the latched sprite list.  `tools/assets.py` converts the graphics ROMs 
   *Fast rows* (2026-10-15, stage 2's lightning wall: layer 3, priority 5, ~110-140 cells a picture): a row whose 8
   lines are all playfield lines no bar hides, of a layer no group layer is above, draws its cells inside the clip
   groups straight from the cache (`ren_orow_draw`, the lookup inline; `ren_ocell_img`): an opaque cell in four
-  passes, a plane each with its 8 lines (SXI 8: a line's one source read with NFSR steps by SXI, not SYI), others a
+  passes, a plane each with its 8 lines (SXI = SYI = 8: Hatari steps a line's one source read with NFSR by SYI), others a
   pass a line (empty rows left out, a repeated mask keeps the end masks); a run of adjacent cells is one damage
   rectangle.  Cells at a clip group's edge take the generic path.
 * **Fixed layers 4/5**: rows of 36 opaque cells whose lowest priority is at least the group's form *bars* (the HUD:
