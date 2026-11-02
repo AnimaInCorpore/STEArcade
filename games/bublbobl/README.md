@@ -565,10 +565,13 @@ VBL.  `ROUNDS=1 tools/bench.sh 3600` (the same game in every build), rounds 1200
 | natives, native MCU, leaf inlining, cheaper video RAM marks (one round a VBL, the default) | 0.532 | 45% | 12.2 |
 | the same with `-D TICK60` (59.19 rounds a second as the arcade: six to five VBLs) | 0.668 | 56% | 5.2 |
 
-Leaf inlining (`z80x` `Config.inline_leaves`, 16 here: a call of a short leaf function is emitted in place, no return
+Leaf inlining (`z80x` `Config.inline_leaves`, 16 at first, 48 since 2026-11-02: a call of a short leaf function is emitted in place, no return
 address, no dispatch) and the video RAM marks without the CCR save where the next instruction expects no flags in it
 (`ccr_kept`): `engine/xprof.py bublbobl --frames 600 --skip 900`, the main CPU's translated code 92.5k -> 80.7k cycles
-a game frame, the 600 game frames 909 -> 775 VBLs.  `logic_test.py` 4,000 frames identical after each step.
+a game frame, the 600 game frames 909 -> 775 VBLs.  `logic_test.py` 4,000 frames identical after each step.  Leaves of up
+to 48 instructions (2026-11-02): `engine/xprof.py bublbobl --frames 300 --skip 900`, the translated code 96.7k -> 94.0k
+cycles a game frame (main 82.0k -> 79.8k, sub 14.7k -> 14.1k), the 300 game frames 360 -> 355 VBLs, the program
+0.8 KB larger.
 
 `-D TICK60`: a VBL adds one round due (every fifth two), at most `MAX_PENDING` (2) due, at most two run in a VBL; the
 late VBLs count too.  The game's logic is the limit: a play round costs 85-160k cycles on Musashi (~1.35 times that in

@@ -30,7 +30,7 @@ IY_SUB = 0xBFF8
 MAIN_HOOKS = {0x0158, 0x01ED}    # the handshake with the MCU (boot turns), the idle loop
 SUB_HOOKS = {0x000A}             # the sub CPU's idle loop
 # calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves)
-INLINE = 0 if os.environ.get("BB_NO_INLINE") else 16
+INLINE = 0 if os.environ.get("BB_NO_INLINE") else 48
 # hand-written 68000 routines that replace Z80 code (src/natives.s; BB_NO_NATIVES=1: all translated)
 MAIN_NATIVES = {} if os.environ.get("BB_NO_NATIVES") else {
     0x5C37: "z_state",           # the objects' state dispatch ($5C37-$5C75)
