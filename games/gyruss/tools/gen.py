@@ -33,6 +33,8 @@ HOOKS = [GyrussPort.MAIN_IDLE]
 TOKEN = GyrussPort.TOKEN
 SEEDS = [int(x) for x in os.environ.get('GY_SEEDS', '').split(',') if x] or range(1, 13)   # (GY_SEEDS: other coverage files)
 ROM_END = 0x6000
+# calls of leaf functions of up to this many instructions are emitted in place, rst helpers and inner jumps too
+INLINE = 16
 # rst $30 sites: entries (the bound of the index: `and n` before it, else the table up to the code or data after it)
 RST30_TABLES = {0x0189: 4,     # and 3
                 0x082F: 10,    # [$942C]
@@ -177,7 +179,8 @@ def generate():
         raise RuntimeError('rst $30 sites without a table: %s' % ['%04X' % p for p in rst30 if p not in RST30_TABLES])
     cfg = z80x.Config(mode='signed', block=0x10000, table_entries=0x10000, iyaddr=0x9FF0, fshadow=0x9FF2,
                       io_read_redirect={}, write_hooks=[(0xC080, 0xC080, 'gy_sound', None)], nmi_token=TOKEN,
-                      token_sym='z80_irq_ret', rst28_tables=False, bit_s=True, **z80x.FAST)
+                      token_sym='z80_irq_ret', rst28_tables=False, bit_s=True,
+                      inline_leaves=INLINE, inline_limit=ROM_END, inline_rst=True, inline_jumps=True, **z80x.FAST)
     joins = set(roots)
     tables.update({s: (s + 1, ts) for s, ts in tables30.items()})
     for nxt, targets in tables.values():

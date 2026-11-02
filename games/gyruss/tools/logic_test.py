@@ -95,7 +95,9 @@ def main():
         for lo, hi in ((0x8000, 0x8800), (0x9000, 0xA800)):
             want = bytes(m.mem[lo:hi])
             got = bytes(mem.r_block(addr(lo), hi - lo))
-            diff = [lo + i for i in range(hi - lo) if want[i] != got[i] and lo + i not in dead]
+            sp = m.main.sp      # (the 64 bytes below SP: inlined calls write no return address)
+            diff = [lo + i for i in range(hi - lo) if want[i] != got[i] and lo + i not in dead and
+                    not (sp - 64 <= lo + i < sp)]
             if diff:
                 raise RuntimeError('frame %d: %d main RAM differences, ref pc %04x %s' % (
                     f, len(diff), m.main.pc, [(hex(a), hex(got[a - lo]), hex(want[a - lo])) for a in diff[:12]]))

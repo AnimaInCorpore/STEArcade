@@ -90,8 +90,47 @@ class SEmitter(z80x.Emitter):
         self.byte_to(src[1], 'd5')
         self.e('bsr snd_out')
 
+    def x_call(self, ins):
+        """The nine music channels' `call $0281` (0164-01A0, IX static): the callee's head `dec (ix+1); ret nz` in
+        place; the flags are dead at every return point (the next `ld ix` / `jp $00FD`, then `and` at 0101), the return
+        address only written when the call goes on to $0285"""
+        if ins.ops[0] == ('addr', 0x0281) and 0x0164 <= ins.pc <= 0x01A0:
+            nxt = ins.pc + ins.length
+            self.e('subq.b #1,1(a6,d4.w)')
+            self.e('bne X%04X' % nxt)
+            self.push_ret(nxt)
+            self.jmp_to(0x0285)
+            return
+        z80x.Emitter.x_call(self, ins)
+
+    JT_SITES = {0x01C2: 0x0BB8, 0x01D6: 0x0C00, 0x00C4: 0x0BB8}   # rst $28 / jp $0028 after `ld hl,nn`: nn
+
+    def table_jump(self, base):
+        """The rst $28 table (Pooyan's sndgen): HL = the word at base + 2 (A & $7F), A its low byte, the flags clear
+        (the adc a,0 of a table below $7F00), a jump there through snd_jt<base>"""
+        self.e('moveq #$7F,d7')
+        self.e('and.b d0,d7')
+        self.e('lsl.w #3,d7')
+        self.e('lea snd_jt%04X,a0' % base)
+        self.e('move.w 4(a0,d7.w),d3')
+        self.e('move.b d3,d0')
+        self.e('clr.b d6')
+        self.e('move.l (a0,d7.w),a0')
+        self.e('jmp (a0)')
+
+    def x_jp(self, ins):
+        if ins.pc in self.JT_SITES and ins.ops[0] == ('addr', 0x0028):
+            self.table_jump(self.JT_SITES[ins.pc])
+            return
+        z80x.Emitter.x_jp(self, ins)
+
     def x_rst(self, ins):
-        """`rst $08` / `$10` / `$18` / `$20` (the I/O helpers, 3-4 instructions) emitted in place (inline_leaves)"""
+        """`rst $28` at JT_SITES as a direct table; `rst $08` / `$10` / `$18` / `$20` (the I/O helpers, 3-4
+        instructions) emitted in place (inline_leaves)"""
+        if ins.pc in self.JT_SITES and ins.ops[0][1] == 0x28:
+            self.push_ret(ins.pc + ins.length)
+            self.table_jump(self.JT_SITES[ins.pc])
+            return
         t = ins.ops[0][1]
         body = self.inline_body(t) if self.transfer is None else None
         if body:
@@ -133,7 +172,8 @@ def generate():
         roots |= missing
     cfg = z80x.Config(prefix='X', table='snd_dispatch', token_sym='snd_token_ret', mode='signed', block=0x10000,
                       iyaddr=0x63F0, fshadow=0x63F2, io_read_redirect={}, write_hooks=[], nmi_token=TOKEN,
-                      table_entries=0x10000, rst28_tables=False, bit_s=True, inline_leaves=6, **z80x.FAST)
+                      table_entries=0x10000, rst28_tables=False, bit_s=True, inline_leaves=16,
+                      inline_limit=ROM_END, inline_rst=True, inline_jumps=True, **z80x.FAST)
     joins = set(roots)
     for nxt, targets in tables.values():
         joins |= set(targets)
@@ -145,6 +185,17 @@ def generate():
     for p in missing:
         out += ['X%04X:\tmove.w #$%04X,d7' % (p, p), '\tjmp snd_badpc']
     out += ['\tsection data,data'] + dispatch_table(code, em)
+    for site, base in SEmitter.JT_SITES.items():
+        prev = [i for i in code.values() if i.pc + i.length == site]
+        assert prev and prev[0].text == 'ld hl,$%04X' % base, (hex(site), prev and prev[0].text)
+    assert code[0x28].text == 'add a,a'
+    labels = {p: 'X%04X' % p for p in code if p not in em.no_entry}
+    out.append('\tcnop 0,4')
+    for base in sorted(set(SEmitter.JT_SITES.values())):      # snd_jt<base>: 128 entries (A & $7F): label, HL
+        out.append('snd_jt%04X:' % base)
+        for i in range(128):
+            t = rom[base + 2 * i] | rom[base + 2 * i + 1] << 8
+            out.append('\tdc.l %s\n\tdc.w $%04X,0' % (labels.get(t, 'snd_badpc'), t))
     seen = [u for u in em.unsupported if u[0] in pcs]
     if seen:
         raise RuntimeError('observed sound instructions cannot be translated: %s' % seen)

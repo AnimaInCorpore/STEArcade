@@ -73,6 +73,16 @@ tile writers list their cells (`cell_list`, no row scans).  `tools/render_test.p
 AUTOPLAY): 54% -> 55% of the arcade's speed, 11.6 -> 12.1 pictures a second: Gyruss's three translated CPUs, not
 its picture, limit it.  Load size ~3.03 MB (the limit 3.7 MB).
 
+**Inline calls and the sound driver's hot spots** (2026-11-02): the main CPU's leaf calls up to 16 instructions, its
+`rst` helpers and their inner jumps in place (as Time Pilot's and Pooyan's; logic_test leaves out the 64 bytes below
+SP, which the inlined calls no longer write), the same in the sound driver, its nine music channels' countdowns in
+place and its `rst $28` table jump as a direct table (the Sound section).  `tools/logic_test.py 6000` (Musashi, the
+logic a frame, exact): seed 5 158.2k -> 145.2k, seed 1 150.2k -> 139.7k, seed 9 182.0k -> 168.6k (-7% to -8%); seeds
+4, 10, 11 and 12 exact too; `tools/sound_test.py 4000` exact.  Hatari (`bench.sh 4000`, AUTOPLAY): 32.7 -> 36.0
+arcade frames a second (54% -> 59%), 12.5 -> 13.6 pictures a second, measured on the tree before 7d63539 (the border
+pulses moved); on the tree after it the same program measured 33.4 frames (55%), 12.7 pictures a second (the
+AUTOPLAY run follows another path at another speed; no baseline run after 7d63539).
+
 ## The schedule (machine.GyrussPort, src/gyruss.s, src/sub.s)
 
 * **Main CPU**: its foreground is a task loop (05F4-0601: a queue at ([$5865] << 8) + [$9433], an empty entry has
@@ -137,8 +147,10 @@ the slot's row masks cut to the band).
   and nine music channels; an i8039 that synthesises effects on a DAC.
 * **The STE's schedule** (`TickBoard`, `snd_frame`): each arcade frame, the commands of the frame before each run the
   IRQ handler, then the frame's ticks run the loop from $010C to its head (the waits left out).  The driver is
-  translated (`tools/sndgen.py`: the static `out`s inline into the five register files, the `rst` I/O helpers in
-  place); ~2,540 Z80 instructions an arcade frame in play.
+  translated (`tools/sndgen.py`: the static `out`s inline into the five register files, the `rst` I/O helpers, leaf
+  calls up to 16 instructions and their inner jumps in place; the nine music channels' countdowns, `call $0281` at
+  0164-01A0, in place, the call made only when a countdown runs out; the `rst $28` table jump at its three `ld hl,nn`
+  sites a direct table, `snd_jt<base>`); ~2,540 Z80 instructions an arcade frame in play.
 * **YM2149**: each arcade frame the three loudest audible of the fifteen AY channels (Kung-Fu Master's method),
   periods x 2000000 / 1789772, noise and envelope from the chip of the first chosen channel that uses them.
 * **The i8039's effects**: `engine/mcs48.py` (MAME's MCS-48 core) runs its program for each command (1-7) offline;
