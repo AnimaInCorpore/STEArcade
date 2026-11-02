@@ -15,7 +15,8 @@
 ; pace stays even).  Game speed first (the user, 2026-11-01): PIC_EVERY 8, MAX_BEHIND 12 - the logic at full rate
 ; where it fits, the pictures in the time left (2 / 3 before: more pictures, the game slower).  In heavy scenes at
 ; least a picture every PIC_VBLS fields (the user, 2026-11-02: 3, a steady 50/3 per second; the game slows instead): after
-; each arcade frame, a picture now when one more frame and the picture would end after the field PIC_VBLS after the
+; each heavy arcade frame (its time's estimate above HEAVY, half a field), a picture now when one more frame and the
+; picture would end after the field PIC_VBLS after the
 ; last flip (pic_due: the time from MFP Timer D running free, 81 us ticks, and the VBLs; the frame's and the picture's
 ; times their recent maxima).  PIC_VBLS 0: off.  DEBUG writes separate logic/picture counters to COUNTERS.BIN on quitting.
 ; The display: the renderer's buffers, engine/rt/borders.s (top and bottom border open, the picture's palette and the
@@ -49,10 +50,14 @@ PIC_EVERY = 8				; (arcade frames a picture at most; game speed first, the user 
 PIC_VBLS = 3				; (fields between pictures at most, where the picture itself fits: the game slows)
       endc
       ifnd EST_DECAY
-EST_DECAY = 1				; (the time estimates: the recent maximum, losing 1 / 2^EST_DECAY a sample; the user, 2026-11-02:
-					; 1 - stage 2 87% / 15.1 pictures a second, 4: 77% / 19.2, more gaps of 2 fields)
+EST_DECAY = 4				; (the time estimates: the recent maximum, losing 1 / 2^EST_DECAY a sample; 2026-11-02 stage 2:
+					; 1 - 87% / 15.1 pictures a second, 4: 77% / 19.2 - the user: at least 50/3)
       endc
 TPF = 245				; (Timer D ticks a field: 2.4576 MHz / 200, 19.97 ms)
+      ifnd HEAVY
+HEAVY = 0				; (a heavy logic frame: its estimate above HEAVY ticks; 0: every frame - the user: at
+					; least 50/3; TPF/2 kept stage 1 at 85% / 19.8, 2 and 8 at 13.2 pictures a second)
+      endc
 ; the pads (engine/rt/jagpad.s): SYSTEM (IN1), P1 (IN0 low), P2 (IN0 high) bits as in key_table (bytes 0-2)
 JP_SH1 = 16
 JP_SH2 = 8
@@ -363,7 +368,11 @@ estimate:
 ; Z clear: a picture is due - one more arcade frame and the picture would end after PIC_VBLS fields after the last
 ; flip (or the coming one: a picture ready)
 pic_due:
-	bsr.s	clock
+	cmp.w	#HEAVY,est_logic	; (heavy logic frames only, the user 2026-11-02: else the game's speed first)
+	bhi.s	.hv
+	moveq	#0,d0
+	rts
+.hv:	bsr.s	clock
 	sub.w	flip_vbl,d0		; the fields since the flip
 	tst.b	m72r_ready
 	beq.s	.n
