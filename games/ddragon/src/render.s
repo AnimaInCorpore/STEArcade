@@ -138,6 +138,14 @@ render_frame:
 	move.w #KEYS/4-1,d0
 .fm:	clr.l (a0)+
 	dbf d0,.fm
+	lea tx_need,a0
+	move.w #KEYS/4-1,d0
+.fm2:	clr.l (a0)+
+	dbf d0,.fm2
+	lea tx_rown,a0
+	rept SLOTS/4
+	clr.l (a0)+
+	endr
 	move.b #1,frame_tag
 .tag:
 	; the scroll: $3809 / $380A and bits 8 from the bank register ($3808 bits 0 and 1)
@@ -711,6 +719,11 @@ cell_draw:
 	tst.b (a0,d0.w)
 	beq.s .nt
 	st txt_dirty			; (a cell under the text: the text again)
+	lea tx_need,a0
+	move.b frame_tag,(a0,d0.w)
+	lea tx_rown,a0
+	move.w cell_k,d1
+	move.b frame_tag,(a0,d1.w)
 .nt:	moveq #0,d0
 	move.w cell_k,d0
 	lsl.w #4,d0
@@ -1118,6 +1131,10 @@ touch_process:
 	tst.b (a0,d7.w)
 	beq.s .nt
 	st txt_dirty
+	lea tx_need,a0
+	move.b frame_tag,(a0,d7.w)
+	lea tx_rown,a0
+	move.b frame_tag,(a0,d1.w)
 .nt:	bsr cell_damage
 	dbf d6,.c
 .done:	rts
@@ -1359,9 +1376,11 @@ text_pairs:
 	rts
 
 ; text_prepare (before the cells): this ring's text state against now; when it differs the old text's cells lose their
-; keys (cell_damage) and the text is drawn again.
+; keys (cell_damage) and the text is drawn again (tx_full). Otherwise text_pass draws only the entries over cells
+; that this picture redrew or drew sprites over (tx_need, tx_rown): the text is the top layer, drawing it again is safe.
 text_prepare:
 	sf txt_dirty
+	sf tx_full
 	move.w ring_index,d0
 	lsl.w #1,d0			; (8 bytes a ring)
 	lea tx_state,a0
@@ -1377,6 +1396,7 @@ text_prepare:
 	bne.s .new
 	rts
 .new:	st txt_dirty
+	st tx_full
 	move.w text_version,(a0)
 	move.w scroll_x,2(a0)
 	move.w scroll_y,4(a0)
@@ -1438,6 +1458,97 @@ text_pass:
 	move.w (a4)+,d0
 	move.w (a4)+,d1
 	movem.l d6-d7/a4,-(sp)
+	tst.b tx_full
+	bne .draw
+	cmp.w #$100,d1			; (an ordinary character or a pair: its row's slot rows, 1 or 2 columns)
+	bhs.s .crun
+	moveq #8,d4
+	tst.b d1
+	bpl.s .cw1
+	moveq #16,d4
+.cw1:	move.w object_x,d3
+	move.w d3,d5
+	add.w d4,d5
+	subq.w #1,d5
+	lsr.w #4,d5
+	lsr.w #4,d3
+	sub.w d3,d5
+	add.w tx_k0,d3
+	lea tx_need,a0
+	move.b frame_tag,d4
+	move.w tx_nk,d6
+.ck2:	cmp.b (a0,d3.w),d4
+	beq .draw
+	tst.w d5
+	beq.s .nc2
+	cmp.b 1(a0,d3.w),d4
+	beq .draw
+.nc2:	add.w #RING_COLS,d3
+	dbf d6,.ck2
+	ifd SIM
+	addq.l #1,cnt_txskip
+	endc
+	bra .skipent
+.crun:	movem.l d0-d2,-(sp)
+	moveq #8,d4			; (only the entries over cells redrawn or drawn over in this picture)
+	moveq #8,d6
+	cmp.w #$100,d1
+	blo.s .cw
+	move.w d1,d4
+	lsr.w #8,d4
+	lsl.w #3,d4
+	move.w d2,d6
+	beq.s .cno
+	bra.s .cg
+.cw:	tst.b d1
+	bpl.s .cg
+	moveq #16,d4
+.cg:	move.w object_x,d3
+	lsr.w #4,d3
+	move.w object_x,d5
+	add.w d4,d5
+	subq.w #1,d5
+	lsr.w #4,d5
+	sub.w d3,d5
+	move.w d7,d0
+	lsl.w #3,d0
+	subq.w #8,d0
+	add.w vphase,d0
+	move.w d0,d1
+	add.w d6,d1
+	subq.w #1,d1
+	asr.w #4,d0
+	asr.w #4,d1
+	sub.w d0,d1
+	lea tx_rown,a0			; (a slot row with a mark at all)
+	move.b frame_tag,d2
+	move.w d0,a1
+	move.w d1,d6
+.rk:	cmp.b (a0,a1.w),d2
+	beq.s .rhit
+	addq.w #1,a1
+	dbf d6,.rk
+	bra.s .cno
+.rhit:	add.w d0,d0
+	lea kmul52,a0
+	move.w (a0,d0.w),d0
+	add.w d3,d0
+	lea tx_need,a0
+.ck:	move.w d0,d3
+	move.w d5,d6
+.ckc:	cmp.b (a0,d3.w),d2
+	beq.s .cyes
+	addq.w #1,d3
+	dbf d6,.ckc
+	add.w #RING_COLS,d0
+	dbf d1,.ck
+.cno:	movem.l (sp)+,d0-d2
+	ifd SIM
+	addq.l #1,cnt_txskip
+	endc
+	bra .skipent
+.cyes:	movem.l (sp)+,d0-d2
+.draw:
 	cmp.w #$100,d1
 	bhs.s .run
 	tst.b d1
@@ -1462,7 +1573,10 @@ text_pass:
 	lsr.w #8,d4
 	lsl.w #3,d4
 	; its cells (the columns of its width, the row's slot rows) into the ring's text map
-.cells:	move.w object_x,d5
+.cells:
+	tst.b tx_full			; (a partial pass: the ring's text map holds these cells already)
+	beq.s .skipent
+	move.w object_x,d5
 	add.w d4,d5
 	subq.w #1,d5
 	lsr.w #4,d5
@@ -1487,6 +1601,7 @@ text_pass:
 	dbf d6,.m
 	add.w #RING_COLS,d2
 	dbf d3,.mk
+.skipent:
 	movem.l (sp)+,d6-d7/a4
 	dbf d6,.ch
 .nrow:	addq.w #1,d7
@@ -2230,4 +2345,9 @@ bake_scratch: ds.b 128
 cache_data: ds.b 128*CT_CHARS
 char_data: ds.b 80*(CHAR_ENTRIES+PAIR_ENTRIES)	; (the pairs after the characters)
 lut_tables: ds.b 2048*PAL_SETS
+tx_need: ds.b KEYS			; (frame_tag: a cell under the text redrawn or drawn over in this picture)
+tx_rown: ds.b SLOTS			; (frame_tag: such a cell in this slot row)
+tx_full: ds.b 1				; (the whole text again)
+	even
+cnt_txskip: ds.l 1			; (text entries skipped)
 	section text,code

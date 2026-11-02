@@ -139,7 +139,8 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
 * **Text**: solid characters (every pixel one pen: the frame of the picture, rows 1 and 30 and columns 0 and 31) are
   Blitter fills, a run of them one fill and a column of them one tall fill (the heights worked out when the text
   changes); two neighbouring others of one colour are one 16-pixel image (128 pairs), single ones baked (256
-  entries); a row a pass.
+  entries); a row a pass.  When the text and the scroll are as in the ring's last picture, only the text entries over
+  cells redrawn or drawn over by sprites in this picture are drawn again (a mark a cell and a slot row).
 * Every Blitter pass HOG and at most 256 cycles (`BLIT_STATS=256`: none longer).
 * `tools/render_test.py`: the picture equals the reference picture through the palette, pixel for pixel (the
   attract mode, the plays through missions 1-4); `tools/sprite_test.py`: both rings x 16 fine scrolls, sprites at
@@ -186,7 +187,15 @@ Taken so far (logic in mission 1 / over missions 1-4):
 
 The picture: 674k -> 619k with pairs of text characters (two neighbours of one colour baked into one 16-pixel
 image, 128 entries), 587k with the solid runs' column heights made once when the text changes (not per picture) and
-a tighter row compare, 578k with the cell copy unrolled.
+a tighter row compare, 578k with the cell copy unrolled.  2026-11-02, the text drawn again only over the cells
+redrawn or drawn over (text and scroll unchanged; `render_test.py --seed -1`, 68000 + Blitter cycles a picture,
+median / mean, p90 unchanged: those pictures follow a text change or a scroll):
+
+| run | before | after |
+|---|---|---|
+| `3400 --first 3000 --every 2` (mission 1) | 500k / 576k | 400k / 490k |
+| `6500 --first 5000 --every 5` (scrolling) | 616k / 607k | 585k / 559k |
+| `4000 --first 1000 --every 10` | 650k / 655k | 606k / 620k |
 
 Before that: the ADPCM decoded at build time (sound 98k / 163k -> 13k / 19k a frame with one / two voices), a
 context per bank (bank switches 27k -> 15k), solid text fills (the text's CPU cycles 391k -> 237k a picture).  What
