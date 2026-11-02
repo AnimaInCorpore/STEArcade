@@ -418,7 +418,9 @@ def generate(extra_roots=()):
         # frame interrupt taken mid-task as on the board (for MARP replays; the normal build has none)
         import cycle_budget
         emitter = cycle_budget.emitter(sys.modules[__name__], rom)
-    em = compile_code(code, joins, cfg, {IDLE}, emitter=emitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites)
+    # No flags kept at the idle hook (00D4): the IRQ handler swaps AF (ex af,af') and 00D4's jr $00B6 -> xor a sets
+    # them again, so the scheduler's last inc c needs none (-2.5% logic, 2026-11-02)
+    em = compile_code(code, joins, cfg, {IDLE}, emitter=emitter, ijmp_flags=True, flags_at=set(), window_sites=sites)
     report = {'cycles': os.environ.get('BT_CYCLES') == '1', 'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'indirect':len(indirect),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}
     banks = report['banks']

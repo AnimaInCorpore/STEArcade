@@ -307,6 +307,16 @@ out of sync after frame 1).  `tools/marp_reference.py --mame184 --dsw1 0x2f` pla
 to tick 16,409, then leaves (the port takes the interrupt at a block start, the reference at the instruction, and
 the random generator's task then runs a different number of times); 78 frames a second.
 
+### No flags at the idle hook (2026-11-02)
+
+`gen.py` compiled with `flags_at={IDLE}`, so the scheduler's last `inc c` of every slot visit computed the Z80 flags
+for the idle hook at 00D4 (52 cycles instead of 8).  They are dead there: the IRQ handler swaps AF (`ex af,af'`) and
+00D4's `jr $00B6` reaches `xor a`, which sets them again; now `flags_at=set()`.  Musashi (`PERF_PLAY=1 PERF_EVERY=3
+perf_test.py 9000 1000`, the MARP inputs, 8000 ticks): logic 54,325 -> 52,982 cycles a tick (-2.5%), pictures
+unchanged (mean 184,114, median 140,124).  Exact: `logic_test.py 1600`, `4000 --walk`, `2400 --idle 2400`,
+`2600 --idle 2400`, `3000 --walk --stage 2/4/6/7`, `render_test.py`, `sprite_test.py`, `sound_test.py 6000`;
+`--audit` (1600, 4000 --walk) reports the same eight block copies.  Hatari not measured.
+
 ## Text drawn like sprites (2026-10-24)
 
 The text runs were drawn with an AND pass (the mask) and an OR pass (the pixels) per plane, eight passes over the
