@@ -1,7 +1,7 @@
 """The translated 1943 program (and the i8751 interpreter) on Musashi against the reference's cooperative schedule.
 
-Every tick: the RAM (video RAM, scroll latches, work RAM, sprite RAM; the dead stack bytes of merged push/pop
-excepted), the buffered sprite list, the latches and the MCU's reply are compared.
+Every tick: the RAM (video RAM, scroll latches, work RAM, sprite RAM; the dead stack bytes of merged push/pop and
+inlined calls excepted), the buffered sprite list, the latches and the MCU's reply are compared.
 """
 from pathlib import Path
 import argparse, json, re
@@ -95,6 +95,13 @@ def main():
         hit = re.match(r'^Z([0-9A-F]{4,5}):\t\t; push .* \(merged\)', line)
         if hit:
             merged.add(int(hit[1], 16))
+    # Calls of short leaf functions are emitted in place (gen.INLINE): the return address such a call (or rst) writes
+    # below SP in the reference is a dead stack word too.
+    lines = (build_dir('1943') / 'code_1943.s').read_text().splitlines()
+    for l, n in zip(lines, lines[1:]):
+        hit = re.match(r'^Z([0-9A-F]{4,5}):', l)
+        if hit and n.strip() == '; (inline)':
+            merged.add(int(hit[1], 16))
     dead = set()
     site = [0]
     step0, write0 = ref.cpu.step, ref.cpu.wr8
@@ -113,11 +120,14 @@ def main():
 
     ref.cpu.step, ref.cpu.wr8 = ref_step, ref_write
 
+    cycles = [0]                                  # (the 68000's cycles of the ticks)
+
     def run_to_stop():
         used = 0
         while used < 400_000_000:
             result = cpu.execute(2000)
             used += result.cycles
+            cycles[0] += result.cycles
             pc = cpu.r_pc()
             if pc in stops:
                 return stops[pc]
@@ -490,6 +500,8 @@ def main():
         print(f'side bands: {band_bad[0]} pictures with non-black pixels ({band_bad[1]} pixels)')
         print(f'sprites drawn clipped at the window edges: {mem.r32(sym["clip_count"])}')
         print(f'front tiles across an edge or outside the window: unshifted {mem.r32(sym["ft_uclips"])}, shifted {mem.r32(sym["ft_sclips"])}')
+    if not args.render:
+        print('68000 cycles a tick (the game logic, no drawing; Musashi):', cycles[0] // max(1, args.frames))
     print(args.frames, 'frames matched' + (f'; {pictures[0]} pictures compared, all equal' if args.render else '') +
           (f' ({approx[0]} only in the drawing order of overlapping sprites behind / before the front layer)' if approx[0] else ''))
     if args.audit:

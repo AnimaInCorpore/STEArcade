@@ -15,6 +15,11 @@ from paths import build_dir, require_coverage
 WIN_LO, WIN_HI, VBASE = 0x8000, 0xc000, 0x10000
 IDLE = 0x00d4
 BUILD = build_dir('1943')
+# calls of leaf functions of up to this many instructions in the fixed ROM (0000-7FFF) are emitted in place
+# (z80x Config.inline_leaves, as Commando)
+INLINE = 32
+# hand-written 68000 routines for Z80 code from these addresses on (src/1943.s)
+NATIVES = {0x00B6: 'nat_scan'}    # the task kernel's scan for a ready task (00B6-00D4)
 
 
 def virt(pc, bank):
@@ -250,7 +255,8 @@ def generate(extra_roots=()):
                                    (0xc806,0xc806,"g_dma",None),
                                    (0xc807,0xc807,"g_mcu_w",None),
                                    (0xd806,0xd806,"g_layer_w",None)],
-                      rst28_tables=False, bit_s=True, **z80x.FAST)
+                      rst28_tables=False, bit_s=True, inline_leaves=INLINE, inline_limit=0x8000, inline_rst=True,
+                      inline_jumps=True, **z80x.FAST)
     # The indirect reads that may read the banked window get its guard: the block instructions, every site the coverage
     # saw reading the window (data, not its own bytes) and every site it never ran.  A site it ran only with other
     # addresses reads the block directly (a miss would show in logic_test.py: the reference reads the bank).
@@ -280,7 +286,7 @@ def generate(extra_roots=()):
     # The writers of the character RAM (D000-D7FF) the coverage saw set chr_written (the renderer compares the RAM with
     # its copy only then; logic_test.py checks that no change of the RAM comes without it).
     em = compile_code(code, joins, cfg, {IDLE}, emitter=GameEmitter, ijmp_flags=True, flags_at={IDLE}, window_sites=sites,
-                      text_writers=twrites)
+                      text_writers=twrites, natives=NATIVES)
     report = {'instructions':len(code), 'unsupported':em.unsupported, 'window_sites':len(sites), 'text_writers': len(twrites),
               'unguarded': sum(1 for pc, ins in code.items() if any(o[0] == 'ind' for o in ins.ops) and pc not in sites),
               'banks': sorted({(pc-VBASE)//0x4000 for pc in code if pc>=VBASE})}

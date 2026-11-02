@@ -287,6 +287,23 @@ MCU states each against the translated firmware (the 256 bytes of RAM and SFRs, 
 pc), identical; `logic_test.py` 4000 frames matched.  `tools/perf_test.py 1400 1300`: the logic 57.1k -> 48.0k cycles a
 tick (the MCU 1.2k).
 
+## The task kernel's scan natively, inline leaves (2026-11-02)
+
+The kernel's scan for a ready task (`$00B6`-`$00D4`: 16 records of 8 bytes from `$EF80`, the first with a state of 4
+or more) was 24% of the translated code (`engine/xprof.py --pcs`, the flags of `inc c` through the stack).
+`src/1943.s` `nat_scan` (`gen.py` `NATIVES`) walks it in a register loop: the port delivers the interrupts at the hook
+only, so `$EF86` stays 0 during the scan; it leaves A, BC, DE, HL and the translation's F as the Z80 code does.  The
+timer loop before it (`$00A1`-`$00AD`, in the interrupt) stays translated: its F goes to F' (`ex af,af'`), so an
+exact native would have to rebuild it.  Calls of leaf functions of up to 32 instructions in the fixed ROM are emitted
+in place (`gen.py` `INLINE`, z80x `inline_leaves` with `inline_rst` / `inline_jumps`, Commando's setting; 61 sites);
+`logic_test.py` leaves out the return address such a call writes below SP in the reference (dead, as for the merged
+push/pop) and prints the logic's cycles.  Musashi, `logic_test.py 4000 --play` (the recorded play, `-D PLAYBACK=1`):
+69,145 -> 65,534 cycles a tick (-5.2%), all 4000 ticks exact (the scan alone 66,503, inline leaves alone 68,165).
+`port.py test 1943`'s logic and picture tests pass: `logic_test.py` 3000, `3000 --render --every 3`, `4000 --render
+--every 4 --cheat 13`, `4000 --render --every 8 --seed 1` (all pictures equal), `sprite_test.py`, `front_test.py`,
+`mcu_native_test.py`.
+Not measured in Hatari.
+
 
 ## Standard PPO exploration
 

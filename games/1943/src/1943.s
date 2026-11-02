@@ -118,6 +118,32 @@ g_dispatch:
     moveq #-1,d7                 ; (z80_badpc reports g_dispatch_pc)
     jmp z80_badpc
 
+; The task kernel's scan for a ready task, 00B6-00D4 (gen.py NATIVES).  The port delivers the interrupts at the hook
+; only, so EF86 stays 0 during the scan.  As the translated code: found -> 00D6 with HL = the record, C = its number,
+; B = 16 - C, A = its state; none -> the hook at 00D4 with HL = F000, BC = $1000, A = the last record's state, F = 0
+; (the flags at 00D6 are dead).
+nat_scan:
+    eor.b d0,d0                  ; xor a
+    move.b d0,-$107A(a6)         ; ld ($EF86),a
+    move.w #$EF80,d3             ; ld hl,$EF80
+    move.w #$0008,d2             ; ld de,8
+    move.w #$0010,d1             ; ld bc,$1000 (C in the high byte)
+.next:
+    move.b (a6,d3.w),d0          ; ld a,(hl)
+    cmp.b #$04,d0                ; cp 4
+    bcc.s .found
+    add.w d2,d3                  ; add hl,de
+    add.w #$0100,d1              ; inc c
+    subq.b #1,d1                 ; djnz
+    bne.s .next
+    move.w sr,d6                 ; (as the translation: SR, the low byte S Z C clear)
+    clr.b d6
+    jmp Z00D4
+.found:
+    move.w sr,d6
+    move.b #$04,d6
+    jmp Z00D6
+
 ; The scheduler has scanned all sixteen task records with no ready task.
 z80_hook:
     tst.b quit_flag
