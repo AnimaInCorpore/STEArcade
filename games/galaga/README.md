@@ -492,6 +492,19 @@ interrupt as bytes 13038, the native read 7128.  Hatari (`tools/bench.sh 9000`, 
 the logic runs at every VBL in both): the old simulation 33.2, the real 51XX first 28.6, without the runs that change
 nothing 29.3, with the native read 31.1.
 
+## The starfield plotted in the window scan (2026-11-02)
+
+`star_frame` (stars.s) plots each star as it finds it in the frame's window, instead of listing it for `draw_stars`
+to plot in a second loop: no list in between, the colour's planes by a 15-way jump instead of four bit tests, and the
+erase list keeps only offset and bit (the erase clears all four planes).  Musashi, CPU + Blitter, the `perf_test.py
+replay` workload with every star (the audit's `perf_stats.py`: attract VBLs 2400-3600 and formation VBLs 4400-5600,
+1201 renders each): attract mean 177.0k -> 165.5k cycles a render (-6.5%), median 176.3k -> 164.5k, p90 220.7k ->
+209.3k; formation mean 137.4k -> 125.8k (-8.4%), p90 157.9k -> 146.3k; the stars 50.8k -> 39.2k.  `perf_test.py
+replay` (attract): 179.2k -> 167.8k.  Pictures: all 2402 renders of both workloads byte-identical (whole screen),
+`perf_test.py compare` and `render_opt_test.py` identical, `render_test.py` (2200 3600 5200) and `sprite_test.py`
+exact.  Not measured in Hatari (its throttle already thins the stars in the heaviest windows, so the gain there is
+smaller).
+
 ## Standard PPO exploration
 
 The hold for the real 51xx/54xx MCU ROMs ended on 2026-10-22 (they are in, the port runs the real 51XX); native MAME

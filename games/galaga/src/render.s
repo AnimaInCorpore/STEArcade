@@ -542,12 +542,11 @@ draw_cell_masked:
 	rts
 
 ; ------------------------------------------------------------------------------
-; Stars.  The 05XX's LFSR sequence (period 65535) is walked once per frame
-; (stars.s, star_frame -> star_list: step in the window = raw x | raw y << 8, and
-; the STE colour); the plots are single pixels, only where the draw screen is black
-; (nothing else is drawn there), and each draw screen keeps its list (offset, bit,
-; colour) to clear them before any writes next time. Characters are composed before
-; plotting, so no later renderer write can overwrite a recorded star.
+; Stars.  The 05XX's LFSR sequence (period 65535) is walked once per frame and its
+; stars plotted as it goes (stars.s, star_frame); the plots are single pixels, only where
+; the draw screen is black (nothing else is drawn there), and each draw screen keeps its
+; list (offset, bit) to clear them before any writes next time. Characters are composed
+; before plotting, so no later renderer write can overwrite a recorded star.
 
 erase_stars:
 	move	draw_index,d0
@@ -563,7 +562,7 @@ erase_stars:
 	subq	#1,d7
 .loop:
 	move.l	(a2)+,a0		; the pixel's byte in plane 0
-	move	(a2)+,d1		; its bit (low byte), its colour (high byte)
+	move	(a2)+,d1		; its bit
 	add.l	a3,a0
 	bclr	d1,(a0)
 	bclr	d1,2(a0)
@@ -577,63 +576,20 @@ erase_stars:
 draw_stars:
 	cmp	#3,star_level		; throttled: no stars (the erase of the old ones ran)
 	bhs	.none
-	bsr	star_frame		; -> star_list / star_n: step.w, colour.w per star
-	move	star_n,d7
-	beq	.none
 	move	draw_index,d0
 	add	d0,d0
-	lea	star_count,a1
+	move	d0,-(sp)
 	lea	star_lists,a2
-	move	d0,d1
-	mulu	#512*6/2,d1		; this screen's list of plotted stars (d1 = 0 or 2)
-	add.l	d1,a2
+	mulu	#512*6/2,d0		; this screen's list of plotted stars
+	add.l	d0,a2
 	move.l	draw_screen_address,a3
-	lea	star_list,a4
 	lea	star_ytab,a5
 	lea	star_ybit,a6
-	moveq	#0,d6			; plotted
-	subq	#1,d7
-.loop:
-	move	(a4)+,d0		; step: raw x | raw y << 8
-	move	(a4)+,d2		; STE colour 1..15
-	moveq	#0,d1
-	move.b	d0,d1
-	add	#16+DISP_TOP,d1		; display line = raw x + 16
-	lsl.l	#8,d1			; line offset
-	lsr	#8,d0			; raw y
-	add	d0,d0
-	add	(a5,d0.w),d1		; byte of plane 0 (display x = 223 - raw y)
-	move	(a6,d0.w),d3		; bit
-	lea	(a3,d1.l),a0
-	move.b	(a0),d4			; black there?
-	or.b	2(a0),d4
-	or.b	4(a0),d4
-	or.b	6(a0),d4
-	btst	d3,d4
-	bne.s	.next
-	btst	#0,d2
-	beq.s	.c1
-	bset	d3,(a0)
-.c1:	btst	#1,d2
-	beq.s	.c2
-	bset	d3,2(a0)
-.c2:	btst	#2,d2
-	beq.s	.c3
-	bset	d3,4(a0)
-.c3:	btst	#3,d2
-	beq.s	.c4
-	bset	d3,6(a0)
-.c4:
-	move.l	d1,(a2)+		; remember for erasing: offset, bit and colour
-	lsl	#8,d2
-	or	d2,d3
-	move	d3,(a2)+
-	addq	#1,d6
-.next:
-	dbf	d7,.loop
-	move	draw_index,d0
-	add	d0,d0
-	move	d6,(a1,d0.w)
+	moveq	#0,d5			; plotted
+	bsr	star_frame		; scans the window and plots, d5 = plotted
+	move	(sp)+,d0
+	lea	star_count,a1
+	move	d5,(a1,d0.w)
 .none:
 	rts
 

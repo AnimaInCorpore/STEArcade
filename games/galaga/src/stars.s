@@ -11,8 +11,8 @@
 ; The sequence is computed once at start: the position of every star in the period
 ; (index 0..65534) with its STE colour, in four lists by set, each sorted (black stars
 ; are left out).  A frame is a window of 224 * 256 steps into the period starting at
-; `star_idx`: the stars of the two sets that are on and lie in it are listed (star_list:
-; step within the window = raw x | raw y << 8, and the colour) and the index moves on.
+; `star_idx`: the stars of the two sets that are on and lie in it are plotted (step within
+; the window = raw x | raw y << 8) and the index moves on.
 ; ------------------------------------------------------------------------------
 
 LFSR_SEED = $7FFF
@@ -114,19 +114,30 @@ init_stars:
 
 	clr	star_idx
 	clr.b	star_enable
-	clr	star_n
 	clr	star_level
 	clr	star_mask
 	clr.b	thr_good
 	rts
 
-; Walk a frame: the stars of the window -> star_list (step.w, colour.w per star), star_n.
+; after a plot: record the star for the erase (offset.l, bit.w), count it, next entry
+star_plotted	macro
+	move.l	d4,(a2)+
+	move	d3,(a2)+
+	addq	#1,d5
+	addq	#2,d1
+	cmp	d7,d1
+	blo	.scan
+	rts
+	endm
+
+; Walk a frame and plot the stars of the window into the draw screen (only on black
+; pixels), each recorded for the erase.  In: a2 = this screen's erase list, a3 = the draw
+; screen, a5/a6 = star_ytab/star_ybit, d5 = 0.  Out: d5 = stars plotted.
 ; The video latch ($A000-$A007 cells of the shared RAM) was set by the program's IRQ
 ; handler; as MAME does, the frame uses the settings of the previous vertical blank
 ; (star_params), and the new ones are taken afterwards.
 
 star_frame:
-	clr	star_n
 	tst.b	star_enable
 	beq	.params
 	move	star_idx,d0
@@ -136,13 +147,10 @@ star_frame:
 	sub	#65535,d0
 .s_ok:
 	move	d0,d6			; window start
-	lea	star_list,a2
-	moveq	#0,d5			; stars listed
 	move.b	star_set_a,d0
 	bsr.s	.set
 	move.b	star_set_b,d0
 	bsr.s	.set
-	move	d5,star_n
 	move	d6,d0
 	add	#STAR_WINDOW&$ffff,d0	; (224 * 256 = 57344)
 	bcc.s	.w1
@@ -160,13 +168,13 @@ star_frame:
 	move	d0,star_idx
 	bra	.params
 
-	; the stars of set d0.b in the window (start d6) -> (a2)+, counted in d5
+	; plot the stars of set d0.b in the window (start d6), recorded at (a2)+, counted in d5
 .set:
 	and	#3,d0
 	add	d0,d0
-	lea	star_set_n,a3
-	move	(a3,d0.w),d7		; bytes of entries
-	beq.s	.set_done
+	lea	star_set_n,a4
+	move	(a4,d0.w),d7		; bytes of entries
+	beq	.set_done
 	lsl	#7,d0
 	lea	star_set_pos,a0
 	add	d0,a0
@@ -184,16 +192,97 @@ star_frame:
 .in:
 	cmp	#STAR_WINDOW,d2
 	bhs.s	.skip
-	move	d2,(a2)+
-	move	(a1,d1.w),(a2)+
-	addq	#1,d5
+	moveq	#0,d4
+	move.b	d2,d4
+	add	#16+DISP_TOP,d4		; display line = raw x + 16
+	lsl.l	#8,d4			; line offset
+	lsr	#8,d2			; raw y
+	add	d2,d2
+	add	(a5,d2.w),d4		; byte of plane 0
+	move	(a6,d2.w),d3		; bit
+	lea	(a3,d4.l),a4
+	move.b	(a4),d0			; black there?
+	or.b	2(a4),d0
+	or.b	4(a4),d0
+	or.b	6(a4),d0
+	btst	d3,d0
+	bne.s	.skip
+	move	(a1,d1.w),d0		; STE colour 1..15: its planes only
+	add	d0,d0
+	move	.ctab(pc,d0.w),d0
+	jmp	.ctab(pc,d0.w)
+.ctab:
+	dc.w	.skip-.ctab
+	dc.w	.c1-.ctab,.c2-.ctab,.c3-.ctab,.c4-.ctab,.c5-.ctab,.c6-.ctab,.c7-.ctab
+	dc.w	.c8-.ctab,.c9-.ctab,.c10-.ctab,.c11-.ctab,.c12-.ctab,.c13-.ctab,.c14-.ctab,.c15-.ctab
 .skip:
 	addq	#2,d1
 	cmp	d7,d1
-	blo.s	.scan
+	blo	.scan
 .set_done:
 	rts
-
+.c1:
+	bset	d3,(a4)
+	star_plotted
+.c2:
+	bset	d3,2(a4)
+	star_plotted
+.c3:
+	bset	d3,(a4)
+	bset	d3,2(a4)
+	star_plotted
+.c4:
+	bset	d3,4(a4)
+	star_plotted
+.c5:
+	bset	d3,(a4)
+	bset	d3,4(a4)
+	star_plotted
+.c6:
+	bset	d3,2(a4)
+	bset	d3,4(a4)
+	star_plotted
+.c7:
+	bset	d3,(a4)
+	bset	d3,2(a4)
+	bset	d3,4(a4)
+	star_plotted
+.c8:
+	bset	d3,6(a4)
+	star_plotted
+.c9:
+	bset	d3,(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c10:
+	bset	d3,2(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c11:
+	bset	d3,(a4)
+	bset	d3,2(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c12:
+	bset	d3,4(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c13:
+	bset	d3,(a4)
+	bset	d3,4(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c14:
+	bset	d3,2(a4)
+	bset	d3,4(a4)
+	bset	d3,6(a4)
+	star_plotted
+.c15:
+	bset	d3,(a4)
+	bset	d3,2(a4)
+	bset	d3,4(a4)
+	bset	d3,6(a4)
+	star_plotted
 .params:
 	; the settings for the next frame from the latch
 	; (the cells hold the byte the program wrote; the latch takes its bit 0)
@@ -328,6 +417,4 @@ star_set_a:	ds.b	1
 star_set_b:	ds.b	1
 star_enable:	ds.b	1
 	even
-star_n:		ds.w	1
-star_list:	ds.b	256*4
 	section text,code
