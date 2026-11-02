@@ -82,10 +82,6 @@ GAMES = [
      "playable, but slow: about 45% of the arcade's speed and 12 pictures a second in play (Hatari\n"
      "  measurements); exact logic and picture; music and effects on the YM",
      "jump: Space, Control, joystick fire, pad A.  bubble: Alternate, joystick up, pad B, pad up."),
-    ("rtype", "RTYPE.PRG", "R-Type (Irem 1987)",
-     "playable, but slow: about 30% of the arcade's speed and 6 pictures a second in play (Hatari); exact logic,\n"
-     "  the centred 320 of the 384 pixels; no sound yet",
-     "fire (hold to charge): Space, Control, joystick fire, pad A.  the Force: Alternate, pad B."),
     ("ddragon", "DDRAGON.PRG", "Double Dragon (Technos 1987)",
      "playable, but slow: about 38% of the arcade's speed and 4 pictures a second in play (Hatari); exact logic,\n"
      "  all 256 x 240 pixels in 16 colours; music and effects on the YM, the voices and hits on the DMA sound",
@@ -116,14 +112,34 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
      "  Up, Space, Control, X, joystick up / fire, pad B."),
+    ("pooyan", "POOYAN.PRG", "Pooyan (Konami 1982)",
+     "the arcade's full speed, 40-50 pictures a second in play (Hatari); exact logic and picture, the turned\n"
+     "  224 x 256 picture; the sound board's Z80 translated, its two AYs on the YM",
+     "fire: Space, Control, Z, joystick fire, pad A/B/C.  Up / down move the basket.  coins: 5 / 6.\n"
+     "  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
+    ("mrdo", "MRDO.PRG", "Mr. Do! (Universal 1982)",
+     "the arcade's full speed in most of play, 44-50 pictures a second (Hatari); exact logic and picture, the\n"
+     "  turned 192 x 240 picture in 15 fitted colours; the two SN76489s' tones on the YM",
+     "fire (the power ball): Space, Control, Z, joystick fire, pad A/B/C.  The players take turns: both joysticks\n"
+     "  and both pads move Mr. Do!.  coins: 5 / 6."),
+    ("mpatrol", "MPATROL.PRG", "Moon Patrol (Irem 1982)",
+     "about 95% of the arcade's speed, 14-30 pictures a second (Hatari); exact logic and picture (frames with more\n"
+     "  than 16 colours on the playfield borrow the nearest colour); music and effects on the YM, the voices on the\n"
+     "  DMA sound",
+     "fire: Space, Control, Z, joystick fire, pad A.  jump: Up, Alternate, X, pad B.  Left / right: slower / faster.\n"
+     "  coins: 5 / 6."),
 ]
-assert [g[0] for g in GAMES] == list(port.GAMES) and all(g[1] == port.GAMES[g[0]] for g in GAMES), \
-    "tools/release.py: GAMES must list port.GAMES (same order, same programs)"
+# registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
+# sprites pre-coloured); the user took it out on 2026-11-01 until it fits again
+NOT_RELEASED = {"rtype"}
+assert [g[0] for g in GAMES] == [g for g in port.GAMES if g not in NOT_RELEASED] and \
+    all(g[1] == port.GAMES[g[0]] for g in GAMES), \
+    "tools/release.py: GAMES must list port.GAMES but NOT_RELEASED (same order, same programs)"
 # The memory a program asks TOS for (text + data + BSS + the 256-byte basepage) stays well under what a 4 MB machine
 # has free: TOS 2.06 alone leaves 4,061,212 bytes (Hatari), a tester's Mega STE with a hard disk driver and
 # accessories 3,831,554 ("not enough memory" from 1942, 1943, Black Tiger, Bubble Bobble and Commando at 3.93-4.05 MB).
 MAX_LOAD = 3700000
-OVER_LOAD = {"RTYPE.PRG"}   # (packed with a warning: R-Type's shrinking was deferred on 2026-10-15; it needs 3,893,790)
+OVER_LOAD = set()   # (programs packed with a warning although over MAX_LOAD; R-Type was one until 0.6)
 DEBUG_NAMES = (b"COUNTERS.BIN", b"DEBUG.BIN", b"LATEPC.BIN", b"RATE.BIN", b"TIMES.BIN", b"DUMP.BIN")
 
 README = """STE Arcade {version}
@@ -136,7 +152,7 @@ https://github.com/AnimaInCorpore/STEArcade  (commit {commit})
 
 Requirements: an Atari STE (or Mega STE) with 4 MB of RAM, a colour monitor or TV (50 Hz).  Start the programs from
 the desktop from a hard disk or a GEMDOS drive. Every program is self-contained: the arcade's
-code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory (R-Type 3.90 MB);
+code and graphics are part of it, nothing else is needed.  Each needs at most 3.7 MB of free memory;
 if TOS says there is not enough, start without accessories and AUTO folder programs.
 
 Floppy disks: DISKS holds a bootable disk image (.ST) for each game that fits on a floppy: write it to a disk or
@@ -151,8 +167,10 @@ No port is certified Complete by this release.  1942 and Donkey Kong passed assi
 regressions in native Hatari; natural complete playability, ordinary controls and sound remain unverified
 by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 / 318.
 Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
-simulated); its full-game verification is pending.  Time Pilot, Track & Field and Hyper Sports are new and incomplete: they
-have no sound yet.  See the source README for the five-color status
+simulated); its full-game verification is pending.  Time Pilot has no sound yet.  Donkey Kong Junior, Pac-Man,
+Pooyan, Mr. Do!, Moon Patrol, Track & Field and Hyper Sports are new: their logic and picture are checked against
+the reference, their full-game verification is pending.  R-Type is not part of this release: while it is developed it needs more than 4 MB of
+RAM.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.
 

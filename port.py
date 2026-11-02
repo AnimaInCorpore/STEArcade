@@ -33,11 +33,20 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "trojan": "TROJAN.PRG", "gyruss": "GYRUSS.PRG", "1943": "1943.PRG", "bublbobl": "BUBBLE.PRG",
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
-         "hyperspt": "HYPERSPT.PRG"}
+         "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
+         "mpatrol": "MPATROL.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
+                                                                # 7 sector selection, 8 stop mode, 9 DIPs
+    "pooyan": [("ref/cover.py", list(range(1, 14)), 20000),       # 1-3 play, 4-8 lives, 9 high score, 10-11 two players,
+                                                                # 12 DIPs, 13 no coin: the attract cycle
+               ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],     # the sound Z80: 0 the game's commands, 1-3 random
+    "mrdo": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-6 lives (6 fire held), 7 two players,
+                                                                # 8-9 DIPs, 10 rack test, 11-12 later scenes
+             ("ref/pens.py", [7, 10, 11, 12], 8000)],            # the pens' counts for the palette fit (tools/assets.py)
     "pacman": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-6 lives + levels, 7 two players, 8-9 DIPs,
                                                                 # 10 rack test, 11-12 levels 20+ / 250+ (split screen)
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
@@ -75,6 +84,30 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "mpatrol": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),
+                ("tools/logic_test.py", ["6000", "--seed", "3", "--quiet"], None),   # the Beginner course to its end
+                ("tools/render_test.py", ["600", "--seed", "1"], None),              # the attract mode
+                ("tools/render_test.py", ["4000", "--seed", "3", "--vbl", "0.8"], None),   # play, pictures dropped as the VBL does
+                ("tools/sprite_test.py", [], None),          # every x (edges, 16 shifts), flips, holes, guards, 64 KB
+                ("tools/sound_test.py", ["3000"], None)],    # the M6803 driver, AYs, YM and DMA voices against sound.py
+    "pooyan": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/logic_test.py", ["{n}"], 3000),
+               ("tools/logic_test.py", ["6000", "--seed", "5", "--quiet"], None),    # rounds 2-4
+               ("tools/render_test.py", ["3000", "--start", "1000", "--every", "3"], None),
+               ("tools/render_test.py", ["3000", "--seed", "10", "--start", "1000", "--every", "5"], None),   # two players
+               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, holes, 64 KB crossings
+               ("tools/sound_test.py", ["3000", "--tag", "pooyan_sim"], None)],   # the sound driver against sound.py
+    "mrdo": [("tools/prepare.py", [], None),
+             ("tools/build.py", ["--sim"], None),
+             ("tools/logic_test.py", ["{n}"], 3000),
+             ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet"], None),    # two players (the maze copies)
+             ("tools/render_test.py", ["3000", "--seed", "10", "--every", "4"], None),
+             ("tools/render_test.py", ["3000", "--seed", "4", "--start", "1600", "--every", "3"], None),   # play
+             ("tools/sprite_test.py", [], None),                  # edges, 16 shifts, flips, holes, 64 KB crossings
+             ("tools/sound_test.py", ["3000"], None)],            # the SN76489s' registers and the YM against sound.py
     "pacman": [("tools/prepare.py", [], None),
                ("tools/build.py", ["--sim"], None),
                ("tools/logic_test.py", ["{n}"], 3000),

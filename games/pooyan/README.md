@@ -13,7 +13,8 @@ in lock-step, a runtime that delivers the NMI at the game's idle point, a Blitte
 python games/pooyan/tools/prepare.py       # verify assets/roms/pooyan.zip, unpack to assets/roms/extracted/pooyan/
 python games/pooyan/tools/machine.py       # the reference in the port's schedule: 600 frames
 python games/pooyan/ref/cover.py <seed> 20000          # coverage, seeds 1-13 -> build/pooyan/cover<seed>.pkl
-python games/pooyan/ref/mame_avi_cmp.py [--keep DIR]   # the reference against WolfMAME 0.162, every frame
+python games/pooyan/ref/mame_cmp_pooyan.py [frame ...]  # the reference against MAME 0.289 (port.py mame pooyan)
+python games/pooyan/ref/mame_avi_cmp.py [--keep DIR]   # the reference against WolfMAME 0.162, every frame (Windows)
 python games/pooyan/tools/gen.py           # -> build/pooyan/code_main.s, translation.json (needs the 13 coverage pickles)
 python games/pooyan/tools/build.py         # -> run/pooyan/POOYAN.PRG (--sim: run/pooyan_sim, the Musashi build)
 python games/pooyan/tools/logic_test.py 6000 --seed 4  # the translation in lock-step with the reference
@@ -110,9 +111,13 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
   crash, no late border event; in play **60 arcade frames and 50 pictures a second** in most 2-second windows, 28-42
   pictures at a round's start (many new tiles baked); 57.9 frames and 46.3 pictures a second over the whole run with
   the boot and the attract mode.
-* Not done: the sound board's RC filters (see Sound), the cocktail flip, a recorded play
-  (`PLAYBACK`), registration in `port.py`, `tools/release.py` and the README table's screenshot; full-game Hatari
-  verification.
+* **MAME 0.289** (`ref/mame_cmp_pooyan.py`, `port.py mame pooyan`, 2026-11-01, on the Mac): the reference renderer
+  draws MAME's memory with 0 differing pixels at frames 60-3600, the pens 0 of 512 differ, and the reference machine
+  from power-on has MAME's RAM (the stack left out) at the same frames.
+* **Registered** 2026-11-01: `port.py cover|build|test|mame pooyan`, `tools/release.py`, the README's table
+  (Verification pending).
+* Not done: the sound board's RC filters (see Sound), the cocktail flip, a recorded play (`PLAYBACK`); full-game
+  Hatari verification (`docs/port-status.md`: a natural playthrough, the controls and the sound by hand).
 
 ## Sound
 

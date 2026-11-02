@@ -38,8 +38,9 @@ reference renderer and MAME.
 |  | [Mr. HELI no Daibouken](games/mrheli/) | Irem M72: NEC V30 + Z80 + i8751 | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
-| <a href="games/pooyan/README.md"><img src="games/pooyan/docs/screenshot.png" width="160" alt="Pooyan"></a> | [Pooyan](games/pooyan/README.md) | Z80 (translated) + Z80 sound (Time Pilot's board; not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed, 50 pictures a second in most of play |
-| <a href="games/mrdo/README.md"><img src="games/mrdo/docs/screenshot.png" width="160" alt="Mr. Do!"></a> | [Mr. Do!](games/mrdo/README.md) | Z80 (translated; two SN76489s on the YM) | ![Incomplete](docs/status/incomplete.svg)<br>Not registered yet; full speed in most of play, 40-50 pictures a second |
+| <a href="games/pooyan/README.md"><img src="games/pooyan/docs/screenshot.png" width="160" alt="Pooyan"></a> | [Pooyan](games/pooyan/README.md) | Z80 (translated) + Z80 sound (Time Pilot's board, translated; two AYs on the YM) | ![Verification pending](docs/status/verification-pending.svg)<br>Logic and picture exact, full speed, 40-50 pictures a second in play; full-game checks pending |
+| <a href="games/mrdo/README.md"><img src="games/mrdo/docs/screenshot.png" width="160" alt="Mr. Do!"></a> | [Mr. Do!](games/mrdo/README.md) | Z80 (translated; two SN76489s on the YM) | ![Verification pending](docs/status/verification-pending.svg)<br>Logic and picture exact, full speed in most of play, 44-50 pictures a second; full-game checks pending |
+| <a href="games/mpatrol/README.md"><img src="games/mpatrol/docs/screenshot.png" width="160" alt="Moon Patrol"></a> | [Moon Patrol](games/mpatrol/README.md) | Z80 (translated) + M6803 sound (translated; two AYs on the YM, the MSM5205 voices on the DMA) | ![Verification pending](docs/status/verification-pending.svg)<br>Logic and picture exact (but frames with over 16 colours); ~95% speed, 14-30 pictures a second; full-game checks pending |
 
 Port status (2026-10-22; based on the linked port reports):
 
@@ -58,7 +59,7 @@ what an automated player can attempt and what evidence establishes completion.
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI
 has a renderer harness; the remaining entries currently provide board/reference work. Use their local scripts;
 their presence in the table does not put them in the release. Input and release instructions below refer to
-registered ports. Current source capabilities and measurements may be newer than release 0.3.
+registered ports. Current source capabilities and measurements may be newer than release 0.7.
 
 Bubble Bobble also has reference captures from MAME (a 64-frame attract-mode collage with every on-screen colour, a
 16-colour Oklab palette, the ROM manifests of the Japan and US sets) in [`games/bublbobl/docs/`](games/bublbobl/docs/README.md).
@@ -70,9 +71,10 @@ R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom; Double 
 
 ## Download
 
-[Release 0.3](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.3): `STEArcade-0.3.zip` with one
-self-contained TOS program per game (the arcade's code and graphics are built in: no separate ROM files are needed)
-and a README.TXT with the controls.  Requirements: an Atari STE with 4 MB.
+[Release 0.7](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.7): `STEArcade-0.7.zip` with one
+self-contained TOS program per game (the arcade's code and graphics are built in: no separate ROM files are needed),
+bootable floppy images (`DISKS/`) for the games that fit on one and a README.TXT with the controls.  R-Type is not in
+it (it needs more than 4 MB while it is developed).  Requirements: an Atari STE with 4 MB.
 
 The ROM sets are not part of this repository.  To build from the sources, put the MAME archives listed in
 [`assets/roms/README.md`](assets/roms/README.md) into `assets/roms/` and follow the Quick start.

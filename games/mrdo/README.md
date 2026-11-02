@@ -12,7 +12,8 @@ the 68000 in lock-step with the reference's port schedule (12 seeds, 144,000 fra
 picture exact against the reference (32,000 pictures of four seeds: the title's and intermissions' scrolling, every
 scene, two players; 476 made-up pictures of sprites at the edges, every scroll value).  In Hatari the logic keeps the
 arcade's 60 frames a second in most of play with 40-50 pictures a second (about 22 on the title).  Sound: the two
-SN76489s' tones on the YM2149 (`src/sound.s`).  Not registered in `port.py` yet.
+SN76489s' tones on the YM2149 (`src/sound.s`).  Registered 2026-11-01: `port.py cover|build|test mrdo`,
+`tools/release.py` and the README's table (Verification pending: the full-game checks of `docs/port-status.md`).
 
 * `src/mrdo.s` the runtime (schedule, IRQ delivery, borders, inputs, sound bytes into a ring, crash dump);
   `src/render.s` the picture (two tile layers composited per cell, the background scrolled; generated sprite code);
@@ -194,4 +195,5 @@ silent as on the reference, the music and effects from the coin on, pitches 270-
 1. Hatari: the logic's pace with the long search frames (the dips to 38-55 frames a second); yield points if they
    show in play.  The title's scroll compositing (~180k a picture) could use the Blitter for rows without foreground.
 2. Per-scene palettes (exact colours).
-3. Registration in `port.py` (GAMES, COVER, TESTS) and `tools/release.py`.
+3. A natural playthrough in Hatari (`docs/port-status.md`): every scene type, the intermissions, the build identity
+   and the input recording kept; the controls and the sound checked by hand.
