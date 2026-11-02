@@ -32,6 +32,16 @@ into the pages of a slot where the target is plausible with all it reaches in it
 the object loops ($CD9A, $AE09, $CCDF, $D5D7: 32 slots each, a handler per object through `JSR [A,X]`), calls and
 returns (RTS ~72 cycles, indirect JSR ~130).
 
+2026-11-02: `tools/gen.py` sets `call_summaries` and `fast_forms` (m6809x, as Hyper Sports and Double Dragon):
+`logic_test.py 1300 --seed 5` identical, 126.2k -> 117.2k cycles a frame for the two CPUs (-7.1%; `call_summaries`
+alone 119.5k in the audit).
+
+Coverage gap (2026-11-02): `build/splatter` holds only `cover_1/4/5.pkl` (the seeds 6, 7, 11-17 and the play
+coverage above are gone).  `logic_test.py 9000 --play` (the recorded play) stops at frame 1482 at a main CPU badpc
+$4AE8 and seed 15 at frame 527 at a main CPU badpc $2D08, both with and without the switches above (seed 4: 2500
+frames identical).  Regenerate the coverage (`ref/cover.py`, seeds 4-7, 11-17, the play) and rerun the long
+lock-step runs before trusting figures past stage 1.
+
 ## Renderer
 
 `src/render.s` draws the arcade picture (288 x 224, the player's view: MAME's screen turned by the cabinet's ROT180 with

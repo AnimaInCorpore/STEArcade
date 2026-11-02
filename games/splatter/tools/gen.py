@@ -368,6 +368,8 @@ def program(cpu, regions, cover):
     # the slots one code page runs from (in all the coverage): returns and jumps into them need no page check
     pages_in = collections.Counter(prog.slot_of.values())
     prog.fixed_slots = tuple(sorted(k for k, n in pages_in.items() if n == 1))
+    prog.fast_forms = True                      # (m6809x Program.fast_forms: flags fixed through d7, returns compared)
+    prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
     # table entries random play did not take (stage-select seeds 11, 13, 17 stopped at them in lock-step)
     extra = {} if os.environ.get("NO_TABLES") else table_targets(prog, prog.exec_cover, tg[cpu], acc[cpu])
     prog.targets = {v: set(tg[cpu].get(v, ())) | extra.get(v, set()) for v in set(tg[cpu]) | set(extra)}
