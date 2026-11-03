@@ -181,8 +181,8 @@ EMIT_SIZE macro
 
 ; the entry at definition offset \1 into the sprite RAM slot at \2 (ix or iy); AW = its attribute with the colour
 EMIT_ENTRY macro
-	move.w	\1(a2,d3.l),d7		; (y offset << 8 | x offset)
     ifnd SPRITE_LIST
+	move.w	\1(a2,d3.l),d7		; (y offset << 8 | x offset)
 	lea	v30_image+$C0000,a0
 	move.b	d7,d0
 	ext.w	d0
@@ -226,7 +226,8 @@ EMIT_RECORD macro
     endc
 	endm
 
-EMIT1	macro
+; Shared by the standalone emitter and the E5CD handler. \1: saved DS0 offset from its caller's SP.
+EMIT1_BODY macro
 	move.w	$2EFC(a3),d4		; IX = IY = the pointer
 	move.w	d4,d5
 	EMIT_SIZE 0,d0
@@ -237,11 +238,16 @@ EMIT1	macro
 	move.w	d0,-(sp)
 	move.w	4(a4,d6.l),d1		; CW, DW: x, y
 	move.w	8(a4,d6.l),d2
-	move.w	6(a6),-2(a5)		; (push ds0)
+	move.w	6(a6),\1(a5)		; (push ds0)
 	EMIT_ENTRY 0,d4
 	move.w	(sp)+,d7
 	EMIT_RECORD d4,d7,1
-.x\@:	NEXIT	\1,R0201A
+.x\@:
+	endm
+
+EMIT1	macro
+	EMIT1_BODY -2
+	NEXIT	\1,R0201A
 	endm
 
 nat_emit1:
@@ -344,6 +350,7 @@ nat_init:				; (rtype.s / core.s init_image)
 	move.w	d2,d0
 	eor.w	#1,d0
 	move.b	(a0,d0.l),d0
+	and.w	#$00FF,d0		; discard the ROM offset's high byte before caching red
 	move.w	d0,(a1)
 	move.w	d2,d0
 	addq.w	#1,d0
@@ -1887,3 +1894,75 @@ nat_h86ea:
 .fa:	move.w	#$86ED,-(a5)		; (a spawn: the arcade's timer routine)
 	jmp	R0FA3A
 .tr:	jmp	R08AEA_t
+
+; ---------------------------------------------------------------------------------------------------------------------
+; The ROM's E5CD handler: scroll a decorative object in x and emit its sprite.
+; Keep the original cleanup/screen tests, registers and V30 stack residues. Both exits
+; overwrite flags before using them. Odd BP uses the original byte-safe translation.
+
+	section text,code
+nat_nh_e5cd:
+	btst #0,d6
+	bne R0E9CD_t
+	tst.b $2FC5(a3)
+	bne R0E9F7
+	lea (a4,d6.l),a0
+	move.w $30(a0),d0
+	POSADD 4
+	move.w $34(a0),d3
+	move.w #$E5E0,-2(a5)
+	EMIT1_BODY -4
+	jmp R0E9E0
+
+; ---------------------------------------------------------------------------------------------------------------------
+; Native equivalents of the three E873/E890/E8AD tile-RAM initialization loops.
+; Only AW 0, the exact CW/IY and the expected DS1 base take the bulk path. Other inputs
+; use the translated loop. Fill the same cells, then mark each affected 64-byte video
+; block once. CW 0 and IY $4000 precede the original POP DS1 / RET continuations.
+
+NC_ENTRY macro
+	tst.w d0
+	bne \1
+	cmp.w #\2,d1
+	bne \1
+	cmp.w #\3,d5
+	bne \1
+	cmp.l #v30_image+\4,a2
+	bne \1
+	bsr nat_nc_fill
+	jmp \5
+	endm
+
+	section text,code
+nat_nc_tail:
+	NC_ENTRY R0EC73_t,$F80,$200,$D0000,R0EC81
+nat_nc_fg:
+	NC_ENTRY R0EC90_t,$1000,0,$D0000,R0EC9E
+nat_nc_bg:
+	NC_ENTRY R0ECAD_t,$1000,0,$D8000,R0ECBB
+
+nat_nc_fill:
+	lea (a2,d5.l),a0
+	move.l a0,a1
+	move.w d1,-(sp)
+	lsr.w #3,d1
+	subq.w #1,d1
+	move.l #$0FA00000,d7
+.fill:
+	rept 8
+	move.l d7,(a0)+
+	endr
+	dbf d1,.fill
+	move.l a1,d7
+	sub.l #v30_image+$C8000,d7
+	lsr.l #6,d7
+	lea v30_vmarks,a0
+	add.l d7,a0
+	move.w (sp)+,d1
+	lsr.w #4,d1
+	subq.w #1,d1
+.mark:	st (a0)+
+	dbf d1,.mark
+	moveq #0,d1
+	move.w #$4000,d5
+	rts

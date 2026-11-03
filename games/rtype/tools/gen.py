@@ -44,6 +44,9 @@ NATIVES = {0x00657: "nat_objloop", 0x05784: "nat_fade_a", 0x05836: "nat_fade_b",
            0x00A72: "nat_posx", 0x00A89: "nat_posy",                # an object's x / y plus its speed
            0x08DB0: "nat_h89b0",                                    # the cave crawler's handler
            0x05701: "nat_prow1", 0x05730: "nat_prow2",              # the palette rows' fades (the scan)
+           0x0E9CD: "nat_nh_e5cd",                                 # decorative object: x movement and sprite
+           0x0EC73: "nat_nc_tail", 0x0EC90: "nat_nc_fg",           # tile-RAM initialization, guarded bulk fills
+           0x0ECAD: "nat_nc_bg",
            0x0EA01: "nat_he601",
            0x0FADA: "nat_eco2",
            0x08AEA: "nat_h86ea",

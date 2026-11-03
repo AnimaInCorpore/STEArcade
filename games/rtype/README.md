@@ -199,6 +199,35 @@ apart.  For an instruction-level comparison (`logic_test.py --steplock F`) build
 Memory: with every stage's sprites pre-coloured (1112 definitions, 3437 colourings) RTYPE.PRG is 5.9 MB - fine on
 the 14 MB machine, far over the 3.7 MB release limit (per-stage loading or packing, decided later).
 
+Renderer experiments, 2026-11-01: damage coalescing saved only 0.6% over the full stage-5 recording and did not improve
+Hatari's picture rate; unrolled secondary-layer loops were neutral and cached shifted masks slower. No runtime change
+kept. See [the audit, bounds and measurements](docs/renderer-audit.md), including sample windows in all eight stages.
+
+Prepared secondary-layer prototype, 2026-11-02: native source packing, generated row routines and lazy masks for
+all 16 shifts, including preparation costs. Stage 3: 266,396 -> 268,203 cycles a picture (+0.68%) drawing every
+second arcade frame; 230,692 -> 229,140 (-0.67%) drawing consecutive frames. Both runs are exact; 113 focused
+cases pass. The 512 KB cache does not supply a consistent win; production renderer unchanged. See
+[implementation, measurements and reproduction](docs/prepared-layer-prototype.md).
+
+Avoiding redraws/copies, 2026-11-03: an eight-stage transfer audit and an isolated late-full-refresh prototype.
+Refresh the visible window and fill incoming strips on buffer reuse: exact, stage 3 −2.50% renderer cycles,
+stage 4 −1.58%, stage 6 −0.81%; smaller gains on consecutive pictures. Pinned Hatari stage 3: 28.18 -> 28.66
+logic ticks/s, 19.17 -> 19.68 pictures/s, with remaining late palette events. No 2x route demonstrated;
+production unchanged. See [bounds, implementation, correctness and timing](docs/route1-results.md).
+
+Native logic optimizations integrated, 2026-11-03: correct cached red-channel words (the ROM offset's high byte leaked into
+4,010 entries), combine the E5CD object's movement/emission, and fill/mark tile-RAM clears in bulk. Early play
+and restarts: −16–23% logic cycles; eight later-game samples: −0.3–3.0%. Pinned Hatari seed 4 600–3600:
+39.54 -> 41.95 logic ticks/s, 29.71 -> 33.94 pictures/s; zero late border/palette events. Independent reference
+lock-step reruns pass seed 4 to 9000 and seed 1 to 14400; all 6,600 production/baseline frames match. See
+[native results, limitations and reproduction](docs/native-results.md).
+
+Later-stage native follow-up, 2026-11-03: movement-script leaf returns, tile runs/BG patches and the breakable-FG
+helper give another 0.49–2.54% fewer logic cycles in stage-3–8 samples. Native box tests and fused object dispatch
+add little or regress. Pinned Hatari stages 7/8: +1.66%/+2.58% logic throughput, picture rates essentially
+unchanged; zero late border/palette events. These prototypes remain isolated; see
+[measurements, exactness and reproduction](docs/later-native-results.md).
+
 ## Sound: the plan (agreed 2026-11-01, not started)
 
 R-Type's sound is the YM2151 alone (MAME 0.286 `irem/m72.cpp`: `rtype()` removes the DAC, the set has no samples

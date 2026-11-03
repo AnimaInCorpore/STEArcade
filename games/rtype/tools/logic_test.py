@@ -105,6 +105,8 @@ def main():
                     "a long run's game over, the ranking and the name entry")
     ap.add_argument("--trace", type=int, default=-1, help="frame whose translated labels are logged")
     ap.add_argument("--start", type=int, default=0, help="frames the reference runs alone before the comparison")
+    ap.add_argument("--windows", default="", help="inclusive comparison ranges A-B,C-D; the reference runs alone "
+                    "between windows and reloads the simulator at each window's start")
     ap.add_argument("--steplock", type=int, default=-1, help="frame run instruction by instruction against the "
                     "interpreter (registers compared at every translated label)")
     ap.add_argument("--snap", action="store_true", help="a FADE_SNAP build (src/natives.s): the palettes and the work "
@@ -123,6 +125,15 @@ def main():
                     "frames after the comparison: its cycles (CPU + Blitter); with --render-profile by routine")
     ap.add_argument("--render-profile", type=int, default=0, help="profile the pictures from this frame on")
     args = ap.parse_args()
+    windows = []
+    if args.windows:
+        try:
+            windows = sorted(tuple(map(int, item.split("-"))) for item in args.windows.split(","))
+            assert all(len(w) == 2 and 0 <= w[0] <= w[1] < args.frames for w in windows)
+            assert all(a[1] < b[0] for a, b in zip(windows, windows[1:]))
+            assert not args.start
+        except (ValueError, AssertionError):
+            ap.error("--windows needs disjoint A-B ranges within --frames and cannot be combined with --start")
     recorded = []
     defs_seen = set()
     cols_seen = set()
@@ -378,11 +389,27 @@ def main():
     state = dict(hold=0, bits=0)
     if args.seed >= 8:
         m.dsw &= ~0x4000
-    cycles = 0
+    cycles = compared = 0
     for f in range(args.frames):
         if f == args.mortal_at:
             m.dsw |= 0x4000
         cover.press(m, f, args.seed, rng, state)
+        if windows:
+            if not any(a <= f <= b for a, b in windows):
+                m.run_frame_port()
+                if f % 10000 == 0:
+                    print("reference advanced to", f, flush=True)
+                continue
+            if any(f == a for a, b in windows):
+                load_state()
+                nonlocal_sound[0] = 0
+                _calls[0] = 0
+                if args.list:
+                    for name in ("m72_slots", "m72_objs"):
+                        mem.w_block(sym[name], bytes(0x400))
+                    mem.w16(sym["m72_slots_hw"], 0)
+                    mem.w16(sym["m72_objs_end"], 0)
+                print("comparison window starts", f, flush=True)
         if f < args.start:
             m.run_frame_port()                          # (--start: the reference alone, then its state)
             if f == args.start - 1:
@@ -424,6 +451,7 @@ def main():
         if not compare(f):
             print("stopped after %d good frames" % f)
             return 1
+        compared += 1
         if args.record:
             recorded.append((f, record_state()))
         if args.defs:
@@ -453,7 +481,7 @@ def main():
         if args.render and f % args.render == 0:
             rcost.append(render_picture(args.render_profile and f >= args.render_profile))
         if f % 100 == 99:
-            print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1 - args.start)), flush=True)
+            print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / max(1, compared)), flush=True)
     if rcost:
         import numpy as np
         a = np.array(rcost[2:] or rcost)
@@ -488,8 +516,7 @@ def main():
         import pickle
         Path(args.record).write_bytes(pickle.dumps(recorded))
         print("%d states -> %s" % (len(recorded), args.record))
-    print("%d frames identical; %.0f 68000 cycles a frame" % (args.frames - args.start,
-                                                              cycles / max(1, args.frames - args.start)))
+    print("%d frames identical; %.0f 68000 cycles a frame" % (compared, cycles / max(1, compared)))
     if "es_ncall" in sym:
         for k, name in enumerate(("0040:F694", "0040:F6DA")):
             print("collision %s: calls %d, rejected %d, full tests %d" % (
