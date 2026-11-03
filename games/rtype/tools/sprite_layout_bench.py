@@ -13,7 +13,8 @@ Cycles: the CPU's (Musashi) plus the Blitter's bus cycles, summed over the 16 sh
 
 Weighted totals count each definition by its draws in the .pkl recordings.  Result 2026-11-03 (928 definitions):
 the estimate's choice 4539.4 cycles a sprite, the measured best 4537.6 (-0.04%, weighted -0.05%; 38 differ):
-the estimate stays (docs/sprite-preparation.md).
+the estimate stays (docs/sprite-preparation.md).  --dp 32 (rows cut by least cost, blitter_sprite_compiler.js):
+4539.4 -> 4503.7 (-0.79%, weighted -0.54%).  Layout x (blocks with an X count a row): 4666.8, +2.8%; dropped.
 """
 import argparse
 import pickle
@@ -114,6 +115,153 @@ def expected(img, s, background):
     return bytes(exp)
 
 
+def pass_bus(cls2, m, w):
+    """a piece's Blitter bus cycles over the 16 shifts (4 planes: reads, writes, a read-modify-write for every end
+    mask other than $FFFF - 0 too), or None when it cannot be drawn at some shift (a wide piece's inner word not
+    opaque)"""
+    total = 0
+    for k in range(16):
+        try:
+            xc, dyi, e1, e2, e3, ctl = S.pass_values(cls2, m, w, k)
+        except AssertionError:
+            return None
+        masks = [e1] if xc == 1 else [e1] + [e2] * (xc - 2) + [e3]
+        total += 16 * (xc - bool(ctl & 0x40) + xc + sum(v != 0xFFFF for v in masks))
+    return total
+
+
+def pieces_dp(img, overhead):
+    """stefastbobs2's blitter_sprite_compiler.js: a row cut into the pieces of the least cost over the 16 shifts
+    (pass_bus + overhead CPU cycles a pass), a piece of up to 32 pixels with any gaps, a wider one (up to WIDE_MAX)
+    with gaps only where its passes' inner words stay opaque - as stage_sprites.pieces: [(y, x0, width, mask)]"""
+    out = []
+    cache = {}
+    for y in range(img.shape[0]):
+        cols = np.flatnonzero(img[y]).tolist()
+        opaque = set(cols)
+        best = [None] * len(cols) + [(0, None)]
+        for i in range(len(cols) - 1, -1, -1):
+            a = cols[i]
+            for j in range(i, len(cols)):
+                b = cols[j]
+                w = b - a + 1
+                if w > S.WIDE_MAX:
+                    break
+                cls2 = S.cls_of(w)
+                n = 16 * (cls2 + 1)
+                m = 0
+                for c in cols[i:j + 1]:
+                    m |= 1 << (n - 1 - (c - a))
+                key = (cls2, m, w)
+                if key not in cache:
+                    cache[key] = pass_bus(cls2, m, w)
+                c = cache[key]
+                if c is None:
+                    continue
+                c += 16 * overhead + best[j + 1][0]
+                if best[i] is None or c < best[i][0]:
+                    best[i] = (c, j)
+        i = 0
+        while i < len(cols):
+            j = best[i][1]
+            a, b = cols[i], cols[j]
+            w = b - a + 1
+            n = 16 * (S.cls_of(w) + 1)
+            m = 0
+            for c in cols[i:j + 1]:
+                m |= 1 << (n - 1 - (c - a))
+            out.append((y, a, w, m))
+            i = j + 1
+    return out
+
+
+# ---- experiment: blocks with an X count a row (blitter_sprite_compiler.js gives every line its own) ----
+# A block's rows keep its left edge (one skew a block at every shift), but each row its own source words (a class of
+# its own: up to its last pixel), X count, NFSR and Y increment - written only where they change at some shift.
+# units: [(long, [(y, L, cls, w, mask)])], long: END1 + END2 written as a long (a row of 17-32 pixels in the unit)
+
+def units_x(units):
+    out = []
+    for cls2, uw, rows in units:
+        if cls2 >= 2:
+            out.append((True, [(y, x0, cls2, uw, m) for y, x0, m in rows]))
+            continue
+        n = 16 * (cls2 + 1)
+        rr = []
+        for y, x0, m in rows:
+            last = max(i for i in range(n) if m >> (n - 1 - i) & 1)    # (the row's last pixel from the block's left)
+            c = 0 if last < 16 else 1
+            rr.append((y, x0, c, last + 1, m >> 16 if n == 32 and not c else m))
+        rr.sort(key=lambda r: (r[3], r[4], r[0]))      # (equal widths together: the same X count at every shift)
+        out.append((any(r[2] for r in rr), rr))
+    return out
+
+
+def x_rows(u, s):
+    return [(y * LB + ((s + x0) >> 4) * 8, S.pass_values(c, m, w, (s + x0) & 15)) for y, x0, c, w, m in u[1]]
+
+
+def x_changes(u):
+    """per row after the first: (END1 [+ END2], END3, XC + DYI, the control word) written again"""
+    vals = [x_rows(u, s) for s in range(16)]
+    out = []
+    for i in range(1, len(u[1])):
+        ch = lambda f: any(f(vals[s][i][1]) != f(vals[s][i - 1][1]) for s in range(16))
+        out.append((ch(lambda v: v[2:4] if u[0] else v[2]), ch(lambda v: v[4]), ch(lambda v: v[0:2]), ch(lambda v: v[5])))
+    return out
+
+
+def x_code(units):
+    body = []
+    for u in units:
+        lg, rows = u
+        e12 = "\tmove.l (a0)+,(a1)" if lg else "\tmove (a0)+,(a1)"
+        body += ["\tadd (a0)+,d0", "\tmove d0,(a4)", "\tmove (a0)+,BLT_XC.w", "\tmove (a0)+,(a3)", e12,
+                 "\tmove (a0)+,(a6)", "\tmove d1,(a5)", "\tmove (a0)+,(a2)"]
+        for (ra, rb), (c12, c3, cx, cc) in zip(zip(rows, rows[1:]), x_changes(u)):
+            if c12:
+                body.append(e12)
+            if c3:
+                body.append("\tmove (a0)+,(a6)")
+            if cx:
+                body += ["\tmove (a0)+,BLT_XC.w", "\tmove (a0)+,(a3)"]
+            d = (rb[0] - ra[0]) * LB + ((rb[1] - ra[1]) // 16) * 8
+            body += ["\tadd d4,d0" if d == LB else "\tadd #%d,d0" % d, "\tmove d0,(a4)", "\tmove d1,(a5)"]
+            body.append("\tmove (a0)+,(a2)" if cc else "\tmove.b d2,(a2)")
+    return body + ["\trts"]
+
+
+def x_streams(units):
+    out = []
+    chg = [x_changes(u) for u in units]
+    for s in range(16):
+        blk = bytearray()
+        prev = 0
+        for u, ch in zip(units, chg):
+            lg = u[0]
+            rv = x_rows(u, s)
+            dst, (xc, dyi, e1, e2, e3, ctl) = rv[0]
+            vals = [dst - prev, xc, dyi, e1] + ([e2] if lg else []) + [e3, ctl]
+            for (d, (fx, fd, f1, f2, f3, fc)), (c12, c3, cx, cc) in zip(rv[1:], ch):
+                if c12:
+                    vals += [f1, f2] if lg else [f1]
+                if c3:
+                    vals.append(f3)
+                if cx:
+                    vals += [fx, fd]
+                if cc:
+                    vals.append(fc)
+            for v in vals:
+                blk += (int(v) & 0xFFFF).to_bytes(2, "big")
+            prev = rv[-1][0]
+        out.append(bytes(blk))
+    return out
+
+
+def x_bake(img, units):
+    return bake(img, [(c, w, [(y, x0, m)]) for _, rows in units for y, x0, c, w, m in rows])
+
+
 def draws(paths):
     """{(bw, n): draws} over the .pkl recordings' frames"""
     cnt = {}
@@ -134,7 +282,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("states", nargs="+")
     ap.add_argument("--limit", type=int, default=0, help="the first N definitions only")
+    ap.add_argument("--dp", type=int, metavar="OVERHEAD",
+                    help="experiment: rows cut by least cost (blitter_sprite_compiler.js), OVERHEAD CPU cycles a pass")
     args = ap.parse_args()
+    if args.dp is not None:
+        S.pieces = lambda img: pieces_dp(img, args.dp)
     rom = load_regions("rtype")["main"]
     sprites = m72.Video("rtype").sprites
     defs = sorted(S.definitions(args.states))
@@ -150,13 +302,16 @@ def main():
         pcs = S.pieces(img)
         ug, ub = S.units_of_groups(S.groups_of(pcs)), S.units_of_blocks(pcs)
         est = "b" if S.units_cost(ub) < S.units_cost(ug) else "g"
-        cases.append(((bw, n), img, {"g": ug, "b": ub}, est))
+        cases.append(((bw, n), img, {"g": ug, "b": ub, "x": units_x(ub)}, est))
     if args.limit:
         cases = cases[:args.limit]
+    gen = {"g": (lambda u: S.sprite_code(u, False), S.sprite_streams, bake),
+           "b": (lambda u: S.sprite_code(u, False), S.sprite_streams, bake),
+           "x": (x_code, x_streams, x_bake)}
     codes = {}
     for _, _, lay, _ in cases:
-        for units in lay.values():
-            codes.setdefault(tuple(S.sprite_code(units, False)), len(codes))
+        for name, units in lay.items():
+            codes.setdefault(tuple(gen[name][0](units)), len(codes))
     lines = ["BLT_XC = $ffff8a36", "BLT_DYI = $ffff8a30", "\torg $%x" % CODE]
     lines += ["\tdc.l c_%d" % i for i in range(len(codes))]
     for body, i in codes.items():
@@ -172,16 +327,17 @@ def main():
     cnt = draws(args.states)
     rng = random.Random(72)
     res = {}
-    tot = {k: [0, 0] for k in ("g", "b", "est", "best")}
+    tot = {k: [0, 0] for k in ("g", "b", "x", "est", "best", "best3")}
     wtot = {k: 0 for k in tot}
     for i, (key, img, lay, est) in enumerate(cases):
         hgt, wid = img.shape
         size = hgt * LB
         meas = {}
         for name, units in lay.items():
-            code = h.mem.r32(CODE + 4 * codes[tuple(S.sprite_code(units, False))])
-            streams = S.sprite_streams(units)
-            h.mem.w_block(SOURCE, bake(img, units))
+            fcode, fstreams, fbake = gen[name]
+            code = h.mem.r32(CODE + 4 * codes[tuple(fcode(units))])
+            streams = fstreams(units)
+            h.mem.w_block(SOURCE, fbake(img, units))
             c = b = 0
             for s in range(16):
                 bg = rng.randbytes(size)
@@ -193,9 +349,10 @@ def main():
                 assert got == expected(img, s, bg), (key, name, s)
             meas[name] = (c, b)
         best = min("gb", key=lambda k: (sum(meas[k]), k != est))
+        best3 = min("gbx", key=lambda k: (sum(meas[k]), k != est))
         res["%d,%d" % key] = best
         w = cnt.get(key, 0)
-        for k, choice in (("g", "g"), ("b", "b"), ("est", est), ("best", best)):
+        for k, choice in (("g", "g"), ("b", "b"), ("x", "x"), ("est", est), ("best", best), ("best3", best3)):
             tot[k][0] += meas[choice][0]
             tot[k][1] += meas[choice][1]
             wtot[k] += w * sum(meas[choice]) / 16
@@ -203,8 +360,8 @@ def main():
             print("%d / %d" % (i + 1, len(cases)), flush=True)
     n = len(cases)
     print("%d definitions, %d routines; CPU + Blitter cycles a sprite, mean over the 16 shifts:" % (n, len(codes)))
-    for k, label in (("g", "mask groups"), ("b", "blocks"), ("est", "the estimate's choice"),
-                     ("best", "the measured choice")):
+    for k, label in (("g", "mask groups"), ("b", "blocks"), ("x", "blocks, XC a row"), ("est", "the estimate's choice"),
+                     ("best", "the measured choice"), ("best3", "best of g, b, x")):
         c, b = tot[k]
         print("  %-22s %8.1f + %7.1f = %8.1f   weighted by draws: %12.0f" % (
             label, c / 16 / n, b / 16 / n, (c + b) / 16 / n, wtot[k]))

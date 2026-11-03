@@ -231,3 +231,14 @@ image). CPU + Blitter cycles a sprite, mean over the shifts: mask groups 2,200 +
 2,865 = 4,541; the estimate's choice 4,539.4; the measured best 4,537.6 (−0.04%, −0.05% weighted by the
 recordings' draws; 38 definitions differ). The estimate's choice stays; the assets were not regenerated. Blocks
 save CPU register writes but cost about 10% more Blitter cycles (rows widened to the block's window).
+Rows cut by least cost (stefastbobs2's `blitter_sprite_compiler.js`, 2026-11-03: a row's pieces chosen over the
+16 shifts by Blitter words - every end mask other than `$FFFF` a read-modify-write - plus a CPU cost a pass; gaps in
+any piece of up to 32 pixels, in a wider one's edge words) instead of `pieces`' greedy 32-pixel windows:
+`sprite_layout_bench.py --dp 32`, all 928 definitions exact: the estimate's choice 4,539.4 -> 4,503.7 cycles a sprite
+(−0.79%; −0.54% weighted by draws); 16 or 64 cycles a pass give the same within 0.1%. Not adopted yet.
+Blocks with an X count a row (the compiler's per-line X count; the block's left edge kept, so one skew a block;
+each row its own source words, X count, NFSR and Y increment, written where they change at some shift - the code is
+shared by the 16 shifts): `sprite_layout_bench.py` layout `x`, all 928 definitions exact: blocks 1,676 + 2,865 =
+4,541 -> 1,924 + 2,743 = 4,667 cycles a sprite (+2.8%: the Blitter −122, the CPU +248 for the X count, Y increment
+and control word written again; rows sorted by width already, by mask they cost more); the best of groups, blocks
+and `x` a sprite 4,536.9 against 4,537.6. Dropped: with shared code, a per-row X count costs more CPU than it saves.
