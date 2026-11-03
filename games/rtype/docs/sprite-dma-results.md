@@ -70,7 +70,7 @@ of copy cost alone. The old stale-list workload concealed a substantial cost in
 heavy scenes. Do not retain the old speed figures as correct-picture throughput.
 
 Every corrected timing replay completes with its expected logic count and no
-crash. Stage 3 still has **22 late palette-on events**; its report is
+crash. Stage 3 still had **22 late palette-on events** (fixed the same day: short `st_sync` passes, README); its report was
 `(1,0,22,0,0)`. Other measured windows have `(1,0,0,0,0)`: one startup fallback,
 zero late top/palette/bottom/off events. This fix does not resolve that separate
 stage-3 border-timing issue.

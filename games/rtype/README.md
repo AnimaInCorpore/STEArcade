@@ -235,6 +235,17 @@ instrumented Hatari stage-3/7 replays reduce pictures with an uncaptured latest 
 Updating the actual sprite poses costs more than repeatedly drawing the old list, so earlier timing numbers are
 not representative of the corrected picture workload. See [the checks and timing](docs/sprite-dma-results.md).
 
+Short Blitter passes in `st_sync` and the FG/BG pieces, 2026-11-03 (the stage-3 late palette events): a restore or
+cleared rectangle wider than 32 words went out as one HOG pass a line (92 words: 736 bus cycles), the log's masked
+copies as 8 lines of 4 words (they read the destination: 384), full FG/BG runs of 7 chunks as 8 words (272).
+Now `st_rect` cuts rectangles into column strips of at most 32 words, masked log passes take 4 lines (8 when the
+mask is `$FFFF`), `ST_RUN` is 6. `BLIT_STATS=256 renderer_audit.py` over the stage recordings (3, s2, s4-s8, 1, 8;
+every picture exact): longest pass 256 bus cycles, none over. Stage-3 simulator cost 242.9k -> 246.8k cycles a
+picture (+1.6%: more passes). Pinned Hatari, the same replays as above: stage 3 (seed 1, 12600-14400) border report
+`(1,0,22,0,0)` -> `(1,0,0,0,0)`, 22.22 -> 21.80 logic/s, 17.31 -> 17.23 pictures/s; stage 7 (seed 10, 64500-67500)
+26.57 -> 26.28 logic/s, 17.17 pictures/s both, no late events either way. `render_test.py` and `sprite_test.py`
+pass on this code.
+
 ## Sound: the plan (agreed 2026-11-01, not started)
 
 R-Type's sound is the YM2151 alone (MAME 0.286 `irem/m72.cpp`: `rtype()` removes the DAC, the set has no samples

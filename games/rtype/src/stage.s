@@ -43,7 +43,7 @@ ST_PL		= 256
 ST_LINES	= ST_G+ST_PL+ST_G
 ST_LINESB	= ST_G+512+ST_PL+ST_G	; (the BG scroll mode: the BG map's 512 lines, its first 256 again below)
 ST_BUFSZ	= (ST_LINES+ST_LINESB)*ST_LB	; (the BG scroll mode's lines below the FG mode's: they start empty)
-ST_RUN		= 7			; (the FG pieces: full chunks a pass at most - 32 words)
+ST_RUN		= 6			; (the FG pieces: full chunks a pass at most - 7 words with NFSR, 4 planes: 240 bus cycles; 7 was 272)
 	ifnd	ST_NBUF
 ST_NBUF		= 3
 	endc
@@ -2518,9 +2518,7 @@ st_sync:
 	subq.w	#1,d7
 .cr:	tst.w	6(a2)
 	beq.s	.cn
-	move.l	(a2),d0
-	lea	(a6,d0.l),a0
-	move.l	a0,BLT_DST.w
+	move.l	(a2),d6			; (the offset)
 	moveq	#0,d0
 	move.b	4(a2),d0		; words a line
 	moveq	#0,d1
@@ -2530,16 +2528,7 @@ st_sync:
 	mulu	d1,d2
 	add.l	d2,st_nclrw
     endc
-	move.w	d0,BLT_XC.w
-	move.w	#ST_LB+2,d2
-	sub.w	d0,d2
-	sub.w	d0,d2
-	move.w	d2,BLT_DYI.w
-	moveq	#1,d3
-	cmp.w	#32,d0
-	bhi.s	.cp
-	move.b	(a3,d0.w),d3
-.cp:	ST_PASSES
+	bsr	st_rect
 .cn:	addq.l	#8,a2
 	dbf	d7,.cr
 	move.w	#$0203,BLT_HOP.w
@@ -2549,6 +2538,7 @@ st_sync:
 	move.w	#ST_LB-6,BLT_SYI.w
 	move.w	#ST_LB-6,BLT_DYI.w
 	moveq	#0,d4			; (the masks loaded: none yet)
+	move.w	#4,a1			; (lines a pass: 4 with a mask - it reads the destination: 16 words, 256 bus cycles)
 .l:	cmp.w	d6,d7
 	beq.s	.lx
 	move.w	d6,d2
@@ -2565,12 +2555,16 @@ st_sync:
 	move.w	d3,BLT_END1.w
 	move.w	d3,BLT_END2.w
 	move.w	d3,BLT_END3.w
+	move.w	#4,a1
+	cmp.w	#-1,d3
+	bne.s	.m
+	move.w	#8,a1			; (no mask: 8 lines, 32 words)
 .m:	move.w	4(a3,d2.w),d1		; lines
     ifd DEBUG
 	addq.l	#1,st_nlog
 	add.l	d1,st_nlogl
     endc
-	moveq	#8,d3
+	move.w	a1,d3
 	ST_PASSES
 	addq.w	#1,d6
 	and.w	#ST_LOG-1,d6
@@ -2596,11 +2590,7 @@ st_sync:
 	addq.l	#8,a2
 	dbf	d7,.d
 	rts
-.dc:	move.l	(a2)+,d0
-	lea	(a5,d0.l),a0
-	move.l	a0,BLT_SRC.w
-	lea	(a6,d0.l),a0
-	move.l	a0,BLT_DST.w
+.dc:	move.l	(a2)+,d6		; (the offset)
 	moveq	#0,d0
 	move.b	(a2)+,d0		; words a line
 	moveq	#0,d1
@@ -2611,17 +2601,7 @@ st_sync:
 	mulu	d1,d2
 	add.l	d2,st_nrectw
     endc
-	move.w	d0,BLT_XC.w
-	move.w	#ST_LB+2,d2
-	sub.w	d0,d2
-	sub.w	d0,d2
-	move.w	d2,BLT_SYI.w
-	move.w	d2,BLT_DYI.w
-	moveq	#1,d3			; the lines a pass: 32 words
-	cmp.w	#32,d0
-	bhi.s	.lp
-	move.b	(a3,d0.w),d3
-.lp:	ST_PASSES
+	bsr	st_rect
 	dbf	d7,.d
 .dx:	rts
 .full:	; (the whole buffer from the clean one)
@@ -2648,6 +2628,36 @@ st_sync:
 	lea	64(a5),a5
 	lea	64(a6),a6
 	dbf	d7,.fs
+	rts
+
+; st_rect: a rectangle at offset d6 of d0 words a line (>= 1), d1 lines (>= 1): from the clean buffer (a5; HOP 0:
+; zeros) into the display buffer (a6) in short HOG passes - column strips of at most 32 words, st_lpp lines a pass
+; (a line wider than 32 words in one pass held the bus for up to 736 cycles: the palette came on late, AGENTS.md).
+; a3 st_lpp, a4 BLT_YC, d5 the start; scratch d0-d4, d6, a0
+st_rect:
+	move.w	d1,d4			; (the lines, for every strip)
+.s:	moveq	#32,d2			; this strip's words
+	cmp.w	d0,d2
+	bls.s	.w
+	move.w	d0,d2
+.w:	lea	(a5,d6.l),a0
+	move.l	a0,BLT_SRC.w
+	lea	(a6,d6.l),a0
+	move.l	a0,BLT_DST.w
+	move.w	d2,BLT_XC.w
+	move.w	#ST_LB+2,d3
+	sub.w	d2,d3
+	sub.w	d2,d3
+	move.w	d3,BLT_SYI.w
+	move.w	d3,BLT_DYI.w
+	moveq	#0,d3
+	move.b	(a3,d2.w),d3		; (st_lpp: lines a pass, 32 words)
+	move.w	d4,d1
+	ST_PASSES
+	add.l	d2,d6			; (the next strip: 2 bytes a word)
+	add.l	d2,d6
+	sub.w	d2,d0
+	bne.s	.s
 	rts
 
 ; st_copy: a0 source, a1 destination (the same layout: ST_LB a line), d0 words a line, d1 lines, d2 / d4 / d3 END1 /
