@@ -219,3 +219,15 @@ passes are HOP 2 / OP 3, HOG, at most 240 observed bus cycles. Preparation
 amortizes differently with picture cadence; no consistent win, production unchanged.
 This experiment concerns the stage renderer's secondary layer, not the outstanding
 shared-M72 sprite comparison above. See [the report](../games/rtype/docs/prepared-layer-prototype.md).
+
+### R-Type stage renderer: mask groups or blocks per whole sprite, 2026-11-03
+
+`games/rtype/tools/stage_sprites.py` lays out each whole sprite either as mask groups (stefastbobs2: rows with
+the same mask and word position share one setup) or as blocks (stedaimakaimura's `sprite_compiler.js`: rows inside
+one 16- or 32-pixel window aligned to its left, sorted by mask) and picks the cheaper by `units_cost`, an estimate.
+`games/rtype/tools/sprite_layout_bench.py` executes both layouts' generated code for all 928 drawn definitions and
+all 16 shifts (Musashi + the Blitter model, word-mode destination, every picture checked against the composed
+image). CPU + Blitter cycles a sprite, mean over the shifts: mask groups 2,200 + 2,615 = 4,815; blocks 1,676 +
+2,865 = 4,541; the estimate's choice 4,539.4; the measured best 4,537.6 (−0.04%, −0.05% weighted by the
+recordings' draws; 38 definitions differ). The estimate's choice stays; the assets were not regenerated. Blocks
+save CPU register writes but cost about 10% more Blitter cycles (rows widened to the block's window).
