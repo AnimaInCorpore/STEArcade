@@ -205,6 +205,10 @@ m72_sprite_dma:
 	st	m72_dma_done
     ifd SPRITE_LIST
       ifnd SIM
+       if PIC_VBLS=0
+	; Only the cadence-only scheduler can prove here that no picture will follow.
+	; With PIC_VBLS, pic_due may force a picture after this logic frame (using
+	; its newly measured cost), so capture every DMA before emitters change slots.
 	tst.b	ticks			; (no copy when no picture can follow this arcade frame: the logic still behind
 	beq.s	.cp			; after it - ticks only grow while it runs - and not the PIC_EVERY-th: rtype.s)
 	move.l	d0,-(sp)
@@ -215,6 +219,7 @@ m72_sprite_dma:
 	bhs.s	.cp
 	rts
 .cp:
+       endc
       endc
 	movem.l	d0/a0-a1,-(sp)		; the objects' records (src/natives.s) from slot $C0 up to the list's pointer
 	move.w	v30_image+$40000+$2EFC,d0	; (DS0 $4000: [2EFCh])

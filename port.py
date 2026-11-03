@@ -179,6 +179,7 @@ TESTS = {
                 ("tools/sound_test.py", ["6000", "--random"], None)],   # the translated driver, YM, voices
     "rtype": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
+              ("tools/dma_test.py", [], None),                         # production DMA with deadline/cadence schedulers
               ("tools/logic_test.py", ["{n}"], 3000),                    # attract
               ("tools/logic_test.py", ["8000", "--seed", "4"], None),     # play
               ("tools/logic_test.py", ["6000", "--seed", "8"], None),     # play, Invulnerability

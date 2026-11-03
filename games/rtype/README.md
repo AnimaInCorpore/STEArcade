@@ -228,6 +228,13 @@ add little or regress. Pinned Hatari stages 7/8: +1.66%/+2.58% logic throughput,
 unchanged; zero late border/palette events. These prototypes remain isolated; see
 [measurements, exactness and reproduction](docs/later-native-results.md).
 
+Sprite DMA scheduling fix, 2026-11-03: with `PIC_VBLS` enabled, capture every sprite DMA. The former skip predicted
+that no picture could follow, but the deadline scheduler could then draw current scrolling with an old object list.
+The skip remains available with `PIC_VBLS=0`. A non-SIM regression test is part of `port.py test rtype`;
+instrumented Hatari stage-3/7 replays reduce pictures with an uncaptured latest DMA from 1,047/1,568 to zero.
+Updating the actual sprite poses costs more than repeatedly drawing the old list, so earlier timing numbers are
+not representative of the corrected picture workload. See [the checks and timing](docs/sprite-dma-results.md).
+
 ## Sound: the plan (agreed 2026-11-01, not started)
 
 R-Type's sound is the YM2151 alone (MAME 0.286 `irem/m72.cpp`: `rtype()` removes the DAC, the set has no samples
