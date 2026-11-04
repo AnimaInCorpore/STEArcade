@@ -235,10 +235,25 @@ Rows cut by least cost (stefastbobs2's `blitter_sprite_compiler.js`, 2026-11-03:
 16 shifts by Blitter words - every end mask other than `$FFFF` a read-modify-write - plus a CPU cost a pass; gaps in
 any piece of up to 32 pixels, in a wider one's edge words) instead of `pieces`' greedy 32-pixel windows:
 `sprite_layout_bench.py --dp 32`, all 928 definitions exact: the estimate's choice 4,539.4 -> 4,503.7 cycles a sprite
-(−0.79%; −0.54% weighted by draws); 16 or 64 cycles a pass give the same within 0.1%. Not adopted yet.
+(−0.79%; −0.54% weighted by draws); 16 or 64 cycles a pass give the same within 0.1%.
 Blocks with an X count a row (the compiler's per-line X count; the block's left edge kept, so one skew a block;
 each row its own source words, X count, NFSR and Y increment, written where they change at some shift - the code is
 shared by the 16 shifts): `sprite_layout_bench.py` layout `x`, all 928 definitions exact: blocks 1,676 + 2,865 =
 4,541 -> 1,924 + 2,743 = 4,667 cycles a sprite (+2.8%: the Blitter −122, the CPU +248 for the X count, Y increment
 and control word written again; rows sorted by width already, by mask they cost more); the best of groups, blocks
 and `x` a sprite 4,536.9 against 4,537.6. Dropped: with shared code, a per-row X count costs more CPU than it saves.
+
+**Adopted 2026-11-04** (`stage_sprites.pieces` is `pieces_dp` with `DP_OVERHEAD = 32`; `--overhead 0` or `sprite_layout_bench.py
+--greedy` give the old windows). Assets rebuilt from the same 941 definitions: stream 1,834,176 -> 1,794,976 bytes,
+pre-coloured pens 841,872 -> 830,032, pieces 26,086 -> 26,041. `stage_test.py` (every 2nd arcade frame of the nine
+recordings, 18,150 pictures, exact against the model throughout), mean CPU + Blitter cycles a picture without the first
+one, old -> new: -0.27%, -0.12%, -0.15%, -0.58%, +0.06%, -0.07%, +0.66%, -0.34%, -0.43% (sum -0.18%). Two recordings
+(s4, s6) get slightly dearer: the sprite bench counts every definition alike and a cut also breaks mask groups. Other
+overheads at picture level: 16 -0.13%, 96 and 160 -0.10% (the same assets): 32 stays.
+
+Elsewhere (same cost model): rows of at most 16 pixels cannot gain (a cut row costs at least 2 x 48 Blitter bus cycles
+against at most 80 for the whole row at every shift), so Mr. HELI's 16 x 16 pieces and every other 16-pixel port are
+unchanged. Galaga '88 (1,390 sprites of 32 x 32, pen 15 transparent, 35,143 row pieces; estimate with
+`stage_sprites.pieces_dp` over `assets.turned()`, unweighted): overhead 32 cuts no row, overhead 8 -0.03%: nothing to
+gain. The gain in R-Type comes from runs wider than 32 pixels; Gauntlet's 32-pixel strips and Splatterhouse's rows
+(at most 32) are expected to behave like Galaga '88 and were not estimated.

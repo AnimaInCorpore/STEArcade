@@ -13,8 +13,8 @@ Cycles: the CPU's (Musashi) plus the Blitter's bus cycles, summed over the 16 sh
 
 Weighted totals count each definition by its draws in the .pkl recordings.  Result 2026-11-03 (928 definitions):
 the estimate's choice 4539.4 cycles a sprite, the measured best 4537.6 (-0.04%, weighted -0.05%; 38 differ):
-the estimate stays (docs/sprite-preparation.md).  --dp 32 (rows cut by least cost, blitter_sprite_compiler.js):
-4539.4 -> 4503.7 (-0.79%, weighted -0.54%).  Layout x (blocks with an X count a row): 4666.8, +2.8%; dropped.
+the estimate stays (docs/sprite-preparation.md).  Rows cut by least cost (--dp 32, blitter_sprite_compiler.js; the
+default since 2026-11-04, --greedy the old windows): 4539.4 -> 4503.7 (-0.79%, weighted -0.54%).  Layout x (blocks with an X count a row): 4666.8, +2.8%; dropped.
 """
 import argparse
 import pickle
@@ -113,66 +113,6 @@ def expected(img, s, background):
             w = (w | bit) if (v >> plane) & 1 else (w & ~bit)
             exp[o:o + 2] = w.to_bytes(2, "big")
     return bytes(exp)
-
-
-def pass_bus(cls2, m, w):
-    """a piece's Blitter bus cycles over the 16 shifts (4 planes: reads, writes, a read-modify-write for every end
-    mask other than $FFFF - 0 too), or None when it cannot be drawn at some shift (a wide piece's inner word not
-    opaque)"""
-    total = 0
-    for k in range(16):
-        try:
-            xc, dyi, e1, e2, e3, ctl = S.pass_values(cls2, m, w, k)
-        except AssertionError:
-            return None
-        masks = [e1] if xc == 1 else [e1] + [e2] * (xc - 2) + [e3]
-        total += 16 * (xc - bool(ctl & 0x40) + xc + sum(v != 0xFFFF for v in masks))
-    return total
-
-
-def pieces_dp(img, overhead):
-    """stefastbobs2's blitter_sprite_compiler.js: a row cut into the pieces of the least cost over the 16 shifts
-    (pass_bus + overhead CPU cycles a pass), a piece of up to 32 pixels with any gaps, a wider one (up to WIDE_MAX)
-    with gaps only where its passes' inner words stay opaque - as stage_sprites.pieces: [(y, x0, width, mask)]"""
-    out = []
-    cache = {}
-    for y in range(img.shape[0]):
-        cols = np.flatnonzero(img[y]).tolist()
-        opaque = set(cols)
-        best = [None] * len(cols) + [(0, None)]
-        for i in range(len(cols) - 1, -1, -1):
-            a = cols[i]
-            for j in range(i, len(cols)):
-                b = cols[j]
-                w = b - a + 1
-                if w > S.WIDE_MAX:
-                    break
-                cls2 = S.cls_of(w)
-                n = 16 * (cls2 + 1)
-                m = 0
-                for c in cols[i:j + 1]:
-                    m |= 1 << (n - 1 - (c - a))
-                key = (cls2, m, w)
-                if key not in cache:
-                    cache[key] = pass_bus(cls2, m, w)
-                c = cache[key]
-                if c is None:
-                    continue
-                c += 16 * overhead + best[j + 1][0]
-                if best[i] is None or c < best[i][0]:
-                    best[i] = (c, j)
-        i = 0
-        while i < len(cols):
-            j = best[i][1]
-            a, b = cols[i], cols[j]
-            w = b - a + 1
-            n = 16 * (S.cls_of(w) + 1)
-            m = 0
-            for c in cols[i:j + 1]:
-                m |= 1 << (n - 1 - (c - a))
-            out.append((y, a, w, m))
-            i = j + 1
-    return out
 
 
 # ---- experiment: blocks with an X count a row (blitter_sprite_compiler.js gives every line its own) ----
@@ -282,11 +222,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("states", nargs="+")
     ap.add_argument("--limit", type=int, default=0, help="the first N definitions only")
-    ap.add_argument("--dp", type=int, metavar="OVERHEAD",
-                    help="experiment: rows cut by least cost (blitter_sprite_compiler.js), OVERHEAD CPU cycles a pass")
+    ap.add_argument("--dp", type=int, metavar="OVERHEAD", default=S.DP_OVERHEAD,
+                    help="rows cut by least cost (blitter_sprite_compiler.js), OVERHEAD CPU cycles a pass (the default)")
+    ap.add_argument("--greedy", action="store_true", help="the greedy 32-pixel windows (before 2026-11-04)")
     args = ap.parse_args()
-    if args.dp is not None:
-        S.pieces = lambda img: pieces_dp(img, args.dp)
+    S.DP_OVERHEAD = None if args.greedy else args.dp
     rom = load_regions("rtype")["main"]
     sprites = m72.Video("rtype").sprites
     defs = sorted(S.definitions(args.states))

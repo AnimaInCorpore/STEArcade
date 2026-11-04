@@ -276,9 +276,10 @@ def main():
             break
     if costs:
         tot = np.array([c[1] + c[2] for c in costs])
-        print("%d pictures: cycles (CPU + Blitter) median %d, 10%% %d, 90%% %d, max %d (frame %d)" % (
-            len(tot), np.median(tot), np.percentile(tot, 10), np.percentile(tot, 90), tot.max(),
-            costs[int(tot.argmax())][0]))
+        print("%d pictures: cycles (CPU + Blitter) median %d, mean %d (without the first picture), 10%% %d, 90%% %d, "
+              "max %d (frame %d)" % (
+            len(tot), np.median(tot), tot[1:].mean() if len(tot) > 1 else tot.mean(), np.percentile(tot, 10),
+            np.percentile(tot, 90), tot.max(), costs[int(tot.argmax())][0]))
     if "st_nclr" in h.sym:
         print("sprite rectangles cleared %d" % h.r32("st_nclr"))
     print("FAIL" if fails else "PASS")

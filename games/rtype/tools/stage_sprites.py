@@ -172,7 +172,7 @@ def cls_of(w):
     return 0 if w <= 16 else 1 if w <= 32 else (w + 15) // 16 - 1
 
 
-def pieces(img):
+def pieces_greedy(img):
     """the opaque pixels of a whole sprite's rows as pieces: [(y, x0, width, aligned mask)].  A contiguous opaque run
     wider than 32 pixels is a wide piece (stedaimakaimura's sprite_compiler.js, the user 2026-11-01: END2 $FFFF - its
     inner words are opaque), at most WIDE_MAX pixels; the rest of a row split greedily: a piece takes the opaque
@@ -210,6 +210,74 @@ def pieces(img):
             out.append((y, int(a), int(w), m))
             i = j + 1
     return out
+
+
+def pass_bus(cls2, m, w):
+    """a piece's Blitter bus cycles over the 16 shifts (4 planes: reads, writes, a read-modify-write for every end
+    mask other than $FFFF - 0 too), or None when it cannot be drawn at some shift (a wide piece's inner word not
+    opaque)"""
+    total = 0
+    for k in range(16):
+        try:
+            xc, dyi, e1, e2, e3, ctl = pass_values(cls2, m, w, k)
+        except AssertionError:
+            return None
+        masks = [e1] if xc == 1 else [e1] + [e2] * (xc - 2) + [e3]
+        total += 16 * (xc - bool(ctl & 0x40) + xc + sum(v != 0xFFFF for v in masks))
+    return total
+
+
+def pieces_dp(img, overhead):
+    """stefastbobs2's blitter_sprite_compiler.js: a row cut into the pieces of the least cost over the 16 shifts
+    (pass_bus + overhead CPU cycles a pass), a piece of up to 32 pixels with any gaps, a wider one (up to WIDE_MAX)
+    with gaps only where its passes' inner words stay opaque - as stage_sprites.pieces: [(y, x0, width, mask)]"""
+    out = []
+    cache = {}
+    for y in range(img.shape[0]):
+        cols = np.flatnonzero(img[y]).tolist()
+        opaque = set(cols)
+        best = [None] * len(cols) + [(0, None)]
+        for i in range(len(cols) - 1, -1, -1):
+            a = cols[i]
+            for j in range(i, len(cols)):
+                b = cols[j]
+                w = b - a + 1
+                if w > WIDE_MAX:
+                    break
+                cls2 = cls_of(w)
+                n = 16 * (cls2 + 1)
+                m = 0
+                for c in cols[i:j + 1]:
+                    m |= 1 << (n - 1 - (c - a))
+                key = (cls2, m, w)
+                if key not in cache:
+                    cache[key] = pass_bus(cls2, m, w)
+                c = cache[key]
+                if c is None:
+                    continue
+                c += 16 * overhead + best[j + 1][0]
+                if best[i] is None or c < best[i][0]:
+                    best[i] = (c, j)
+        i = 0
+        while i < len(cols):
+            j = best[i][1]
+            a, b = cols[i], cols[j]
+            w = b - a + 1
+            n = 16 * (cls_of(w) + 1)
+            m = 0
+            for c in cols[i:j + 1]:
+                m |= 1 << (n - 1 - (c - a))
+            out.append((y, a, w, m))
+            i = j + 1
+    return out
+
+
+DP_OVERHEAD = 32           # (CPU cycles a pass in pieces_dp's cost; 16 or 64 give the same within 0.1%)
+
+
+def pieces(img):
+    """the pieces of a whole sprite's rows: pieces_dp (the default since 2026-11-04), or pieces_greedy when DP_OVERHEAD is None"""
+    return pieces_greedy(img) if DP_OVERHEAD is None else pieces_dp(img, DP_OVERHEAD)
 
 
 def groups_of(pcs):
@@ -477,7 +545,9 @@ def build(paths):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("states", nargs="+")
+    ap.add_argument("--overhead", type=int, default=DP_OVERHEAD, help="CPU cycles a pass in pieces_dp's cost (0: greedy)")
     args = ap.parse_args()
+    globals()["DP_OVERHEAD"] = args.overhead or None
     build(args.states)
 
 
