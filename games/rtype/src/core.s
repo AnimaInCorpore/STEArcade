@@ -228,19 +228,35 @@ m72_sprite_dma:
 	move.w	m72_slots_hw,d0		; (a slow frame: the last list's tail)
 .p:	move.w	d0,m72_objs_end
 	sub.w	#$C0,d0
-	bls.s	.none
-	lsr.w	#3,d0
-	subq.w	#1,d0
-	lea	m72_slots+$C0,a0
-	lea	m72_objs+$C0,a1
-.c:	move.l	(a0)+,(a1)+
-	move.l	(a0)+,(a1)+
-	dbf	d0,.c
+	bls	.none
+	lsr.w #3,d0
+	cmp.w #96,d0
+	bhi .original
+	lea m72_slots+$C0,a0
+	lea m72_objs+$C0,a1
+	neg.w d0
+	add.w #96,d0
+	lsl.w #2,d0
+	jmp .copies(pc,d0.w)
+.copies:
+	rept 96
+	move.l (a0)+,(a1)+
+	move.l (a0)+,(a1)+
+	endr
+	bra .none
+.original:
+	subq.w #1,d0
+	lea m72_slots+$C0,a0
+	lea m72_objs+$C0,a1
+.c:
+	move.l (a0)+,(a1)+
+	move.l (a0)+,(a1)+
+	dbf d0,.c
 .none:	lea	m72_slots+$3C0,a0	; (and the fixed slots above the list: the ship, the Force - natives.s nat_emit1f)
 	lea	m72_objs+$3C0,a1
-	moveq	#$40/4-1,d0
-.f:	move.l	(a0)+,(a1)+
-	dbf	d0,.f
+	rept 16
+	move.l (a0)+,(a1)+
+	endr
 	movem.l	(sp)+,d0/a0-a1
 	rts
     endc

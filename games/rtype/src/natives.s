@@ -98,8 +98,411 @@ FADE_ROW macro
 	moveq	#0,d2
 	moveq	#0,d0
 	bra	.tail\@
-.slow\@:	lea	(a3,d3.l),a0
-	moveq	#0,d2			; channels changed
+.slow\@:
+	lea (a3,d3.l),a0
+	cmp.l #v30_image+$3B000,a2
+	bne .bytes\@
+	moveq #0,d2
+	move.w d4,d2
+	add.l d2,d2
+	lea fade_tab,a1
+	adda.l d2,a1
+	move.w 94(a1),d0
+	sub.w $41E(a0),d0
+	move.w d0,-(sp)
+	moveq #0,d2
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_0
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_0
+	addq.w #1,d2
+.pair_low\@_0:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_0
+	addq.w #1,d2
+.pair_store\@_0:
+	move.l d7,(a0)
+.pair_next\@_0:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_1
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_1
+	addq.w #1,d2
+.pair_low\@_1:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_1
+	addq.w #1,d2
+.pair_store\@_1:
+	move.l d7,(a0)
+.pair_next\@_1:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_2
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_2
+	addq.w #1,d2
+.pair_low\@_2:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_2
+	addq.w #1,d2
+.pair_store\@_2:
+	move.l d7,(a0)
+.pair_next\@_2:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_3
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_3
+	addq.w #1,d2
+.pair_low\@_3:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_3
+	addq.w #1,d2
+.pair_store\@_3:
+	move.l d7,(a0)
+.pair_next\@_3:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_4
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_4
+	addq.w #1,d2
+.pair_low\@_4:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_4
+	addq.w #1,d2
+.pair_store\@_4:
+	move.l d7,(a0)
+.pair_next\@_4:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_5
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_5
+	addq.w #1,d2
+.pair_low\@_5:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_5
+	addq.w #1,d2
+.pair_store\@_5:
+	move.l d7,(a0)
+.pair_next\@_5:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_6
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_6
+	addq.w #1,d2
+.pair_low\@_6:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_6
+	addq.w #1,d2
+.pair_store\@_6:
+	move.l d7,(a0)
+.pair_next\@_6:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_7
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_7
+	addq.w #1,d2
+.pair_low\@_7:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_7
+	addq.w #1,d2
+.pair_store\@_7:
+	move.l d7,(a0)
+.pair_next\@_7:
+	addq.l #4,a0
+	lea $200-32(a0),a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_8
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_8
+	addq.w #1,d2
+.pair_low\@_8:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_8
+	addq.w #1,d2
+.pair_store\@_8:
+	move.l d7,(a0)
+.pair_next\@_8:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_9
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_9
+	addq.w #1,d2
+.pair_low\@_9:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_9
+	addq.w #1,d2
+.pair_store\@_9:
+	move.l d7,(a0)
+.pair_next\@_9:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_10
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_10
+	addq.w #1,d2
+.pair_low\@_10:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_10
+	addq.w #1,d2
+.pair_store\@_10:
+	move.l d7,(a0)
+.pair_next\@_10:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_11
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_11
+	addq.w #1,d2
+.pair_low\@_11:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_11
+	addq.w #1,d2
+.pair_store\@_11:
+	move.l d7,(a0)
+.pair_next\@_11:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_12
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_12
+	addq.w #1,d2
+.pair_low\@_12:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_12
+	addq.w #1,d2
+.pair_store\@_12:
+	move.l d7,(a0)
+.pair_next\@_12:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_13
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_13
+	addq.w #1,d2
+.pair_low\@_13:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_13
+	addq.w #1,d2
+.pair_store\@_13:
+	move.l d7,(a0)
+.pair_next\@_13:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_14
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_14
+	addq.w #1,d2
+.pair_low\@_14:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_14
+	addq.w #1,d2
+.pair_store\@_14:
+	move.l d7,(a0)
+.pair_next\@_14:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_15
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_15
+	addq.w #1,d2
+.pair_low\@_15:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_15
+	addq.w #1,d2
+.pair_store\@_15:
+	move.l d7,(a0)
+.pair_next\@_15:
+	addq.l #4,a0
+	lea $200-32(a0),a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_16
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_16
+	addq.w #1,d2
+.pair_low\@_16:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_16
+	addq.w #1,d2
+.pair_store\@_16:
+	move.l d7,(a0)
+.pair_next\@_16:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_17
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_17
+	addq.w #1,d2
+.pair_low\@_17:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_17
+	addq.w #1,d2
+.pair_store\@_17:
+	move.l d7,(a0)
+.pair_next\@_17:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_18
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_18
+	addq.w #1,d2
+.pair_low\@_18:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_18
+	addq.w #1,d2
+.pair_store\@_18:
+	move.l d7,(a0)
+.pair_next\@_18:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_19
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_19
+	addq.w #1,d2
+.pair_low\@_19:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_19
+	addq.w #1,d2
+.pair_store\@_19:
+	move.l d7,(a0)
+.pair_next\@_19:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_20
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_20
+	addq.w #1,d2
+.pair_low\@_20:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_20
+	addq.w #1,d2
+.pair_store\@_20:
+	move.l d7,(a0)
+.pair_next\@_20:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_21
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_21
+	addq.w #1,d2
+.pair_low\@_21:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_21
+	addq.w #1,d2
+.pair_store\@_21:
+	move.l d7,(a0)
+.pair_next\@_21:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_22
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_22
+	addq.w #1,d2
+.pair_low\@_22:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_22
+	addq.w #1,d2
+.pair_store\@_22:
+	move.l d7,(a0)
+.pair_next\@_22:
+	addq.l #4,a0
+	move.l (a1)+,d7
+	cmp.l (a0),d7
+	beq.s .pair_next\@_23
+	move.l d7,d0
+	swap d0
+	cmp.w (a0),d0
+	beq.s .pair_low\@_23
+	addq.w #1,d2
+.pair_low\@_23:
+	cmp.w 2(a0),d7
+	beq.s .pair_store\@_23
+	addq.w #1,d2
+.pair_store\@_23:
+	move.l d7,(a0)
+.pair_next\@_23:
+	addq.l #4,a0
+	moveq #0,d0
+	move.w (sp)+,d0
+	add.w #48,d4
+	bra .tail\@
+.bytes\@:
+	moveq #0,d2			; channels changed
 	moveq	#16-1,d5
 .pen\@:
 	moveq	#1,d7
@@ -228,6 +631,39 @@ EMIT_RECORD macro
 
 ; Shared by the standalone emitter and the E5CD handler. \1: saved DS0 offset from its caller's SP.
 EMIT1_BODY macro
+    ifd SPRITE_LIST
+	move.w $2EFC(a3),d4
+	move.w d4,d5
+	moveq #8,d0
+	btst #6,4(a2,d3.l)
+	beq.s .size\@
+	moveq #16,d0
+.size\@:
+	add.w d5,d0
+	cmp.w #$3C8,d0
+	bcc .exit\@
+	move.w d0,$2EFC(a3)
+	lea (a4,d6.l),a1
+	move.w 4(a1),d1
+	move.w 8(a1),d2
+	move.w 6(a6),\1(a5)
+	move.w 4(a2,d3.l),d0
+	moveq #6,d7
+	add.w d6,d7
+	eor.w #1,d7
+	move.b (a4,d7.l),d0
+	lea m72_slots,a0
+	adda.l d4,a0
+	move.w d3,(a0)+
+	move.b #1,(a0)+
+	move.b d0,(a0)+
+	move.w d1,(a0)+
+	move.w d2,(a0)+
+	btst #14,d0
+	beq.s .exit\@
+	clr.w (a0)
+.exit\@:
+    else
 	move.w	$2EFC(a3),d4		; IX = IY = the pointer
 	move.w	d4,d5
 	EMIT_SIZE 0,d0
@@ -243,6 +679,7 @@ EMIT1_BODY macro
 	move.w	(sp)+,d7
 	EMIT_RECORD d4,d7,1
 .x\@:
+    endc
 	endm
 
 EMIT1	macro
@@ -539,16 +976,16 @@ nat_box:
 ; [2EC9h]: $2EC8, BG y [2ECDh]: $2ECC; the initial values are those of all-zero longs).
 FG_AT	macro				; -> d3 = BW (the FG tile's offset), d1 = CW (FG x & 7); d0, d7 used
 	move.l	$2EC0(a3),d7
-	cmp.l	tc_kf,d7
+	cmp.l	tc_kf(pc),d7
 	beq.s	.c\@
 	bsr	tc_fg
 .c\@:	move.w	4(a4,d6.l),d3
-	add.w	tc_cxf,d3
+	add.w	tc_cxf(pc),d3
 	lsr.w	#1,d3
 	and.w	#$FFFC,d3
-	add.w	tc_basef,d3
+	add.w	tc_basef(pc),d3
 	and.w	#$10FF,d3
-	move.w	tc_cwf,d1
+	move.w	tc_cwf(pc),d1
 	move.w	#$17F,d0
 	sub.w	8(a4,d6.l),d0
 	bcc.s	.y\@
@@ -577,21 +1014,21 @@ BGTILE	macro
 	move.w	d3,-2(a5)		; (push bw, push aw)
 	move.w	d0,-4(a5)
 	move.l	$2EC8(a3),d7		; the BG's ([2EC9h], [2ECDh])
-	cmp.l	tc_kbx,d7
+	cmp.l	tc_kbx(pc),d7
 	beq.s	.cx\@
 	bsr	tc_bx
 .cx\@:	move.l	$2ECC(a3),d7
-	cmp.l	tc_kby,d7
+	cmp.l	tc_kby(pc),d7
 	beq.s	.cy\@
 	bsr	tc_by
 .cy\@:	move.w	4(a4,d6.l),d5
-	add.w	tc_cxb,d5
+	add.w	tc_cxb(pc),d5
 	lsr.w	#1,d5
 	and.w	#$FFFC,d5
-	add.w	tc_basebx,d5
+	add.w	tc_basebx(pc),d5
 	and.w	#$10FF,d5
-	add.w	tc_byterm,d5
-	move.w	tc_yb,d7
+	add.w	tc_byterm(pc),d5
+	move.w	tc_yb(pc),d7
 	sub.w	8(a4,d6.l),d7
 	bcc.s	.by\@
 	moveq	#0,d7
@@ -658,7 +1095,7 @@ tc_by:	move.l	d7,tc_kby		; y: the row term (y << 5) & $3F00, the line $17F + (y 
 	move.w	d1,tc_byterm
 	rts
 
-	section data,data
+	section text,code
 tc_kf:	dc.l	0
 tc_kbx:	dc.l	0
 tc_kby:	dc.l	0
@@ -791,13 +1228,15 @@ nat_mscr:
 	lsr.b	#3,d7
 	btst	#2,d0
 	bne.s	.end
-	lsl.b	#6,d0
-	or.b	d7,d0
-	cmp.w	#1,d1
-	bne.s	.more
-	tst.b	d0			; (the last step: the flags of the last RCL - AL's sign and zero, OV and CY clear -,
-	bra	R0F9EA			; then INC [BP+14h], DBNZ, CLR1 CY, RET)
-.more:	addq.w	#1,20(a1)		; INC [BP+14h]
+	cmp.w #1,d1
+	bne.s .more
+	lsl.b #6,d0
+	or.b d7,d0
+	bra R0F9EA
+.more:
+	lsl.b #6,d0
+	or.b d7,d0
+	addq.w #1,20(a1)		; INC [BP+14h]
 	addq.w	#1,d3
 	subq.w	#1,d1
 	bra.s	.l
@@ -1131,8 +1570,42 @@ ECOLL	macro
 	tst.b	(a3,d4.w)		; the arcade's full test) ...
 	beq	.full
 	move.w	d4,a1
-	move.w	es_lastip,d7
-	bra	.rend
+	move.w es_lastip,d7
+    ifd ES_CHECK
+	bra .rend
+    else
+    if \2=0
+	cmp.w 2(a3,d4.w),d0
+	bcs.s .awl\@
+	cmp.w 4(a3,d4.w),d0
+	bcs.s .awy\@
+	move.w d3,d0
+	cmp.w 4(a3,d4.w),d0
+	bcc.s .awdone\@
+	bra.s .awy\@
+.awl\@:
+	move.w d1,d0
+	cmp.w 2(a3,d4.w),d0
+	bcs.s .awdone\@
+.awy\@:
+	move.w d2,d0
+	cmp.w 6(a3,d4.w),d0
+	bcs.s .awtop\@
+	cmp.w 8(a3,d4.w),d0
+	bcs.s .awdone\@
+	add.w 4(a2,d5.l),d0
+	bra.s .awdone\@
+.awtop\@:
+	move.w d6,d0
+.awdone\@:
+	movem.l (sp)+,d2/d6
+	move.w d5,d3
+	move.w a1,d4
+	bra .r
+    else
+	bra .rend
+    endc
+    endc
 .r0:	move.w	d4,a1
 	move.w	$B4(a3),d0		; ... C8h / A8h by their conditions (BP: 6(sp)) ...
 	move.w	$D4(a3),d1
@@ -1262,8 +1735,7 @@ k	set	k+1
 	move.b	(a4,d7.l),d0
 	move.w	d0,-2(a5)
 	move.w	#$476,d4
-	moveq	#0,d1
-	cmp.b	d0,d0			; (POP AW, CMP AL,[BP+1Fh]: equal)
+	moveq	#0,d1			; (POP AW, CMP AL,[BP+1Fh]: equal)
 	NEXIT	\1,R0FB5E
     endc
 .hit:
@@ -1765,15 +2237,15 @@ nat_prow2:
 ; (else the translation); a hit or a wall continues in the arcade's code with its flags.  The registers and the stack
 ; below SP (the CALLs' return IPs) as the arcade leaves them.
 ; ---------------------------------------------------------------------------------------------------------------------
-POSADD	macro				; \1 the word offset (4 x / 8 y): the 24 bits at [BP+\1-1] .. [BP+\1+1] plus AW
-	move.w	\1(a0),d7
-	lsl.l	#8,d7
-	move.b	\1-2(a0),d7
-	move.w	d0,a1
-	add.l	a1,d7
-	move.b	d7,\1-2(a0)
-	lsr.l	#8,d7
-	move.w	d7,\1(a0)
+POSADD macro
+	move.b \1-2(a0),d7
+	add.b d0,d7
+	move.b d7,\1-2(a0)
+	move.b \2(a0),d0
+	ext.w d0
+	move.w \1(a0),d7
+	addx.w d0,d7
+	move.w d7,\1(a0)
 	endm
 nat_he601:
 	btst	#0,d6
@@ -1781,10 +2253,10 @@ nat_he601:
 	lea	(a4,d6.l),a0
 	move.w	$30(a0),d0		; CALL 0A72h: x
 	move.w	#$E609,-2(a5)
-	POSADD	4
+	POSADD	4,$30
 	move.w	$32(a0),d0		; CALL 0A89h: y
 	move.w	#$E60F,-2(a5)
-	POSADD	8
+	POSADD	8,$32
 	cmp.w	#$E603,(a0)
 	beq.s	.em
 	tst.w	$20(a0)
@@ -1908,7 +2380,7 @@ nat_nh_e5cd:
 	bne R0E9F7
 	lea (a4,d6.l),a0
 	move.w $30(a0),d0
-	POSADD 4
+	POSADD 4,$30
 	move.w $34(a0),d3
 	move.w #$E5E0,-2(a5)
 	EMIT1_BODY -4

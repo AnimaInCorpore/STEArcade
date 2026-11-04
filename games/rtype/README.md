@@ -246,6 +246,21 @@ picture (+1.6%: more passes). Pinned Hatari, the same replays as above: stage 3 
 26.57 -> 26.28 logic/s, 17.17 pictures/s both, no late events either way. `render_test.py` and `sprite_test.py`
 pass on this code.
 
+Higher-level logic audit, 2026-11-04: exact shared collision queries, compiled two-command motion transitions and
+query construction hoisted out of collision scans give **2.13%** fewer logic cycles over the stage-3 warship replay,
+**3.22% / 3.47%** in the seed-10 stage-3/7 samples. All 6,600 production/prototype comparison frames and 1,152 focused
+cases match. The hottest stage-7 handler accounts for 37% of sampled logic, but only 10% is its translated code;
+27% is already native work. No 2x route demonstrated; prototypes remain isolated. See
+[algorithms, conditional bounds, measurements and reproduction](docs/logic-level-results.md).
+
+Native structural improvements retained, 2026-11-04: specialize one-entry sprite emission, reuse collision-query
+endpoints on no-hit returns, use PC-relative terrain-cache fields, ADDX for inline 24-bit movement, cached word-pair
+copies for changed fades, existing MOVE/logical result flags, and an unrolled DMA copy. Logic cycles −1.06–2.97%
+across eight stage samples; warship −1.77%, stage 7 −2.16%. All 6,600 A/B frames, 2,176 focused cases and 72 non-SIM
+DMA cases pass; fresh independent reference checks pass seed 4 to 9000 and 1800 warship frames. Hatari logic throughput
++0.64% / +1.52% in the warship/stage-7 replays, zero late border/palette events. Not a 2x gain. See
+[retained changes, 68000 choices, rejected variants and reproduction](docs/native-structure-results.md).
+
 ## Sound: the plan (agreed 2026-11-01, not started)
 
 R-Type's sound is the YM2151 alone (MAME 0.286 `irem/m72.cpp`: `rtype()` removes the DAC, the set has no samples
