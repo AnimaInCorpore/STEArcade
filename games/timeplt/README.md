@@ -10,7 +10,7 @@ scanline-255 schedule).
 
 ```sh
 python games/timeplt/tools/prepare.py      # verify assets/roms/timeplt.zip, unpack to assets/roms/extracted/timeplt/
-python port.py cover timeplt               # coverage: ref/cover.py seeds 1-12 (~10 min in parallel)
+python port.py cover timeplt               # coverage: ref/cover.py seeds 1-13 (~10 min in parallel)
 python games/timeplt/tools/build.py        # -> run/timeplt/TIMEPLT.PRG (--sim: run/timeplt_sim; --assets: colours again)
 python games/timeplt/tools/logic_test.py 8000 --seed 4   # the translation in lock-step with the reference
 python games/timeplt/tools/render_test.py 3000 --start 1000   # the STE picture against the reference, every frame
@@ -53,7 +53,8 @@ lists.
 * **Logic**: exact against the reference's port schedule.  `tools/logic_test.py`: RAM $A000-$AFFF, the sprite RAMs,
   latch Q0, the sound commands (latch Q2's rising edge), the reused clouds, every changed video RAM cell listed.
   Seed 1 3,000 frames, seeds 4 and 9 8,000 (infinite lives from stage 1-5 / invincible: every era, stage changes,
-  the later loops), seed 10 6,000 (two players); with the natives (below) seeds 1, 4, 9, 10 3,000 frames each.
+  the later loops), seed 10 6,000 (two players), seed 13 8,000 (games from stages 10-60: the stage counter's
+  icons); with the natives (below) seeds 1, 4, 9, 10 3,000 frames each.
 * **Picture**: exact in the shown colours: `tools/render_test.py`, 0 differences in 600 consecutive pictures of
   seed 1's play and in 3,000 of seed 8 (era 5); `tools/sprite_test.py`: 150 made-up pictures exact (both side edges at
   every shift, the generated and the row path, holes, flips, reused clouds, the score bands, 64 KB crossings, 60
@@ -67,7 +68,24 @@ lists.
 * Not done: sound (the board's Z80 and two AY-3-8910s), the cocktail flip, Space Pilot (`spaceplt`, the bootleg: its
   own code ROMs, coverage and checks).
 
-## Speed (2026-10-25)
+## A recorded expert game (MARP, 2026-11-04)
+
+`dyo_timeplt_2903800_wolf106.zip` (replay.marpirc.net; WolfMAME 0.106, 87.6 minutes, 315,449 frames) was replayed
+through the reference in MAME's schedule (`machine.Timeplt.run_frame`; DSW0 $FF, DSW1 $7B from the recording).  The
+.inp of 0.106: a 28-byte header, then 124 bytes a frame (a u32, then up to 30 ports as big-endian u32: IN0, IN1, IN2,
+DSW0, DSW1); recording frame n + 1 drives reference frame n.  It stays with the recorded game to the end: stage 54,
+the game over and the initials entry ("DY.."), 903,700 points on the six-digit counter against MARP's 2,903,800 (100
+apart: not resolved without a WolfMAME 0.106 dump).  The port's own schedule (tasks in zero time, `ld a,r` its shift
+register) cannot follow a recording.
+
+Its coverage against seeds 1-12: the stage counter's icons for 30, 10 and 5 stages (`$0DE0`-`$0E8C`, 8 video and
+colour RAM stores) had never run, so the translation did not mark those cells and the STE would not have redrawn them
+from stage 10 on (seed 13 now: `logic_test.py --seed 13` stopped at frame 999 without it).  Still unseen and
+translated, not lock-step tested: `$2BD5`-`$2C70`, `$2DD2`, `$3C7F`, `$4597`, `$4824`-`$484C`; the beam waits
+`$109F`-`$1195` run in MAME's schedule only.  18 sprite shapes (codes 62-63, 141-143, 184-191 flipped in y, 200-203,
+252) take the row path.
+
+
 
 `PLAY=1 tools/bench.sh 9000` (the recorded play, `tools/play_search.py`: 9,000 ticks, infinite lives from tick 840;
 DEBUG build, Hatari): **100% of the arcade's speed (59.9 frames a second); in play 32.5 pictures a second (median of

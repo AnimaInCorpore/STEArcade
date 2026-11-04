@@ -28,7 +28,7 @@ from machine import TimepltPort, CLOUD_CLEAR, load
 BUILD = build_dir('timeplt')
 HOOKS = [TimepltPort.IDLE]
 TOKEN = TimepltPort.TOKEN
-SEEDS = [int(x) for x in os.environ.get('TP_SEEDS', '').split(',') if x] or range(1, 13)
+SEEDS = [int(x) for x in os.environ.get('TP_SEEDS', '').split(',') if x] or range(1, 14)
 ROM_END = 0x6000
 IO_IN = {0xC000: 0x7F00, 0xC200: 0x7F01, 0xC300: 0x7F02, 0xC320: 0x7F03, 0xC340: 0x7F04, 0xC360: 0x7F05}
 SOUND_TRIGGER = 0xC304

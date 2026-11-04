@@ -53,7 +53,7 @@ COVER = {
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
     "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
-    "timeplt": [("ref/cover.py", list(range(1, 13)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs
+    "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
                ("ref/cover_sound.py", [1, 2, 3], 30000)],          # random commands

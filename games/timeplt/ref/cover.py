@@ -10,7 +10,8 @@ $C000-$CFFF); pens: the pens' pixel counts of the reference pictures (every 8th 
 Seeds: 1-3 attract, coin, start and random play to the game over and again; 4-8 infinite lives (MAME cheat $AD10)
 from stage 1-5 ($AD11 / $AD14) with the guardian called now and then ($AD02), so the play reaches every era and the
 stage changes; 9 invincible ($A800) with the guardian called often: many stages, the later loops; 10-11 two players;
-12 the DIP switches' other bonus, 5 lives, the hardest difficulty, no demo sounds.
+12 the DIP switches' other bonus, 5 lives, the hardest difficulty, no demo sounds; 13 each game from a stage of 10-60
+(the stage counter's icons for 30, 10 and 5 stages, $0DE0-$0E8C: an expert's MARP game reached them, no other seed did).
 """
 import collections
 import pickle
@@ -69,6 +70,9 @@ def cheats(seed, frame, m, state):
         mem[ERA] = (seed - 4) % 5
     if seed == 9:
         mem[INVINCIBLE] = 0xFF
+    if seed == 13 and mem[0xAD30] == 0xFF and mem[STAGE] == 1:   # (each new game: play to the game over, coin again)
+        mem[STAGE] = (10, 15, 29, 30, 34, 35, 39, 40, 54, 60)[frame // 2500 % 10]
+        mem[ERA] = mem[STAGE] % 5
     if (4 <= seed <= 8 and frame % 3000 == 2999) or (seed == 9 and frame % 900 == 899):
         mem[GUARDIAN] = 0
 
