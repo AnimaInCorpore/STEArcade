@@ -494,6 +494,8 @@ class Emitter:
         self.merged = set()     # of those, the ones whose label is not in the code (emitted as a stub)
         self.raw_af = set()     # push af / pop af pairs that keep the flags in the d6 format (pair_af)
         self.natives = {}       # pc -> label: a hand-written 68000 routine replaces the code from pc on (natives)
+        self.pairshift = {}     # first pc -> (pcs, op, pair, k): sra/srl hi + rr lo (or sla lo + rl hi) runs as a word shift
+        self.pairshift_rest = set()   # the other pcs of those runs (emitted with the first)
 
     def regmap(self):
         """where the registers that are not plain data registers are kept (for the tests)"""
@@ -510,6 +512,7 @@ class Emitter:
     def analyze(self, joins):
         """Compute ccr_in / ccr_users; joins: pcs where nothing is known about the CCR."""
         self.joins = set(joins)
+        self.plan_pairshift(self.boundaries())
         saved = (self.lines, self.uid, self.refs, self.unsupported, self.after_label)
         self.lines, self.refs, self.unsupported, self.after_label = [], set(), [], {}
         self.transfer = {}
@@ -826,6 +829,63 @@ class Emitter:
                 q += i2.length
         return out
 
+    PAIRS = {"bc": ("b", "c"), "de": ("d", "e"), "hl": ("h", "l"), "ix": ("ixh", "ixl")}
+    PS_RIGHT = {"sra": "asr", "srl": "lsr"}
+
+    def plan_pairshift(self, bnd):
+        """Runs of 16-bit shifts the Z80 does a byte at a time: sra/srl hi + rr lo (right) or sla lo + rl hi (left)
+        on one pair, repeated k times, straight code nothing enters after the first instruction, with S Z P/V of the
+        last dead: one word shift by k (C = the last bit out, H N cleared)."""
+        self.pairshift, self.pairshift_rest = {}, set()
+        avoid = bnd | set(self.hooks) | set(self.natives)
+        def step(q):
+            i1 = self.code.get(q)
+            if i1 is None or len(i1.ops) != 1 or i1.ops[0][0] != "r8":
+                return None
+            q2 = q + i1.length
+            i2 = self.code.get(q2)
+            if i2 is None or q2 in avoid or len(i2.ops) != 1 or i2.ops[0][0] != "r8":
+                return None
+            for pair, (hi, lo) in self.PAIRS.items():
+                if i1.mn in self.PS_RIGHT and i1.ops[0][1] == hi and i2.mn == "rr" and i2.ops[0][1] == lo:
+                    return pair, self.PS_RIGHT[i1.mn], (q, q2)
+                if i1.mn == "sla" and i1.ops[0][1] == lo and i2.mn == "rl" and i2.ops[0][1] == hi:
+                    return pair, "lsl", (q, q2)
+            return None
+        for pc in sorted(self.code):
+            if pc in self.pairshift_rest or pc in self.hooks or pc in self.natives:
+                continue
+            first = step(pc)
+            if first is None:
+                continue
+            pair, op, pcs = first
+            pcs = list(pcs)
+            while len(pcs) < 16:
+                q = pcs[-1] + self.code[pcs[-1]].length
+                if q in avoid:
+                    break
+                nx = step(q)
+                if nx is None or nx[0] != pair or nx[1] != op:
+                    break
+                pcs += nx[2]
+            if self.live_out[pcs[-1]] & (S | Z | PV):
+                continue
+            self.pairshift[pc] = (pcs, op, pair, len(pcs) // 2)
+            self.pairshift_rest |= set(pcs[1:])
+
+    def emit_pairshift(self, pc):
+        pcs, op, pair, k = self.pairshift[pc]
+        self.lo = self.live_out[pcs[-1]]
+        reg = REG16[pair]
+        swapped = not HALF[self.PAIRS[pair][0]][1]      # the Z80 high byte kept in the low one (BC)
+        self.lines.append("	; + %d instructions: one word shift" % (len(pcs) - 1))
+        if swapped:
+            self.e("ror.w #8,%s" % reg)
+        self.e("%s.w #%d,%s" % (op, k, reg))
+        self.flags(C, const_clear=H | N)
+        if swapped:
+            self.e("ror.w #8,%s" % reg)
+
     def emit_copy(self, pc, push, pop):
         """push rr / pop rr': rr' = rr (the stack word below SP is dead)"""
         s, d = push.ops[0][1], pop.ops[0][1]
@@ -850,6 +910,7 @@ class Emitter:
         pcs = sorted(self.code) if order is None else order
         bnd = self.boundaries()
         self.raw_af = self.pair_af(bnd)
+        self.plan_pairshift(bnd)
         i = 0
         while i < len(pcs):
             pc = pcs[i]
@@ -857,6 +918,14 @@ class Emitter:
             nxt = pc + ins.length
             n2 = self.code.get(nxt)
             step = 1
+            if pc in self.pairshift_rest:       # emitted with the run's first instruction
+                self.no_entry.add(pc)
+                self.merged.add(pc)
+                follow = pcs[i + 1] if i + 1 < len(pcs) else None
+                if follow != nxt:
+                    self.jmp_to(nxt)
+                i += 1
+                continue
             if (ins.mn == "push" and n2 is not None and n2.mn == "pop" and nxt not in bnd and pc not in self.hooks
                     and i + 1 < len(pcs) and pcs[i + 1] == nxt and "af" not in (ins.ops[0][1], n2.ops[0][1])
                     and "sp" not in (ins.ops[0][1], n2.ops[0][1])):
@@ -914,6 +983,15 @@ class Emitter:
         start = len(self.lines)
         self.core_at = None
         self.core_provided = 0
+        if pc in self.pairshift_rest:           # (analyze only: emitted with the run's first instruction)
+            if self.transfer is not None:
+                self.transfer[pc] = ((), False, None, 0, ALLF)
+            return
+        if pc in self.pairshift:
+            self.emit_pairshift(pc)
+            if self.transfer is not None:
+                self.record_transfer(pc, start)
+            return
         try:
             fn = getattr(self, "x_" + ins.mn.replace(" ", "_").replace(",", "_").replace("'", "p"), None)
             if fn is None:
