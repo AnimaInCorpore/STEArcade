@@ -2139,9 +2139,10 @@ bake_tile:
  lsr.w #8,d0
  lsr.w #2,d0
  and.w #15,d0
- lsl.w #2,d0
+ lsl.w #3,d0
  lea acc_tile_tab,a0
- move.l (a0,d0.w),bake_acc
+ lea (a0,d0.w),a0
+ move.l a0,bake_acc
  clr.w obj_row
 .row:
  move.w obj_row,d0		; the source row: flip (attribute bit 6) reverses the rows
@@ -2150,6 +2151,14 @@ bake_tile:
  neg.w d0
  add.w #31,d0
 .down:
+ move.w d0,d4
+ btst #7,obj_key
+ beq.s .phase
+ eor.w #1,d4
+.phase:
+ and.w #1,d4
+ lsl.w #2,d4
+ move.w d4,obj_phase
  lsl.w #4,d0
  move.l bake_src,a0
  movem.l (a0,d0.w),d0-d3
@@ -2160,6 +2169,8 @@ bake_tile:
  lea pen_scratch,a4
  bsr pen_masks
  move.l bake_acc,a0
+ move.w obj_phase,d5
+ move.l (a0,d5.w),a0
  jsr (a0)
  move.l baked_ptr,a1
  move.w obj_row,d4
@@ -2171,7 +2182,7 @@ bake_tile:
  move.l d3,384(a1)
  addq.w #1,obj_row
  cmp.w #32,obj_row
- blo.s .row
+ blo .row
  rts
 
 ; A sprite (obj_key: code, flip << 11, colour << 12) into (a1): 16 rows of 4 plane words, in the order of its shape's
@@ -2188,9 +2199,11 @@ bake_sprite:
  move.w d0,d1
  lsr.w #8,d1
  lsr.w #2,d1
- and.w #$3c,d1			; colour * 4
+ and.w #$3c,d1
+ add.w d1,d1			; colour * 4
  lea acc_spr_tab,a0
- move.l (a0,d1.w),bake_acc
+ lea (a0,d1.w),a0
+ move.l a0,bake_acc
  move.w d0,d1			; the shape: code * 2 + flip
  and.w #$7ff,d1
  add.w d1,d1
@@ -2220,6 +2233,14 @@ bake_sprite:
  ext.w d0
 .natural:
  move.w d0,obj_srow
+ move.w d0,d4
+ btst #3,obj_key
+ beq.s .phase
+ eor.w #1,d4
+.phase:
+ and.w #1,d4
+ lsl.w #2,d4
+ move.w d4,obj_phase
  lsl.w #3,d0
  move.l bake_src,a0
  add.w d0,a0
@@ -2247,6 +2268,8 @@ bake_sprite:
  lea pen_scratch,a4
  bsr pen_masks
  move.l bake_acc,a0
+ move.w obj_phase,d5
+ move.l (a0,d5.w),a0
  jsr (a0)
  move.l baked_ptr,a1
  move.w obj_row,d4
@@ -2276,9 +2299,11 @@ bake_char:
  add.w d1,a0
  move.l a0,bake_src
  lsr.w #8,d0
- and.w #$7c,d0			; colour * 4
+ and.w #$7c,d0
+ add.w d0,d0			; colour * 4
  lea acc_chr_tab,a0
- move.l (a0,d0.w),bake_acc
+ lea (a0,d0.w),a0
+ move.l a0,bake_acc
  clr.w obj_row
 .row:
  move.l bake_src,a0
@@ -2302,7 +2327,13 @@ bake_char:
  move.l d5,4(a4)
  move.l d6,8(a4)
  move.l d4,12(a4)
+ move.w obj_row,d5
+ and.w #1,d5
+ lsl.w #2,d5
+ move.w d5,obj_phase
  move.l bake_acc,a0
+ move.w obj_phase,d5
+ move.l (a0,d5.w),a0
  jsr (a0)
  move.l baked_ptr,a1
  move.w obj_row,d5
@@ -2365,6 +2396,7 @@ dbg_any: ds.w 1
 pen_scratch: ds.l 16
 bake_src: ds.l 1
 bake_acc: ds.l 1
+obj_phase: ds.w 1
 bake_order: ds.l 1
 fg_roll: ds.w 1
 fg_epoch: ds.w 1

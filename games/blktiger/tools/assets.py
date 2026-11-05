@@ -1,4 +1,7 @@
-"""Packed ROM graphics, a fixed STE palette, and mask-grouped sprite programs."""
+"""Packed ROM graphics, a fixed STE palette, and mask-grouped sprite programs.
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
+"""
 from pathlib import Path
 import json
 import sys
@@ -90,15 +93,10 @@ RGB = np.array([[(v >> 4 & 15) * 17, (v & 15) * 17, (v >> 8 & 15) * 17] for v in
 def palette():
     # The fixed colours (docs/palette.json, ref/palette_fit.py: fitted in Oklab to the game's colours, colour 0
     # black); every palette word maps to the nearest of them in Oklab.
-    doc = json.loads((Path(__file__).resolve().parents[1] / 'docs' / 'palette.json').read_text())
-    colours = np.array([[int(c[i:i+2], 16) for i in (1, 3, 5)] for c in doc['colours']], np.uint8)
-    assert len(colours) == 16 and not colours[0].any() and not (colours % 17).any()
-    mapping = ((oklab(RGB)[:, None] - oklab(colours)[None]) ** 2).sum(2).argmin(1).astype(np.uint8)
-    regs = []
-    for r, g, b in colours // 17:
-        conv = lambda n: ((int(n) >> 1) & 7) | ((int(n) & 1) << 3)
-        regs.append((conv(r) << 8) | (conv(g) << 4) | conv(b))
-    return colours, mapping, np.array(regs, '>u2')
+    import palette_native as pn
+    import palette_quantize as pq
+    colours, mapping = pn.ram('blktiger', RGB)
+    return colours, mapping, pq.ste_words(colours)
 
 
 def build():
@@ -118,7 +116,11 @@ def build():
     colours,mapping,regs=palette()
     (dest/'palette_rgb.bin').write_bytes(colours.tobytes())
     (dest/'rgb_map.bin').write_bytes(mapping.tobytes())
+    import palette_quantize as pq
+    (dest/'rgb_map_flat.bin').write_bytes((pq.flat_map(colours, RGB) * 17).tobytes())
     (dest/'palette.bin').write_bytes(regs.tobytes())
+    import palette_native as pn
+    (dest/'colour_spread.s').write_text(pn.spread_tables())
     print('renderer assets:',dest,flush=True)
 
 
@@ -126,12 +128,17 @@ class Oracle:
     def __init__(self):
         dest=build_dir('blktiger')
         self.mapping=np.frombuffer((dest/'rgb_map.bin').read_bytes(),np.uint8)
+        self.flat_mapping=np.frombuffer((dest/'rgb_map_flat.bin').read_bytes(),np.uint8)
         self.rgb=np.frombuffer((dest/'palette_rgb.bin').read_bytes(),np.uint8).reshape(16,3)
 
     def frame(self,m):
+        import palette_quantize as pq
         values=np.frombuffer(m.mem,np.uint8)
         pal=values[0xd800:0xdc00].astype(np.uint16)|values[0xdc00:0xe000].astype(np.uint16)<<8
-        return self.mapping[pal[m.render_raw()[16:240]]&4095]
+        raw = m.render_raw(checker=True)[16:240]
+        word = pal[raw & 1023] & 4095
+        pairs = np.where((raw & 1023) >= 0x300, self.flat_mapping[word], self.mapping[word])
+        return pq.indices(pairs, raw >> 10)
 
 
 if __name__ == '__main__':

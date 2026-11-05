@@ -147,6 +147,17 @@ def main():
         ys = (ys0 + ((7 * i) << 7)) & 0xFFFF
         objs = [(436, 3, 3, 2, i & 1, 10 + 4 * i, 5 * k) for k in range(0, 48, 1)][:20]
         check("64k", objs, (xs0 + i) & 511, ys)
+    # $ff is a valid packed pair (both pixels index 15). A fresh renderer must
+    # initialize those tables even when its old invalid pen-map bytes were $ff.
+    whites = np.flatnonzero(oracle.mapping == 255)
+    assert len(whites), 'no flat colour-15 hardware word'
+    white_palette = np.full(1024, int(whites[0]), dtype='>u2').tobytes()
+    fresh = render_test.Harness(prg)
+    for xs in (xs0, xs0 + 1):
+        fresh.put_raw(vram0, white_palette, xs)
+        fresh.draw()
+        assert np.array_equal(fresh.picture(), oracle.picture_raw(vram0, white_palette, xs)), 'first $ff palette'
+        state['n'] += 1
     print("%d pictures compared, %d differ; rows across a 64 KB boundary: %d objects" % (
         state["n"], state["bad"], state["crossed"]))
     return int(state["bad"] != 0 or state["crossed"] == 0)

@@ -19,6 +19,9 @@ Colours: black and 15 fitted by a weighted k-means in Oklab (Gyruss's tools/asse
 (ref/pens.py: the title, intermissions, every scene), the pixel counts' square roots as weights (with the counts
 themselves the rare pure blue of the sprites goes to a dull blue and orange to ochre; with lower powers the two reds
 merge).  The arcade shows 26 colours in all, at most 15 in a picture.
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import collections
@@ -30,6 +33,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine import Gfx
 from paths import build_dir
 import sprite_programs as sp
+import palette_native as pn
 
 BUILD = build_dir('mrdo')
 WEIGHT_POWER = 0.5
@@ -69,9 +73,8 @@ def palette(g=None):
     """-> (16 colours, pen map [320])"""
     g = g or Gfx()
     pens = g.rgb[:320].astype(int)
-    h = histogram()
-    cols = [(0, 0, 0)] + gy.fit(collections.Counter({p: int(n ** WEIGHT_POWER) + 1 for p, n in h.items()}), pens)
-    return cols, gy.pen_map(cols, pens)
+    cols, pairs = pn.prom('mrdo', histogram(), pens, lambda p: p >= 256)
+    return [tuple(map(int, c)) for c in cols], pairs >> 4
 
 
 def turned(img):

@@ -14,6 +14,9 @@
     nz4.bin          256 bytes: per byte of four 2-bit pixels, the pixels not 0 (bit 3 the first)
     bitrev.bin       256 bytes: a byte's bits reversed (a mirrored mask)
     sprite_code.s    the motion objects' draw routine (render.s includes it)
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import json
@@ -47,20 +50,14 @@ def irgb_rgb(words):
 
 def palette():
     """-> (the 16 colours [16, 3], the 65536-entry IRGB map, the 16 STE words)"""
-    doc = json.loads((DOCS / "palette.json").read_text())
-    colours = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in doc["colours"]], np.uint8)
-    assert len(colours) == 16 and not colours[0].any() and not (colours % 17).any()
+    import palette_native as pn
+    import palette_quantize as pq
     rgb = irgb_rgb(np.arange(65536))
     key = (rgb[:, 0] << 16) | (rgb[:, 1] << 8) | rgb[:, 2]
     u, inv = np.unique(key, return_inverse=True)
     ur = np.stack([(u >> 16) & 255, (u >> 8) & 255, u & 255], axis=1)
-    near = ((oklab(ur)[:, None] - oklab(colours)[None]) ** 2).sum(2).argmin(1).astype(np.uint8)
-    mapping = near[inv.ravel()]
-    regs = []
-    for r, g, b in colours // 17:
-        conv = lambda n: ((int(n) >> 1) & 7) | ((int(n) & 1) << 3)
-        regs.append((conv(r) << 8) | (conv(g) << 4) | conv(b))
-    return colours, mapping, np.array(regs, ">u2")
+    colours, pairs = pn.ram('gauntlet', ur)
+    return colours, pairs[inv.ravel()], pq.ste_words(colours)
 
 
 def sprite_code():
@@ -74,7 +71,11 @@ def build():
     colours, mapping, regs = palette()
     (dest / "palette_rgb.bin").write_bytes(colours.tobytes())
     (dest / "irgb_map.bin").write_bytes(mapping.tobytes())
+    import palette_quantize as pq
+    (dest / 'irgb_map_flat.bin').write_bytes((pq.flat_map(colours, irgb_rgb(np.arange(65536))) * 17).tobytes())
     (dest / "palette.bin").write_bytes(regs.tobytes())
+    import palette_native as pn
+    (dest / 'colour_spread.s').write_text(pn.spread_tables())
     t = v.tiles.astype(np.uint8)                                          # [8192, 8, 8]
     (dest / "tile_px.bin").write_bytes(((t[..., ::2] << 4) | t[..., 1::2]).tobytes())
     pens = np.zeros(len(t), np.int64)
@@ -105,19 +106,23 @@ class Oracle:
         from video import Video
         dest = build_dir("gauntlet")
         self.mapping = np.frombuffer((dest / "irgb_map.bin").read_bytes(), np.uint8)
+        self.flat_mapping = np.frombuffer((dest / "irgb_map_flat.bin").read_bytes(), np.uint8)
         self.rgb = np.frombuffer((dest / "palette_rgb.bin").read_bytes(), np.uint8).reshape(16, 3)
         self.video = Video()
 
     def indices(self, raw, palette_ram):
+        import palette_quantize as pq
         pens = np.frombuffer(bytes(palette_ram[:0x800]), ">u2").astype(np.int64)
-        return self.mapping[pens[raw]]
+        word = pens[raw & 1023]
+        pairs = np.where((raw & 1023) < 0x100, self.flat_mapping[word], self.mapping[word])
+        return pq.indices(pairs, raw >> 10)
 
     def picture(self, m):
         return self.picture_raw(m.vram(), m.palette(), m.xscroll)
 
     def picture_raw(self, vram, palette, xscroll):
         vram = bytes(vram)
-        raw = self.video.render_raw(vram, xscroll, (vram[0x5F6E] << 8) | vram[0x5F6F])
+        raw = self.video.render_raw(vram, xscroll, (vram[0x5F6E] << 8) | vram[0x5F6F], checker=True)
         idx = self.indices(raw, palette)
         return np.hstack((idx[:, 8:232], idx[:, 240:336]))
 

@@ -66,6 +66,8 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
   or reordering rows, preserving the opaque masks and pass order. Keep exact PROM mappings, fixed player colours,
   HUD palettes and cycling-pen slots where the port needs them. Compare existing ports before changing their
   weighting: the [cross-port audit](palette-audit.md) found background regressions from a blanket replacement.
+  The user approved the [eleven-port rollout](palette-defaults.md) after visual comparison; six PROM ports use
+  the bounded flat fit, five use native source-anchored checker pairs, and Gauntlet keeps its four player anchors.
 * **Throttle the logic when it cannot keep up** so the renderer still runs; never let a pending VBL nest.
 * **Reference renderers can be wrong in ways "port equals reference" cannot see** (plane order, palette weights,
   a sprite row off by one): the MAME check below is not optional.
@@ -638,7 +640,8 @@ F030Arcade's spare-time renderer (`PORTING.md` there, "Spare-time renderer").
   from the running game, so a sprite never seen is not drawn: the graphics side of the coverage problem above.  The ports
   here bake their graphics from the ROM sets instead.
 * **Its colours**: nearest colour in CIELAB, plus 50/50 checkerboard mixes of palette pairs that are close enough (for a
-  CRT).  The ports here use exact palettes or a fixed Oklab palette (Bubble Bobble), no dithering.
+  CRT). R-Type and five further ports now bake restrained source-anchored checker pairs; see
+  [the colour defaults](palette-defaults.md). Other ports use exact or fitted flat palettes.
 * **"The frame is done"**: Daimakaimura patches one instruction into the game's task scheduler (all tasks idle ->
   `request_next_frame`); the VBL handler then draws, stops when Timer B's line count says the beam is close, and resumes
   at the next VBL.  F030Arcade generalises it: the VBL shows a completed page, runs one game step and asks for a picture;

@@ -151,14 +151,16 @@ class Commando:
         self.run_to_idle()
         self.frame+=1
 
-    def render_raw(self):
+    def render_raw(self, checker=False):
         if self.gfx is None:
             self.gfx = Gfx()
         g, mem = self.gfx, self.mem
-        wide = np.empty((512,512), np.uint8)
+        wide = np.empty((512,512), np.uint16 if checker else np.uint8)
+        from mamegfx import checker_gfx
         for idx in range(1024):
             attr = mem[0xdc00+idx]
             tile = g.tiles[mem[0xd800+idx]+((attr & 0xc0)<<2)]
+            if checker: tile = checker_gfx(tile, invert=True)
             if attr & 0x10: tile = tile[:,::-1]
             if attr & 0x20: tile = tile[::-1]
             col, row = divmod(idx,32)
@@ -175,6 +177,7 @@ class Commando:
             bank = attr >> 6
             if bank == 3: continue
             tile = g.sprites[code+bank*256]
+            if checker: tile = checker_gfx(tile, invert=True)
             fx, fy = bool(attr & 4), bool(attr & 8)
             x -= (attr & 1)<<8
             if flip:
@@ -185,6 +188,7 @@ class Commando:
         for idx in range(1024):
             attr = mem[0xd400+idx]
             tile = g.chars[mem[0xd000+idx]+((attr & 0xc0)<<2)]
+            if checker: tile = checker_gfx(tile, invert=True)
             fx, fy = bool(attr & 0x10), bool(attr & 0x20)
             row, col = divmod(idx,32)
             x, y = col*8, row*8
@@ -201,7 +205,7 @@ class Commando:
         if x0>=x1 or y0>=y1: return
         src=tile[y0-y:y1-y,x0-x:x1-x]
         dst=bmp[y0:y1,x0:x1]
-        mask=src!=transparent
+        mask=(src & 15)!=transparent
         dst[mask]=src[mask]+base
 
     def render_rgb(self):

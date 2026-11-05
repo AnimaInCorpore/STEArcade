@@ -34,7 +34,7 @@ class Video:
         self.pens = self.colors[self.lookup]
         self.y, self.x = np.indices((256,256))
 
-    def render_raw(self, m):
+    def render_raw(self, m, checker=False):
         flip = bool(m.control & 64)
         x, y = (255-self.x,255-self.y) if flip else (self.x,self.y)
         out = np.full((256,256), 640, np.uint16)
@@ -48,6 +48,8 @@ class Video:
             tx = np.where(attr&64,31-tx,tx)
             ty = np.where(attr&128,31-ty,ty)
             out = 128 + ((attr&60).astype(np.uint16)>>2)*16 + self.tiles[code,ty,tx]
+            if checker:
+                out |= (((tx + ty + 1) & 1) * 1024).astype(np.uint16)
         if m.layers & 32:
             for off in range(4096-32,-1,-32):
                 code,attr,sy,sx = m.sprites[off:off+4]
@@ -61,13 +63,16 @@ class Video:
                     sx,sy = 240-sx,240-sy
                     fx,fy = True,not fy
                 pixels = self.sprites[code]
+                if checker:
+                    from mamegfx import checker_gfx
+                    pixels = checker_gfx(pixels, invert=True)
                 if fx: pixels = pixels[:,::-1]
                 if fy: pixels = pixels[::-1]
                 left,right,top,bottom = max(0,sx),min(256,sx+16),max(0,sy),min(256,sy+16)
                 if left >= right or top >= bottom: continue
                 p = pixels[top-sy:bottom-sy,left-sx:right-sx]
                 view = out[top:bottom,left:right]
-                mask = p != 0
+                mask = (p & 15) != 0
                 view[mask] = 384+(attr&15)*16+p[mask].astype(np.uint16)
         if m.control & 128:
             ram = np.frombuffer(m.mem,np.uint8)
@@ -78,6 +83,8 @@ class Video:
             pens = (attr&31).astype(np.uint16)*4+p
             mask = self.lookup[pens] != 0x4f
             out[mask] = pens[mask]
+            if checker:
+                out[mask] |= (((x + y + 1) & 1) * 1024).astype(np.uint16)[mask]
         return out
 
     def render_rgb(self,m):

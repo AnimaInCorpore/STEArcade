@@ -1,5 +1,7 @@
 # Track & Field (Konami, 1983) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Track & Field on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `trackfld` (Konami GX361).  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 40 KB of ROM), is

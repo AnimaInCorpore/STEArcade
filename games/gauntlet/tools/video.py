@@ -76,27 +76,31 @@ class Video:
         self.chars = G.decode_gfx(chars, 8, 8, 1024, [0, 4], [0, 1, 2, 3, 8, 9, 10, 11],
                                   [16 * y for y in range(8)], 128).astype(np.int16)
         self.tiles_fx = self.tiles[:, :, ::-1].copy()
+        self.checker_tiles = G.checker_gfx(self.tiles)
+        self.checker_tiles_fx = self.checker_tiles[:, :, ::-1]
 
     # ---- layers ----------------------------------------------------------------------------------------------
-    def playfield(self, vram, bank):
+    def playfield(self, vram, bank, checker=False):
         """The 512 x 512 pixmap of pens."""
         d = words(vram[0:0x2000]).reshape(64, 64).T                    # [row, col] (SCAN_COLS: col * 64 + row)
         code = (((bank & 3) * 0x1000) + (d & 0xFFF)) ^ 0x800
         color = 0x18 + ((d >> 12) & 7)
         zero = np.zeros_like(d)
-        pix, _ = G.tile_pixmap(self.tiles, code, color, d >> 15, zero, 64, 64, 0x100, 16)
+        gfx = self.checker_tiles if checker else self.tiles
+        pix, _ = G.tile_pixmap(gfx, code, color, d >> 15, zero, 64, 64, 0x100, 16)
         return pix.astype(np.int16)
 
-    def alpha(self, vram):
+    def alpha(self, vram, checker=False):
         """The 248 x 512 pixmap of pens and its mask of drawn pixels."""
         d = words(vram[0x5000:0x5000 + 64 * 31 * 2]).reshape(31, 64)
         color = ((d >> 10) & 0x0F) | ((d >> 9) & 0x20)
         zero = np.zeros_like(d)
-        pix, raw = G.tile_pixmap(self.chars, d & 0x3FF, color, zero, zero, 31, 64, 0, 4)
+        gfx = G.checker_gfx(self.chars) if checker else self.chars
+        pix, raw = G.tile_pixmap(gfx, d & 0x3FF, color, zero, zero, 31, 64, 0, 4)
         opaque = np.repeat(np.repeat((d & 0x8000) != 0, 8, 0), 8, 1)
-        return pix.astype(np.int16), opaque | (raw != 0)
+        return pix.astype(np.int16), opaque | ((raw & 3) != 0)
 
-    def motion_objects(self, vram, xscroll, yscroll, y0, y1):
+    def motion_objects(self, vram, xscroll, yscroll, y0, y1, checker=False):
         """MAME's MO bitmap over lines y0..y1 ([y1 + 1, 336], NO_MO where nothing is drawn)."""
         mo = np.full((y1 + 1, W), NO_MO, np.int16)
         ram = words(vram[0x2000:0x4000]).reshape(4, 1024)
@@ -114,11 +118,11 @@ class Video:
             visited = set()
             while link not in visited:                                 # build_active_list
                 visited.add(link)
-                self._object(mo, clip, ram[:, link], xs, ys, height_bm)
+                self._object(mo, clip, ram[:, link], xs, ys, height_bm, checker)
                 link = ram[3, link] & 0x3FF
         return mo
 
-    def _object(self, bm, clip, e, xs, ys, height_bm):
+    def _object(self, bm, clip, e, xs, ys, height_bm, checker=False):
         """render_object (no neighbours, no vflip, no special value)."""
         code = (e[0] & 0x7FFF) ^ 0x800
         color = 0x100 + (e[1] & 0x0F) * 16
@@ -139,6 +143,8 @@ class Video:
             xpos += (width - 1) * 8
             xadv = -8
         gfx = self.tiles_fx if hflip else self.tiles
+        if checker:
+            gfx = self.checker_tiles_fx if hflip else self.checker_tiles
         n = len(gfx)
         for ty in range(height):
             sy = ypos + ty * 8
@@ -154,27 +160,27 @@ class Video:
                     b0, b1 = max(sx, x0), min(sx + 7, x1)
                     s = gfx[code % n, a0 - sy:a1 - sy + 1, b0 - sx:b1 - sx + 1]
                     d = bm[a0:a1 + 1, b0:b1 + 1]
-                    keep = s != 0
+                    keep = (s & 15) != 0
                     d[keep] = color + s[keep]
                 code += 1
 
     # ---- the picture -----------------------------------------------------------------------------------------
-    def render_raw(self, vram, xscroll, yscroll, y0=0, y1=H - 1, out=None):
+    def render_raw(self, vram, xscroll, yscroll, y0=0, y1=H - 1, out=None, checker=False):
         """Lines y0..y1 of the picture (one screen_update with that cliprect) into out ([240, 336] int16, a new one
         if None); returns out."""
         if out is None:
             out = np.zeros((H, W), np.int16)
-        pf = self.playfield(vram, yscroll & 3)
+        pf = self.playfield(vram, yscroll & 3, checker)
         rows = (np.arange(y0, y1 + 1) + (yscroll >> 7)) & 0x1FF
         cols = (np.arange(W) + xscroll) & 0x1FF
         bm = pf[np.ix_(rows, cols)]
-        mo = self.motion_objects(vram, xscroll, yscroll, y0, y1)[y0:]
+        mo = self.motion_objects(vram, xscroll, yscroll, y0, y1, checker)[y0:]
         drawn = mo != NO_MO
         shadow = drawn & ((mo & 0x0F) == 1)
         bm[shadow] ^= 0x80
         put = drawn & ~shadow
         bm[put] = mo[put]
-        apix, amask = self.alpha(vram)
+        apix, amask = self.alpha(vram, checker)
         apix, amask = apix[y0:y1 + 1, :W], amask[y0:y1 + 1, :W]
         bm[amask] = apix[amask]
         out[y0:y1 + 1] = bm

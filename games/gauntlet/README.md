@@ -1,5 +1,7 @@
 # Gauntlet (Atari Games, 1985) for the Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 2026-10-26: the game runs at the arcade's 60 frames a second (it ran one frame a VBL: 83%); the playfield and the
 alphanumerics are compared only where the game's writers marked them (the patched program calls the runtime), the
 picture 18-26% cheaper in play; the patcher follows jump tables (88 window addresses it had missed: a bus error in

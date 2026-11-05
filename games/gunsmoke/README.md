@@ -1,5 +1,7 @@
 # Gun.Smoke (Capcom, 1985) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 2026-10-19: scrolling strip clears use a HOP 0 fill path and damage restores use the full-word copy path.
 See the [cross-port measurements](../../docs/virtual-scroll-performance.md#implementation-results).
 

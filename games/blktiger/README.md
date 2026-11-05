@@ -1,5 +1,7 @@
 # Black Tiger (Capcom, 1987)
 
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Black Tiger on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `blktiger`, with a bank-aware translation of the unmodified

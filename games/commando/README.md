@@ -1,5 +1,7 @@
 # Commando (World) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 2026-10-19: margin clears and larger damage restores use the shared full-word dispatcher.
 [Measurements](../../docs/virtual-scroll-performance.md#implementation-results) keep logic and drawing apart.
 

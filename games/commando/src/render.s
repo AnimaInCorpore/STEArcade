@@ -325,11 +325,12 @@ get_object_bake:
  and.w #3,d3
  move.w d3,obj_flip
  and.w #15,d2
- lsl.w #2,d2
+ lsl.w #3,d2
  cmp.w #2,d1
  beq .char
  lea bake_tile_rows,a5		; tiles: 16 rows of 3 pen planes, out plane-major (a plane's 16 rows, 4 planes)
- move.l (a5,d2.w),a5
+ lea (a5,d2.w),a5
+ move.l a5,bake_table
  lea tile_planes,a3
  mulu #16*6,d0
  add.l d0,a3
@@ -339,8 +340,19 @@ get_object_bake:
  lea 15*6(a3),a3
  move.w #-6,a4
 .tile_down:
+ move.w obj_flip,d0
+ move.w d0,d1
+ lsr.w #1,d1
+ eor.w d1,d0
+ and.w #1,d0
+ lsl.w #2,d0
+ move.w d0,bake_phase
  lea 32(a1),a0
 .tile_row:
+ move.l bake_table,a5
+ move.w bake_phase,d0
+ move.l (a5,d0.w),a5
+ eor.w #4,bake_phase
  movem.w (a3),d0-d2
  add.w a4,a3
  btst #1,obj_flip+1
@@ -360,7 +372,8 @@ get_object_bake:
  bra .baked
 .char:
  lea bake_chr_rows,a5		; characters: 8 rows of 2 pen planes, out plane-major (8 rows, 4 planes), the opaque
- move.l (a5,d2.w),a5		; pixels at 64(a1) in steps of 8 for char_convert
+ lea (a5,d2.w),a5
+ move.l a5,bake_table		; pixels at 64(a1) in steps of 8 for char_convert
  lea chr_planes,a3
  lsl.l #5,d0
  add.l d0,a3
@@ -370,9 +383,20 @@ get_object_bake:
  lea 7*4(a3),a3
  move.w #-4,a4
 .char_down:
+ move.w obj_flip,d0
+ move.w d0,d1
+ lsr.w #1,d1
+ eor.w d1,d0
+ and.w #1,d0
+ lsl.w #2,d0
+ move.w d0,bake_phase
  lea 64(a1),a2
  lea 16(a1),a0
 .char_row:
+ move.l bake_table,a5
+ move.w bake_phase,d0
+ move.l (a5,d0.w),a5
+ eor.w #4,bake_phase
  movem.w (a3),d0-d1
  add.w a4,a3
  btst #1,obj_flip+1
@@ -404,9 +428,10 @@ get_object_bake:
  move.w d3,obj_flip
  lsr.w #4,d2
  and.w #3,d2
- lsl.w #2,d2
+ lsl.w #3,d2
  lea bake_spr_rows,a5
- move.l (a5,d2.w),a5
+ lea (a5,d2.w),a5
+ move.l a5,bake_table
  lea spr_planes,a4
  lsl.l #4,d0
  lea spr_order,a3
@@ -417,6 +442,13 @@ get_object_bake:
 .spr_row:
  moveq #0,d0
  move.b (a3)+,d0
+ move.w obj_flip,d1
+ lsr.w #1,d1
+ eor.w d0,d1
+ and.w #1,d1
+ lsl.w #2,d1
+ move.l bake_table,a5
+ move.l (a5,d1.w),a5
  lsl.w #3,d0
  movem.w (a4,d0.w),d0-d3
  btst #1,obj_flip+1
@@ -430,7 +462,7 @@ get_object_bake:
  movem.w d4-d7,(a1)
  addq.l #8,a1
  cmp.l a0,a1
- blo.s .spr_row
+ blo .spr_row
 .baked:
  move.l baked_ptr,a1
  cmp.w #2,obj_kind
@@ -972,11 +1004,28 @@ draw_tile:
  move.w #$0203,BLT_HOP_OP.w
  bsr destination
  moveq #3,d3
+ move.w tile_ctrl,d0
+ move.b d0,BLT_SKEW.w		; MOVE sets Z: select the aligned/shifted path once per tile
+ beq.s .aligned
+ moveq #8,d0
+.shifted_plane:
+ move.l a1,BLT_SRC_ADDR.w
+ move.l d2,BLT_DST_ADDR.w
+ move.w d0,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w		; at most 160 bus cycles, source/destination keep advancing
+ move.w d0,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
+ lea 32(a1),a1
+ addq.l #2,d2
+ dbf d3,.shifted_plane
+ rts
+.aligned:
+ moveq #16,d0
 .plane:
  move.l a1,BLT_SRC_ADDR.w
  move.l d2,BLT_DST_ADDR.w
- move.w #16,BLT_COUNT+2.w
- move.w tile_ctrl,BLT_CTRL.w
+ move.w d0,BLT_COUNT+2.w
+ move.b #$c0,BLT_CTRL.w
  lea 32(a1),a1
  addq.l #2,d2
  dbf d3,.plane
@@ -1865,6 +1914,9 @@ obj_key: ds.w 1
 obj_kind: ds.w 1
 obj_code: ds.w 1
 obj_flip: ds.w 1
+bake_table: ds.l 1
+bake_phase: ds.w 1
+bake_pen_bits: ds.w 1
 bake_ab: ds.w 4			; (the bake's row routines: the products of the two low pen planes)
 dest_stride: ds.w 1
 copy_src_y: ds.w 1

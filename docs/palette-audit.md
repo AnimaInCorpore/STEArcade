@@ -4,6 +4,10 @@ R-Type's approved bounded weighting is retained in `engine/palette_quantize.py`
 and `engine/palette_quantize.js`, and is the default for its stage renderer and
 new build-time fitted palette paths. The separate stefastbobs2 checkout is not a
 build dependency. Existing ports were checked before changing their palettes.
+After reviewing the gallery, the user approved new native defaults in all eleven
+previewed ports; the [rollout and validation](palette-defaults.md) supersede the
+initial retention decisions below. The numerical comparisons remain the original
+audit evidence.
 
 The histogram policy compresses sprite and tile counts separately with power
 0.75, applies sprite priority afterwards (8x), and uses the smooth bonus

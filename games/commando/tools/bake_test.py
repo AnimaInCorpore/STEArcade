@@ -11,11 +11,13 @@ from machine68k import Register as R
 from sim import Sim,TRAP1
 from machine import Gfx,BUILD
 from paths import ROOT
+from mamegfx import checker_gfx
+import palette_quantize as pq
 
 
 def planes(pixels,mapping):
     """(rows, width) pens -> (4, rows) STE plane words, the first pixel in the high bit of a 16 bit word"""
-    colours=mapping[pixels].astype(np.uint16)
+    colours=pq.indices(mapping[pixels & 15], pixels >> 10).astype(np.uint16)
     width=pixels.shape[1]
     return np.array([sum(((colours[:,i]>>k)&1)<<(15-i) for i in range(width)) for k in range(4)],np.uint16)
 
@@ -28,18 +30,18 @@ def expected(g,mapping,order,kind,key):
     attr=key>>8;code=((attr&0xc0)<<2)|(key&255)
     if kind==1:
         colour,flip=(attr>>4)&3,(attr>>2)&3
-        t=variant(g.sprites[code].T[::-1],flip)
+        t=variant(checker_gfx(g.sprites[code].T[::-1]),flip)
         p=planes(t,mapping[128+colour*16:])
         rows=[15-b if flip&1 else b for b in order[code]]
         return p[:,rows].T.astype('>u2').tobytes()
     colour,flip=attr&15,(attr>>4)&3
     if kind==0:
-        return planes(variant(g.tiles[code].T[::-1],flip),mapping[colour*8:]).astype('>u2').tobytes()
-    t=variant(g.chars[code].T[::-1],flip)
+        return planes(variant(checker_gfx(g.tiles[code].T[::-1]),flip),mapping[colour*8:]).astype('>u2').tobytes()
+    t=variant(checker_gfx(g.chars[code].T[::-1]),flip)
     p=planes(t,mapping[192+colour*4:])
     out=bytearray(p.astype('>u2').tobytes())
     for r in range(8):
-        opaque=sum(int(t[r,i]!=3)<<(7-i) for i in range(8))
+        opaque=sum(int(t[r,i]&15!=3)<<(7-i) for i in range(8))
         keep=(~(opaque*0x01010101))&0xffffffff
         data=sum(((int(p[k,r])>>8)&opaque)<<(24-8*k) for k in range(4))
         out+=keep.to_bytes(4,'big')+data.to_bytes(4,'big')

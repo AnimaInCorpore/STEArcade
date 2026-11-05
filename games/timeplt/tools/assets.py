@@ -15,6 +15,9 @@ The picture is turned as MAME's ROT90 turns it: picture pixel (X, Y), X 0-223, Y
 Colours: black and 15 fitted by a weighted k-means in Oklab (Gyruss's tools/assets.py) to the reference pictures' pens
 of the coverage runs (ref/cover.py's `pens`), snapped to the STE's 4 bits a gun; every pen maps to the nearest (black
 only for black).  The arcade shows up to 22 colours in a stage (25 in all).
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import collections
@@ -27,6 +30,7 @@ from machine import Video
 from paths import build_dir
 import importlib.util
 import sprite_programs as sp
+import palette_native as pn
 
 _spec = importlib.util.spec_from_file_location('gy_assets', Path(__file__).resolve().parents[2] / 'gyruss' / 'tools' /
                                                'assets.py')
@@ -51,8 +55,8 @@ def histogram():
 def palette(v=None):
     """-> (16 colours, pen map [384])"""
     v = v or Video()
-    cols = [(0, 0, 0)] + gy.fit(histogram(), v.pens)
-    return cols, gy.pen_map(cols, v.pens)
+    cols, pairs = pn.prom('timeplt', histogram(), v.pens, lambda p: p >= 128)
+    return [tuple(map(int, c)) for c in cols], pairs >> 4
 
 
 def turned(img):

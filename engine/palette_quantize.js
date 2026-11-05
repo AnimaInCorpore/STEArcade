@@ -67,7 +67,8 @@ const colors = [ ...colorWeights.entries() ].map(([ key, weight ]) => {
     return { rgb, lab: rgb2oklab(rgb), weight };
 });
 
-const FIT_COUNT = Math.min(COLOR_COUNT, new Set(["0,0,0", ...colors.map(c => steColor(c.rgb).join(","))]).size);
+const fixedColors = [[0, 0, 0], ...(job.fixed || [])].filter((c, i, a) => a.findIndex(v => v.join() === c.join()) === i);
+const FIT_COUNT = Math.min(COLOR_COUNT, new Set([...fixedColors.map(c => c.join(",")), ...colors.map(c => steColor(c.rgb).join(","))]).size);
 
 const steColors = [];
 
@@ -101,7 +102,7 @@ function createPalette(seed) {
     let state = seed;
     const random = () => { state = (state * 1664525 + 1013904223) >>> 0; return state / 4294967296; };
 
-    const centers = [ { rgb: [ 0, 0, 0 ], lab: rgb2oklab([ 0, 0, 0 ]), fixed: true } ];
+    const centers = fixedColors.map(rgb => ({rgb, lab:rgb2oklab(rgb), fixed:true}));
 
     // k-means++ initialization.
 
@@ -260,7 +261,7 @@ if(DITHER_MAX_L > 0) {
     for(let round = 0, improved = true; improved && round < 8; round++) {
         improved = false;
 
-        for(let index = 1; index < refinedRgbs.length; index++) {
+        for(let index = fixedColors.length; index < refinedRgbs.length; index++) {
             const used = new Set(refinedRgbs.map(rgb => rgb.join(",")));
             const original = { rgb: refinedRgbs[index], lab: refinedLabs[index] };
             let best = original;

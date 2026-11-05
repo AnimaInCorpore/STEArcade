@@ -1,5 +1,7 @@
 # Mr. Do!, Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Mr. Do! on the STE (Hatari)](docs/screenshot.png)
 
 Port started 2026-10-29.  Set: MAME `mrdo`, Mr. Do! (Universal), 1982; one Z80, two SN76489s, two 2-bit tile layers

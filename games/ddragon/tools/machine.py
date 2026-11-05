@@ -123,11 +123,14 @@ class Video:
         rows, cols = np.indices((32, 32))
         self.bg_index = (cols & 0x0F) | ((rows & 0x0F) << 4) | ((cols & 0x10) << 4) | ((rows & 0x10) << 5)
 
-    def render_raw(self, mem, scrollx, scrolly):
+    def render_raw(self, mem, scrollx, scrolly, checker=False):
+        tiles = G.checker_gfx(self.tiles) if checker else self.tiles
+        sprites = G.checker_gfx(self.sprites) if checker else self.sprites
+        chars = G.checker_gfx(self.chars) if checker else self.chars
         bg = np.frombuffer(bytes(mem[0x3000:0x3800]), np.uint8)
         attr = bg[2 * self.bg_index]
         code = bg[2 * self.bg_index + 1].astype(np.int32) | ((attr & 7).astype(np.int32) << 8)
-        pix, _ = G.tile_pixmap(self.tiles, code, (attr >> 3) & 7, attr & 0x40, attr & 0x80, 32, 32, 256, 16)
+        pix, _ = G.tile_pixmap(tiles, code, (attr >> 3) & 7, attr & 0x40, attr & 0x80, 32, 32, 256, 16)
         ys = (np.arange(240) + 8 + scrolly) % 512
         xs = (np.arange(256) + scrollx) % 512
         bm = pix[np.ix_(ys, xs)].astype(np.int16)
@@ -146,14 +149,14 @@ class Video:
             parts = {0: [(0, 0, 0)], 1: [(0, 0, -16), (1, 0, 0)], 2: [(0, -16, 0), (2, 0, 0)],
                      3: [(0, -16, -16), (1, -16, 0), (2, 0, -16), (3, 0, 0)]}[size]
             for order, dx, dy in parts:
-                G.draw_gfx(bm, clip, self.sprites, which + order, color, fx, fy, sx + dx, sy + dy, lambda s: s == 0)
+                G.draw_gfx(bm, clip, sprites, which + order, color, fx, fy, sx + dx, sy + dy, lambda s: (s & 15) == 0)
         fg = np.frombuffer(bytes(mem[0x1800:0x2000]), np.uint8).reshape(32, 64)
         attr = fg[:, 0::2]
         code = fg[:, 1::2].astype(np.int32) | ((attr & 7).astype(np.int32) << 8)
         zero = np.zeros_like(attr)
-        pix, raw = G.tile_pixmap(self.chars, code, attr >> 5, zero, zero, 32, 32, 0, 16)
+        pix, raw = G.tile_pixmap(chars, code, attr >> 5, zero, zero, 32, 32, 0, 16)
         pix, raw = pix[8:248], raw[8:248]
-        keep = raw != 0
+        keep = (raw & 15) != 0
         bm[keep] = pix[keep]
         return bm
 

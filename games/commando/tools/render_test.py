@@ -69,7 +69,10 @@ def main():
         sp=cpu.r_reg(R.A7)-4;mem.w32(sp,ret);cpu.w_reg(R.A7,sp);cpu.w_pc(sym['render_frame'])
         mem.set_trace_mode(True);cost=run_to(ret);mem.set_trace_mode(False)
         idx=mem.r16(sym['draw_idx']);base=mem.r32(sym['draw_base'])
-        mine=window(mem,base);want=mapping[m.render_raw()[16:240].T[::-1]]
+        import palette_quantize as pq
+        mine=window(mem,base)
+        raw=m.render_raw(checker=True)[16:240].T[::-1]
+        want=pq.indices(mapping[raw & 1023],raw >> 10)
         if mode=='edges':
             raw=np.frombuffer(bytes(mem.r_block(base+edge_y*256,16*256)),np.uint8).reshape(16,32,4,2)
             words=(raw[...,0].astype(np.uint16)<<8)|raw[...,1]
@@ -79,12 +82,14 @@ def main():
             sprite=m.gfx.sprites[code].T[::-1]
             got=pixels[:,48+edge_x:48+edge_x+16]
             mask=sprite!=15
+            yy,xx=np.indices(sprite.shape)
+            sprite_colours=pq.indices(mapping[128+sprite],xx+yy)
             if edge_x<0 or edge_x>208:   # (left and right: clipped at the window's chunk-aligned edges, sprite_test.py)
                 inner=np.zeros_like(mask);inner[:,max(0,-edge_x):min(16,224-edge_x)]=True
-                assert np.array_equal(got[mask&inner],mapping[128+sprite][mask&inner]), 'edge sprite: inner part wrong'
-                assert not np.array_equal(got[mask&~inner],mapping[128+sprite][mask&~inner]), 'edge sprite drawn into the band'
+                assert np.array_equal(got[mask&inner],sprite_colours[mask&inner]), 'edge sprite: inner part wrong'
+                assert not np.array_equal(got[mask&~inner],sprite_colours[mask&~inner]), 'edge sprite drawn into the band'
             else:
-                assert np.array_equal(got[mask],mapping[128+sprite][mask]), 'whole sprite was clipped in its guard area'
+                assert np.array_equal(got[mask],sprite_colours[mask]), 'whole sprite was clipped in its guard area'
         diff=np.count_nonzero(mine!=want)
         if diff:
             out=BUILD/f'render_diff_{sample}.png'

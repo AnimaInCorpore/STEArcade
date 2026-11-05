@@ -10,6 +10,7 @@ import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
 import gen
 from paths import build_dir, ROOT, EXTRACTED
+import palette_native as pn
 from toolchain import assemble_link
 
 
@@ -30,8 +31,9 @@ def main():
         import assets                         # (the renderer's graphics, colours and sprite code)
     except ImportError:
         assets = None
-    if assets and (args.assets or not (build / 'md_assets.s').exists()):
+    if assets and (args.assets or pn.changed('mrdo') or not (build / 'md_assets.s').exists()):
         assets.build()
+        pn.stamp('mrdo')
     text, report, _ = gen.generate()
     (build / 'code_main.s').write_text(text)
     (build / 'translation.json').write_text(json.dumps(report, indent=1) + '\n')

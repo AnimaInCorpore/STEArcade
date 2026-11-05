@@ -12,6 +12,7 @@ import gen
 import gen_sub
 from machine import load
 from paths import build_dir, ROOT, EXTRACTED
+import palette_native as pn
 from toolchain import assemble_link
 
 
@@ -30,8 +31,9 @@ def main():
     (build / 'gyruss.rom').write_bytes(gen.image()[:0x8000])
     (build / 'sub.rom').write_bytes(load('gyrussk.9'))
     import assets
-    if args.assets or not (build / 'gy_assets.s').exists():
+    if args.assets or pn.changed('gyruss') or not (build / 'gy_assets.s').exists():
         assets.build()
+        pn.stamp('gyruss')
     text, report, _ = gen.generate()
     (build / 'code_main.s').write_text(text)
     (build / 'translation.json').write_text(json.dumps(report, indent=1) + '\n')
@@ -45,7 +47,7 @@ def main():
         import sndgen
         (build / 'snd.rom').write_bytes(sndgen.image()[:0x4000])
         stext, srep2 = sndgen.generate()
-        if args.assets or not (build / 'snd_dac.s').exists():
+        if args.assets or pn.changed('gyruss') or not (build / 'snd_dac.s').exists():
             subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'i8039.py'), '--rate', '6258',
                             '--cap', '7'], check=True)
         (build / 'snd_code.s').write_text(stext)

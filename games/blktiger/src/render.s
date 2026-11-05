@@ -24,7 +24,7 @@ WIN_ROWS = 15                    ; and the 224 lines
 TILE_ENTRIES = 512
     endc
 TILE_SETS = TILE_ENTRIES/4
-BYTE_LUTS = 32                   ; cached byte tables of bake_pixels (2 KB each: tiles 0-15, sprites 16-23, characters 24-31)
+BYTE_LUTS = 32                   ; cached byte tables of bake_pixels (4 KB each: tiles 0-15, sprites 16-23, characters 24-31)
     ifnd SPRITE_ENTRIES
 SPRITE_ENTRIES = 512
     endc
@@ -359,6 +359,10 @@ map_block:
     lea pen_map,a2
     add.w d6,a2
     lea rgb_map,a3
+    cmp.w #$300,d6
+    blo.s .map_kind
+    lea rgb_map_flat,a3
+.map_kind:
     lea palette_dirty,a4
     move.w d6,d3
     lsr.w #4,d3
@@ -1694,7 +1698,7 @@ bake_pixels:
     mulu #20,d1
     lea byte_lut_tags,a5
     add.w d1,a5
-    moveq #11,d1
+    moveq #12,d1
     lsl.l d1,d0
     add.l #byte_luts,d0
     move.l d0,byte_lut
@@ -1729,9 +1733,12 @@ bake_pixels:
     ifd DEBUG
     addq.l #1,dbg_byte_luts
     endc
-    ; Each pen once: its planes spread over the four bytes (spread4), its masks
+    ; Each pen once: its planes spread over the four bytes (spread_pairs), its masks
+    moveq #0,d7
+.phase_build:
     lea bake_lut,a5
-    lea spread4,a6
+    lea spread_pairs,a6
+    adda.w d7,a6
     moveq #0,d0
 .lut:
     moveq #0,d1
@@ -1745,11 +1752,18 @@ bake_pixels:
 .lut_back:
     move.b (a2,d0.w),d1
     lsl.w #2,d1
+    add.w #1024,d1
+    move.l (a6,d1.w),d6
+    sub.w #1024,d1
     move.l (a6,d1.w),d1
+    bra.s .lut_save_pair
 .lut_save:
+    moveq #0,d6
+.lut_save_pair:
     move.w d0,d4
     lsl.w #2,d4
     move.l d1,(a5,d4.w)
+    move.l d6,96(a5,d4.w)
     move.w d0,d4
     add.w d4,d4
     move.w d3,64(a5,d4.w)        ; (the masks: words after the 16 longs)
@@ -1758,6 +1772,9 @@ bake_pixels:
     blo.s .lut
     ; byte b: its high pixel first (shifted once more); entries of 8 bytes: the planes, the masks, a pad
     move.l byte_lut,a4
+    move.w d7,d0
+    add.w d0,d0
+    adda.w d0,a4
     moveq #0,d0
 .byte_hi:
     move.w d0,d4
@@ -1768,7 +1785,7 @@ bake_pixels:
     add.w d4,d4
     move.w 64(a5,d4.w),d2
     add.w d2,d2
-    lea bake_lut,a6
+    lea bake_lut+96,a6
     lea bake_lut+64,a3
     moveq #15,d5
 .byte_lo:
@@ -1783,8 +1800,19 @@ bake_pixels:
     addq.w #1,d0
     cmp.w #16,d0
     blo.s .byte_hi
+    add.w #1024,d7
+    cmp.w #2048,d7
+    blo .phase_build
 .rows:
     move.l byte_lut,a5
+    move.w #2048,bake_phase_step
+    move.b bake_flip,d0
+    move.b bake_vflip,d1
+    eor.b d1,d0
+    beq.s .phase_ready
+    lea 2048(a5),a5
+    neg.w bake_phase_step
+.phase_ready:
     lea nibble_swap,a6
     lea 128(a1),a3               ; the transparency masks
     lea 160(a1),a4               ; the front masks
@@ -1839,6 +1867,8 @@ bake_pixels:
     sub.w bake_stride,a0
     sub.w bake_stride,a0
 .counted:
+    adda.w bake_phase_step,a5
+    neg.w bake_phase_step
     subq.w #1,bake_row_count
     bne .row
     rts
@@ -3172,12 +3202,6 @@ NS set 0
     dc.b ((NS&15)<<4)|(NS>>4)
 NS set NS+1
     endr
-spread4:                         ; a pen's four plane bits, one a byte (plane 0 in the high byte)
-SP4 set 0
-    rept 16
-    dc.l ((SP4&1)<<24)|((SP4&2)<<15)|((SP4&4)<<6)|((SP4&8)>>3)
-SP4 set SP4+1
-    endr
 front_limits: dc.b 12,12,8,8,4,4,0,0,0,0,0,0,0,0,0,0
     even
 ring_tables:
@@ -3198,7 +3222,9 @@ strip_mask_tab:                  ; per word of the display window (2 and 18 set 
     dcb.w 15,0
     dc.w -1,-1,-1
 palette_data: incbin "palette.bin"
+	include "colour_spread.s"
 rgb_map: incbin "rgb_map.bin"
+rgb_map_flat: incbin "rgb_map_flat.bin"
 tile_front: incbin "tile_front.bin"
     even
 tile_pixels: incbin "tile_pixels.bin"
@@ -3269,6 +3295,7 @@ cache_key: ds.l 1
 cell_keyv: ds.l 1
 cell_src: ds.l 1
 bake_stride: ds.w 1
+bake_phase_step: ds.w 1
 bake_width: ds.w 1
 bake_rows: ds.w 1
 bake_pixel_count: ds.w 1
@@ -3289,7 +3316,7 @@ palette_dirty: ds.b 64
 bake_lut: ds.l 48
 byte_lut: ds.l 1
 byte_lut_tags: ds.b 20*BYTE_LUTS
-byte_luts: ds.b 2048*BYTE_LUTS
+byte_luts: ds.b 4096*BYTE_LUTS
 bake_calls: ds.l 1
     ifd SIM
 bake_n_tile: ds.l 1                ; (perf_test frames: the bakes by kind)

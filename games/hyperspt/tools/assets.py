@@ -15,6 +15,9 @@
 Colours: black and 15 fitted by a weighted k-means in Oklab (Gyruss's tools/assets.py) to the reference pictures' pens
 of the coverage runs (ref/cover.py's `pens`), snapped to the STE's 4 bits a gun; every pen maps to the nearest.  The
 arcade shows 24 colours in the coverage (a 32-byte palette PROM).
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import collections
@@ -53,8 +56,9 @@ def histogram():
 def palette(v=None):
     """-> (16 colours, pen map [512])"""
     v = v or Video()
-    cols = [(0, 0, 0)] + gy.fit(histogram(), v.pens)
-    return cols, gy.pen_map(cols, v.pens)
+    import palette_native as pn
+    cols, pairs = pn.prom('hyperspt', histogram(), v.pens, lambda p: p < 256)
+    return [tuple(map(int, c)) for c in cols], pairs >> 4
 
 
 def nibbles(img):

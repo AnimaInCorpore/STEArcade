@@ -7,6 +7,7 @@ import sound                    # assets adds 1942's tools to sys.path; bind thi
 import gen
 from prepare import prepare
 from paths import build_dir, ROOT
+import palette_native as pn
 from toolchain import assemble_link
 
 
@@ -25,8 +26,9 @@ def main():
         import assets
     except ImportError:
         assets = None
-    if assets and (args.assets or not all((build / f).exists() for f in ('spr_code.s', 'spr_vrange.bin'))):
+    if assets and (args.assets or pn.changed('gunsmoke') or not all((build / f).exists() for f in ('spr_code.s', 'spr_vrange.bin'))):
         assets.build()
+        pn.stamp('gunsmoke')
     if True:                                    # (from the recordings, build/gunsmoke/fx.pkl and music.pkl)
         import sound
         import capsnd

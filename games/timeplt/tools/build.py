@@ -10,6 +10,7 @@ import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
 import gen
 from paths import build_dir, ROOT, EXTRACTED
+import palette_native as pn
 from toolchain import assemble_link
 
 
@@ -27,8 +28,9 @@ def main():
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'prepare.py')], check=True)
     (build / 'timeplt.rom').write_bytes(gen.image()[:0x8000])
     import assets
-    if args.assets or not (build / 'tp_assets.s').exists():
+    if args.assets or pn.changed('timeplt') or not (build / 'tp_assets.s').exists():
         assets.build()
+        pn.stamp('timeplt')
     text, report, _ = gen.generate()
     (build / 'code_main.s').write_text(text)
     (build / 'translation.json').write_text(json.dumps(report, indent=1) + '\n')

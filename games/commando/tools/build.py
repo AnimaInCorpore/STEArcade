@@ -3,6 +3,7 @@ from pathlib import Path
 import argparse,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[3]/'engine'))
 from paths import ROOT,build_dir
+import palette_native as pn
 from toolchain import assemble_link
 from prepare import prepare
 import gen,assets
@@ -15,7 +16,9 @@ def main():
     ap.add_argument('--frames',type=int,default=0);ap.add_argument('-D',dest='defines',action='append',default=[])
     a=ap.parse_args();prepare()
     # (spr_planes.bin: the pen planes and shared sprite orders of 2026-10-10; an older build directory has neither)
-    if a.assets or not all((build_dir("commando")/f).exists() for f in ("spr_code.s","spr_planes.bin")): assets.build()
+    if a.assets or pn.changed("commando") or not all((build_dir("commando")/f).exists() for f in ("spr_code.s","spr_planes.bin")):
+        assets.build()
+        pn.stamp("commando")
     if not (build_dir("commando")/"spr_vrange.bin").exists(): assets.vranges()
     if a.sound or not (build_dir('commando')/'sfx_data.s').exists():
         import sound_sfx;print('sfx_data.s: %d bytes'%sound_sfx.emit(build_dir('commando')/'sfx_data.s'))

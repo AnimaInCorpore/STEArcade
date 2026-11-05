@@ -1,8 +1,13 @@
-"""Screen-oriented pen masks, 16-colour STE palette and baked Blitter streams."""
+"""Screen-oriented pen masks, 16-colour STE palette and baked Blitter streams.
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
+"""
 from pathlib import Path
 import sys,importlib.util,json,random
 import numpy as np
 from machine import Gfx,Commando,BUILD
+import palette_native as pn
+import palette_quantize as pq
 
 def helper(name,file):
     old=list(sys.path)
@@ -32,8 +37,18 @@ def bake_rows(mapping):
     of its pair of the high ones (B, in d0).  Characters keep their four products in registers and leave pen 3 (the
     transparent pen) in d2; their pixels are the high byte."""
     lines=[]
-    def ors(reg,value):
-        return [f'\tor.w {reg},d{4+k}' for k in range(4) if value>>k&1]
+    def ors(reg, pair, phase):
+        a, b = (int(pair) >> 4), (int(pair) & 15)
+        if phase: a, b = b, a
+        out = []
+        for k in range(4):
+            aa, bb = (a >> k) & 1, (b >> k) & 1
+            if aa and bb:
+                out.append(f'\tor.w {reg},d{4+k}')
+            elif aa or bb:
+                out += [f'\tmove.w {reg},bake_pen_bits', f'\tand.w #${0xaaaa if aa else 0x5555:04x},{reg}',
+                        f'\tor.w {reg},d{4+k}', f'\tmove.w bake_pen_bits,{reg}']
+        return out
     pairs=['\tmove.w d0,d4','\tand.w d1,d4','\teor.w d4,d0','\teor.w d4,d1',
            '\tmove.w d0,d5','\tor.w d1,d5','\tor.w d4,d5','\tnot.w d5']   # pen bits 0-1: 3 d4, 1 d0, 2 d1, 0 d5
     clear=[f'\tmoveq #0,d{4+k}' for k in range(4)]
@@ -43,24 +58,26 @@ def bake_rows(mapping):
                   ['\tmove.w d2,d0','\tnot.w d0','\tand.w d3,d0'],['\tmove.w d2,d0','\tand.w d3,d0']]}
     for kind,base,pens,colours in (('tile',0,8,16),('spr',128,16,4)):
         lines.append(f'bake_{kind}_rows:')
-        lines+=[f'\tdc.l bake_{kind}{c}' for c in range(colours)]
+        lines+=[f'\tdc.l bake_{kind}{c}_0,bake_{kind}{c}_1' for c in range(colours)]
         for c in range(colours):
-            lines+=[f'bake_{kind}{c}:']+pairs+['\tmovem.w d0/d1/d4/d5,(a2)']+clear
-            for j,high in enumerate(highs[kind]):
-                values=[int(mapping[base+c*pens+4*j+i]) for i in range(4)]
-                if not any(values):continue
-                lines+=high
-                for i,v in enumerate(values):
-                    if v:lines+=[f'\tmove.w {offset[i]}(a2),d1','\tand.w d0,d1']+ors('d1',v)
-            lines.append('\trts')
+            for phase in range(2):
+                lines+=[f'bake_{kind}{c}_{phase}:']+pairs+['\tmovem.w d0/d1/d4/d5,(a2)']+clear
+                for j,high in enumerate(highs[kind]):
+                    values=[int(mapping[base+c*pens+4*j+i]) for i in range(4)]
+                    if not any(values):continue
+                    lines+=high
+                    for i,v in enumerate(values):
+                        if v:lines+=[f'\tmove.w {offset[i]}(a2),d1','\tand.w d0,d1']+ors('d1',v,phase)
+                lines.append('\trts')
     lines.append('bake_chr_rows:')
-    lines+=[f'\tdc.l bake_chr{c}' for c in range(16)]
+    lines+=[f'\tdc.l bake_chr{c}_0,bake_chr{c}_1' for c in range(16)]
     for c in range(16):
-        lines+=[f'bake_chr{c}:','\tmove.w d0,d2','\tand.w d1,d2','\teor.w d2,d0','\teor.w d2,d1',
-                '\tmove.w d0,d3','\tor.w d1,d3','\tor.w d2,d3','\tnot.w d3','\tand.w #$ff00,d3']+clear
-        for pen,reg in enumerate(('d3','d0','d1','d2')):
-            lines+=ors(reg,int(mapping[192+c*4+pen]))
-        lines.append('\trts')
+        for phase in range(2):
+            lines+=[f'bake_chr{c}_{phase}:','\tmove.w d0,d2','\tand.w d1,d2','\teor.w d2,d0','\teor.w d2,d1',
+                    '\tmove.w d0,d3','\tor.w d1,d3','\tor.w d2,d3','\tnot.w d3','\tand.w #$ff00,d3']+clear
+            for pen,reg in enumerate(('d3','d0','d1','d2')):
+                lines+=ors(reg,int(mapping[192+c*4+pen]),phase)
+            lines.append('\trts')
     return lines
 
 
@@ -74,13 +91,13 @@ def build():
         m.inputs[:3]=inputs(f,rnd);m.run_frame_port()
         if f in (100,300,700,900,1000,1200,1500,1800,2200,2500):
             weights+=np.bincount(m.render_raw()[16:240].ravel(),minlength=256)
-    colours=pal.oklab_to_rgb(pal.kmeans(g.rgb,weights**0.6+1,16))
-    colours=np.round(colours/17)*17;colours[0]=0
-    mapping=((pal.rgb_to_oklab(g.rgb)[:,None]-pal.rgb_to_oklab(colours)[None])**2).sum(axis=2).argmin(axis=1)
+    counts={p:float(n) for p,n in enumerate(weights) if n}
+    colours,mapping=pn.prom('commando',counts,g.rgb,lambda p:128<=p<192,dither=True)
+    mapping[192:256] = pq.flat_map(colours, g.rgb[192:256]) * 17
     (BUILD/'palmap.bin').write_bytes(mapping.astype(np.uint8).tobytes())
-    (BUILD/'palette.bin').write_bytes(np.array([pal.ste_word(c) for c in colours],'>u2').tobytes())
+    (BUILD/'palette.bin').write_bytes(pq.ste_words(colours).tobytes())
     docs=Path(__file__).resolve().parents[1]/'docs'
-    (docs/'palette.json').write_text(json.dumps(dict(rgb=colours.astype(int).tolist(),map=mapping.tolist()),indent=2)+'\n')
+    (docs/'palette.json').write_text(json.dumps(dict(rgb=colours.astype(int).tolist(),map=mapping.tolist(),map_format='even-source index high nibble, odd-source index low nibble'),indent=2)+'\n')
     # The objects as pen planes (render.s get_object_bake): per row the plane words (bit j of the pen), rows in order.
     for name,pixels,planes in [('tile',g.tiles,3),('spr',g.sprites,4),('chr',g.chars,2)]:
         oriented=pixels.transpose(0,2,1)[:,::-1]

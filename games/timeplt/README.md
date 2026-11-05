@@ -1,5 +1,7 @@
 # Time Pilot (Konami, 1982) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Time Pilot on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `timeplt`.  The main Z80 program (24 KB) is statically translated to 68000 code and checked against a

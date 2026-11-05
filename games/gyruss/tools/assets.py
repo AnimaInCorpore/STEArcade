@@ -15,6 +15,9 @@ picture are raw columns):
 Colours: black and 15 fitted by a weighted k-means in Oklab (as Kung-Fu Master's tools/assets.py) to the reference pictures' pens
 of the coverage runs (ref/cover.py's `pens`), snapped to the STE's 4 bits a gun; every pen maps to the nearest (black
 only for black).  The arcade shows 28 colours (a 32-entry PROM).
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import collections
@@ -25,6 +28,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine import Video
 from paths import build_dir
 import sprite_programs as sp
+import palette_native as pn
 
 BUILD = build_dir('gyruss')
 
@@ -112,8 +116,8 @@ def histogram():
 def palette(v=None):
     """-> (16 colours, pen map [320])"""
     v = v or Video()
-    cols = [(0, 0, 0)] + fit(histogram(), v.pens)
-    return cols, pen_map(cols, v.pens)
+    cols, pairs = pn.prom('gyruss', histogram(), v.pens, lambda p: p < 256)
+    return [tuple(map(int, c)) for c in cols], pairs >> 4
 
 
 def turned_sprites(v):

@@ -1,5 +1,7 @@
 # Gyruss (Konami, 1983) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Gyruss on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `gyruss` (Konami GX347).  Both game CPUs are statically translated to 68000 code: the main Z80 (24 KB) and

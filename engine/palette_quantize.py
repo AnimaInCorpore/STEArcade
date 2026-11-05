@@ -41,7 +41,7 @@ def balanced_weights(histograms, power=FREQUENCY_POWER, chroma_gain=CHROMA_GAIN,
     return [[','.join(map(str, c)), float(w)] for c, w in zip(colors, weight)]
 
 
-def fit(histograms, inputs, count=16, cache=None, dither=True):
+def fit(histograms, inputs, count=16, cache=None, dither=True, fixed=()):
     """Return RGB palette and packed pairs (even-source parity high nibble).
 
     Inputs and histogram keys are original RGB triples. Black stays index zero.
@@ -49,6 +49,12 @@ def fit(histograms, inputs, count=16, cache=None, dither=True):
     """
     job = dict(hist=balanced_weights(histograms), input_colors=np.asarray(inputs).tolist(),
                color_count=count, dither_l=.12 if dither else 0)
+    if len(fixed):
+        anchors = np.asarray(fixed, dtype=int)
+        assert anchors.ndim == 2 and anchors.shape[1] == 3
+        assert np.all((anchors >= 0) & (anchors <= 255)) and np.all(anchors % 17 == 0)
+        assert len({tuple(c) for c in anchors} | {(0, 0, 0)}) <= count
+        job['fixed'] = anchors.tolist()
     payload = json.dumps(job, sort_keys=True, separators=(',', ':')).encode()
     key = hashlib.sha256(WORKER.read_bytes() + payload).hexdigest()
     path = Path(cache) / (key + '.json') if cache is not None else None
@@ -62,6 +68,35 @@ def fit(histograms, inputs, count=16, cache=None, dither=True):
     palette = np.array(result['palette'], np.uint8)
     assert 0 < len(palette) <= count <= 16 and np.all(palette % 17 == 0)
     assert np.all(palette[0] == 0) and len(result['choices']) == len(inputs)
+    assert all(np.any(np.all(palette == c, axis=1)) for c in fixed)
     pairs = np.array([(c['first'] << 4) | c['second'] for c in result['choices']], np.uint8)
     palette = np.pad(palette, ((0, count - len(palette)), (0, 0)))
     return palette, pairs
+
+
+def pen_histograms(counts, pens, sprites):
+    """Separate PROM pen counts before compression; merge equal original RGB."""
+    from collections import Counter
+    layers = [Counter(), Counter()]
+    for p, n in counts.items():
+        layers[0 if sprites(p) else 1][tuple(map(int, pens[p]))] += n
+    return layers
+
+
+def indices(pairs, phase):
+    """Select the checker colour at original graphic (x + y) parity."""
+    pairs = np.asarray(pairs, np.uint8)
+    return np.where(np.asarray(phase) & 1, pairs & 15, pairs >> 4).astype(np.uint8)
+
+
+def flat_map(palette, inputs):
+    """Nearest single index in the fitted palette; text never uses a checker."""
+    delta = oklab(inputs)[:, None] - oklab(palette)[None]
+    delta[:, :, 1:] *= .75
+    return (delta**2).sum(2).argmin(1).astype(np.uint8)
+
+
+def ste_words(palette):
+    level = np.asarray(palette, np.uint16) // 17
+    nib = ((level & 1) << 3) | (level >> 1)
+    return ((nib[:, 0] << 8) | (nib[:, 1] << 4) | nib[:, 2]).astype('>u2')

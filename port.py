@@ -157,6 +157,7 @@ TESTS = {
                  ("tools/sound_test.py", ["player"], None)],         # the STE's sound player against its model
     "ddragon": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
+                ("tools/palette_test.py", [], None),             # flat text colours and bounded solid fills
                 ("tools/logic_test.py", ["{n}"], 3000),
                 ("tools/logic_test.py", ["6000", "--seed", "-1"], None),    # the recorded play
                 ("tools/render_test.py", ["4000", "--seed", "-1", "--first", "1000", "--every", "10"], None),
@@ -256,7 +257,7 @@ TESTS = {
              ("tools/sound_test.py", ["3000"], None),
              ("tools/render_test.py", ["seq", "200", "1", "1200"], None)],
 }
-ENGINE_TESTS = ["engine/ppo_test.py", "engine/borders_blit_test.py", "engine/m72_bitmap_test.py",
+ENGINE_TESTS = ["engine/palette_quantize_test.py", "engine/ppo_test.py", "engine/borders_blit_test.py", "engine/m72_bitmap_test.py",
                 "engine/sprite_blit_test.py", "engine/jagpad_test.py", "engine/ikbd_test.py", "engine/lz.py",
                 "engine/hdd_test.py",                              # (tools/hddtest.sh: the same on Hatari's disks)
                 "engine/m6809_test.py", "engine/hd63701_test.py",   # (MAME traces: build/m6809/, build/hd63701/)

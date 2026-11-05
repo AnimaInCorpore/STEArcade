@@ -14,6 +14,9 @@ sprites' row streams (stefastbobs2's preparation, as Trojan's and Black Tiger's 
     char_pixels.bin   1024 x 32 (8 rows of 8 pixels, two a byte); char_blank.bin: 1 when every pixel is pen 0,
                       $80 + the pen when every pixel is that pen (a solid character: render.s fills it)
     nz2.bin           per byte: (the first pixel not 0) << 1 | (the second not 0)
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import json
@@ -49,15 +52,10 @@ def oklab(c):
 
 def palette():
     """-> (the 16 colours [16, 3], the 4096-entry map, the 16 STE words)"""
-    doc = json.loads((DOCS / "palette.json").read_text())
-    colours = np.array([[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in doc["colours"]], np.uint8)
-    assert len(colours) == 16 and not colours[0].any() and not (colours % 17).any()
-    mapping = ((oklab(RGB)[:, None] - oklab(colours)[None]) ** 2).sum(2).argmin(1).astype(np.uint8)
-    regs = []
-    for r, g, b in colours // 17:
-        conv = lambda n: ((int(n) >> 1) & 7) | ((int(n) & 1) << 3)
-        regs.append((conv(r) << 8) | (conv(g) << 4) | conv(b))
-    return colours, mapping, np.array(regs, ">u2")
+    import palette_native as pn
+    import palette_quantize as pq
+    colours, mapping = pn.ram('ddragon', RGB)
+    return colours, mapping, pq.ste_words(colours)
 
 
 def masks(tile, test):
@@ -154,7 +152,11 @@ def build():
     colours, mapping, regs = palette()
     (dest / "palette_rgb.bin").write_bytes(colours.tobytes())
     (dest / "rgb_map.bin").write_bytes(mapping.tobytes())
+    import palette_quantize as pq
+    (dest / 'rgb_map_flat.bin').write_bytes((pq.flat_map(colours, RGB) * 17).tobytes())
     (dest / "palette.bin").write_bytes(regs.tobytes())
+    import palette_native as pn
+    (dest / 'colour_spread.s').write_text(pn.spread_tables())
     (dest / "bg_pixels.bin").write_bytes(packed(v.tiles))
     (dest / "bg_slot.bin").write_bytes(bg_slot())
     spr = v.sprites.astype(np.uint8)
@@ -176,15 +178,19 @@ class Oracle:
     def __init__(self):
         dest = build_dir("ddragon")
         self.mapping = np.frombuffer((dest / "rgb_map.bin").read_bytes(), np.uint8)
+        self.flat_mapping = np.frombuffer((dest / "rgb_map_flat.bin").read_bytes(), np.uint8)
         self.rgb = np.frombuffer((dest / "palette_rgb.bin").read_bytes(), np.uint8).reshape(16, 3)
         self.video = Video()
 
     def frame(self, m):
-        raw = self.video.render_raw(m.mem, m.scrollx, m.scrolly)
+        import palette_quantize as pq
+        raw = self.video.render_raw(m.mem, m.scrollx, m.scrolly, checker=True)
         lo = np.frombuffer(bytes(m.mem[0x1000:0x1200]), np.uint8).astype(int)
         hi = np.frombuffer(bytes(m.mem[0x1200:0x1400]), np.uint8).astype(int)
         word = ((lo & 15) << 8) | ((lo >> 4) << 4) | (hi & 15)
-        return self.mapping[word[raw]]
+        word = word[raw & 1023]
+        pairs = np.where((raw & 1023) < 128, self.flat_mapping[word], self.mapping[word])
+        return pq.indices(pairs, raw >> 10)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@
 ; README), -D NORENDER=1 no pictures (the game alone).
 ;
 ; Fixed memory: RING0 $200000, RING1 $260400, PFB $2C0800, PFS $2E0800, AIMG $300800, PF_LISTS $30A000, LUTS
-; $31A000, ALUTS $32A000, AL_LISTS $33A000, SPR_POOL $35F800-$3BFFFF, MO_HASH $3C2000-$3C7FFF, PBUF $3E0800-$3EB47F.
+; $31A000-$339FFF, ALUTS in runtime BSS, AL_LISTS $33A000, SPR_POOL $35F800-$3BFFFF, MO_HASH $3C2000-$3C7FFF, PBUF $3E0800-$3EB47F.
 
 STRIDE = 448
 RING_COLS = 56
@@ -53,8 +53,7 @@ PFB = $2C0800				; P: 512 lines x 256 bytes
 PFS = $2E0800				; P': the shadow colours
 AIMG = $300800				; the alphanumerics: 240 lines x 160 bytes
 PF_LISTS = $30A000			; 8 x 4096 words: the positions of the tiles of each playfield palette
-LUTS = $31A000				; 32 x 2 KB: per colour set, a byte of two pixels -> their plane bits (and mirrored)
-ALUTS = $32A000				; 64 x 1 KB: per alphanumerics colour, a byte of four 2-bit pixels -> plane nibbles
+LUTS = $31A000				; 32 x 4 KB: both source-row parity banks, including mirrors; ends at AL_LISTS
 AL_LISTS = $33A000			; 64 x 1200 words: the character positions of each alphanumerics colour
 SPR_POOL = $35F800			; the motion objects' baked images
 PBUF = $3E0800				; the panel composed when its characters are not all opaque (120 x 368)
@@ -132,6 +131,7 @@ init_video:
 	move.l	d1,(a1)+
 	dbf	d0,.ps
 	lea	pen_map,a0
+	st	palette_first
 	move.w	#768/4-1,d0
 .pm:	move.l	#$ffffffff,(a0)+
 	dbf	d0,.pm
@@ -417,16 +417,24 @@ pal_update:
 	addq.w	#1,d7
 	cmp.w	#48,d7
 	blo	.set
+	sf	palette_first
 	rts
 ; pen d0.w's word at (a2): its STE colour; a change goes into set_mask.  Keeps d0/d6/a0-a2.
 pen_new:
 	moveq	#0,d1
 	move.w	(a2),d1
 	lea	irgb_map,a3
+	cmp.w	#$100,d0
+	bhs	.map_kind
+	lea	irgb_map_flat,a3
+.map_kind:
 	move.b	(a3,d1.l),d1
 	lea	pen_map,a3
+	tst.b	palette_first		; $ff is now a valid packed colour, not an invalid sentinel
+	bne	.changed
 	cmp.b	(a3,d0.w),d1
 	beq	.same
+.changed:
 	move.b	d1,(a3,d0.w)
 	move.w	d0,d1
 	lsr.w	#4,d1
@@ -528,56 +536,61 @@ lut_need:
 .ok:	move.l	(sp)+,a0
 	rts
 
-; lut_build: table d0.w (2 KB at LUTS) from the 16 pens from d1.w: [b] = the plane bits of the pixels b >> 4 and
+; lut_build: table d0.w (4 KB at LUTS) from the 16 pens from d1.w: [b] = the plane bits of the pixels b >> 4 and
 ; b & 15 (two bits a byte, plane 0 in the high byte, the first pixel the higher bit); at +1024 the pixels swapped.
 lut_build:
 	lea	LUTS,a1
 	and.l	#$ffff,d0
-	moveq	#11,d2
+	moveq	#12,d2
 	lsl.l	d2,d0
 	add.l	d0,a1
 	lea	pen_map,a3
 	add.w	d1,a3
-	lea	spread4,a0
-	lea	lut_tmp,a2		; s[16], then s << 1
+	move.l	a3,a4
+	lea	spread_pairs,a0
+	moveq	#1,d7
+.phase:
+	move.l	a4,a3
+	lea	lut_tmp,a2		; raw even-X spreads shifted once; raw odd-X spreads at +64
 	moveq	#16-1,d3
 .s:	moveq	#0,d0
 	move.b	(a3)+,d0
 	add.w	d0,d0
 	add.w	d0,d0
+	move.l	(a0,d0.w),d4
+	add.w	#1024,d0
 	move.l	(a0,d0.w),d0
-	move.l	d0,(a2)+
-	add.l	d0,d0
-	move.l	d0,64-4(a2)
+	move.l	d0,64(a2)
+	add.l	d4,d4
+	move.l	d4,(a2)+
 	dbf	d3,.s
-	lea	lut_tmp+64,a3		; [hi << 4 | lo] = s2[hi] | s[lo]
+	lea	lut_tmp,a3		; shifted raw even-X pixel
 	moveq	#16-1,d3
 .h:	move.l	(a3)+,d2
-	lea	lut_tmp,a2
-	rept	16
-	move.l	(a2)+,d0
-	or.l	d2,d0
-	move.l	d0,(a1)+
-	endr
-	dbf	d3,.h
-	lea	lut_tmp,a3		; mirrored: s2[lo] | s[hi]
-	moveq	#16-1,d3
-.m:	move.l	(a3)+,d2
 	lea	lut_tmp+64,a2
 	rept	16
 	move.l	(a2)+,d0
 	or.l	d2,d0
 	move.l	d0,(a1)+
 	endr
+	dbf	d3,.h
+	lea	lut_tmp,a3		; raw high nibble, unshifted for its second destination pixel
+	moveq	#16-1,d3
+.m:	move.l	(a3)+,d2
+	lsr.l	#1,d2
+	lea	lut_tmp+64,a2
+	rept	16
+	move.l	(a2)+,d0
+	add.l	d0,d0
+	or.l	d2,d0
+	move.l	d0,(a1)+
+	endr
 	dbf	d3,.m
+	lea	1024(a0),a0
+	dbf	d7,.phase
 	rts
 
-spread4:				; a colour's plane bits, one a byte (plane 0 in the high byte)
-N	set	0
-	rept	16
-	dc.l	((N&1)<<24)|(((N>>1)&1)<<16)|(((N>>2)&1)<<8)|((N>>3)&1)
-N	set	N+1
-	endr
+	include "colour_spread.s"
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; pf_update: the playfield.  A new tile bank: every copy invalid.  The window's tiles (29 columns x 31 rows from
@@ -785,8 +798,8 @@ pf_tile_draw:
 	move.w	d0,d5
 	rol.w	#4,d5
 	and.w	#7,d5			; the palette
-	moveq	#11,d1
-	lsl.w	d1,d5			; (2 KB a table)
+	moveq	#12,d1
+	lsl.w	d1,d5			; (4 KB a table)
 	; the place: P + row * 2048 + (col >> 1) * 8 + (col & 1)
 	moveq	#63,d1
 	and.w	d3,d1			; the row
@@ -806,20 +819,20 @@ pf_tile_draw:
 	beq	.nop
 	movem.l	d1-d2/a0,-(sp)
 	move.w	d5,d0
-	moveq	#11,d4
+	moveq	#12,d4
 	lsr.w	d4,d0
 	addq.w	#8,d0
 	bsr	lut_need
 	lea	PFB,a1
 	add.l	d1,a1
-	lea	LUTS+8*2048,a2
+	lea	LUTS+8*4096,a2
 	add.w	d5,a2
 	bsr	tile_rows
 	movem.l	(sp)+,d1-d2/a0
 .nop:	btst	#1,d2
 	beq	.nos
 	move.w	d5,d0
-	moveq	#11,d4
+	moveq	#12,d4
 	lsr.w	d4,d0
 	bsr	lut_need
 	lea	PFS,a1
@@ -831,6 +844,7 @@ pf_tile_draw:
 
 ; tile_rows: 8 rows of pixels at a0 (4 bytes a row) through the table a2 (d7.b set: mirrored) to a1 (256 bytes a line)
 tile_rows:
+	move.w	#2048,d4
 	moveq	#8-1,d6
 	tst.b	d7
 	bne	.mir
@@ -859,6 +873,8 @@ tile_rows:
 	or.l	(a2,d1.w),d0
 	movep.l	d0,0(a1)
 	lea	256(a1),a1
+	adda.w	d4,a2
+	neg.w	d4
 	dbf	d6,.row
 	rts
 .mir:	lea	1024(a2),a2
@@ -889,6 +905,8 @@ tile_rows:
 	movep.l	d0,0(a1)
 	lea	256(a1),a1
 	addq.l	#4,a0
+	adda.w	d4,a2
+	neg.w	d4
 	dbf	d6,.mrow
 	rts
 
@@ -1119,7 +1137,7 @@ al_char:
 	lea	ALUTS,a2
 	moveq	#0,d0
 	move.w	d2,d0
-	moveq	#10,d1
+	moveq	#11,d1
 	lsl.l	d1,d0
 	add.l	d0,a2			; the colour's table
 	and.w	#$3ff,d3
@@ -1136,6 +1154,7 @@ al_char:
 	and.w	#1,d4
 	add.w	d4,d0
 	add.w	d0,a1
+	move.w	#1024,d3
 	moveq	#8-1,d6
 .row:	moveq	#0,d1
 	move.b	(a0)+,d1
@@ -1150,6 +1169,8 @@ al_char:
 	or.l	(a2,d1.w),d0
 	movep.l	d0,0(a1)
 	lea	AL(a1),a1
+	adda.w	d3,a2
+	neg.w	d3
 	dbf	d6,.row
 .done:	rts
 
@@ -1181,10 +1202,11 @@ al_set_changed:
 ; alut_build: colour d0.w's table: [b] = the plane nibbles of the four 2-bit pixels of b (the first the highest bit):
 ; [hi << 4 | lo] = pairs_hi[hi] | pairs_lo[lo]
 alut_build:
+	movem.l	d7/a4,-(sp)
 	lea	ALUTS,a1
 	moveq	#0,d1
 	move.w	d0,d1
-	moveq	#10,d2
+	moveq	#11,d2
 	lsl.l	d2,d1
 	add.l	d1,a1
 	lea	pen_map,a3
@@ -1192,7 +1214,15 @@ alut_build:
 	add.w	d0,a3
 	add.w	d0,a3
 	add.w	d0,a3			; its 4 pens
-	lea	spread4,a0
+	move.l	a3,a4
+	moveq	#0,d7
+.phase:
+	move.l	a4,a3
+	lea	spread_pairs,a0
+	move.w	d7,d2
+	lsl.w	#8,d2
+	lsl.w	#2,d2
+	adda.w	d2,a0
 	lea	lut_tmp,a2
 	moveq	#4-1,d3			; s[4]
 .s:	moveq	#0,d0
@@ -1200,6 +1230,9 @@ alut_build:
 	add.w	d0,d0
 	add.w	d0,d0
 	move.l	(a0,d0.w),(a2)+
+	add.w	#1024,d0
+	move.l	(a0,d0.w),d4
+	move.l	d4,144-4(a2)
 	dbf	d3,.s
 	lea	lut_tmp,a0		; the pairs: hi (s[a] << 3 | s[b] << 2) at +16, lo (s[a] << 1 | s[b]) at +80
 	lea	lut_tmp+16,a2
@@ -1208,7 +1241,9 @@ alut_build:
 .pa:	moveq	#0,d4			; b
 .pb:	move.l	(a0,d3.w),d0
 	add.l	d0,d0
+	add.w	#144,d4
 	or.l	(a0,d4.w),d0
+	sub.w	#144,d4
 	move.l	d0,(a3)+
 	add.l	d0,d0
 	add.l	d0,d0
@@ -1229,6 +1264,10 @@ alut_build:
 	move.l	d0,(a1)+
 	endr
 	dbf	d3,.h
+	addq.w	#1,d7
+	cmp.w	#2,d7
+	blo	.phase
+	movem.l	(sp)+,d7/a4
 	rts
 
 ; al_recolour: colour d0.w's listed characters that use its pens d1.w drawn again
@@ -2694,11 +2733,13 @@ mo_bake:
 	move.w	ob_pal,d0
 	add.w	#16,d0
 	bsr	lut_need
-	lea	LUTS+16*2048,a2
+	lea	LUTS+16*4096,a2
+	moveq	#0,d0
 	move.w	ob_pal,d0
-	moveq	#11,d1
-	lsl.w	d1,d0
-	add.w	d0,a2			; the palette's table
+	moveq	#12,d1
+	lsl.l	d1,d0
+	add.l	d0,a2
+	move.w	#2048,mo_phase_step			; the palette's table
 	btst	#6,MR_W2+1(a6)
 	sne	ob_flip
 	beq	.nf
@@ -2863,7 +2904,9 @@ mo_bake:
 	beq	.nd
 	move.l	(a0)+,(a5)+
 	move.l	(a0)+,(a5)+
-.nd:	addq.w	#1,d7
+.nd:	adda.w	mo_phase_step,a2
+	neg.w	mo_phase_step
+	addq.w	#1,d7
 	cmp.w	#8,d7
 	blo	.r
 	addq.w	#1,ob_ty
@@ -3580,6 +3623,7 @@ sblit:
 	even
 palette_data:	incbin	"palette.bin"
 irgb_map:	incbin	"irgb_map.bin"
+irgb_map_flat:	incbin	"irgb_map_flat.bin"
 tile_px:	incbin	"tile_px.bin"
 tile_pens:	incbin	"tile_pens.bin"
 tile_masks:	incbin	"tile_masks.bin"
@@ -3671,6 +3715,8 @@ mo_epoch:	ds.b	16
 lut_stale:	ds.b	32
 	even
 lut_tmp:	ds.l	40
+mo_phase_step:	ds.w	1
+ALUTS:		ds.b	64*2048
 pf_list_n:	ds.w	8
 al_list_n:	ds.w	64
 row_ver:	ds.l	30
@@ -3685,6 +3731,8 @@ runs_dirty:	ds.b	30
 row_t2:		ds.b	30
 	even
 pen_map:	ds.b	768
+palette_first:	ds.b	1
+	even
 pal_shadow:	ds.w	768
 pf_shadow:	ds.w	4096
 al_dirty:	ds.b	1		; the alphanumerics written since they were compared (gauntlet.s's hooks)

@@ -12,6 +12,7 @@ import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
 import gen
 from paths import build_dir, ROOT, EXTRACTED
+import palette_native as pn
 from toolchain import assemble_link
 
 
@@ -32,8 +33,9 @@ def main():
         import assets
     except ImportError:
         assets = None
-    if assets and (args.assets or not (build / 'tf_assets.s').exists()):
+    if assets and (args.assets or pn.changed('trackfld') or not (build / 'tf_assets.s').exists()):
         assets.build()
+        pn.stamp('trackfld')
     report = gen.generate()
     (build / 'translation.json').write_text(json.dumps({k: v for k, v in report.items() if k != 'missing'},
                                                        indent=1, default=str) + '\n')

@@ -133,14 +133,18 @@ def main():
         wx = mem.r16(sym['cur_wx'])                 # the window's first pixel on the buffer's lines (48 + the hardware offset)
         full = planar(mem, base, 256, 0, 32)
         mine = full[:, wx:wx + 224]
-        want = mapping[video.render_raw(m)[16:240].T[::-1]]
+        import palette_quantize as pq
+        raw = video.render_raw(m, checker=True)[16:240].T[::-1]
+        want = pq.indices(mapping[raw & 1023], raw >> 10)
         if edge:
             code, edge_x, edge_y = edge
             got = planar(mem, base + edge_y * 256, 16, 0, 32)[:, wx + edge_x:wx + edge_x + 16]
             shape = video.sprites[code].T[::-1]
             opaque = shape != 0
+            yy,xx = np.indices(shape.shape)
+            sprite_colours = pq.indices(mapping[384 + 3 * 16 + shape.astype(int)], xx+yy)
             if edge_y in (-8, 248):             # (above / below the window: the whole sprite is in the guard lines)
-                assert np.array_equal(got[opaque], mapping[384 + 3 * 16 + shape.astype(int)][opaque]),                     'the whole sprite was clipped'
+                assert np.array_equal(got[opaque], sprite_colours[opaque]), 'the whole sprite was clipped'
         # the side bars (the 48 pixels on each side of the window that the screen shows) must stay black
         if full[:, wx - 48:wx].any() or full[:, wx + 224:wx + 272].any():
             where = np.argwhere(np.hstack((full[:, wx - 48:wx], full[:, wx + 224:wx + 272])))

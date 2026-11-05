@@ -100,7 +100,8 @@ def main():
                             ax, ay = (240 - xs_, 240 - ys) if flip else (xs_, ys)
                             attr = (0x10 if ax < 0 else 0) | hf
                             ref.sprites[4 * n:4 * n + 4] = bytes([code & 255, attr | ((code >> 3) & 0xe0), ay & 255, ax & 255])
-                            seen = gfx.sprites[code]
+                            from mamegfx import checker_gfx
+                            seen = checker_gfx(gfx.sprites[code])
                             if hf:
                                 seen = seen[:, ::-1]
                             if flip:
@@ -162,7 +163,9 @@ def main():
                 continue
             ref.sprites[4 * n:4 * n + 4] = bytes([code & 255, (0x10 if ax < 0 else 0) | hf | colour | ((code >> 3) & 0xe0),
                                                   ay & 255, ax & 255])
-            seen = gfx.sprites[code][:, ::-1] if hf else gfx.sprites[code]
+            from mamegfx import checker_gfx
+            seen = checker_gfx(gfx.sprites[code])
+            if hf: seen = seen[:, ::-1]
             placed.append((xs_, ys, seen[::-1, ::-1] if flip else seen, colour))
         mine_win, _ = render(r, ref)
         walk += 1
@@ -197,8 +200,9 @@ def expect(oracle, ref, pal, placed, f):
     want = np.zeros((224, 320), np.uint8)
     want[:, 32:288] = oracle.frame(ref)
     for xs_, ys, seen, colour in placed:
-        mapped = oracle.mapping[pal[0x200 + colour * 16 + seen.astype(np.uint16)] & 4095]
-        opaque = seen != 15
+        import palette_quantize as pq
+        mapped = pq.indices(oracle.mapping[pal[0x200 + colour * 16 + (seen.astype(np.uint16) & 15)] & 4095], seen >> 10)
+        opaque = (seen & 15) != 15
         for c in range(16):
             wx = 32 + xs_ + c
             band = (32 - f <= wx < 32) or (288 <= wx < 304 - f) or ('--whole' in sys.argv and 0 <= wx < 320 and not 32 <= wx < 288)

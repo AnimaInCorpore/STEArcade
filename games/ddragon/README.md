@@ -1,5 +1,7 @@
 # Double Dragon (Technos, 1987) for the Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 2026-10-19: margin clears use the full-word dispatcher and solid text fills look up their piece sizes.
 Native continuation roots are explicit; `sprite_test.py --seed 1` supplements the default private replay test.
 See [measurements and validation](../../docs/virtual-scroll-performance.md#implementation-results).

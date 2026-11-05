@@ -18,6 +18,9 @@ The picture is turned as MAME's ROT90 turns it: picture pixel (X, Y), X 0-223, Y
 Colours: Pooyan's PROM has 19 colours and the pictures show 17 (ref/cover.py's pens): colour 0 is black (the side
 bands and the borders), 1-15 the 15 most frequent; every pen maps to the nearest in Oklab (the two left out are drawn
 on 0.003% of the pixels).
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import collections
@@ -66,19 +69,10 @@ def ste_word(rgb):
 def palette(v=None):
     """-> (16 colours (8-bit RGB, as the STE shows them), pen map [512])"""
     v = v or Video()
-    h = histogram()
-    by_rgb = collections.Counter()
-    for p, n in h.items():
-        by_rgb[tuple(int(x) for x in v.pens[p])] += n
-    seen = [c for c, _ in by_rgb.most_common() if c != (0, 0, 0)]
-    cols = [(0, 0, 0)] + seen[:15]
-    while len(cols) < 16:
-        cols.append((0, 0, 0))
-    shown = [tuple(ste4(x) * 17 for x in c) for c in cols]
-    lab = oklab(shown)
-    pens = oklab(v.pens)
-    pmap = np.array([int(np.argmin(((lab - pens[p]) ** 2).sum(1))) for p in range(len(v.pens))])
-    return shown, pmap, cols
+    import palette_native as pn
+    palette, pairs = pn.prom('pooyan', histogram(), v.pens, lambda p: p >= 256)
+    cols = [tuple(map(int, c)) for c in palette]
+    return cols, pairs >> 4, cols
 
 
 def turned(img):

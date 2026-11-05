@@ -1,5 +1,7 @@
 # Pooyan (Konami, 1982) for Atari STE
 
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+
 ![Pooyan on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `pooyan` (the Konami parent; the zip also holds the clones `pooyans` and `pootan`).  Started 2026-10-29:

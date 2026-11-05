@@ -154,7 +154,7 @@ class BlackTiger:
         self.run_to_idle()
         self.frame += 1
 
-    def render_raw(self):
+    def render_raw(self, checker=False):
         if self.gfx is None:
             self.gfx = Gfx()
         g = self.gfx
@@ -179,12 +179,17 @@ class BlackTiger:
             front = pen < front_limit
             back = (pen != 15) & ~front
             bgpens = colour.astype(np.uint16)*16 + pen
+            if checker:
+                bgpens |= (((px + (wy & 15)) & 1) * 1024).astype(np.uint16)
             out[back] = bgpens[back]
         if not self.video_enable & 4:
             for o in range(0x1fc, -1, -4):
                 code, attr, y, x = self.sprites[o:o+4]
                 x -= (attr & 0x10) << 4
                 pixels = g.sprites[code | ((attr & 0xe0) << 3)]
+                if checker:
+                    from mamegfx import checker_gfx
+                    pixels = checker_gfx(pixels)
                 if attr & 8:
                     pixels = pixels[:, ::-1]
                 x0, x1, y0, y1 = max(0, x), min(256, x+16), y, min(256, y+16)
@@ -192,7 +197,7 @@ class BlackTiger:
                     continue
                 p = pixels[y0-y:y1-y, x0-x:x1-x]
                 dest = out[y0:y1, x0:x1]
-                mask = p != 15
+                mask = (p & 15) != 15
                 dest[mask] = (0x200 + (attr & 7)*16 + p.astype(np.uint16))[mask]
         if not self.video_enable & 2:
             out[front] = bgpens[front]
@@ -203,7 +208,10 @@ class BlackTiger:
             code = fg[0xd000+idx].astype(np.uint16) + ((attr.astype(np.uint16) & 0xe0) << 3)
             pen = g.chars[code, yy & 7, xx & 7]
             mask = pen != 3
-            out[mask] = (0x300 + (attr.astype(np.uint16) & 31)*4 + pen)[mask]
+            text = 0x300 + (attr.astype(np.uint16) & 31)*4 + pen
+            if checker:
+                text |= (((xx + yy) & 1) * 1024).astype(np.uint16)
+            out[mask] = text[mask]
         if self.control & 64:
             out = out[::-1, ::-1]
         return out

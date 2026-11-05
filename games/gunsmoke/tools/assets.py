@@ -15,6 +15,9 @@ The arcade raster is rotated: screen row r = 255 - raw x, screen column c = raw 
   often in coverage (cover.py 'sprites'), as many as fit SPRITE_BUDGET bytes; spr_shape.bin maps code * 2 + flip to
   the shape's index there or $FFFF (those are drawn by the generic path: the same Blitter calls, the end masks made
   from the shape's rows).
+
+Current colour default (2026-11-05): engine/palette_native.py; see docs/palette-defaults.md.
+Earlier fitting descriptions in this module refer to the previous palette.
 """
 from pathlib import Path
 import importlib.util
@@ -25,6 +28,8 @@ import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
 from paths import build_dir, require_coverage
 from video import Video
+import palette_native as pn
+import palette_quantize as pq
 
 BUILD = build_dir('gunsmoke')
 DOCS = Path(__file__).resolve().parents[1] / 'docs'
@@ -56,15 +61,13 @@ def palette(video):
     weights = np.zeros(641)
     for counts in stats.values():
         weights += np.array(counts, float)
-    used = weights > 0
-    colours = pal.oklab_to_rgb(pal.kmeans(rgb[used], weights[used] ** 0.6 + 1, 16))
-    colours = np.clip(np.round(colours / 17) * 17, 0, 255)
-    colours[0] = 0
-    mapping = ((pal.rgb_to_oklab(rgb)[:, None] - pal.rgb_to_oklab(colours)[None]) ** 2).sum(axis=2).argmin(axis=1)
+    counts = {p:float(n) for p,n in enumerate(weights) if n}
+    colours, mapping = pn.prom('gunsmoke', counts, rgb.astype(np.uint8), lambda p:384<=p<640, dither=True)
     mapping[640] = 0
+    mapping[0:128] = pq.flat_map(colours, rgb[0:128]) * 17
     (BUILD / 'palmap.bin').write_bytes(mapping.astype(np.uint8).tobytes())
-    (BUILD / 'palette.bin').write_bytes(np.array([pal.ste_word(c) for c in colours], '>u2').tobytes())
-    (DOCS / 'palette.json').write_text(json.dumps(dict(rgb=colours.astype(int).tolist(), map=mapping.tolist())) + '\n')
+    (BUILD / 'palette.bin').write_bytes(pq.ste_words(colours).tobytes())
+    (DOCS / 'palette.json').write_text(json.dumps(dict(rgb=colours.astype(int).tolist(), map=mapping.tolist(), map_format='even-source index high nibble, odd-source index low nibble')) + '\n')
     return colours, mapping
 
 
@@ -135,21 +138,29 @@ def build():
 
     # Baking: the 16 (4) pen masks of a row are longs at (a4) (pen * 4); a routine per colour bank ORs them into the
     # four STE planes d0-d3 by the palette map (and the opaque pixels of a character colour into d4).
-    def acc(name, pens, opaque=False):
+    def acc(name, pens, phase, opaque=False):
         out = [name + ':'] + ['\tmoveq #0,d%d' % q for q in range(5 if opaque else 4)]
         for q in range(4):
-            out += ['\tor.l %d(a4),d%d' % (pen * 4, q) for pen, colour in pens if colour >> q & 1]
+            for pen, pair in pens:
+                a, b = pair >> 4, pair & 15
+                if phase: a, b = b, a
+                aa, bb = (a >> q) & 1, (b >> q) & 1
+                if aa and bb:
+                    out.append(f'\tor.l {pen*4}(a4),d{q}')
+                elif aa or bb:
+                    out += [f'\tmove.l {pen*4}(a4),d5', f'\tand.l #${0xaaaaaaaa if aa else 0x55555555:08x},d5', f'\tor.l d5,d{q}']
         if opaque:
             out += ['\tor.l %d(a4),d4' % (pen * 4) for pen, _ in pens]
         return out + ['\trts']
-    lines += ['acc_tile_tab:', '\tdc.l ' + ','.join(f'acc_t{b}' for b in range(16))]
-    lines += ['acc_spr_tab:', '\tdc.l ' + ','.join(f'acc_s{b}' for b in range(16))]
-    lines += ['acc_chr_tab:', '\tdc.l ' + ','.join(f'acc_c{c}' for c in range(32))]
-    for b in range(16):
-        lines += acc(f'acc_t{b}', [(p, int(mapping[128 + b * 16 + p])) for p in range(16)])
-        lines += acc(f'acc_s{b}', [(p, int(mapping[384 + b * 16 + p])) for p in range(1, 16)])
-    for c in range(32):
-        lines += acc(f'acc_c{c}', [(p, int(mapping[c * 4 + p])) for p in range(4) if v.lookup[c * 4 + p] != 0x4f], True)
+    lines += ['acc_tile_tab:', '\tdc.l ' + ','.join(f'acc_t{b}_0,acc_t{b}_1' for b in range(16))]
+    lines += ['acc_spr_tab:', '\tdc.l ' + ','.join(f'acc_s{b}_0,acc_s{b}_1' for b in range(16))]
+    lines += ['acc_chr_tab:', '\tdc.l ' + ','.join(f'acc_c{c}_0,acc_c{c}_1' for c in range(32))]
+    for phase in range(2):
+        for b in range(16):
+            lines += acc(f'acc_t{b}_{phase}', [(p, int(mapping[128 + b * 16 + p])) for p in range(16)], phase)
+            lines += acc(f'acc_s{b}_{phase}', [(p, int(mapping[384 + b * 16 + p])) for p in range(1, 16)], phase)
+        for c in range(32):
+            lines += acc(f'acc_c{c}_{phase}', [(p, int(mapping[c * 4 + p])) for p in range(4) if v.lookup[c * 4 + p] != 0x4f], phase, True)
     (BUILD / 'render_tables.s').write_text('\n'.join(lines) + '\n')
 
 

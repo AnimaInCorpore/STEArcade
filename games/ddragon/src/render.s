@@ -256,7 +256,12 @@ pal_update:
 	bne.s .map
 	dbf d1,.cmp
 	bra .next
-.map:	moveq #0,d6			; a pen's colour changed
+.map:	lea rgb_map,a3
+	cmp.w #8,d7
+	bhs.s .mapped_kind
+	lea rgb_map_flat,a3
+.mapped_kind:
+	moveq #0,d6			; a pen's colour changed
 	moveq #15,d5
 	move.l a0,a5
 	move.l a1,a6
@@ -2077,6 +2082,7 @@ char_get:
 	move.w d6,d0
 	bsr lut_get			; -> a2 the set's byte table
 	lea nz2,a3
+	move.w #2048,d4			; alternate the source-row checker bank
 	moveq #7,d7
 	lea 64(a1),a4			; the masks
 .row:	moveq #0,d0			; the planes (a byte each)
@@ -2099,6 +2105,8 @@ char_get:
 	lsl.w #8,d3
 	move.w d3,(a4)+
 	addq.l #8,a1
+	adda.w d4,a2
+	neg.w d4
 	dbf d7,.row
 	move.l (sp)+,a1
 	rts
@@ -2110,6 +2118,7 @@ char_get:
 bake:
 	movem.l a1,-(sp)
 	bsr lut_get			; -> a2 the byte table (1 KB), at 1024(a2) the swapped one
+	move.w #2048,d4
 	subq.w #1,d5
 	tst.b d7
 	bne.s .mir
@@ -2134,6 +2143,8 @@ bake:
 	dbf d6,.b2
 	movep.l d0,1(a1)
 	addq.l #8,a1
+	adda.w d4,a2
+	neg.w d4
 	dbf d5,.row
 	movem.l (sp)+,a1
 	rts
@@ -2161,6 +2172,8 @@ bake:
 	dbf d6,.m2
 	movep.l d0,1(a1)
 	addq.l #8,a1
+	adda.w d4,a2
+	neg.w d4
 	dbf d5,.mrow
 	movem.l (sp)+,a1
 	rts
@@ -2173,8 +2186,8 @@ lut_get:
 	lea lut_tables,a2
 	moveq #0,d1
 	move.w d0,d1
-	moveq #11,d2
-	lsl.l d2,d1			; 2 KB a set
+	moveq #12,d2
+	lsl.l d2,d1			; two 2 KB source-row parity banks a set
 	add.l d1,a2
 	lea pal_epoch,a3
 	move.b (a3,d0.w),d1
@@ -2186,7 +2199,9 @@ lut_get:
 	lsl.w #4,d0
 	add.w d0,a3			; the set's 16 pens
 	move.l a2,a1
-	lea spread4,a0
+	lea spread_pairs,a0
+	moveq #1,d2
+.phase:
 	moveq #0,d4			; v
 .v:	moveq #15,d5
 	and.w d4,d5
@@ -2194,7 +2209,8 @@ lut_get:
 	move.b (a3,d5.w),d0
 	add.w d0,d0
 	add.w d0,d0
-	move.l (a0,d0.w),d6		; the second pixel's planes (v & 15)
+	add.w #1024,d0
+	move.l (a0,d0.w),d6		; raw odd-X pixel (v & 15)
 	move.w d4,d5
 	lsr.w #4,d5
 	moveq #0,d0
@@ -2214,15 +2230,13 @@ lut_get:
 	addq.w #1,d4
 	cmp.w #256,d4
 	blo.s .v
+	lea 1024(a1),a1			; next row parity, after the mirrored table
+	lea 1024(a0),a0
+	dbf d2,.phase
 .ok:	movem.l (sp)+,d4-d7/a0-a1
 	rts
 
-spread4:				; a colour's plane bits, one a byte (plane 0 in the high byte)
-N	set 0
-	rept 16
-	dc.l ((N&1)<<24)|(((N>>1)&1)<<16)|(((N>>2)&1)<<8)|((N>>3)&1)
-N	set N+1
-	endr
+	include "colour_spread.s"
 
 CT_TILES = 0
 CT_SPRITES = TILE_ENTRIES
@@ -2235,6 +2249,7 @@ CT_PAIRS = CT_CHARS+CHAR_ENTRIES
 palette_data: incbin "palette.bin"
 nz2: incbin "nz2.bin"
 rgb_map: incbin "rgb_map.bin"
+rgb_map_flat: incbin "rgb_map_flat.bin"
 sprite_blank: incbin "sprite_blank.bin"
 char_blank: incbin "char_blank.bin"
 sprite_order: incbin "sprite_order.bin"
@@ -2344,7 +2359,7 @@ cache_tags_end:
 bake_scratch: ds.b 128
 cache_data: ds.b 128*CT_CHARS
 char_data: ds.b 80*(CHAR_ENTRIES+PAIR_ENTRIES)	; (the pairs after the characters)
-lut_tables: ds.b 2048*PAL_SETS
+lut_tables: ds.b 4096*PAL_SETS
 tx_need: ds.b KEYS			; (frame_tag: a cell under the text redrawn or drawn over in this picture)
 tx_rown: ds.b SLOTS			; (frame_tag: such a cell in this slot row)
 tx_full: ds.b 1				; (the whole text again)

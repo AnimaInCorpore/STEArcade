@@ -64,6 +64,16 @@ def combine(weights, *bits):
     return int(s + 0.5)
 
 
+def checker_gfx(gfx, invert=False):
+    """Reference-only source parity tags above the arcade pen (bit 10).
+
+    Tags follow flips/crops/composition exactly like pixels. Original PROM/RAM
+    pens and transparency remain in the low bits; no STE conversion is used.
+    """
+    y, x = np.indices(gfx.shape[-2:])
+    return np.asarray(gfx, np.int16) | ((((x + y + int(invert)) & 1) * 1024).astype(np.int16))
+
+
 def tile_pixmap(gfx, codes, colors, flipx, flipy, rows, cols, pen_base, granularity):
     """A tilemap's pixmap of pens [rows*h, cols*w] (TILEMAP_SCAN_ROWS arrays [rows, cols]); also the raw pixel
     values (for transparency masks)."""

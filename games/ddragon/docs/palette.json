@@ -1,7 +1,26 @@
 {
  "name": "Double Dragon fixed palette (tools/assets.py)",
- "origin": "ref/palette_fit.py: weighted k-means in Oklab over the colours of 6000 frames of the attract mode and of the play seeds [11, -1, -2]",
+ "origin": "engine/palette_native.py: approved bounded fit from docs/colour_training.json",
  "colours": [
+  "#000000",
+  "#331111",
+  "#333344",
+  "#662211",
+  "#445555",
+  "#884433",
+  "#557766",
+  "#3366dd",
+  "#996644",
+  "#dd3355",
+  "#998888",
+  "#cc8866",
+  "#88bb33",
+  "#bbaaaa",
+  "#ffbb99",
+  "#ffeedd"
+ ],
+ "map_format": "Packed even/odd source checker indices: high/low nibble",
+ "previous_colours": [
   "#000000",
   "#331111",
   "#334444",
@@ -19,22 +38,6 @@
   "#eecc88",
   "#eeffff"
  ],
- "error": {
-  "attract": [
-   7.75,
-   0.558
-  ],
-  "seed 11": [
-   9.88,
-   0.393
-  ],
-  "seed -1": [
-   9.1,
-   0.394
-  ],
-  "seed -2": [
-   10.14,
-   0.348
-  ]
- }
+ "coverage": "Approved sampled-play fit; see colour_training.json. Previous fit errors do not describe this palette.",
+ "text_policy": "Flat character/foreground colours; separate flat hardware-word map, single index duplicated in both nibbles."
 }

@@ -1,7 +1,26 @@
 {
  "name": "Gauntlet fixed palette (tools/assets.py)",
- "origin": "ref/palette_fit.py: weighted k-means in Oklab over the colours of the attract mode (12000 frames) and of play in levels [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 30] (3000 frames each)",
+ "origin": "engine/palette_native.py: approved bounded fit from docs/colour_training.json",
  "colours": [
+  "#000000",
+  "#221122",
+  "#333344",
+  "#772211",
+  "#444455",
+  "#aa3322",
+  "#777799",
+  "#cc6633",
+  "#ff0000",
+  "#0088ff",
+  "#aa9999",
+  "#ffaa44",
+  "#00ff00",
+  "#ccdddd",
+  "#ffff00",
+  "#ffffff"
+ ],
+ "map_format": "Packed even/odd source checker indices: high/low nibble",
+ "previous_colours": [
   "#000000",
   "#111122",
   "#221133",
@@ -19,82 +38,6 @@
   "#eeeeee",
   "#ffff00"
  ],
- "error": {
-  "attract": [
-   4.29,
-   0.556
-  ],
-  "level 1": [
-   4.4,
-   0.287
-  ],
-  "level 2": [
-   4.52,
-   0.282
-  ],
-  "level 3": [
-   4.38,
-   0.288
-  ],
-  "level 4": [
-   4.61,
-   0.286
-  ],
-  "level 5": [
-   4.63,
-   0.287
-  ],
-  "level 6": [
-   4.39,
-   0.287
-  ],
-  "level 7": [
-   4.52,
-   0.283
-  ],
-  "level 8": [
-   4.38,
-   0.288
-  ],
-  "level 9": [
-   5.36,
-   0.31
-  ],
-  "level 10": [
-   5.36,
-   0.308
-  ],
-  "level 11": [
-   5.4,
-   0.304
-  ],
-  "level 12": [
-   5.43,
-   0.304
-  ],
-  "level 13": [
-   5.34,
-   0.309
-  ],
-  "level 14": [
-   5.36,
-   0.31
-  ],
-  "level 15": [
-   5.36,
-   0.308
-  ],
-  "level 16": [
-   5.4,
-   0.304
-  ],
-  "level 20": [
-   5.36,
-   0.308
-  ],
-  "level 30": [
-   5.36,
-   0.308
-  ]
- }
+ "coverage": "Approved sampled-play fit; see colour_training.json. Previous fit errors do not describe this palette.",
+ "text_policy": "Flat character/foreground colours; separate flat hardware-word map, single index duplicated in both nibbles."
 }
