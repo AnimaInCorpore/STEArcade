@@ -8,7 +8,9 @@ simulator (the work RAM, the dual-port RAM, the sprite RAM, the palettes and the
 registers and segments into the context).  Every frame: the inputs (seeds as ref/cover.py: 1-3 attract, 4-7 play, 8+
 play with the Invulnerability DIP switch; the frame number counts from the port's start), port_frame in the simulator,
 run_frame_port in the reference.  Compared: the work RAM (the PSW the port's interrupts push: only its live flags, IE
-and DF), the dual-port RAM (the MCU's mailbox byte B0FFE the VBL handler increments), the sprite RAM and the buffer the
+and DF), the dual-port RAM as the main CPU leaves it (before the reference's MCU runs: the mailbox byte B0FFE the VBL
+handler increments; the MCU's writes - command $10's code at B0000, its wipe - then go from the reference into the
+image: the simulator runs no MCU), the sprite RAM and the buffer the
 picture shows, the palettes, the video RAMs (and that every 64-byte block of the palettes and video RAMs that changed
 has its mark: tools/gen.py store_marks), the registers and segments at the idle point, the scroll, raster and the
 number of raster interrupts, the two sound latches' writes.  --steplock F runs frame F instruction by instruction
@@ -54,7 +56,7 @@ def ref_region(m, base, n):
     if base == 0xA0000:
         return bytes(m.ram)
     if base == 0xB0000:
-        return bytes(m.dpram)
+        return bytes(getattr(m, "dpram_v30", m.dpram))
     if base == 0xC0000:
         return bytes(m.spriteram)
     if base in (0xC8000, 0xCC000):
@@ -323,6 +325,8 @@ def main():
         if not compare(f):
             print("stopped after %d good frames" % (f - args.start))
             return 1
+        # the MCU's side comes from the reference (its i8751): its dual-port RAM writes of the frame into the image
+        mem.w_block(img + 0xB0000, swap(bytes(m.dpram)))
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, sum(per) / len(per)), flush=True)
     n = len(per)

@@ -262,5 +262,6 @@ class MrHeli(M72):
             last = self.raster_line
             self.run_irq(RASTER_VECTOR)
             self.rasters += 1
+        self.dpram_v30 = bytes(self.dpram)              # (the dual-port RAM as the main CPU left it: logic_test)
         self.run_mcu()
         self.port_frames += 1
