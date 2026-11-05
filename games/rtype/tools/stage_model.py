@@ -63,6 +63,12 @@ class Model:
         empty = np.repeat(np.repeat(self.star[w[:, :, 0] & 0x3FFF], 8, 0), 8, 1)
         return np.where(empty, -1, pen)
 
+    def layer_phase(self, ram):
+        codes = np.frombuffer(ram, '<u2').reshape(64, 64, 2)[:, :, 0]
+        flip = ((codes >> 14) ^ (codes >> 15)) & 1
+        y, x = np.indices((512, 512))
+        return ((x + y) & 1) ^ np.repeat(np.repeat(flip, 8, 0), 8, 1)
+
     def bg_empty(self, ram, y0, y1, sy, bx):
         """True when the BG map's part under the window (lines y0..y1, BG map x bx..bx+319) is empty tiles only"""
         w = np.frombuffer(ram, "<u2").reshape(64, 64, 2)
@@ -102,6 +108,9 @@ class Model:
                         tl = tl[::-1, :]
                     img[r * 8:r * 8 + 8, c * 8:c * 8 + 8] = 256 + (attr & 15) * 16 + tl.astype(np.int32)
             self._strip_key, self._strip_img = key, img
+            flip = ((strip[:, :, 0] >> 14) ^ (strip[:, :, 0] >> 15)) & 1
+            y, x = np.indices(img.shape)
+            self._strip_phase = ((x + y) & 1) ^ np.repeat(np.repeat(flip.T, 8, 0), 8, 1)
         return self._strip_img
 
     def picture(self, st, lock, squeeze=False, tile_dx=0, strip=None, bgscroll=False, nobg=False):
@@ -109,9 +118,11 @@ class Model:
         a Lock (updated); strip: the scene's BG strip (load_strip) or None; bgscroll: the BG at its own scroll; nobg:
         the playfield without BG (stage 6)"""
         fgm, bgm = self.layer(0, st["fg"]), self.layer(1, st["bg"])
+        fgphase, bgphase = self.layer_phase(st['fg']), self.layer_phase(st['bg'])
         if strip is not None and self.walls(st["bg"]):
             strip = None
         out = np.full((256, W), BLACK, np.int32)
+        self.phase = np.zeros(out.shape, np.uint8)
         xp = np.arange(X0, X0 + W)
         main = max(st["bands"], key=lambda b: b[1] - b[0])
         lock.update(self, st, main)
@@ -123,27 +134,33 @@ class Model:
             ys = np.arange(y0, y1 + 1)
             xs = xp + (tile_dx if y0 < HUD_Y else 0)    # (a scene's playfield tiles shown shifted: TILE_DX; not the bar)
             f = fgm[((ys + sy[0] + 128) & 511)[:, None], ((xs + sx[0]) & 511)[None, :]]
+            fp = fgphase[((ys + sy[0] + 128) & 511)[:, None], ((xs + sx[0]) & 511)[None, :]]
             bx = (sx[0] + lock.L) if y0 < HUD_Y and not bgscroll else sx[1]
             if simg is not None and y0 < HUD_Y:     # (the strip: locked to the unwrapped FG column)
                 ap = lock.fgabs + xs                # (the unwrapped FG pixel x)
                 sc = ((ap >> 3) - lock.origin) % (simg.shape[1] // 8)
                 b = simg[((ys + sy[0] + 128) & 511)[:, None], (sc * 8 + (ap & 7))[None, :]]
+                bp = self._strip_phase[((ys + sy[0] + 128) & 511)[:, None], (sc * 8 + (ap & 7))[None, :]]
             else:
                 b = bgm[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
+                bp = bgphase[((ys + sy[1] + 128) & 511)[:, None], ((xs + bx) & 511)[None, :]]
             if nobg and y0 < HUD_Y:
                 b = np.full_like(f, -1)
             out[y0:y1 + 1] = np.where(f >= 0, f, np.where(b >= 0, b, BLACK))
+            self.phase[y0:y1 + 1] = np.where(f >= 0, fp, bp)
         bar = any(b[0] == HUD_Y for b in st["bands"])
-        self.sprites(out, objs_to_spr(st, squeeze) if "objs" in st else st["spr"], HUD_Y if bar else 256)
+        spr, origins = objs_to_spr(st, squeeze, with_origins=True) if 'objs' in st else (st['spr'], None)
+        self.sprites(out, spr, HUD_Y if bar else 256, origins)
         return out
 
-    def sprites(self, out, spr, ylim=HUD_Y):
+    def sprites(self, out, spr, ylim=HUD_Y, origins=None):
         w16 = np.frombuffer(spr, "<u2").astype(np.int32)
         sp = self.video.sprites
         done = np.zeros(out.shape, bool)
         i = 0
         while i < len(w16):                     # (the first entry on top: drawn first, pixels not drawn twice)
             y, code, a, x = (int(v) for v in w16[i:i + 4])
+            origin = None if origins is None else origins[i // 4]
             w, h = 1 << ((a & 0xC000) >> 14), 1 << ((a & 0x3000) >> 12)
             i += 4 * w
             if not (y or code or a or x) or (code & 0xFFF) in STAR_SPRITES:
@@ -169,6 +186,9 @@ class Model:
                     dn = done[ay0:ay1 + 1, ax0:ax1 + 1]
                     show = (s != 0) & ~dn
                     d[show] = (a & 15) * 16 + s[show]
+                    yy, xx = np.indices(s.shape)
+                    phase = (xx + ax0 + yy + ay0 + (origin if origin is not None else sx + sy)) & 1
+                    self.phase[ay0:ay1 + 1, ax0:ax1 + 1][show] = phase[show]
                     dn |= s != 0
 
 
@@ -183,7 +203,7 @@ def squeeze_x(x):
     return x - (q if n >= 0 else -q)
 
 
-def objs_to_spr(st, squeeze=False):
+def objs_to_spr(st, squeeze=False, with_origins=False):
     """the sprite list the object records stand for (src/natives.s; as tools/logic_test.py list_check expands them)"""
     import struct
     if not _rom:
@@ -192,6 +212,7 @@ def objs_to_spr(st, squeeze=False):
     rom = _rom[0]
     o, end = st["objs"], st["objs_end"]
     spr = bytearray(0x400)
+    origins = np.zeros(0x400 // 8, np.uint8)
     for slot in list(range(0xC0, min(end, 0x3C0), 8)) + list(range(0x3C0, 0x400, 8)):     # (the fixed slots too)
         bw, n, col, x, y = struct.unpack(">HBBhh", o[slot:slot + 8])
         if not bw:
@@ -206,8 +227,9 @@ def objs_to_spr(st, squeeze=False):
             attr = (attr & 0xFF00) | col
             if s + 8 <= 0x400:
                 spr[s:s + 8] = struct.pack("<HHHH", (y + dy) & 0xFFFF, code, attr, (x + dx) & 0xFFFF)
+                origins[s // 8] = (x + y) & 1
             s += 16 if attr & 0x4000 else 8
-    return bytes(spr)
+    return (bytes(spr), origins) if with_origins else bytes(spr)
 
 
 def load_strip(name):

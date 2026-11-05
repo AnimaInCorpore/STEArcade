@@ -59,6 +59,13 @@ Work in progress outside `port.py list` uses its own scripts under `games/<game>
 * **Fixed palette, fitted per stage**: when the game's stages look different, fit the fixed colours to frames of
   every stage (cheats to reach them, as `games/blktiger/ref/palette_fit.py`), each set's histogram normalised;
   square-rooting the weights (Bubble Bobble) let a stage's sky lose its colour there.
+* **Default build-time colour quantization** (R-Type, 2026-11-05): use `engine/palette_quantize.py` for new fitted
+  palette paths. Fit original arcade RGB, compress sprite and tile counts separately (power 0.75), apply sprite
+  priority after compression (8x), and bound the chroma bonus below 2x. Do not increase RGB saturation itself.
+  Checker choices are two indices in one byte; bake their parity in asset coordinates before flipping, cropping
+  or reordering rows, preserving the opaque masks and pass order. Keep exact PROM mappings, fixed player colours,
+  HUD palettes and cycling-pen slots where the port needs them. Compare existing ports before changing their
+  weighting: the [cross-port audit](palette-audit.md) found background regressions from a blanket replacement.
 * **Throttle the logic when it cannot keep up** so the renderer still runs; never let a pending VBL nest.
 * **Reference renderers can be wrong in ways "port equals reference" cannot see** (plane order, palette weights,
   a sprite row off by one): the MAME check below is not optional.

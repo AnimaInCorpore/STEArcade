@@ -204,18 +204,20 @@ class Expected:
                 t[16 + r] = ref[r]
         pidx = np.concatenate([spm[t[r]] if r < 16 else tpm[t[r]] for r in range(32)])
         for row, pen, idx in ded:                       # (dedicated pens: their own indices, src/stage.s st_palette)
-            pidx[row * 16 + pen] = idx
+            pidx[row * 16 + pen] = idx * 17
         hidx = np.concatenate([np.zeros(256, np.int32)] + [hpm[t[r]] for r in range(16, 32)])
         name = self.SA.BG_STRIPS[flags >> 6 & 3]
         strip = self.strips.setdefault(name, SM.load_strip(name)) if flags & 2 else None
         bgs = bool(flags & 4) and self.model.bg_any(st["bg"])
         pens = self.model.picture(st, self.lock, squeeze=bool(flags & 1), tile_dx=flags >> 8, strip=strip, bgscroll=bgs,
                                    nobg=bool(flags & 32))
+        self.pens = pens
         bar = any(b[0] == SM.HUD_Y for b in st["bands"])
         pp = np.minimum(pens, 511)
         want = pidx[pp]
         if bar:
             want[SM.HUD_Y:] = hidx[pp[SM.HUD_Y:]]
+        want = np.where(self.model.phase == 0, want >> 4, want & 15)
         want[pens == 512] = 0
         return want
 

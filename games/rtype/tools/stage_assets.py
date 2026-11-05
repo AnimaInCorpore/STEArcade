@@ -1,13 +1,13 @@
-"""The stage renderers' build-time data (tools/stage_model.py's picture): per stage a fixed STE palette for the playfield
-and one for the status bar, and a fixed STE index for every arcade pen.
+"""Default R-Type stage assets: fixed scene palettes and source-anchored checker pairs.
 
     venv/bin/python games/rtype/tools/stage_assets.py [--png]      -> build/rtype/stage<N>_pal.bin (+ preview pictures)
 
-The colours: the model's pictures of the stage's recorded frames (render_test's states), each pen weighted by its
-pixels (sprites x SPRITE_WEIGHT), at the STE's 4 bits a channel; index 0 black, the others colours the arcade shows
-(medoids: no averages, so red and orange do not blend into brown), chosen for the least weighted Oklab error with
-saturated colours weighted up (SAT_BOOST).  A pen's colour is the one it shows most often in those frames (fades are left out, colour cycles
-are left out: the colours as the game sets them).
+Scene colours use engine/palette_quantize: original arcade RGB, separate sprite
+and tile counts compressed by 0.75, then 8x sprite priority and a chroma bonus
+below 2x. The retained Alien/Zombies fitter snaps to the STE grid and selects
+restrained checker pairs. Black stays index zero. HUD colours are flat; changing
+pens retain their dedicated indices. Pair bytes store even source parity in the
+high nibble and odd parity in the low nibble. No palette fitting runs on the STE.
 
 A pen's index is looked up by its current colour (the game reloads palette rows during a stage: a pen shows other
 things later), so the renderer keeps a pen -> index table and redoes a palette row's entries when the game writes the
@@ -17,6 +17,9 @@ R, R words their pens (indices 16 - R .. 15 in order: the pens' current colours 
 """
 import argparse
 import collections
+import concurrent.futures
+import hashlib
+import json
 import pickle
 import sys
 import zlib
@@ -29,6 +32,7 @@ import m72
 import m72_palettes as MP
 from paths import build_dir
 import stage_model as SM
+import palette_quantize as PQ
 
 # the stages: the recorded frames (render_test's sets) that show them
 STAGES = {1: [("play", 500, 7000)],
@@ -38,7 +42,6 @@ STAGES = {1: [("play", 500, 7000)],
 # makes the fades itself: FADE_SNAP jumps the palette RAM to the target).  Stage 1: the wall's pens (grey 371, light
 # grey 373, the lights 369 and 370; 372 stays black), faded in at frames ~4100-4750.
 RESERVED = {1: [371]}
-SAT_BOOST = 40              # weights x (1 + SAT_BOOST * chroma): saturated colours pull centres
 SPRITE_WEIGHT = 8           # a sprite pixel counts this many tile pixels (small saturated sprites keep their colours)
 STEP = 10
 
@@ -72,11 +75,14 @@ def pen_colours(st):
 
 
 def medoids(keys, weight, n, rounds=8):
-    """n colours (black first) chosen among keys (12-bit) to minimise the sum of weight' x Oklab L1 distance to the
-    nearest, weight' = sqrt(pixels) x (1 + SAT_BOOST x chroma): greedy additions, then swaps"""
+    """Legacy flat stage-table fitter: greedy medoids with bounded chroma weights.
+
+    The default scene renderer uses the shared pair fitter in scene_blob instead.
+    """
     lab = MP.lab12(keys).astype(float)
-    chroma = np.hypot(lab[:, 1] - 128, lab[:, 2] - 128) / 128
-    w = np.sqrt(weight) * (1 + SAT_BOOST * chroma)
+    rgb = np.stack([(keys >> 8) & 15, (keys >> 4) & 15, keys & 15], -1) * 17
+    chroma = np.linalg.norm(PQ.oklab(rgb)[:, 1:], axis=1)
+    w = np.asarray(weight, float)**PQ.FREQUENCY_POWER * (1 + chroma**2/(chroma**2+.1**2))
     d = np.abs(lab[:, None, :] - lab[None]).sum(2)              # (keys x keys)
     black = np.abs(lab - MP.lab12([0])[0]).sum(1)
     chosen = []
@@ -242,20 +248,28 @@ def target_colours(rom, kind, t):
     return [q4_12(rom[a + 3 * p] & 31, rom[a + 3 * p + 1] & 31, rom[a + 3 * p + 2] & 31) for p in range(16)]
 
 
+def target_rgb(rom, kind, target):
+    """Original 5-bit arcade RGB, expanded before fitting to the STE grid."""
+    addr = 0x3B000 + int(target) * 48 + (0x2400 if kind else 0)
+    values = np.frombuffer(rom[addr:addr + 48], np.uint8).astype(np.int32).reshape(16, 3) & 31
+    return ((values << 3) | (values >> 2)).astype(np.uint8)
+
+
 def choose_scene(tile_targets, refs, current):
     """the renderer's choice (src/stage.s st_scene): the scene whose reference has the most tile-row targets equal to
     the current ones (the first of equals); kept unless that one matches SCENE_MATCH rows"""
-    counts = [int((np.asarray(tile_targets) == r).sum()) for r in refs]
+    targets = np.frombuffer(tile_targets, np.uint8) if isinstance(tile_targets, (bytes, bytearray)) else np.asarray(tile_targets)
+    counts = [int((targets == r).sum()) for r in refs]
     best = max(range(len(refs)), key=lambda k: (counts[k], -k))
     if current is None or (best != current and counts[best] >= SCENE_MATCH):
         return best
     return current
 
 
-def load_scenes():
+def load_scenes(path=None):
     """[(reference tile targets [16], playfield palette, status bar palette (STE words, bytes), sprite premap
     [256, 16], tile premap [256, 16], status bar premap [256, 16], flags, dedicated pens, frozen tile rows)] from build/rtype/stage_scenes.bin"""
-    d = (build_dir("rtype") / "stage_scenes.bin").read_bytes()
+    d = Path(path or (build_dir("rtype") / "stage_scenes.bin")).read_bytes()
     out = []
     for k in range(int.from_bytes(d[:2], "big")):
         o = 2 + k * SC_SIZE
@@ -274,7 +288,7 @@ def load_scenes():
 def scenes(png=False):
     """build/rtype/stage_scenes.bin (big-endian): a word, the scenes; per scene (SC_SIZE bytes) 16 bytes its reference
     tile-row targets, 16 + 16 words the playfield's and the status bar's STE colours, 256 x 16 bytes the playfield
-    index of each pen of each sprite target (the ROM's colour tables at $3B000 + 48 t), the same for the tile targets
+    packed index pair of each pen of each sprite target (the ROM's colour tables at $3B000 + 48 t), the same for the tile targets
     ($3B000 + $2400 + 48 t) and the status bar's indices of the tile targets, a word of flags (bit 0: the sprites
     squeezed, SQUEEZE_SCENES; bits 8-15 the tiles' shift in pixels, TILE_DX).  A palette row's colours are its
     record's target's table (the game sets and fades its rows to them; FADE_SNAP at once): src/stage.s copies a row's
@@ -290,6 +304,7 @@ def scenes(png=False):
             if i % SCENE_STEP:
                 continue
             st = pickle.loads(zlib.decompress(it))
+            st['_palette_recording'] = path
             if (pen_colours(st)[256:] == 0).all():
                 continue
             t = np.frombuffer(st["recs"][16:], np.uint8)
@@ -301,74 +316,147 @@ def scenes(png=False):
             else:
                 refs.append(t.copy())
                 members.append([st])
+    # Keep canonical references stable while extending colour training to the
+    # separate warship replay (and any future extra stage recordings).
+    references = []
+    for frames in members:
+        sample = frames[::max(1, len(frames) // 150)]
+        tg = np.array([np.frombuffer(st['recs'][16:], np.uint8) for st in sample])
+        references.append([collections.Counter(tg[:, r].tolist()).most_common(1)[0][0] for r in range(16)])
+    grouped = set(SCENE_RECORDINGS + SCENE_EXTRA)
+    for path in sorted(build_dir('rtype').glob('stage_states_*.pkl')):
+        if str(path.relative_to(build_dir('rtype').parents[1])) in grouped:
+            continue
+        current = None
+        for i, (_, packed) in enumerate(pickle.loads(path.read_bytes())):
+            if i % SCENE_STEP:
+                continue
+            st = pickle.loads(zlib.decompress(packed))
+            if (pen_colours(st)[256:] == 0).all():
+                continue
+            st['_palette_recording'] = str(path)
+            current = choose_scene(st['recs'][16:], references, current)
+            members[current].append(st)
+    previous_path = build_dir('rtype') / 'stage_scenes.bin'
+    legacy_path = build_dir('rtype') / 'stage_scenes_legacy.bin'
+    baseline_path = build_dir('rtype') / 'palette_default_audit/baseline/stage_scenes.bin'
+    if not legacy_path.exists():
+        candidate = baseline_path if baseline_path.exists() else previous_path
+        if candidate.exists() and all(s[3].max() < 16 for s in load_scenes(candidate)):
+            legacy_path.write_bytes(candidate.read_bytes())
+    previous = load_scenes(legacy_path) if legacy_path.exists() else []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        blobs = list(pool.map(lambda k: scene_blob(k, members[k], rom, png, references[k]), range(len(members))))
+    data = len(blobs).to_bytes(2, "big") + b"".join(blob for blob, _ in blobs)
+    (build_dir("rtype") / "stage_scenes.bin").write_bytes(data)
+    # Migrate locally recorded legacy index rows; future recordings store scene/target.
+    migration_path = build_dir("rtype") / "stage_colour_migration.json"
+    migration = {}
+    for old, new in zip(previous, load_scenes()):
+        for a, b in zip(old[3], new[3]):
+            if np.max(a) <= 15:
+                key = bytes([0] + a[1:].tolist()).hex()
+                value = bytes([0] + b[1:].tolist()).hex()
+                migration[key] = sorted(set(migration.get(key, []) + [value]))
+    migration_path.write_text(json.dumps(migration, sort_keys=True) + "\n")
+    (build_dir("rtype") / "stage_palette_policy.json").write_text(json.dumps(dict(
+        policy="bounded-oklab-checker-v1", frequency_power=PQ.FREQUENCY_POWER,
+        chroma_gain=PQ.CHROMA_GAIN, sprite_weight=PQ.SPRITE_WEIGHT,
+        checker_phase="source coordinates", scenes=[info for _, info in blobs]), indent=2) + "\n")
+    if png:
+        from stage_test import Expected
+        from PIL import Image
+        for k, frames in enumerate(members):
+            st = frames[len(frames) // 2]
+            expected = Expected()
+            expected.cur, expected.tiles = k, np.frombuffer(st['recs'][16:], np.uint8).copy()
+            want = expected(st)
+            ref, pb, hb, _, _, _, _, ded, frz = expected.scenes[k]
+            targets = np.frombuffer(st['recs'], np.uint8).copy()
+            for row in range(16):
+                if frz >> row & 1:
+                    targets[16 + row] = ref[row]
+            def decode(data):
+                words = np.frombuffer(data, '>u2').astype(np.int32)
+                nib = np.stack([(words >> s) & 15 for s in (8, 4, 0)], -1)
+                return (((nib & 7) << 1) | (nib >> 3)).astype(np.uint8) * 17
+            pal, hpal = decode(pb), decode(hb)
+            for row, pen, idx in ded:
+                c = target_colours(rom, 1, int(targets[row]))[pen]
+                pal[idx] = np.array([(c >> s) & 15 for s in (8, 4, 0)], np.uint8) * 17
+            ste = pal[want]
+            if any(b[0] == SM.HUD_Y for b in st['bands']):
+                ste[SM.HUD_Y:] = hpal[want[SM.HUD_Y:]]
+            colors = np.concatenate([target_rgb(rom, int(row >= 16), target) for row, target in enumerate(targets)] +
+                                    [np.zeros((1, 3), np.uint8)])
+            image = np.concatenate([ste, colors[expected.pens]], 1)
+            Image.fromarray(image).resize((1280, 512), Image.Resampling.NEAREST).save(build_dir('rtype') / f'scene_{k}.png')
+
+
+def scene_blob(k, members, rom, png, ref):
+    frames = members[::max(1, len(members) // 150)]
     md = SM.Model()
-    lab_all = MP.lab12(np.arange(4096)).astype(float)
-    data = bytearray(len(refs).to_bytes(2, "big"))
-    for k, frames in enumerate(members):
-        frames = frames[::max(1, len(frames) // 150)]
-        tg = np.array([np.frombuffer(st["recs"][16:], np.uint8) for st in frames])
-        ref = [collections.Counter(tg[:, r].tolist()).most_common(1)[0][0] for r in range(16)]
-        hist, hhist = collections.Counter(), collections.Counter()
-        ded = dedicated(k)
-        dpens = {256 + (row - 16) * 16 + pen for row, pen, _ in ded}
-        pics = []
-        for st in frames:
-            pens = md.picture(st, SM.Lock())
-            pics.append((st, pens))
-            col = pen_colours(st)
-            for hud, rows, h in ((0, slice(0, SM.HUD_Y), hist), (1, slice(SM.HUD_Y, 256), hhist)):
-                v = pens[rows]
-                for p, n in zip(*np.unique(v[v < 512], return_counts=True)):
-                    if hud == 0 and int(p) in dpens:
-                        continue                # (a dedicated pen: its own index)
-                    h[int(col[p])] += int(n) * (SPRITE_WEIGHT if p < 256 else 1)
-        pal_tab = []
-        for hud, h in enumerate((hist, hhist)):
-            if not h:
-                h = collections.Counter({0: 1})
-            kk = np.array(sorted(h), np.int32)
-            free = 16 - (len(ded) if hud == 0 else 0)
-            cl, _ = medoids(kk, np.array([h[x] for x in kk.tolist()], float), min(free, max(2, len(kk) + 1)))
-            pal = np.zeros(16, np.int32)
-            pal[:len(cl)] = cl
-            lab_c = MP.lab12(cl).astype(float)
-            pal_tab.append((pal, np.abs(lab_all[:, None, :] - lab_c[None]).sum(2).argmin(1)))
-        (pal, tab), (hpal, htab) = pal_tab
-        data += bytes(ref)
-        for v in list(pal) + list(hpal):
-            data += int(ste12(int(v))).to_bytes(2, "big")
-        for kind, table in ((0, tab), (1, tab), (1, htab)):
-            for t in range(256):
-                data += bytes(int(table[c]) for c in target_colours(rom, kind, t))
-        data += ((1 if k in SQUEEZE_SCENES else 0) | (2 | BG_STRIPS.index(BG_STRIP_SCENES[k]) << 6 if k in BG_STRIP_SCENES else 0) | (32 if k in NO_BG_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) | (8 if k in BG_PIECE_SCENES else 0) | (16 if k in BG_HYBRID_SCENES else 0) |
-                 (TILE_DX.get(k, 0) << 8)).to_bytes(2, "big")
-        dtab = bytearray(512)
-        for row, pen, idx in ded:
-            dtab[row * 16 + pen] = idx + 1
-        data += bytes(dtab) + len(ded).to_bytes(2, "big")
-        for i in range(DED_MAX):
-            data += bytes(ded[i]) + b"\0" if i < len(ded) else bytes(4)
+    ded = dedicated(k)
+    dpens = {256 + (row - 16) * 16 + pen for row, pen, _ in ded}
+    hist = [collections.Counter(), collections.Counter()]
+    hhist = [collections.Counter(), collections.Counter()]
+    allrgb = np.array([[target_rgb(rom, kind, t) for t in range(256)] for kind in range(2)])
+    strip = SM.load_strip(BG_STRIP_SCENES[k]) if k in BG_STRIP_SCENES else None
+    lock, source = SM.Lock(), None
+    for st in frames:
+        if st.get('_palette_recording') != source:
+            lock, source = SM.Lock(), st.get('_palette_recording')
+        pens = md.picture(st, lock, squeeze=k in SQUEEZE_SCENES, tile_dx=TILE_DX.get(k, 0), strip=strip,
+                          bgscroll=k in BG_SCROLL_SCENES and md.bg_any(st['bg']), nobg=k in NO_BG_SCENES)
+        targets = np.frombuffer(st["recs"], np.uint8).copy()
+        for row in FROZEN_ROWS.get(k, ()):
+            targets[16 + row] = ref[row]
+        colors = np.concatenate([allrgb[int(r >= 16), targets[r]] for r in range(32)])
+        for hud, rows, hs in ((0, slice(0, SM.HUD_Y), hist), (1, slice(SM.HUD_Y, 256), hhist)):
+            v = pens[rows]
+            for pen, n in zip(*np.unique(v[v < 512], return_counts=True)):
+                if not hud and int(pen) in dpens:
+                    continue
+                hs[int(pen >= 256)][tuple(map(int, colors[pen]))] += int(n)
+    inputs = np.unique(allrgb.reshape(-1, 3), axis=0)
+    pal_tab = []
+    for hud, hs in enumerate((hist, hhist)):
+        free = 16 - (len(ded) if not hud else 0)
+        rgb, pairs = PQ.fit(hs, inputs, free, cache=build_dir("rtype") / "palette_cache", dither=not hud)
+        pal = np.zeros(16, np.int32)
+        q = (rgb // 17).astype(np.int32)
+        pal[:free] = (q[:, 0] << 8) | (q[:, 1] << 4) | q[:, 2]
+        lookup = {tuple(c):int(pair) for c, pair in zip(inputs, pairs)}
+        pal_tab.append((pal, lookup))
+    (pal, tab), (hpal, htab) = pal_tab
+    data = bytearray(bytes(ref))
+    for v in list(pal) + list(hpal):
+        data += int(ste12(int(v))).to_bytes(2, "big")
+    for kind, table in ((0, tab), (1, tab), (1, htab)):
         for t in range(256):
-            cols = target_colours(rom, 1, t)
-            for i in range(DED_MAX):
-                data += (ste12(cols[ded[i][1]]) if i < len(ded) else 0).to_bytes(2, "big")
-        data += sum(1 << r for r in FROZEN_ROWS.get(k, ())).to_bytes(2, "big")
-        print("scene %d: %d frames, tile targets %s; playfield %s | bar %s" % (
-            k, len(members[k]), " ".join("%02X" % t for t in ref), " ".join("%03X" % v for v in pal),
-            " ".join("%03X" % v for v in hpal)))
-        if png:
-            from PIL import Image
-            rgb4 = lambda c: np.stack([(c >> 8) & 15, (c >> 4) & 15, c & 15], -1) * 17
-            st, pens = pics[len(pics) // 2]
-            col = pen_colours(st)
-            p = np.minimum(pens, 511)
-            ste = np.where(np.arange(256)[:, None] >= SM.HUD_Y, hpal[htab[col[p]]], pal[tab[col[p]]])
-            ste = np.where(pens == 512, 0, ste)
-            arc = rgb4(np.append(col, 0)[np.minimum(pens, 512)])
-            img = np.hstack([rgb4(ste), arc]).astype(np.uint8)
-            o = build_dir("rtype") / ("scene_%d.png" % k)
-            Image.fromarray(img).resize((img.shape[1] * 2, img.shape[0] * 2), Image.NEAREST).save(o)
-    (build_dir("rtype") / "stage_scenes.bin").write_bytes(bytes(data))
+            data += bytes(table[tuple(c)] for c in allrgb[kind, t])
+    flags = ((1 if k in SQUEEZE_SCENES else 0) |
+             (2 | BG_STRIPS.index(BG_STRIP_SCENES[k]) << 6 if k in BG_STRIP_SCENES else 0) |
+             (32 if k in NO_BG_SCENES else 0) | (4 if k in BG_SCROLL_SCENES else 0) |
+             (8 if k in BG_PIECE_SCENES else 0) | (16 if k in BG_HYBRID_SCENES else 0) |
+             (TILE_DX.get(k, 0) << 8))
+    data += flags.to_bytes(2, "big")
+    dtab = bytearray(512)
+    for row, pen, idx in ded:
+        dtab[row * 16 + pen] = idx + 1
+    data += dtab + len(ded).to_bytes(2, "big")
+    for i in range(DED_MAX):
+        data += bytes(ded[i]) + b"\0" if i < len(ded) else bytes(4)
+    for t in range(256):
+        cols = target_colours(rom, 1, t)
+        for i in range(DED_MAX):
+            data += (ste12(cols[ded[i][1]]) if i < len(ded) else 0).to_bytes(2, "big")
+    data += sum(1 << r for r in FROZEN_ROWS.get(k, ())).to_bytes(2, "big")
+    assert len(data) == SC_SIZE
+    print("scene %d: %d frames, bounded checker palette %s" %
+          (k, len(frames), " ".join("%03X" % v for v in pal)), flush=True)
+    return bytes(data), dict(scene=k, frames=len(frames), palette=pal.tolist(),
+                             hud_palette=hpal.tolist(), reserved=len(ded))
 
 
 def stage_pal():
@@ -444,6 +532,37 @@ def main():
     tiles()
     stage_pal()
     scenes(args.png)
+
+
+def ensure():
+    """Build the default stage data when its inputs change, including sprite colours."""
+    import stage_sprites
+    out = build_dir('rtype')
+    states = [Path(p).resolve() for p in SCENE_RECORDINGS + SCENE_EXTRA]
+    if missing := [str(p) for p in states if not p.exists()]:
+        raise SystemExit('Missing stage palette recordings: ' + ', '.join(missing))
+    # Palette grouping deliberately excludes some recordings; sprite coverage must
+    # include every recording, including the separate stage-3 attract replay.
+    sprite_states = sorted(set(states) | set(out.glob('stage_states_*.pkl')))
+    paths = sprite_states + sorted(out.glob('defs_*.json')) + sorted(out.glob('cols_*.json'))
+    sources = [Path(__file__), Path(stage_sprites.__file__), Path(SM.__file__), Path(PQ.__file__), PQ.WORKER]
+    inputs = sources + paths + sorted((out.parents[1] / 'assets/roms/extracted/rtype').glob('*'))
+    digest = hashlib.sha256()
+    for path in inputs:
+        if path.is_file():
+            digest.update(str(path).encode())
+            digest.update(path.read_bytes())
+    key = digest.hexdigest()
+    stamp = out / 'stage_default.sha256'
+    required = ['stage_scenes.bin', 'stage_tiles.bin', 'stage_tmask.bin', 'stage_fgempty.bin',
+                'stage_bgstar.bin', 'stage_pal.s', 'stage_sprites.s', 'stage_sstream.bin', 'stage_precol.bin']
+    if stamp.exists() and stamp.read_text().strip() == key and all((out / p).exists() for p in required):
+        return
+    tiles()
+    stage_pal()
+    scenes()
+    stage_sprites.build([str(p) for p in paths])
+    stamp.write_text(key + '\n')
 
 
 if __name__ == "__main__":

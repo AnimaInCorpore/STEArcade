@@ -6,7 +6,16 @@ table in transfer fallback paths. This also serves Mr. HELI. See [measurements](
 ![R-Type on the STE (Hatari)](docs/screenshot.png)
 
 STE port of MAME set `rtype` (Irem M72): the main CPU's NEC V30 program statically translated to 68000 code
-(`engine/v30x.py`), the M72 picture drawn by the shared renderer (`engine/rt/m72render.s`).  No sound yet.
+(`engine/v30x.py`), drawn by the stage renderer (`src/stage.s`). No sound yet.
+
+**Default colours, 2026-11-05:** the retained Alien/Zombies quantizer with bounded saturation weighting
+(`engine/palette_quantize.py` and `.js`). Sprite and tile counts are compressed separately with exponent 0.75,
+then sprite priority is 8x and the chroma bonus stays below 2x. Source RGB is preserved until the STE palette
+is fitted. Restrained checker pairs are baked in source coordinates, including cropped and reordered sprite
+pieces; the pattern moves with each asset. The HUD stays flat and changing pens keep their reserved indices.
+The ordinary build selects this renderer and regenerates palettes and sprite colours when their inputs change.
+`--legacy-renderer` builds the older shared M72 path. See [colour validation](docs/palette-results.md) and the
+[cross-port audit](../../docs/palette-audit.md).
 
 **Memory: development targets a 14 MB ST RAM system** (the user, 2026-10-31; `tools/bench.sh` runs Hatari with
 `--memsize 14`).  R-Type alone may use it, for speed (e.g. sprites coloured at build time instead of at run time).

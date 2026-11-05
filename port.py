@@ -178,6 +178,7 @@ TESTS = {
                 ("tools/sprite_test.py", [], None),                 # edges, 16 shifts, holes, 64 KB crossings
                 ("tools/sound_test.py", ["6000", "--random"], None)],   # the translated driver, YM, voices
     "rtype": [("tools/prepare.py", [], None),
+              ("tools/palette_test.py", [], None),              # default stage colours, source phase, native cache fallback
               ("tools/build.py", ["--sim"], None),
               ("tools/dma_test.py", [], None),                         # production DMA with deadline/cadence schedulers
               ("tools/logic_test.py", ["{n}"], 3000),                    # attract

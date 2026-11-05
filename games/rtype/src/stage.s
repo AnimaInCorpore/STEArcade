@@ -52,6 +52,7 @@ ST_LOG		= 2048			; clean-buffer changes kept (a power of 2)
 ST_POOL		= 1024*1024		; the sprite colour cache
 ST_HASH		= 65536			; (14 MB development system: room for the pre-coloured sprites)
 ST_TCN		= 4096			; tile conversions cached
+ST_PHASE	= 256*16*4		; second bank of source-parity colour tables
 ST_BARLB	= 160			; the status bar's image: 320 x 16
 ST_HUDY		= 240
 
@@ -431,6 +432,9 @@ st_palette:
 	beq.s	.c0
 	move.b	d7,d4
 	subq.b	#1,d4
+	move.b	d4,d7			; dedicated index in both parity nibbles
+	lsl.b	#4,d4
+	or.b	d7,d4
 .c0:	cmp.b	(a1),d4
 	beq.s	.c1
 	move.b	d4,(a1)
@@ -597,12 +601,12 @@ st_scene:
 .x:	movem.l	(sp)+,d1-d7/a0-a3
 	rts
 
-; st_rowtables: d5 = a colour row (0-15 sprites, 16-31 tiles): its tables from st_pidx (pen 0: index 0 - transparent
-; for the tiles over the empty BG, masked for the sprites).  Tiles: st_tt (a byte of 2 pens -> each plane's 2 bits at
+; st_rowtables: d5 = a colour row (0-15 sprites, 16-31 tiles): both parity banks from st_pidx's packed pairs (pen 0: 0)
+; Pen 0 is black over an empty BG and masked for sprites. Tiles: st_tt (2 pens -> each plane's 2 bits at
 ; the bottom of its byte of a long: movep order), st_ttf (the pens in the other order: flip x).  Sprites: st_ta (planes
 ; 0 / 1: 2 bits at the bottom of each word of a long), st_tb (planes 2 / 3).
 st_rowtables:
-	movem.l	d0-d1/a0-a4,-(sp)
+	movem.l	d0-d1/d7/a0-a4,-(sp)
 	lea	st_pidx,a0
 	move.w	d5,d0
 	lsl.w	#4,d0
@@ -617,37 +621,53 @@ st_rowtables:
 	add.l	d0,a1
 	lea	st_sal,a3
 	lea	st_sar,a4
+	moveq	#0,d7
+	bsr	st_mktab
+	lea	ST_PHASE(a1),a1
+	moveq	#1,d7
 	bsr	st_mktab
 	lea	st_tb,a1
 	add.l	d0,a1
 	lea	st_sbl,a3
 	lea	st_sbr,a4
+	moveq	#0,d7
 	bsr	st_mktab
-	movem.l	(sp)+,d0-d1/a0-a4
+	lea	ST_PHASE(a1),a1
+	moveq	#1,d7
+	bsr	st_mktab
+	movem.l	(sp)+,d0-d1/d7/a0-a4
 	rts
 .tile:	lea	st_tt,a1
 	add.l	d0,a1
 	lea	st_ttf,a2
 	add.l	d0,a2
 	bsr	st_tiletables
-	movem.l	(sp)+,d0-d1/a0-a4
+	movem.l	(sp)+,d0-d1/d7/a0-a4
 	rts
 
-; st_tiletables: a0 = a colour row's 16 indices: a1 its tile table, a2 its flipped one (see st_rowtables)
+; st_tiletables: a0 = 16 packed pairs: a1 its tile table, a2 its flipped one; second banks at ST_PHASE
 st_tiletables:
-	movem.l	a1/a3-a4,-(sp)
+	movem.l	d7/a1/a3-a4,-(sp)
 	lea	st_tl,a3
 	lea	st_tr,a4
+	moveq	#0,d7
+	bsr	st_mktab
+	lea	ST_PHASE(a1),a1
+	moveq	#1,d7
 	bsr	st_mktab
 	move.l	a2,a1			; (flipped: the left pixel's bits from the right pixel's table)
 	lea	st_tr,a3
 	lea	st_tl,a4
+	moveq	#0,d7
 	bsr	st_mktab
-	movem.l	(sp)+,a1/a3-a4
+	lea	ST_PHASE(a1),a1
+	moveq	#1,d7
+	bsr	st_mktab
+	movem.l	(sp)+,d7/a1/a3-a4
 	rts
 
-; st_mktab: a0 = 16 indices (pen 0: 0), a3 / a4 = the left / right pixel's bits of each index (16 longs): a1 = 256
-; longs, entry b = a3[index of b >> 4] | a4[index of b & 15]
+; st_mktab: a0 = 16 packed pairs (even high nibble, odd low; pen 0: 0); d7 = source parity at the left pixel.
+; a3 / a4 = left / right bits of each index (16 longs), a1 = 256 longs for the packed source-pen bytes.
 st_mktab:
 	movem.l	d0-d2/d6/a0-a2,-(sp)
 	lea	st_mkr,a2		; (the right pixel's bits by pen)
@@ -657,6 +677,11 @@ st_mktab:
 	tst.w	d1
 	beq.s	.r1			; (pen 0)
 	move.b	(a0,d1.w),d0
+.rp:	tst.w	d7
+	beq.s	.rlo
+	lsr.w	#4,d0
+	bra.s	.r1
+.rlo:	and.w	#15,d0
 .r1:	add.w	d0,d0
 	add.w	d0,d0
 	move.l	(a4,d0.w),(a2)+
@@ -668,6 +693,11 @@ st_mktab:
 	tst.w	d1
 	beq.s	.l1
 	move.b	(a0,d1.w),d0
+	tst.w	d7
+	bne.s	.llo
+	lsr.w	#4,d0
+	bra.s	.l1
+.llo:	and.w	#15,d0
 .l1:	add.w	d0,d0
 	add.w	d0,d0
 	move.l	(a3,d0.w),d0		; the left pixel's bits
@@ -2409,11 +2439,14 @@ st_tile:
 	beq.s	.nfx
 	lea	st_ttf,a2
 .nfx:	add.l	d2,a2			; the row's table
+	move.w	#ST_PHASE,d7		; alternate source-row parity; follows tile flips
 	moveq	#4,d4			; the next row
 	btst	#15,d1
 	beq.s	.nfy
 	lea	28(a1),a1
 	moveq	#-4,d4
+	lea	ST_PHASE(a2),a2
+	neg.w	d7
 .nfy:	moveq	#8-1,d5
 	btst	#14,d1
 	bne	.fx
@@ -2428,6 +2461,8 @@ st_tile:
 	endr
 	move.l	d0,(a3)+
 	lea	-4(a1,d4.w),a1
+	adda.w	d7,a2
+	neg.w	d7
 	dbf	d5,.row
 	bra.s	.done
 .fx:	moveq	#0,d0
@@ -2442,6 +2477,8 @@ st_tile:
 	endr
 	move.l	d0,(a3)+
 	add.w	d4,a1
+	adda.w	d7,a2
+	neg.w	d7
 	dbf	d5,.fx
 .done:	lea	-32(a3),a0
 	movem.l	(sp)+,d1-d7/a1-a3
@@ -3311,13 +3348,16 @@ st_bake:
 	move.l	20(a2),a0		; its pens
 	move.l	a3,a1
 	move.w	10(a2),d5		; its groups
-	lea	88(a2),a4		; (class, rows)
+	lea	88(a2),a4		; (class, rows, signed parity-bank delta per piece)
 	subq.w	#1,d5
 .grp:	move.b	(a4)+,d3		; the class
 	moveq	#0,d7
 	move.b	(a4)+,d7		; the rows
 	subq.w	#1,d7
-.row:	cmp.b	#1,d3
+.row:	move.w	(a4)+,d2		; source x+y parity, retained through piece reordering
+	adda.w	d2,a5
+	adda.w	d2,a6
+	cmp.b	#1,d3
 	bhi.s	.wn
 	bsr	.half			; (16 pixels -> d0 planes 0 / 1, d1 planes 2 / 3)
 	tst.b	d3
@@ -3799,8 +3839,8 @@ st_dmgn:	ds.w	ST_NBUF
 st_dmg:		ds.b	ST_NBUF*ST_DMG*8
 st_log:		ds.b	ST_LOG*8
 st_rtgt:	ds.w	32		; the targets the rows show (st_palette)
-st_pidx:	ds.b	512		; the pens' playfield indices
-st_hidx:	ds.b	256		; the tile pens' status bar indices
+st_pidx:	ds.b	512		; playfield pairs: source-even index high, source-odd low
+st_hidx:	ds.b	256		; status bar pairs: the same flat index in both nibbles
 st_rcid:	ds.w	16		; the sprite rows' colouring ids (st_palette; the sprites' cache key)
 st_ver:		ds.b	32		; the colour rows' versions (sprites 0-15, tiles 16-31)
 st_cells:	ds.b	4096		; the map cells composed in the clean buffer
@@ -3833,12 +3873,12 @@ st_mkr:		ds.l	16
 st_barkey:	ds.l	80		; (the bar's cells as drawn: code << 16 | colour << 8 | st_hver)
 st_bardc:	ds.b	80		; (the bar's cells the game changed)
 st_hrowchg:	ds.l	1
-st_htt:		ds.l	256*16
-st_httf:	ds.l	256*16
-st_ta:		ds.l	256*16
-st_tb:		ds.l	256*16
-st_tt:		ds.l	256*16
-st_ttf:		ds.l	256*16
+st_htt:		ds.l	256*16*2
+st_httf:	ds.l	256*16*2
+st_ta:		ds.l	256*16*2
+st_tb:		ds.l	256*16*2
+st_tt:		ds.l	256*16*2
+st_ttf:		ds.l	256*16*2
 st_tckey:	ds.l	ST_TCN
 st_tcdata:	ds.b	ST_TCN*32
 st_hash:	ds.b	ST_HASH*16
