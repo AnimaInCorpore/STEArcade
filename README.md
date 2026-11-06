@@ -141,3 +141,9 @@ Use `venv/bin/python port.py ppo <game> train|record|verify|test` for the standa
 workflow. It trains in MAME and verifies recordings through a private Hatari replay build, preserving canonical
 fixtures and curated translator coverage. See [the shared PPO guide](docs/ppo.md) for setup, verification limits,
 and storage policy. Galaga has no PPO profile yet; unregistered ports remain work in progress.
+
+## License
+
+The code in this repository is free software under the GNU General Public License, version 2 or (at your option) any
+later version: see [LICENSE](LICENSE).  The license does not cover the arcade games themselves: their ROMs, and the
+code, graphics and sound converted from them and built into each .PRG, belong to their rights holders.
