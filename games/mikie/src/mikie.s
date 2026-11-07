@@ -398,9 +398,14 @@ mk_idle:
 	clr.b	idle_cwai
 	bra.s	mk_wait
 
-mk_cwai:
+mk_cwai:				; CWAI #$EF: I cleared, E set, the entire state pushed now; the IRQ is taken from here
 	move	sr,d5
+	move.w	d5,idle_sr
 	move.w	#CWAI_PC+2,idle_pc
+	clr.b	idle_cwai
+	bsr	push_state
+	and.b	#$EF,SCCHI(a6)
+	or.b	#$80,SCCHI(a6)
 	st	idle_cwai
 mk_wait:
 	move.w	d5,idle_sr
@@ -455,7 +460,18 @@ mk_wait:
 	jmp	MAIN_IDLE_T
 .again:	move.w	idle_sr,d5
 	bra	mk_wait
-.irq:	moveq	#0,d7
+.irq:	tst.b	idle_cwai
+	bne.s	.go			; (the CWAI pushed the state already)
+	bsr	push_state
+.go:	or.b	#$90,SCCHI(a6)		; E I
+	move.w	idle_sr,d5
+	move	d5,ccr
+	jmp	MAIN_IRQ
+
+; push_state: the 6809's entire state for an interrupt (E set): PC idle_pc, U Y X DP B A, CC (E F H I from SCCHI, N Z V C
+; from idle_sr; I cleared in the pushed copy for a CWAI)
+push_state:
+	moveq	#0,d7
 	move.w	idle_pc,d7
 	move.b	d7,-(a5)		; PC
 	lsr.w	#8,d7
@@ -481,14 +497,11 @@ mk_wait:
 	and.b	#$0F,d6
 	or.b	d6,d7
 	or.b	#$80,d7
-	tst.b	idle_cwai
-	beq.s	.pi
+	cmp.w	#CWAI_PC+2,idle_pc	; (a CWAI)
+	bne.s	.pi
 	and.b	#$EF,d7			; (the CWAI cleared I in the pushed state)
 .pi:	move.b	d7,-(a5)
-	or.b	#$90,SCCHI(a6)		; E I
-	move.w	idle_sr,d5
-	move	d5,ccr
-	jmp	MAIN_IRQ
+	rts
 
 	ifd PLAYBACK
 ; The recorded play (build/mikie/play_inputs.bin; engine/playbot.py: runs of count, SYSTEM, IN0, a count of 0 at the

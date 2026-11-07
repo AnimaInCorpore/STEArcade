@@ -1074,9 +1074,10 @@ sprite_baked:
 bake_sprite:
 	move.w	d2,d0
 	lsr.w	#6,d0			; the code
-	lsl.w	#7,d0			; 128 bytes a code
+	lsl.w	#7,d0			; 128 bytes a code (up to 64 KB: unsigned)
 	lea	mk_spr,a1
-	add.w	d0,a1
+	and.l	#$FFFF,d0
+	add.l	d0,a1
 	move.w	d2,d0
 	and.w	#$3C,d0			; the colour * 4
 	add.w	d0,d0
