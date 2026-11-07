@@ -5,7 +5,7 @@
 The pickle: the 6809 coverage (engine/m6809cover.py: exec, acc, targets, wraps, io: the accesses outside the RAM and the
 ROM's reads; the boot self-test is not covered: the port starts at $8000);
 pens: the pens' pixel counts of the reference pictures (every 8th frame); sprites: Counter of (code, flip x, flip y)
-entries; frames, seed.
+entries; phrases: Counter of the VLM5030 phrases started (data bytes); frames, seed.
 
 Seeds: 1-4 attract, coin, start, random play (moves and kicks / punches in changing modes) to the game over and
 again; 5-8 the same with 5 lives and the easy setting (further opponents); 9 two players; 10 the other DIP switches
@@ -120,7 +120,16 @@ def main():
             print(f'seed {seed} frame {frame}: {len(cov.exec)} pcs', flush=True)
     out = build_dir('yiear') / f'cover{seed}.pkl'
     d = cov.data()
-    d.update({'pens': pens, 'sprites': sprites, 'seed': seed, 'frames': frames})
+    phrases = collections.Counter()               # the VLM5030's phrases started (the data byte latched when ST falls)
+    st = data = 0
+    for _, kind, v in m.sound_log:
+        if kind == 'vd':
+            data = v
+        elif kind == 'vc':
+            if st and not v & 2:
+                phrases[data] += 1
+            st = v >> 1 & 1
+    d.update({'pens': pens, 'sprites': sprites, 'phrases': phrases, 'seed': seed, 'frames': frames})
     out.write_bytes(pickle.dumps(d))
     print(out, len(cov.exec), 'pcs')
 

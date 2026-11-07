@@ -2,16 +2,17 @@
 # recorded (Hatari's AVI, the emulated screen with its borders), the counters printed (COUNTERS.BIN: VBLs, pictures,
 # arcade frames, the border fallbacks and late events), stills extracted every -Every VBLs (ffmpeg).  Outputs in
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Pooyan's.
-#   powershell -File games/yiear/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name yiear_hatari] [-Avi 1]
+#   powershell -File games/yiear/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name yiear_hatari] [-Avi 1] [-Sound 1: Hatari's sound on,
+#     the AVI's audio track extracted to run/<Name>/yiear.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
 param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "yiear_hatari", [int]$Avi = 1,
-      [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
+      [string[]]$Extra = @('-D', 'AUTOPLAY=1'), [int]$Sound = 0)
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
 $arcade = if ($env:F030ARCADE) { $env:F030ARCADE } else { "C:/Arbeit/F030Arcade" }
 $msys = if ($env:MSYS2) { $env:MSYS2 } else { "C:/msys64" }
-$py = Join-Path $root "venv/bin/python.exe"
+$py = if (Test-Path (Join-Path $root "venv/bin/python.exe")) { Join-Path $root "venv/bin/python.exe" } else { "python" }
 $env:PATH += ";$msys/mingw64/bin;$msys/ucrt64/bin;$msys/usr/bin"
 & $py "$PSScriptRoot/build.py" --debug --frames $Frames --tag $Name @Extra
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
@@ -22,7 +23,7 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'RATE.BIN', 'yiear.avi')) {
 }
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$(if ($Sound) { '44100' } else { 'off' }),'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
 if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\yiear.avi") }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `
@@ -42,4 +43,8 @@ if (Test-Path "$out/COUNTERS.BIN") {
 if ($Avi -and (Test-Path "$out/yiear.avi")) {
     & ffmpeg -v error -i "$out/yiear.avi" -vf "select=not(mod(n\,$Every))" -fps_mode passthrough "$out/still_%03d.png"
     "stills: " + ((Get-ChildItem -LiteralPath $out -Filter 'still_*.png').Count)
+}
+if ($Sound -and $Avi -and (Test-Path "$out/yiear.avi")) {
+    & ffmpeg -v error -y -i "$out/yiear.avi" -vn "$out/yiear.wav"
+    "audio: $out/yiear.wav"
 }

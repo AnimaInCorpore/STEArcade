@@ -241,25 +241,26 @@ class YieArPort(YieAr):
         super().__init__(*a, **k)
         self.booted = False
         self.irqs = self.nmis = 0
-        self.vbusy, self.vend, self.vst = False, None, 0
+        self.vbusy, self.vend, self.vst, self.vrst = False, None, 0, 0
         self.nmi_cycles = self.irq_cycles = 0
 
     def rd(self, a):
         if a == 0:
-            if self.vbusy and self.vend is not None:
-                # the game waits for BSY to fall ($C8C5, in an NMI) before it starts the next phrase: a loop that
-                # would never end here (no time passes between frames), so the phrase ends at this read
-                if self.frame >= self.vend or 0xC8C5 <= self.cpu.pc <= 0xC8C8:
-                    self.vbusy = False
+            if self.vbusy and self.vend is not None and self.frame >= self.vend:
+                self.vbusy = False
             return int(self.vbusy)
         return super().rd(a)
 
     def wr(self, a, v):
         if a == 0x4A00:
             # the port has no time between its frames: BSY is high from ST's rise until the phrase's length in frames
-            # (tools/vlm_frames.py) after ST's fall, counted from the frame the phrase starts in
+            # (tools/vlm_frames.py) after ST's fall, counted from the frame the phrase starts in; RST rising ends it
             self.sound_log.append((self.frame, 'vc', v))
             st = v >> 1 & 1
+            rst = v >> 2 & 1
+            if rst and not self.vrst and self.vbusy:      # RST rising while BSY: the chip resets, the speech stops
+                self.vbusy, self.vend = False, None
+            self.vrst = rst
             if st and not self.vst:
                 self.vbusy, self.vend = True, None
             elif self.vst and not st:

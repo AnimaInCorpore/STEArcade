@@ -34,11 +34,12 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "yiear": "YIEAR.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "yiear": [("ref/cover.py", list(range(1, 12)), 20000)],       # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
@@ -85,6 +86,14 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "yiear": [("tools/prepare.py", [], None),
+              ("tools/build.py", ["--sim"], None),
+              ("tools/logic_test.py", ["{n}"], 3000),
+              ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+              ("tools/logic_test.py", ["6000", "--seed", "9", "--quiet"], None),    # two players
+              ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
+              ("tools/render_test.py", ["3000", "--seed", "2", "--start", "100", "--every", "3"], None),
+              ("tools/sprite_test.py", [], None)],              # edges, 16 shifts, holes, guards, 64 KB crossings
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),

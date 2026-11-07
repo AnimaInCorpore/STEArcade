@@ -128,6 +128,10 @@ GAMES = [
      "  DMA sound",
      "fire: Space, Control, Z, joystick fire, pad A.  jump: Up, Alternate, X, pad B.  Left / right: slower / faster.\n"
      "  coins: 5 / 6."),
+    ("yiear", "YIEAR.PRG", "Yie Ar Kung-Fu (Konami 1985)",
+     "work in progress: exact logic and picture (256 x 224 in 16 fitted colours); no sound yet",
+     "move: the arrows, joystick, pad A.  kick: Z, Space, Control, joystick fire, pad A.  punch: X, Alternate, pad B.\n"
+     "  coins: 5 / 6, start 1 / 2."),
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again

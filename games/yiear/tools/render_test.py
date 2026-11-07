@@ -25,7 +25,7 @@ import cover
 from paths import ROOT, build_dir
 
 BUILD = build_dir('yiear')
-LB, PIC_TOP = 160, 20
+LB, PIC_TOP, LEFT = 160, 20, 32
 
 
 def planes_to_idx(words):

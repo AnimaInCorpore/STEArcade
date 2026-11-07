@@ -5,7 +5,7 @@
 
 Compared every frame: the RAM $5000-$5FFF (sprite RAM, video RAM; the 64 bytes below the stack pointer are dead and
 left out), the control latch (bits 1 and 2: the NMI and IRQ enables), the sound writes of the frame (SN76489A data,
-VLM5030 control and data).  Reports the 68000 cycles of the logic a frame (Musashi; the drawing is switched off: render_frame returns at
+VLM5030 control and data), the SN76489A's registers and the YM2149's (tools/sound.py: snd_ym a frame later).  Reports the 68000 cycles of the logic a frame (Musashi; the drawing is switched off: render_frame returns at
 once).
 """
 from pathlib import Path
@@ -17,6 +17,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine68k import Register as R
 from sim import Sim, TRAP1
 from machine import YieArPort
+import sound as S
 from paths import ROOT, build_dir
 import cover
 
@@ -71,6 +72,8 @@ def main():
         cpu.w_reg(R.A7, sp + 4)
 
     snd = [0]
+    sn, ym = S.SN(), S.YM()
+    has_sound = 'snd_sn' in sym
 
     def compare(f):
         sp = m.cpu.s
@@ -91,12 +94,28 @@ def main():
         if got != want:
             raise RuntimeError('frame %d: sound writes %s, reference %s' % (f, got[:12], want[:12]))
         snd[0] = head
+        if has_sound:
+            # the YM as the frame's start left it (snd_ym once a frame, from the SN writes of the frames before)
+            if f >= 0 and sn.dirty:
+                ym.frame(sn)
+                sn.dirty = False
+            for fr, k, v in m.sound_log:
+                if fr == f and k == 'sn':
+                    sn.write(v)
+            regs = [mem.r16(sym['snd_sn'] + 2 * i) for i in range(8)]
+            if regs != sn.reg:
+                raise RuntimeError('frame %d: SN registers %s, model %s' % (f, regs, sn.reg))
+            cache = list(mem.r_block(sym['snd_ym_cache'], 11))
+            if cache != ym.cache[:11]:
+                raise RuntimeError('frame %d: YM registers %s, model %s' % (f, cache, ym.cache[:11]))
 
     run_to({wait})
     m.frame = -1
     m.boot()
     m.run_to_idle()
     m.booted = True
+    ym.frame(sn)                             # (snd_init's)
+    sn.dirty = False
     compare(-1)
     state = {'two': args.seed == 9}
     cycles[0] = 0

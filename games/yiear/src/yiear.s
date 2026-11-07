@@ -91,6 +91,9 @@ start:
 
 	bsr	init_hardware
 	bsr	init_render
+	ifnd NOSOUND
+	bsr	snd_init
+	endc
 
 	bsr	init_main
 	lea	main_ctx,a6
@@ -433,7 +436,12 @@ ya_idle:
 	subq.b	#1,vlm_left
 	bne.s	.nv
 	clr.b	vlm_busy
-.nv:	movem.l	(sp)+,d0-d4/a2-a6
+.nv:	ifnd NOSOUND
+	tst.b	snd_dirty		; the YM follows the SN76489A once a frame
+	beq.s	.ns
+	bsr	snd_ym
+.ns:	endc
+	movem.l	(sp)+,d0-d4/a2-a6
 	move.b	#NMIS,nmi_left
 	btst	#2,ya_ctl		; the IRQ enable
 	beq.s	.none
@@ -557,15 +565,8 @@ main_io_r:
 	rts
 .low:	tst.w	d7
 	bne.s	.zero
-	moveq	#0,d7			; $0000: the VLM5030's BSY.  A read with ST low while it is up ends the phrase there: the
-	tst.b	vlm_busy		; game waits for BSY to fall ($C8C5, in an NMI) before the next phrase, and no time
-	beq.s	.zero			; passes here between frames (machine.YieArPort.rd)
-	tst.b	vlm_st
-	bne.s	.busy
-	clr.b	vlm_busy
-	clr.b	vlm_left
-	rts
-.busy:	moveq	#1,d7
+	moveq	#0,d7			; $0000: the VLM5030's BSY
+	move.b	vlm_busy,d7
 	rts
 .zero:	moveq	#0,d7
 	rts
@@ -593,7 +594,8 @@ main_io_w:
 	rts
 .n1:	cmp.w	#$4900,d7
 	bne.s	.n2
-	move.b	sn_latch,d5		; the SN76489A's data into the sound ring: (kind 0, value)
+	move.b	sn_latch,d5		; the SN76489A's data into the sound ring: (kind 0, value), and its registers
+	bsr	snd_sn_w
 	moveq	#0,d7
 	bra.s	.log
 .n2:	cmp.w	#$4A00,d7
@@ -626,12 +628,25 @@ main_io_w:
 	move.l	(sp)+,a0
 	rts
 
-; vlm_control: the byte d5 written to $4A00.  BSY rises with ST (bit 1) and, ST falling, stays up the phrase's length in
-; frames (ya_vlmf: tools/vlm_frames.py, by the latched data) counted from the frame it started in.  d6 d7 kept.
+; vlm_control: the byte d5 written to $4A00 (machine.YieArPort.wr).  RST (bit 2) rising while BSY resets the chip: BSY falls
+; and the speech stops.  BSY rises with ST (bit 1) and, ST falling, stays up the phrase's length in frames (ya_vlmf:
+; tools/vlm_frames.py, by the latched data) counted from the frame it started in; the phrase's samples start on the
+; DMA sound.  d6 d7 kept.
 vlm_control:
-	movem.l	d0/a0,-(sp)
+	movem.l	d0-d1/a0,-(sp)
+	moveq	#4,d0
+	and.b	d5,d0			; RST
+	beq.s	.rd
+	tst.b	vlm_rst
+	bne.s	.rd
+	tst.b	vlm_busy
+	beq.s	.rd
+	clr.b	vlm_busy
+	clr.b	vlm_left
+	bsr	snd_stop
+.rd:	move.b	d0,vlm_rst
 	moveq	#2,d0
-	and.b	d5,d0
+	and.b	d5,d0			; ST
 	beq.s	.low
 	tst.b	vlm_st
 	bne.s	.same
@@ -644,10 +659,11 @@ vlm_control:
 	move.b	vlm_data,d0
 	lea	ya_vlmf,a0
 	move.b	(a0,d0.w),vlm_left
+	bsr	snd_phrase		; (d0 = the data byte)
 .same:	moveq	#2,d0
 	and.b	d5,d0
 	move.b	d0,vlm_st
-	movem.l	(sp)+,d0/a0
+	movem.l	(sp)+,d0-d1/a0
 	rts
 
 main_bad_table:				; (the dispatcher's table for a slot without code: none)
@@ -935,6 +951,14 @@ dbg_name4:
 	endc
 
 	include	"render.s"
+	ifnd NOSOUND
+	include	"sound.s"
+	else
+snd_sn_w:
+snd_phrase:
+snd_stop:
+	rts
+	endc
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch tables in the data section)
@@ -999,6 +1023,7 @@ nmi_left:	ds.b	1		; NMIs still to deliver this frame
 vlm_busy:	ds.b	1		; the VLM5030's BSY ($0000)
 vlm_left:	ds.b	1		; frames until it falls
 vlm_st:		ds.b	1		; ST (bit 1 of the last $4A00 write)
+vlm_rst:	ds.b	1		; RST (bit 2)
 vlm_data:	ds.b	1		; the VLM's data latch ($4B00)
 io_sys:		ds.b	1		; what the program reads: SYSTEM, IN1, IN2, DSW1 ($4E00-$4E03), DSW2 ($4C00), DSW3 ($4D00)
 io_in1:		ds.b	1

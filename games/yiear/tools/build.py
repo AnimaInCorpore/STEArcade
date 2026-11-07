@@ -2,6 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
+-D NOSOUND=1: without the sound (src/sound.s, tools/sndgen.py).
 """
 from pathlib import Path
 import argparse
@@ -45,6 +46,10 @@ def main():
                                                        indent=1, default=str) + '\n')
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
+    if not any(d.startswith('NOSOUND') for d in defs):
+        import sndgen                         # (the SN76489A's tables, the VLM5030's phrases: needs the coverage's `phrases`)
+        if args.assets or not (build / 'snd_data.s').exists():
+            sndgen.build()
     tag = args.tag or ('yiear_sim' if args.sim else 'yiear')
     out = ROOT / 'run' / tag / 'YIEAR.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)
