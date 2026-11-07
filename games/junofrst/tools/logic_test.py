@@ -50,15 +50,18 @@ def main():
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--render', action='store_true', help='draw (render_frame) and compare the published buffer and palette too')
     ap.add_argument('--trace', type=int, default=-1, help='compare the executed instructions of this frame')
     ap.add_argument('--tag', default='junofrst_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
-    s = Sim(str(run / 'JUNOFRST.PRG'), run_dir=run)
-    s.mem.set_trace_mode(False)
+    s = Sim(str(run / 'JUNOFRST.PRG'), run_dir=run, **({'ram_kib': 16384} if args.render else {}))   # (16 MB: the Blitter's registers read back)
+    if not args.render:
+        s.mem.set_trace_mode(False)      # (the hardware registers are not emulated: the drawing is off)
     sym = {k: v + s.base for k, v in s.symbols(BUILD / (args.tag + '.map')).items()}
     mem, cpu = s.mem, s.cpu
-    mem.w16(sym['render_frame'], 0x4e75)
+    if not args.render:
+        mem.w16(sym['render_frame'], 0x4e75)
     wait, done = sym['sim_wait'], sym['sim_frame_done']
     bad = set(range(sym['main_badpc'], sym['main_badpc'] + 12, 2))
     base = sym['jf_mem']
@@ -101,6 +104,8 @@ def main():
         cpu.w_reg(R.A7, sp + 4)
 
     snd = [0]
+    pics = [0]
+    last_pic = [0]
 
     def compare(f):
         sp = m.cpu.s
@@ -128,6 +133,24 @@ def main():
         if got != want:
             raise RuntimeError('frame %d: sound commands %s, reference %s' % (f, got, want))
         snd[0] = head
+        pcn = mem.r16(sym['pic_count'])
+        fresh = pcn != last_pic[0]
+        last_pic[0] = pcn
+        if args.render and f >= 0 and fresh and mem.r8(sym['frame_ready']):
+            idx = mem.r8(sym['frame_ready']) - 1
+            buf = mem.r32(sym['buf_base'] + 4 * idx)
+            shown = picture(bytes(mem.r_block(buf + 10 * 160, 256 * 160)))
+            n = int((shown != expected(m.mem)).sum())
+            if n:
+                ys, xs = np.nonzero(shown != expected(m.mem))
+                raise RuntimeError('frame %d: the published buffer differs from the reference picture in %d pixels: lines %d-%d, columns %d-%d' % (f, n, ys.min(), ys.max(), xs.min(), xs.max()))
+            from assets import ste_word
+            from machine import pens
+            want = [ste_word(c) for c in pens(m.mem[0x8000:0x8010])]
+            got = [mem.r16(sym['pend_pal'] + 2 * i) for i in range(16)]
+            if want != got:
+                raise RuntimeError('frame %d: palette %s, reference %s' % (f, got, want))
+            pics[0] += 1
 
     run_to({wait})
     m.frame = -1
@@ -186,6 +209,8 @@ def main():
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact' % (f + 1), flush=True)
     print('PASS: %d frames (seed %d), RAM, palette RAM, picture, latch, bank and sound commands exact' % (args.frames, args.seed))
+    if args.render:
+        print('%d published pictures and palettes exact' % pics[0])
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

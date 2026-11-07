@@ -31,8 +31,8 @@ TA_DATA = 98
 	ifnd TA_NOPS
 TA_NOPS = 84
 	endc
-PIC_TOP = 20				; the picture's first displayed line
-PIC_LINES = 224
+PIC_TOP = 10				; the picture's first displayed line (as Gyruss: 256 lines, both borders open)
+PIC_LINES = 256
 BD_PALETTE = 1
 	include	"borders.s"
 

@@ -106,6 +106,13 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
+    ("junofrst", "JUNOFRST.PRG", "Juno First (Konami 1983)",
+     "work in progress: exact logic and picture (224 x 256, the screen turned as the arcade's), but slow (the
+"
+     "  pixel routines are not optimised, no prepared Blitter sprite passes); no sound yet",
+     "Left / Right / Up / Down, the joystick or a pad move the ship; Space, Control, Z or the stick's fire shoot
+"
+     "  (X: the second button).  5 / 6 coin, 1 / 2 start."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
      "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
