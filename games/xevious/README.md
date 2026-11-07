@@ -52,11 +52,12 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   1500, 2200, 3000, 4800, 5600, 6500, 8000, 9500, 11000 and 13000 of the attract mode (scrolling terrain, all sprite sizes
   the demo shows).  The reference's own game follows MAME's RAM for hundreds of frames, then drifts (three Z80s interleaved
   differently): the check is of the renderer and the board's memory map.
-* The translation (`tools/logic_test.py`, Musashi against `Xevious.run_frame_port`): 6,000 frames exact for seed 1 (one
-  player: coin, start, random play, deaths, game over) and seed 4 (two players); seed 31 (MAME's invincibility cheat as a
-  ROM patch of both sides, 20,000 frames into the later areas): see "Verification".  Compared every frame: the work RAM
-  `$7800-$CFFF` (main CPU's view, the sub CPU's half), the latches, the scroll registers, the 51XX's RAM; every changed
-  tile RAM block must have been marked.  Not lock-stepped: DIP variants (seeds 7-9), seeds 11-14.
+* The translation (`tools/logic_test.py`, Musashi against `Xevious.run_frame_port`): **exact** for 8,000 frames of seed 1
+  (one player: coin, start, random play, deaths, game over) and of seed 4 (two players), 12,000 frames of seed 32 (MAME's
+  invincibility cheat as a ROM patch of both sides: the later areas) and 20,000 frames of seed 31 (the same, before the sound
+  check was added).  Compared every frame: the work RAM `$7800-$CFFF` (main CPU's view, the sub CPU's half), the latches, the
+  scroll registers, the 51XX's RAM, the sound registers and the YM image; every changed tile RAM block must have been
+  marked.  Not lock-stepped: DIP variants (seeds 7-9), seeds 11-14, the build's own timing (the schedule is the reference's).
 * The picture (`tools/render_test.py`): 0 of 64,512 pixels differ against `machine.render_raw()` through the colour map at
   every sampled picture (frames 150-3600 of seeds 1, 3 and 31, six consecutive pictures at 400-405), the pixels outside
   the picture area stay black.
