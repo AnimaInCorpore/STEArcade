@@ -211,7 +211,8 @@ class JailBreak:
         self.cpu.reset()
         self.line = 0                      # the next 005849 timer event's line
         self.base = 0                      # the cycle at which the current frame's line 0 starts
-        self.vlm = Vlm(load('507l01.8c')[:0x2000])
+        self.vlm_rom = load('507l01.8c')[:0x2000]
+        self.vlm = Vlm(self.vlm_rom)
 
     def rd(self, a):
         if a < 0x2040 or a >= 0x8000:
@@ -291,6 +292,131 @@ class JailBreak:
         if self.video is None:
             self.video = Video()
         return self.video.render_rgb(self.mem, bool(self.ctrl[4] & 8))
+
+
+class JailBreakPort(JailBreak):
+    """The STE runtime's schedule (src/jailbrek.s), one call of run_frame_port an arcade frame.
+
+    The foreground is a task loop: $8073 LDX <$3C; LDD ,X; ASLA; BCS $8073 (the queue's read pointer at $153C, the
+    queue at $14C0-$14FF; an entry with bit 7 set is empty); the NMI handler ($B05D, eight a frame while ctrl 4 bit 0
+    is set) steps the random generators and polls the speech chip, the IRQ handler ($8A57, at the VBLANK while ctrl 4
+    bit 1 is set) plays the game and queues the tasks.  The port's idle point is $8073 with an empty queue: there each
+    interrupt is delivered with $8073 as its return address, and the foreground runs the queued tasks until the queue
+    is empty again.  A frame is seven NMIs, then the eighth with the IRQ behind it (the arcade's order at line 240).
+    The boot: from the reset to the first idle.
+
+    The speech chip's BSY pin is counted in NMIs (one NMI = 32 lines = 3072 CPU cycles = 16.27 speech samples): ST
+    rising raises it, ST falling starts the phrase of the data latch's table entry at the speed the last RST falling
+    edge latched, and it falls that many NMIs later (the handler that polls it runs before the count goes down).
+    """
+    IDLE = 0x8073
+    NMI = 0xB05D
+    IRQ = 0x8A57
+    QPTR = 0x153C
+    SAMPLES_PER_NMI = VLM_RATE * 32 * LINE / CPU_HZ
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.booted = False
+        self.irqs = self.nmis = 0
+        self.bsy = 0
+        self.bsy_left = 0                  # NMIs until BSY falls (when a phrase runs)
+        self.speed = self.step_bits = 0
+        self.latch = 0
+        self.st = self.rst = 0
+
+    def rd(self, a):
+        if a == 0x6000:
+            return self.bsy
+        return super().rd(a)
+
+    def wr(self, a, v):
+        if a == 0x4000:
+            self.sound_log.append((self.frame, 'pins', v))
+            st, rst = v >> 1 & 1, v >> 2 & 1
+            if st != self.st:
+                self.st = st
+                if st:
+                    self.bsy, self.bsy_left = 1, 0
+                else:
+                    self.bsy_left = vlm_nmis(self.vlm_rom, self.latch, self.speed, self.step_bits)
+            if rst != self.rst:
+                self.rst = rst
+                if not rst:
+                    self.speed, self.step_bits = self.latch >> 3 & 7, self.latch & 3
+                elif self.bsy:
+                    self.bsy = self.bsy_left = 0
+                    self.speed = self.step_bits = 0
+        elif a == 0x5000:
+            self.sound_log.append((self.frame, 'vlm', v))
+            self.latch = v
+        else:
+            super().wr(a, v)
+
+    def waits(self):
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until the task queue is empty at the idle point"""
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE and self.waits():
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def nmi_tick(self):
+        c = self.cpu
+        c.set_nmi(True)
+        c.step()                                      # (the entry: the state pushed, PC = the vector)
+        assert c.pc == self.NMI, hex(c.pc)
+        self.nmis += 1
+        self.run_to_idle()
+        if self.bsy_left:
+            self.bsy_left -= 1
+            if not self.bsy_left:
+                self.bsy = 0
+
+    def run_frame_port(self):
+        c = self.cpu
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        for i in range(8):
+            if self.ctrl[4] & 1:
+                self.nmi_tick()
+        if self.ctrl[4] & 2 and not c.cc & 0x10:
+            c.set_irq(True)
+            c.step()
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.run_to_idle()
+        self.frame += 1
+
+
+def vlm_nmis(rom, latch, speed, step_bits):
+    """NMIs a phrase keeps BSY high (see Vlm.st_w: the same frame walk, in speech samples, then in NMIs)"""
+    f = (40, 30, 20, 20, 40, 60, 50, 50)[speed]
+    step = 4 if step_bits & 2 else 2 if step_bits & 1 else 1
+    table = (latch & 0xFE) + ((latch & 1) << 8)
+    addr = (rom[table & 0x1FFF] << 8) | rom[(table + 1) & 0x1FFF]
+    periods, interp, stop = 1, 4, False
+    while not stop and periods < 100000:
+        if interp == 0:
+            cmd = rom[addr & 0x1FFF]
+            if cmd & 1:
+                addr += 1
+                if cmd & 2:
+                    interp, stop = 4, True
+                else:
+                    interp = ((cmd >> 2) + 1) * 2 * 4
+            else:
+                addr += 6
+                interp = 4
+        interp -= step
+        periods += 1
+    return max(1, -(-periods * f // int(JailBreakPort.SAMPLES_PER_NMI)))
 
 
 if __name__ == "__main__":
