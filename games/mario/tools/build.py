@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
--D NOSOUND=1: without the sound driver (there is none yet: the build always defines it).
+-D NOSOUND=1: without the sound driver (src/sound.s; its clips are recorded from MAME: tools/sound_capture.py).
 """
 from pathlib import Path
 import argparse
@@ -40,7 +40,8 @@ def main():
           len(report['unsupported']), 'unsupported')
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')
+        import sound_convert
+        sound_convert.ensure()                      # mario_sound.s: the board's clips (MAME recordings, sound_capture.py)
     tag = args.tag or ('mario_sim' if args.sim else 'mario')
     out = ROOT / 'run' / tag / 'MARIO.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

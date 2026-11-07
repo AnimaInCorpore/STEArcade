@@ -287,6 +287,7 @@ vbl:
 	move.b	d0,IO_IN1
 	endc
 	ifd AUTOPLAY				; (benchmark build: coin, start, then walking and jumping; period 4000 frames)
+	move.l	d2,-(sp)			; (d2 is the Z80's DE: kept)
 	moveq	#0,d0
 	move.w	isr_count,d0
 	divu	#4000,d0
@@ -313,7 +314,7 @@ vbl:
 	bhs.s	.ap5
 	or.b	#$10,d1
 .ap5:	move.b	d1,IO_IN0
-.ap3:
+.ap3:	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase

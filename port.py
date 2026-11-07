@@ -91,7 +91,8 @@ TESTS = {
               ("tools/logic_test.py", ["{n}"], 3000),
               ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
               ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
-              ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None)],   # (5: two players)
+              ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
+              ("tools/sound_test.py", ["3000"], None)],              # the DMA sound driver against the game's commands
     "mpatrol": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
