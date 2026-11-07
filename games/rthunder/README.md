@@ -43,9 +43,17 @@ assumption that cpu2 dispatched its own step thousands of cycles earlier; cpu2 s
 into its IRQ, long before cpu1 changes it), and whichever CPU runs first breaks one of the two kinds.  Tried 2026-11-07: a cycle-counted interleave (`RthunderCycles`: the CPUs alternate in slices of N 6809 cycles, IRQs
 at the idle points, no semaphore or spin yields): N = 32 follows 366 frames then runs over budget (cpu1 in `$A668`);
 N = 256 and 1024 fail in the first frame (cpu2 spins at `$858F`, cpu1 already idle).  Worse than the cooperative
-schedule, and it would need cycle counting in the translator; not a way forward as it stands.  Not tried: yield points
-taken from MAME traces of the conflicting accesses; taking the IRQs mid-foreground as the board does (the idle-point
-IRQ is itself a change of the timing).  Idle points found: cpu1 `$81BC` (the main loop's
+schedule, and it would need cycle counting in the translator; not a way forward as it stands.  Tried 2026-11-07 (second attempt): the MAME-schedule trace of a frame shows the cross-CPU traffic is tiny (frames
+401-403: only `$1606/$1607` with `$1600`, `$1632`; frames 2363-2370: the `$16D2` pair, the data at `$1000-$101F` that cpu1 writes
+before it releases `$D2`, plus `$1632`), i.e. semaphore protocols, which the yield-at-semaphore-write schedule follows.  The
+deadlock of `RthunderPort` (port frame 2168) is cpu1 at `$9036` waiting for `$07` while cpu2 has gone idle in the handler
+at `$8569` (`CLR <$07` ... RTS without the `INC <$07` of the normal path): the port's game state had left MAME's before (at the
+same MAME frame 2369 MAME still runs the `$D2` handshake).  Port and MAME agree on `$1600-$16FF` apart from timing-loop
+temporaries (`$160E/F`, `$1612/13`, `$1624`, `$1626/27`) for 232 frames; the divergence is elsewhere and not found.
+`RthunderOverrun` (a blocked CPU stays in its handler into the next frame, as MAME's overruns) does not help: from frame
+~2170 on cpu1 is blocked every frame (3832 of 6000 frames), i.e. the game is hung, not slowed.  Not tried: taking the IRQs
+mid-foreground as the board does; a lock-step comparison of the *whole* RAM of port and MAME to find the first real
+divergence (needs a per-frame normalisation of idle-loop counters).  Idle points found: cpu1 `$81BC` (the main loop's
 BRA, queues `$56B3/$56B4`, `$566E/$566F` equal), cpu2 `$80A6` (`$1667/$1668` equal).
 
 ## Tools

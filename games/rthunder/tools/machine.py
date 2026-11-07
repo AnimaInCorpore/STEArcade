@@ -727,3 +727,38 @@ class RthunderCycles(RthunderPort):
                 total += self.QUANTUM
             if total > self.FRAME_LIMIT:
                 raise RuntimeError("frame over budget: cpu1 pc %04X cpu2 pc %04X" % (self.cpu1.pc, self.cpu2.pc))
+
+
+class RthunderOverrun(RthunderPort):
+    """RthunderPort where a CPU that is blocked in a spin wait when the other has finished its frame stays in its
+    handler into the next frame (MAME's overrun): its IRQ for the next frame is not taken (it is inside its handler),
+    the other CPU's is."""
+    def cooperate(self):
+        stuck = 0
+        while "run" in self.state:
+            before = (self.writes, tuple(c.pc for c in self.cpus))
+            for i in self.ORDER:
+                if self.state[i] != "run":
+                    continue
+                if self.run_cpu(i) == "idle":
+                    self.state[i] = "idle"
+            if before == (self.writes, tuple(c.pc for c in self.cpus)):
+                stuck += 1
+                if stuck > 2:
+                    self.overruns = getattr(self, "overruns", 0) + 1
+                    return
+            else:
+                stuck = 0
+
+    def run_frame_port(self):
+        self.run_others()
+        for i in (0, 1):
+            c = self.cpus[i]
+            if not self.idle(i):
+                continue                                   # still inside the last frame's handler
+            c.set_irq(True)
+            c.step()
+            c.set_irq(False)
+            self.state[i] = "run"
+        self.cooperate()
+        self.port_frames += 1
