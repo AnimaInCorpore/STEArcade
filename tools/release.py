@@ -39,7 +39,7 @@ GAMES = [
      "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
      "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
     ("xevious", "XEVIOUS.PRG", "Super Xevious (Namco 1984)",
-     "logic exact against the reference (lock-step); the picture is drawn by the CPU, a few pictures a second; no sound yet; 16 colours fitted",
+     "logic exact against the reference (lock-step); the picture is drawn by the CPU, 5.4 pictures a second; sound: the WSG voices on the YM (no explosions); 16 colours fitted",
      "fire: Space, Control, joystick fire, pad A/C.  bomb: Alternate, pad B.  8 directions.  One coin key (5, Option)."),
     ("galaga", "GALAGA.PRG", "Galaga (Namco 1981)",
      "a game frame per VBL; the real 51XX MCU's program (translated), the 54XX's explosion simulated; 31 frames a second\n"

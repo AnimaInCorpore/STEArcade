@@ -19,6 +19,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
 from machine68k import Register as R
 from sim import Sim, TRAP1
 from machine import Xevious
+import sound
 from paths import ROOT, build_dir
 
 BUILD = build_dir('xevious')
@@ -53,7 +54,7 @@ def main():
         m.dswa = 0xff & ~0x60 | (0x40 if seed == 7 else 0x00)
     if seed == 9:
         m.dswb = m.dswb & ~0x60
-    for base in (g_rom1, g_block, g3_block):
+    for base in (g_rom1, g_block):
         for i in range(8):
             mem.w8(base + 0x6800 + i, ((m.dswb >> i) & 1) | (((m.dswa >> i) & 1) << 1))
 
@@ -133,6 +134,12 @@ def main():
         sc = [mem.r16(sym['scroll'] + 2 * i) for i in range(4)]
         if sc != [m.scroll[i] for i in range(4)] or mem.r16(sym['flip']) != m.flip:
             raise RuntimeError('frame %d: scroll %s flip %d, reference %s %d' % (f, sc, mem.r16(sym['flip']), m.scroll, m.flip))
+        wsg = [mem.r8(g3_block + 0x6800 + i) & 15 for i in range(32)]
+        if wsg != [v & 15 for v in m.sound]:
+            raise RuntimeError('frame %d: the sound registers %s, reference %s' % (f, wsg, [v & 15 for v in m.sound]))
+        ym = [mem.r8(sym['snd_ym'] + i) for i in range(11)]
+        if ym != sound.ym_image(list(m.sound), 0):
+            raise RuntimeError('frame %d: the YM registers %s, the model %s' % (f, ym, sound.ym_image(list(m.sound), 0)))
         st = sym['N51_state']
         ram51 = [mem.r8(st + i) & 15 for i in range(64)]
         if not m.n51.held and ram51 != list(m.n51.mcu.ram):

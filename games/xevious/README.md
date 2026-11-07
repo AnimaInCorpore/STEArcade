@@ -10,11 +10,11 @@ The MAME set **`sxevious`** (Super Xevious, a clone of `xevious`; driver `namco/
 for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (explosion noise), two scrolling tile layers
 (background with a pattern ROM logic, foreground characters) and 3-bit sprites.  All three Z80 programs are translated to
 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
-the 50XX is **simulated** at the register interface for the three commands the game sends; the 54XX and the sound are not
-done.  Status: **Experimental** (root README): the logic is exact in lock-step and the picture is exact against the
-reference renderer, which equals MAME's picture, but there is no sound, the picture is drawn by the CPU, and the speed is
-low.  Latest speed (Hatari, 4 MB STE, `tools/bench.ps1 3000`, attract mode, 2026-11-07): about 22 arcade frames a second
-(36% of the arcade's 60.6) and 5.5 pictures a second.
+the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
+three voices as the YM2149's square waves (as in Galaga), the 54XX's explosions are not done.  Status: **Experimental** (root README): the logic is exact in lock-step and the picture is exact against the
+reference renderer, which equals MAME's picture, but the explosions are silent, the picture is drawn by the CPU, and the speed is
+low.  Latest speed (Hatari, 4 MB STE, `tools/bench.ps1 3000`, attract mode, 2026-11-07): about 21.5 arcade frames a second
+(35% of the arcade's 60.6) and 5.4 pictures a second.
 
 ## Build and run
 
@@ -64,8 +64,11 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   `CRASH.TXT`.  **The picture was not looked at in Hatari** (this session could not capture its window); the screenshot
   above is the STE renderer's own output in the simulator.
 * Coverage (`ref/cover.py`): CPU1 7,187 translated instructions, CPU2 762, CPU3 555; no unsupported, no missing target.
-* Missing, most important first: **sound** (the WSG on the YM is not done; the sound CPU runs, its NMIs are delivered, the
-  54XX's commands are only counted); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
+* Sound (`tools/logic_test.py`): every frame the sound CPU's WSG registers equal the reference's and the YM2149's registers
+  equal `tools/sound.py`'s image of them (the model of Galaga's port with Xevious's waveform PROM); not listened to in Hatari
+  (`--sound off`), the pitch not compared with MAME's audio.
+* Missing, most important first: the 54XX's **explosions** (the commands are only counted; MAME plays samples / a discrete
+  circuit); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
   `AGENTS.md` (sprites and the foreground are merged by the CPU: `render.s`, `blit_row`); the cocktail flip, a foreground
   scroll and a vertical background scroll other than 0 (the game uses none: `ref/pens.py` saw one value of registers 1-3);
   per-area palettes (one 16-colour fit for all areas); the 54XX's program; the 50XX's own program (translating it needs
@@ -127,8 +130,8 @@ clipped at the picture's edges), the foreground from a list of cells with pixels
 
 ## Speed
 
-Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1 3000`, attract mode, 2026-11-07): 22 arcade frames a second,
-5.5 pictures a second (`MAX_SKIP` 3: a picture is skipped while a VBL waits).  Musashi: the logic about 175,000 cycles a
+Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1 3000`, attract mode, 2026-11-07, sound included): 21.5 arcade
+frames a second, 5.4 pictures a second (`MAX_SKIP` 3: a picture is skipped while a VBL waits).  Musashi: the logic about 175,000 cycles a
 frame (lock-step test average), a steady picture about 800,000 (the ring update, the 129,000 bus cycles of the picture
 copy, the CPU sprites, the foreground); a first picture 12 million (it builds the ring).  Where it goes: the CPU sprite
 rows (about 500 cycles a row) and the picture copy; `docs/speed.md` lists the techniques not used yet: the Blitter's
@@ -160,4 +163,4 @@ Measured and not kept: drawing every picture (9 pictures a second but 9 arcade f
 ## Verification
 
 Assisted coverage and tests only (random scripted play, MAME's cheats); no natural full-game playthrough, no Hatari
-playtest of the picture, no sound: see the [status policy](../../docs/port-status.md).  No PPO profile.
+playtest of the picture, no listening test: see the [status policy](../../docs/port-status.md).  No PPO profile.

@@ -2,7 +2,7 @@
 -> run/xevious/XEVIOUS.PRG, run/xevious_sim/XEVIOUS.PRG with --sim (the CPU ROMs are embedded: build/xevious/rom_*.rom)"""
 import argparse, os, sys
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
-import gen, assets, mb88x
+import gen, assets, mb88x, sound
 from machine import load_mcu, load, ste_rom
 from paths import build_dir, run_dir
 from toolchain import assemble_link
@@ -34,6 +34,7 @@ def main():
     (build_dir("xevious") / "n51_code.s").write_text(n51)
     (build_dir("xevious") / "n51_bss.s").write_text(mb88x.bss("N51"))
     assets.build()
+    sound.emit(build_dir("xevious") / "sound_tables.s")
     roms = [b"".join(load(f) for f in files) for files in ROMS]
     roms[0] = ste_rom(roms[0], not a.full_selftest, a.invincible)
     for n, rom in enumerate(roms):

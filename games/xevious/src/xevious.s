@@ -130,6 +130,8 @@ start:
 	st	n51_held		; (the custom chips are held in reset until the program releases latch $6823)
 	move.l	#$1234,rnd_state
 	bsr	n50_init
+	move.b	#$FF,snd_expl_t
+	bsr	snd_init
 
 	; The main CPU: the foreground thread.
 
@@ -198,7 +200,6 @@ load_roms:
 init_cells:
 	lea	G_IO1+$6800,a0
 	lea	G_IO2+$6800,a1
-	lea	g3_block+$6800,a2
 	moveq	#0,d1			; bit
 .dsw:
 	moveq	#0,d0
@@ -212,7 +213,6 @@ init_cells:
 	or	d3,d2
 	move.b	d2,(a0,d1.w)
 	move.b	d2,(a1,d1.w)
-	move.b	d2,(a2,d1.w)
 	addq	#1,d1
 	cmp	#8,d1
 	blt.s	.dsw
@@ -692,13 +692,150 @@ g_sound_frame:
 .none:	bra	snd_update
 
 ; ------------------------------------------------------------------------------
-; Sound: filled in with the sound driver (the WSG as the YM2149's square waves); the frame's hooks are here
+; Sound: the WSG (the sound CPU's $6800-$681F cells) on the YM2149, a square wave per voice (tools/sound.py is the same in
+; Python, logic_test.py compares them).  The 54XX's explosions are not done: snd_expl_t stays $FF.
 ; ------------------------------------------------------------------------------
 
+; at the start: the YM silent, its shadow
 snd_init:
-snd_off:
-snd_update:
+	lea	snd_ym,a0
+	moveq	#0,d1
+.y:	move.b	d1,$ffff8800.w
+	moveq	#0,d0
+	cmp.b	#7,d1
+	bne.s	.w
+	moveq	#-1,d0			; (mixer: everything off, both ports outputs)
+.w:	move.b	d0,$ffff8802.w
+	move.b	d0,(a0)+
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.y
 	rts
+
+snd_off:
+	moveq	#8,d0
+.v:	move.b	d0,$ffff8800.w
+	clr.b	$ffff8802.w
+	addq.b	#1,d0
+	cmp.b	#11,d0
+	blo.s	.v
+	rts
+
+; One game frame: the explosion's envelope steps, the YM's registers 0-10 from the WSG cells.  Clobbers d0-d7 / a0-a2.
+snd_update:
+	lea	g3_block+$6800,a0	; nothing to do when the WSG is as last time and no explosion sounds
+	lea	snd_wsg,a1
+	tst.b	snd_expl_t
+	bpl.s	.changed
+	moveq	#8-1,d0
+.cmp:	cmpm.l	(a0)+,(a1)+
+	dbne	d0,.cmp
+	bne.s	.changed
+	rts
+.changed:
+	lea	g3_block+$6800,a0
+	lea	snd_wsg,a1
+	moveq	#8-1,d0
+.keep:	move.l	(a0)+,(a1)+
+	dbf	d0,.keep
+	lea	snd_buf,a2
+	clr.l	(a2)
+	clr.l	4(a2)
+	clr.w	8(a2)
+	clr.b	10(a2)
+	moveq	#$3F,d6			; the mixer: bit k tone off, bit k + 3 noise off
+	lea	g3_block+$6800,a0
+	moveq	#0,d5			; the voice
+.voice:	move.w	d5,d4
+	mulu	#5,d4			; its register offset
+	moveq	#0,d0			; the frequency
+	tst.w	d5
+	bne.s	.f1
+	move.b	$10(a0),d0
+	and.w	#15,d0
+.f1:	moveq	#4,d2			; nibbles $11-$14 of the voice: << 4, 8, 12, 16
+	lea	$11(a0,d4.w),a1
+.fn:	moveq	#15,d1
+	and.b	(a1)+,d1
+	lsl.l	d2,d1
+	add.l	d1,d0
+	addq.w	#4,d2
+	cmp.w	#20,d2
+	blo.s	.fn
+	moveq	#15,d1
+	and.b	$15(a0,d4.w),d1		; the volume
+	beq.s	.next
+	tst.l	d0
+	beq.s	.next
+	moveq	#7,d3
+	and.b	5(a0,d4.w),d3		; the waveform
+	move.w	#4095,d2
+	cmp.l	#334,d0
+	blo.s	.per
+	moveq	#20,d2
+	cmp.l	#$FFFF,d0
+	bhi.s	.per
+	move.l	#DIVIDEND,d2
+	divu	d0,d2
+.per:	lea	snd_shift,a1
+	move.b	(a1,d3.w),d7
+	lsr.w	d7,d2
+	bne.s	.p1
+	moveq	#1,d2
+.p1:	lsl.w	#4,d3
+	add.w	d1,d3
+	lea	snd_level,a1
+	move.b	(a1,d3.w),d1		; the level
+	beq.s	.next
+	move.w	d5,d3
+	add.w	d3,d3
+	move.b	d2,(a2,d3.w)		; the period
+	lsr.w	#8,d2
+	move.b	d2,1(a2,d3.w)
+	move.b	d1,8(a2,d5.w)
+	bclr	d5,d6			; tone on
+.next:	addq.w	#1,d5
+	cmp.w	#3,d5
+	blo	.voice
+	; the explosion
+	moveq	#0,d0
+	move.b	snd_expl_t,d0
+	bmi.s	.noexpl
+	lea	snd_expl_env,a1
+	move.b	(a1,d0.w),d1
+	addq.b	#1,d0
+	cmp.b	#SND_EXPL_LEN,d0
+	blo.s	.t
+	moveq	#-1,d0
+.t:	move.b	d0,snd_expl_t
+	cmp.b	10(a2),d1
+	bls.s	.noexpl
+	clr.b	4(a2)
+	clr.b	5(a2)
+	move.b	d1,10(a2)
+	bset	#2,d6			; channel C: tone off, noise on
+	bclr	#5,d6
+	move.b	#SND_NOISE,6(a2)
+.noexpl:
+	or.b	#$C0,d6
+	move.b	d6,7(a2)
+	; the registers that changed (no interrupt handler of the port touches the YM)
+	lea	snd_ym,a0
+	moveq	#0,d1
+.wr:	move.b	(a2)+,d0
+	cmp.b	(a0),d0
+	beq.s	.same
+	move.b	d0,(a0)
+	move.b	d1,$ffff8800.w
+	move.b	d0,$ffff8802.w
+.same:	addq.l	#1,a0
+	addq.b	#1,d1
+	cmp.b	#11,d1
+	blo.s	.wr
+	rts
+
+DIVIDEND = 1365333			; 125000 * 2^20 / 96000: the YM period of a WSG frequency
+	include	"sound_tables.s"
 
 ; ------------------------------------------------------------------------------
 ; The sub CPU's background pattern ROM read (MAME's xevious_bb_r): the BS latches it wrote at F000 / F001 select the
@@ -1017,7 +1154,6 @@ n51_frame_tick:
 	or.b	d7,d6
 	move.b	d6,G_IO1+$6800
 	move.b	d6,G_IO2+$6800
-	move.b	d6,g3_block+$6800
 	moveq	#1,d7			; (the rising edge counts nothing: no run)
 	bsr	N51_set_tc
 	moveq	#0,d7
@@ -1510,6 +1646,10 @@ g2_iff:		ds.b	1
 latch:		ds.b	8		; $6820-$6827 (IRQ1, IRQ2, NMI3 off, the reset line, ...)
 chips_on:	ds.b	1		; the reset line was released
 nmi3_left:	ds.b	1
+snd_expl_t:	ds.b	1		; the explosion's frame ($FF: off; the 54XX is not done)
+snd_wsg:	ds.b	32		; the WSG cells at the last snd_update
+snd_buf:	ds.b	12		; the YM registers of this frame
+snd_ym:		ds.b	12		; the YM2149's registers 0-10 as written
 n51_held:	ds.b	1		; the 51XX is in reset (latch $6823 is 0)
 n51_busy:	ds.b	1		; a transfer runs (g_ctrl06)
 n51_first:	ds.b	1		; its first pulse
