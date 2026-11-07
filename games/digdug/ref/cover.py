@@ -3,7 +3,9 @@ and the sites of the I/O accesses.  python ref/cover.py <seed> <frames>  ->  dig
 
 Seeds: 1-3 one player (random joystick and pump button), 4 two players, 5 hardest difficulty, 5 lives, no bonus life, 6 a
 cocktail cabinet with two players (the screen flips), 7 a coin-less attract cycle, 9 continue allowed and the other
-coinage / bonus DIPs, 10-11 fast input changes (dies earlier: more game overs).  (Seed 8, the service switch, is left out:
+coinage / bonus DIPs, 10-11 fast input changes (dies earlier: more game overs), 12 the scripted game of tools/schedule_test.py
+and render_test.py (the sound CPU's rarer commands only the long runs reach), 13-16 long random play (all four directions,
+holds of 5-60 frames).  (Seed 8, the service switch, is left out:
 the test mode runs inside the main CPU's IRQ handler and does not return.)  ewrites: the instructions that write the
 EAROM window ($B800-$B83F), the sites gen.py makes track the address."""
 import os, pickle, random, sys
@@ -52,6 +54,8 @@ def credit_mode():
     return m.n51.mcu.ram[3] == 0
 
 
+LONG = seed >= 13
+hold = 15
 coin_at = 600 + rnd.randrange(600)
 state = "attract"
 joy = 0
@@ -73,8 +77,10 @@ for f in range(frames):
             else: state, t0 = "play", f
         if state in ("play", "over"):
             g = f - t0
-            if g % (6 if FAST else 15) == 0:
-                joy = rnd.choice([0, 1, 2, 4, 8, 8, 4])
+            if g % (6 if FAST else hold) == 0:
+                joy = rnd.choice([0, 1, 2, 4, 8] if LONG else [0, 1, 2, 4, 8, 8, 4])
+                if LONG:
+                    hold = rnd.randrange(5, 60)
             if joy:
                 m.in0 &= ~joy
                 if PLAYERS == 2 and (f // 600) % 2:

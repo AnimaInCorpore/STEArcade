@@ -69,7 +69,7 @@ def check(n, pmap):
         in0, in1 = script(s.frames)
         sim.mem.w8(sym["in0_kbd"], (~in0) & 0xff)
         sim.mem.w8(sym["in1_kbd"], (~in1) & 0xff)
-    s.run_frames(n + 12, on_frame=on_frame)
+    s.run_frames(n + 40, on_frame=on_frame)      # (a busy picture takes several VBLs: the shown one must be of the frozen state)
     mine = screen(s.mem, s.mem.r32(sym["display_screen_address"]))
     want = reference(s.mem, sym, pmap)
     diff = np.argwhere(mine != want)

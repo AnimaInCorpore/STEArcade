@@ -131,7 +131,7 @@ GAMES = [
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again
-NOT_RELEASED = {"rtype"}
+NOT_RELEASED = {"rtype", "digdug"}      # Dig Dug: ~4.2 MB (the sprite data), developed with 14 MB in Hatari until it is packed
 assert [g[0] for g in GAMES] == [g for g in port.GAMES if g not in NOT_RELEASED] and \
     all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES but NOT_RELEASED (same order, same programs)"

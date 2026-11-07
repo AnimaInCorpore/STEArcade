@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG"}
+         "mpatrol": "MPATROL.PRG", "digdug": "DIGDUG.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -74,6 +74,8 @@ COVER = {
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry
                ("ref/cover.py", [7], 20000)],                                          # 7: the real 51XX
+    "digdug": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 9, 10, 11], 20000), ("ref/cover.py", [12], 12000), ("ref/cover.py", [13, 14, 15, 16], 40000)],   # 1-3 play, 4 two players, 5 hardest + 5 lives, 6 cocktail,
+                                                                          # 7 no coin (attract), 9 other coinage / bonus DIPs, 10-11 fast input
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
@@ -241,6 +243,10 @@ TESTS = {
                ("ref/mcu_events_test.py", ["{n}"], 3000),        # the event-driven 51XX against the cycle-exact one
                ("../../engine/mb88x_test.py", ["{n}"], 3000),    # the translated 51XX against the event-driven one
                ("tools/n51_test.py", ["{n}"], 3000)],            # the build's 51XX traffic against the reference
+    "digdug": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/schedule_test.py", ["{n}", "--no-build", "--every", "50", "--slack", "700"], 2400),   # the STE's tile / sprite RAM against the reference's schedule
+               ("tools/render_test.py", ["1500", "2500", "3500", "5000"], None)],                          # the picture against the reference renderer
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 2000),          # (into the play: src/natives.s runs there)
