@@ -112,6 +112,13 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
      "  Up, Space, Control, X, joystick up / fire, pad B."),
+    ("sbasketb", "SBASKETB.PRG", "Super Basketball (Konami 1984)",
+     "work in progress: about 60% of the arcade's speed, ~11 pictures a second (Hatari); exact logic and picture,
+"
+     "  the turned 224 x 256 picture in 16 fitted colours; no sound yet",
+     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):
+"
+     "  X, pad B.  button 3: C, pad C.  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
     ("pooyan", "POOYAN.PRG", "Pooyan (Konami 1982)",
      "the arcade's full speed, 40-50 pictures a second in play (Hatari); exact logic and picture, the turned\n"
      "  224 x 256 picture; the sound board's Z80 translated, its two AYs on the YM",
