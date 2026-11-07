@@ -187,6 +187,10 @@ class Program:
         self.opcode_reader = opcode_reader
         self.inline_calls = dict(inline_calls or {})
         self.static_write = dict(static_write or {})
+        # page_alias (set after construction): {slot: {page: alias page}}: a code page that runs from two slots (Dragon
+        # Spirit's main page $334 in slots 5 and 6) is translated once per slot; mapped into that slot it takes the
+        # alias's number (a mirror of the same ROM bytes, its own 68000 copy; the runtime's bank writes do the same)
+        self.page_alias = {}
         self.wrap_sites = set(wrap_sites)
         # video_inline (set after construction): (lo, hi, sites): a byte store at one of these I/O sites whose address
         # is in lo .. hi - 1 goes into the 64 KB block at a4 and lists its cell (address & $7FF) once in cell_dirty /
@@ -677,9 +681,11 @@ class Emitter:
             self.e("lea %d(%s),a0" % (d, b))
             return "(a0,%s.l)" % dr
         if x.kind in ("inc1", "inc2"):
-            # post increment: the register first, the operand at -n (the increment must not follow the flag op)
-            self.slot_base(v, slots, dr, 0)
-            if not getattr(self, "_inc_done", False):
+            # post increment: the register first, the operand at -n (the increment must not follow the flag op); the
+            # slot is the old register's (once incremented: register - n; Dragon Spirit's LDD ,Y++ at Y = $7FFE)
+            inc_done = getattr(self, "_inc_done", False)
+            self.slot_base(v, slots, dr, -x.inc if inc_done else 0)
+            if not inc_done:
                 self.e("addq.w #%d,%s" % (x.inc, dr))
             d = off - x.inc
             return "%d(%s,%s.l)" % (d, self._base, dr)
@@ -887,6 +893,12 @@ class Emitter:
             e("and.w #3,d7")
             e("lsl.w #8,d7")
             e("move.b %d(a6),d7" % (PID_OFF + 2 * k + 1))
+        for page, alias in sorted(self.p.page_alias.get(k, {}).items()):
+            other = self.new_label()                    # (page_alias: this page in slot k is another page number)
+            e("cmp.w #$%X,d7" % page)
+            e("bne.s %s" % other)
+            e("move.w #$%X,d7" % alias)
+            self.lines.append(other + ":")
         skip = self.new_label()
         e("cmp.w %d(a6),d7" % (PID_OFF + 2 * k))       # (the same page again: nothing changes; 2 of 3 writes)
         e("beq.s %s" % skip)
