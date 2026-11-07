@@ -215,7 +215,9 @@ is left is flat: after the collision no routine of the game takes more than 2.5%
 The program asked TOS for 3,665,354 bytes on 2026-10-16 (text, data and BSS; the release limit is 3,700,000; the 0.7
 release of 2026-11-02 3,613,772): the tile cache is 512 entries, the character cache 256, the sprites' row orders two
 a byte.  The checker pairs of 2026-11-05 added +64 KB of conversion tables and a 4 KB lookup: the load size has to be
-measured again.
+measured again.  For development Hatari may run it with 14 MB (the user, 2026-11-07; the repository's `tools/hatari.sh` and
+this port's `tools/bench.sh` default to 14 here, `MEMSIZE=4` for a 4 MB STE): speed work may use more memory first; the release
+still has to fit the load budget.
 
 ## What is missing
 

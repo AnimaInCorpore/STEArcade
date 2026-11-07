@@ -4,6 +4,8 @@
 #
 #   games/ddragon/tools/bench.sh [VBLs]      PLAY=1: the recorded play (build/ddragon/play_inputs.bin, -D PLAYBACK=1)
 #                                            instead of the AUTOPLAY script; EXTRA="-D ...": more build.py options
+#   MEMSIZE=4 games/ddragon/tools/bench.sh ...  (Hatari ST RAM in MB, default 14: allowed for development, the user
+#                                            2026-11-07; the release still has to fit tools/release.py's MAX_LOAD)
 #
 # Its own Hatari (the F030Arcade build), killed by its PID only (other sessions run Hatari too).  run/ddragon gets
 # the normal build back.  Reports the logic (arcade frames a second; the arcade: 57.44) and the pictures a second
@@ -20,7 +22,7 @@ $PY games/ddragon/tools/build.py 2>&1 | grep -i "built\|rror" | tail -1
 rm -f $BENCH/COUNTERS.BIN $BENCH/RATE.BIN $BENCH/CRASH.TXT
 HATARI=${HATARI:-/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari}
 TOS=${TOS:-/Users/saschaspringer/Work/F030Arcade/third_party/tos/tos206de.img}
-(cd $BENCH && exec "$HATARI" --machine ste --memsize 4 --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
+(cd $BENCH && exec "$HATARI" --machine ste --memsize ${MEMSIZE:-14} --tos "$TOS" --fast-boot true --cpu-exact true --compatible true \
   --sound off --confirm-quit off --statusbar false --fast-forward true --log-file hatari.log DDRAGON.PRG) > /dev/null 2>&1 &
 HP=$!
 for i in $(seq ${WAIT:-600}); do sleep 1; [ -f $BENCH/COUNTERS.BIN ] || [ -f $BENCH/CRASH.TXT ] && break; kill -0 $HP 2>/dev/null || break; done
