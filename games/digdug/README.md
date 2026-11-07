@@ -11,8 +11,8 @@ Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles 
 (the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
 
 Status: **Experimental / deferred** (root README): the game boots, runs its attract mode and plays in the simulator (a
-scripted game of 8000 frames); **in Hatari it still crashes** (`z80_badpc`, CRASH.TXT, the sub CPU's EAROM command at
-boot: see State, Hatari); there is no Hatari screenshot yet (the image above does not exist); no full natural playthrough, no speed measurement, the program
+scripted game of 8000 frames) and in Hatari (14 MB, the screenshot above: a scripted game, `-D AUTOPLAY`, 3600 VBLs
+without a crash; the STE shows 277 of the 288 lines, so the lives and the round line at the bottom are cut); no full natural playthrough, no speed measurement, the program
 is too large for a 4 MB machine (14 MB in Hatari while it is developed).
 
 ## Build and run
@@ -55,17 +55,9 @@ Verified (what each check ran, see Tests and tools):
   reference renderer through the colour map: 0 differing pixels at several moments of play (see below), the sprites'
   wrap-around copies (MAME draws a sprite 256 pixels to the right too) left out of both.  `tools/sprite_test.py`: 2664
   cases at both side edges, all 16 shifts, flips, double sizes, transparent holes and a 64 KB crossing, exact.
-* **Hatari (14 MB): NOT working yet.**  The program starts and then ends in `z80_badpc` (CRASH.TXT) while the sub CPU
-  runs the EAROM command the main CPU leaves in `$9B3D` at boot (`g_earom_ctl`, `$1DDC`; the Z80 stack of the dump shows
-  the EAROM routine's return addresses `$1E24` / `$1E8B`).  The same program does not crash on Musashi (8000 frames of the
-  scripted game).  Not found: the stall, the nested stack or an odd access Hatari takes and Musashi does not.  Patching
-  the EAROM delay loop (`$1EA0`) out changed the dump but not the crash.  Next: run the sub CPU's task under the
-  reference's schedule in Hatari with `-D DEBUG` and `CHKSP`, and look at `ctx2`.
-
-Not done or not verified:
-
-* **No full-game verification**: no natural playthrough, no round beyond the first few of random play, no high-score
-  entry in the STE (the translation covers it only where the coverage seeds reached), no two-player game in Hatari.
+* **Hatari (14 MB)**: boots, attract mode, coin, start and a scripted game (`-D AUTOPLAY=1400`: moves and pumps) for 3600
+  VBLs without a crash, tunnels dug, score counting, enemies and rocks drawn.  Looked at in AVI captures only (no sound, no
+  keyboard session, no timing); the attract screens look as MAME's (the all-yellow dirt of the title screen is MAME's too).
 * **The EAROM** (`g_earom_ctl`) is a model of the chip's states; its content is not kept between runs.  Coverage reaches
   the load at boot and the save at a game over.
 * **The service / test mode** (service switch): the test mode runs inside the main CPU's IRQ handler and does not return in
@@ -121,6 +113,12 @@ Not done or not verified:
 
 ## Lessons
 
+* **Hatari-only crash, a nested VBL (fixed 2026-11-07)**: the sub CPU's EAROM task runs inside the VBL handler; Timer B's
+  handler (the border removal) lowers the IPL, so a VBL arrived inside the task and ran the IRQ handlers on the task's
+  registers (the Z80 stack of CRASH.TXT showed a second `TOKEN` and zeros from the stale `ctx2` above the task's return
+  address).  Musashi has no timers: no repro, even with a slow render or tiny chunks.  Now `in_game` makes a VBL inside the
+  game interrupts do nothing, `in_fg2` / `g2_iff` keep the task from restarting or taking an IRQ.  The delay loop of the EAROM
+  commands (`$1EA0`) is a `ret` (tens of VBLs of the STE's time otherwise).
 * **Sound CPU table** (found by the crash's Z80 stack in the simulator, fixed): `$0391` looks the sound id up in 21 code
   pointers at `$040D` (`jp (hl)` at `$0390`); an id the coverage never played (6, frame ~4930 of the scripted game) ended at
   `z80_badpc`.  The words at `$0700` that I first took for it are sequence data (a data root gave an unsupported `add hl,bc`):

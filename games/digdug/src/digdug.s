@@ -484,6 +484,9 @@ vbl:
 	endc
 	movem.l	d0-d7/a0-a6,-(sp)
 	bsr	jagpad_poll		; (the 51XX's inputs merge jp_in)
+	ifd AUTOPLAY			; (-D AUTOPLAY=1: a scripted game for the Hatari captures: a coin and a start, then moves and pumps)
+	bsr	autoplay
+	endc
 	bsr	n51_vbl			; the 51XX's frame: the vertical blank on its TC pin
 
 	; A frame finished drawing since the last VBL: show it, draw into the other one.
@@ -537,6 +540,9 @@ vbl:
 
 	tst.b	in_turn			; a booting CPU's registers are live: no handlers
 	bne	vbl_render
+	tst.b	in_game			; a VBL inside the game's interrupts below (Timer B's handler lowers the IPL, Hatari): the
+	bne	vbl_done		; interrupted code is a handler or the sub CPU's task, not the main thread: nothing
+	st	in_game
 	ifd FREEZEAT
 	cmp.l	#FREEZEAT,frame_counter	; test: the game stands still from VBL FREEZEAT on,
 	bhs	vbl_render		; the renderer goes on (screens of two builds compared)
@@ -588,14 +594,21 @@ vbl:
 
 	tst.b	booted2
 	beq.s	.no_fg2
+	tst.b	in_fg2			; (a nested VBL: the task is running)
+	bne.s	.no_fg2
 	tst.b	g_ram+$1B3D
 	beq.s	.no_fg2
+	st	in_fg2
+	clr.b	g2_iff			; (a VBL during the task - Timer B's handler lowers the IPL - must not start the sub CPU's IRQ
+					; handler on the registers of the task: the IRQ waits for the next VBL)
 	movem.l	ctx2,d0-d7/a0-a6
 	move.w	#TOKEN,-(a5)
 	move.l	#.after_fg2,g2_ret_to
 	jmp	Y1DDC
 .after_fg2:
 	movem.l	d0-d7/a0-a6,ctx2
+	clr.b	in_fg2
+	st	g2_iff
 	chk_sp	21
 .no_fg2:
 
@@ -606,6 +619,7 @@ vbl:
 
 	bsr	g_boot_turns		; a booting CPU waiting for the main CPU gets on
 	chk_sp	22
+	clr.b	in_game
 
 vbl_render:
 	; Draw the frame, with the VBL enabled: when it takes longer than a frame, the
@@ -651,6 +665,40 @@ vbl_done:
 
 	movem.l	(sp)+,d0-d7/a0-a6
 	rte
+
+	ifd AUTOPLAY
+autoplay:
+	move.l	frame_counter,d0
+	moveq	#0,d1			; pressed bits of in1 (active high: the VBL inverts), d2: of in0
+	moveq	#0,d2
+	cmp.l	#AUTOPLAY,d0
+	blo.s	.set
+	move.l	d0,d3
+	sub.l	#AUTOPLAY,d3
+	cmp.l	#6,d3			; the coin
+	bhs.s	.c1
+	moveq	#$10,d1
+.c1:	cmp.l	#40,d3			; the start
+	blo.s	.m
+	cmp.l	#46,d3
+	bhs.s	.m
+	moveq	#4,d1
+.m:	cmp.l	#400,d3			; then moves (right / down / left / up in turn) and the pump
+	blo.s	.set
+	move.l	d3,d4
+	lsr.l	#5,d4
+	and.l	#3,d4
+	move.b	.dirs(pc,d4.w),d2
+	move.l	d3,d4
+	and.l	#15,d4
+	cmp.l	#4,d4
+	bhs.s	.set
+	or.b	#1,d1
+.set:	move.b	d1,in1_kbd
+	move.b	d2,in0_kbd
+	rts
+.dirs:	dc.b	2,4,8,1
+	endc
 
 ; The token on a Z80 stack returns here: back to whoever started the handler.
 
@@ -1571,6 +1619,8 @@ current:	ds.b	1		; 0: the main CPU's code runs, 1: the sub CPU's
 booted2:	ds.b	1		; the sub CPU reached its idle loop
 cpu3_state:	ds.b	1
 ctrl06_mode:	ds.b	1
+in_game:	ds.b	1		; the VBL's game interrupts run (a nested VBL does nothing)
+in_fg2:		ds.b	1		; the sub CPU's EAROM task runs
 g1_iff:		ds.b	1		; the CPUs' interrupt enable (ei / di)
 g2_iff:		ds.b	1
 	even

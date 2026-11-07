@@ -41,6 +41,11 @@ init_render:
 ; ------------------------------------------------------------------------------
 
 render_frame:
+	ifd SLOWRENDER			; (test: a render of SLOWRENDER x 12 cycles: the next VBL comes during it, as in a busy Hatari scene)
+	move.l	#SLOWRENDER,d0
+.slow:	subq.l	#1,d0
+	bne.s	.slow
+	endc
 	lea	tile_marks,a0		; no cell is marked yet in this frame
 	moveq	#0,d0
 	moveq	#0,d1
