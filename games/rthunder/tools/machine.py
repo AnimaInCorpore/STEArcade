@@ -701,3 +701,29 @@ class RthunderPort(Rthunder):
             self.state[i] = "run"
         self.cooperate()
         self.port_frames += 1
+
+
+class RthunderCycles(RthunderPort):
+    """Port schedule by cycles: the two CPUs alternate in slices of QUANTUM 6809 cycles (counted per instruction, as a
+    translation could count them per basic block), each until it is idle at its idle point; no yield at semaphores or
+    spins (a spin just uses its slice).  IRQs are taken at the idle points as in RthunderPort."""
+    QUANTUM = 32
+    LEARN = False
+    FRAME_LIMIT = 400000                                   # cycles a frame may take before it is called a deadlock
+
+    def cooperate(self):
+        total = 0
+        while "run" in self.state:
+            for i in (0, 1):
+                if self.state[i] != "run":
+                    continue
+                c = self.cpus[i]
+                end = c.cycles + self.QUANTUM
+                while c.cycles < end:
+                    if self.idle(i):
+                        self.state[i] = "idle"
+                        break
+                    c.step()
+                total += self.QUANTUM
+            if total > self.FRAME_LIMIT:
+                raise RuntimeError("frame over budget: cpu1 pc %04X cpu2 pc %04X" % (self.cpu1.pc, self.cpu2.pc))

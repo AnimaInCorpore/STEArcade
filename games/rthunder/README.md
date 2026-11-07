@@ -40,9 +40,12 @@ a semaphore byte or a spin wait goes round again; spin sites and semaphore bytes
 prints them).  This follows the game for **1972 frames (cpu1 first) or 2168 (cpu2 first) of attract mode, then
 deadlocks**: the programs also assume the board's *timing* (cpu1's sub-step completion advances cpu2's counter on the
 assumption that cpu2 dispatched its own step thousands of cycles earlier; cpu2 samples cpu1's flag `$18` ~100 cycles
-into its IRQ, long before cpu1 changes it), and whichever CPU runs first breaks one of the two kinds.  Ideas not tried:
-a cycle-counted interleave (the translation counting 6809 cycles per basic block and yielding at MAME's quantum), or
-yield points taken from MAME traces of the conflicting accesses.  Idle points found: cpu1 `$81BC` (the main loop's
+into its IRQ, long before cpu1 changes it), and whichever CPU runs first breaks one of the two kinds.  Tried 2026-11-07: a cycle-counted interleave (`RthunderCycles`: the CPUs alternate in slices of N 6809 cycles, IRQs
+at the idle points, no semaphore or spin yields): N = 32 follows 366 frames then runs over budget (cpu1 in `$A668`);
+N = 256 and 1024 fail in the first frame (cpu2 spins at `$858F`, cpu1 already idle).  Worse than the cooperative
+schedule, and it would need cycle counting in the translator; not a way forward as it stands.  Not tried: yield points
+taken from MAME traces of the conflicting accesses; taking the IRQs mid-foreground as the board does (the idle-point
+IRQ is itself a change of the timing).  Idle points found: cpu1 `$81BC` (the main loop's
 BRA, queues `$56B3/$56B4`, `$566E/$566F` equal), cpu2 `$80A6` (`$1667/$1668` equal).
 
 ## Tools
