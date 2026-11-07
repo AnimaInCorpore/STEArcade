@@ -322,6 +322,7 @@ vbl:
 	jp_merge	in_in1,io_in1,2
 	endc
 	ifd AUTOPLAY				; (benchmark build: coin, start, then a walk with jumps; period 4000 frames)
+	move.l	d2,-(sp)			; (d2 is the 6809's X: kept)
 	moveq	#0,d0
 	move.w	isr_count,d0
 	divu	#4000,d0
@@ -350,7 +351,7 @@ vbl:
 	bhs.s	.ap5
 	and.b	#$EF,d2
 .ap5:	move.b	d2,io_in0
-.ap3:
+.ap3:	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
