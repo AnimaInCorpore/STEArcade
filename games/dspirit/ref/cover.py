@@ -216,7 +216,17 @@ def run(seed, frames, out=None, port=False):
             m.control_in[0] &= ~0x80
         if play and f == coin_at + 106:
             m.control_in[0] |= 0x80
-        if play and f > coin_at + 150:
+        if play and seed >= 20 and coin_at + 150 < f <= coin_at + 400:
+            # (seeds 20 on: the area select screen - right (area - 1) times, then the shot: areas 2-4 by the seed)
+            area = 2 + seed % 3
+            k = f - coin_at - 190
+            bits = 0
+            if 0 <= k < (area - 1) * 20 and k % 20 < 8:
+                bits = 0x01
+            elif (area - 1) * 20 + 20 <= k < (area - 1) * 20 + 26:
+                bits = 0x10
+            m.control_in[0] = (0xFF & ~bits) | 0x80
+        elif play and f > coin_at + 150:
             if hold <= 0:
                 bits = random_bits(rng)
                 m.control_in[0] = (0xFF & ~bits) | 0x80

@@ -29,7 +29,8 @@ from paths import build_dir
 VIO_FIRST, VIO_LAST = 0x170, 0x183                  # virtual pages of vio ($2E0000-$307FFF)
 IO_PAGES = {0x17C, 0x17E}
 A4_SLOT = {}                                        # (program(): from the coverage)
-NATIVES = {0: {}, 1: {}}
+# hand-written 68000 routines that replace 6809 code (src/natives.s; NO_NATIVES=1: all translated)
+NATIVES = {0: {0x7FC37F: "nat_slots_C37F", 0x76DA54: "nat_fill_7A54", 0x7FC0DB: "nat_block_C0DB"}, 1: {}}
 NAMES = {0: ("main", "M"), 1: ("sub", "S")}
 
 
@@ -247,6 +248,39 @@ def table_targets(cpu, main, exec_, targets, slot_of):
     return out
 
 
+TILE_PAGES = range(0x2F0000 >> 13, 0x2F8000 >> 13)          # the CUS123 tile RAM ($2F0000-$2F7FFF)
+
+
+def tile_marks(acc, ioacc):
+    """the renderer's writer flags (src/render.s: tile_written + n, n = layer 0-3, 4 the fixed layers 4 and 5):
+    (v, ins) -> the lines after a store into tile RAM: per site the regions its stores reached (tile RAM's pages
+    $178-$17A are layers 0-2; page $17B holds layer 3 below $2F7000 and the fixed layers above: the coverage's
+    addresses decide, both when it kept none); a store the coverage never saw: every flag"""
+    marks = {}
+    for v, s in acc.items():
+        pages = {pg for rw, slot, pg, odd in s if rw == "w" and pg in TILE_PAGES}
+        if not pages:
+            continue
+        flags = {pg - TILE_PAGES[0] for pg in pages if pg != TILE_PAGES[-1]}
+        if TILE_PAGES[-1] in pages:
+            ws = [va for rw, va in ioacc.get(v, ()) if rw == "w" and va >> 13 == TILE_PAGES[-1]]
+            exact = 0 < len(ioacc.get(v, ())) < CAP
+            if not exact or any(va < 0x2F7000 for va in ws):
+                flags.add(3)
+            if not exact or any(va >= 0x2F7000 for va in ws):
+                flags.add(4)
+        marks[v] = ["st tile_written+%d" % f for f in sorted(flags)]
+
+    def after(v, ins):
+        if v in marks:
+            return marks[v]
+        if v not in acc and ins.mode in ("ext", "idx") and (m6809x.base_mn(ins.mn).startswith("st") or m6809x.base_mn(ins.mn) in (
+                "clr", "neg", "com", "inc", "dec", "asl", "lsl", "lsr", "asr", "rol", "ror")):
+            return ["st tile_written+%d" % f for f in range(5)]
+        return None
+    return after
+
+
 def rom_writes(acc):
     """the sites that stored into a ROM page outside slot 7 (slot 7: the MMU's registers): main $AC00-$AC1A STA $6000 /
     $6200 / $6400 / $6600 into slot 3's ROM.  The arcade ignores them; through the runtime (core.s io_w drops stores
@@ -312,7 +346,7 @@ def program(cpu, regions, cover):
                           hook_next=hook_next, inline_banks=True, dp=DP[cpu], a3_slot=a3,
                           a4_slot=A4_SLOT[cpu], dp_sites=dp_sites, dynamic_stack=True,
                           io_fold=control_fold(ioacc[cpu]), indirect_live=not os.environ.get("NO_INDIRECT_LIVE"),
-                          nf_dispatch=True,
+                          nf_dispatch=True, after=tile_marks(acc[cpu], ioacc[cpu]),
                           natives={} if os.environ.get("NO_NATIVES") else NATIVES[cpu],
                           io_sites={v for v, s in ioacc[cpu].items() if io_site(s)} | rom_writes(acc[cpu]))
     # the slots one code page runs from (in all the coverage): returns and jumps into them need no page check
@@ -325,21 +359,30 @@ def program(cpu, regions, cover):
 
 
 def dispatch_tables(prog, code, em):
-    """per code page a table of 8192 longs (the labels; <cpu>_badpc elsewhere), and the page list"""
+    """per code page a directory of 32 longs (a block of 256 pcs: its table of 256 labels, <cpu>_badpc where no code;
+    bad_block for a block without code), and the page list (bad_table: a page without code).  Two levels: half the
+    memory of one table of 8192 labels a page (core.s dispatch)"""
     lines = ["\tsection data,data", "%s_page_tables:" % prog.name]
     pages = sorted(prog.slot_of)
-    table_of = {}
     for p in range(0x400):
         lines.append("\tdc.l %s" % ("%s_pt_%03X" % (prog.name, p) if p in prog.slot_of else "bad_table"))
     for p in pages:
+        blocks = []
+        for b in range(32):
+            labs = []
+            for off in range(b * 256, b * 256 + 256):
+                v = (p << 13) | off
+                labs.append(prog.label(v) if v in code and v not in em.no_entry else None)
+            blocks.append(labs if any(labs) else None)
         lines.append("%s_pt_%03X:" % (prog.name, p))
-        row = []
-        for off in range(0x2000):
-            v = (p << 13) | off
-            row.append(prog.label(v) if v in code and v not in em.no_entry else "%s_badpc" % prog.name)
-            if len(row) == 8:
-                lines.append("\tdc.l " + ",".join(row))
-                row = []
+        lines.append("\tdc.l " + ",".join("%s_pb_%03X_%02X" % (prog.name, p, b) if blk else "bad_block"
+                                          for b, blk in enumerate(blocks)))
+        for b, blk in enumerate(blocks):
+            if not blk:
+                continue
+            lines.append("%s_pb_%03X_%02X:" % (prog.name, p, b))
+            for k in range(0, 256, 8):
+                lines.append("\tdc.l " + ",".join(x or "%s_badpc" % prog.name for x in blk[k:k + 8]))
     return lines
 
 

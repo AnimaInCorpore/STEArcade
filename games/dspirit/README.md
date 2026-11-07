@@ -66,14 +66,88 @@ frame for the two CPUs (Musashi), the attract mode ~63k.  Random play reaches on
 stages' code is translated where static flow and the jump tables reach it (`badpc` / CRASH.TXT where not); coverage
 of later stages (snapshots, a scripted or Go-Explore player, `docs/go-explore.md`) is open.
 
+Natives (src/natives.s, tools/gen.py NATIVES; NO_NATIVES=1 builds without, 2026-11-07, R-Type's "exact natives"):
+the object-slot loop $C37F (empty slots skipped), the tile-column fill $7A54 and the 4 x 4 tile block $C0DB (the
+stage's tile streaming).  `logic_test.py 3000` identical on seeds 5 and 22 (after `build.py --sim`: logic_test runs
+the built program); 106.8k -> 89.3k (seed 5) and 143.1k -> 117.5k (seed 22) cycles a frame.  `tools/profile.py`
+(from Splatterhouse's): gameplay ~140k a frame before - the translation's own costs (LDD/STD indexed ~80 cycles,
+dynamic slots, D built from A and B) are most of what is left: at 60 frames a second the logic alone needs more
+than the STE's 160k cycles a VBL.
+
 Next: the STE program (snapshot at frame 300, the MCU - Splatterhouse's native model of the CUS64 program, to be
 checked for Dragon Spirit -, the display, a renderer from Galaga '88's), then sound.
 
+## The STE program (src/dspirit.s, from Galaga '88's)
+
+`tools/build.py` (and `--sim` for the logic tests): the translated CPUs, the snapshot at frame 300
+(`tools/snapshot.py`: snapshot_vio.bin is vio's starting content - core.s -, snapshot_ctx.bin the CPUs', the key
+custom's and the MCU's), the MCU (Splatterhouse's native CUS64 model, the same ROM in all four Namco System 1 sets;
+`tools/mcu_test.py` 1500 frames: TRIRAM and the MCU's RAM equal, 12 frames with 98 / 100 instead of 99 voice DAC
+writes around a sample's start - the voice, not the game), a picture every PIC_EVERY (2) arcade frames.  Keys: arrows,
+space / Z air shot, X / Alternate bomb, 1 start, 5 / 6 coin, Esc quits (COUNTERS.BIN); joystick 1, its button both
+air shot and bomb.  Uncovered code: CRASH.TXT.  The dispatcher's page tables are two-level (a directory of 32 blocks
+of 256 labels a page: tools/gen.py dispatch_tables; 556 -> 267 KB).  Size 3.79 MB (text + data + bss): it loads on a
+4 MB STE; for development Hatari may run it with 14 MB (as R-Type; the user, 2026-11-07).
+
+## Renderer (src/render.s)
+
+`tools/make_render.py` writes src/render.s from src/render_new.s (Dragon Spirit's parts), the colour, bank-map and
+sprite-cache routines of Galaga '88's renderer (copied by label) and src/render_data.s.  Galaga '88's picture (ROT270
+with its screen flip) has Dragon Spirit's geometry (ROT90, no flip): its turned characters and sprites and its
+ren_convert are right as they are; the sprite positions are Dragon Spirit's.  `tools/stemodel.py picture_wide` is the
+picture in Python; its arcade part is exact against the reference (`stemodel.py 2000`: 200 play pictures).
+
+The user's decisions (2026-11-07): the scrolling layers and the sprites over the STE's whole 320 pixels (the terrain
+maps hold valid tiles beyond the arcade's 224: checked in areas 1-4), the text layers at their old place (x 48-271;
+their rows 0-15 shown 5 lines lower, 264-287 6 higher, so all of them fit the 277 lines: picture rows 5-281 shown),
+stage 1's water layer (2, under the terrain) locked to the terrain (its offsets taken when the lock begins).
+
+* Layers in play: 0 the terrain (all areas; stage 1: holes over layer 2, the water), 1 / 3 clouds, 4 / 5 the text.
+* The buffers: two, each 2 x 288 lines (twins: any 277 in one block) of 424 bytes (the terrain's 512 columns and its
+  first 336 again: any 320 + the fine scroll's 16 in one line).  The window: its first line follows layer 0's
+  scroll (`ren_view`), screen x 0 is layer 0's image column K (`ren_xo`): the VBL sets the base, $ffff8265 (the
+  fine scroll) and $ffff820f (the line's rest).  Vertical and horizontal scrolling are free.
+* The terrain mode (`ren_mode`: layer 0 on and the first layer drawn, the C116 window whole, no sprite below
+  layer 0): layer 0's image (all 64 tile columns of the 288 rows, the locked layers in its holes, its holes black)
+  is the buffer's terrain: drawn whole only for a new tag (colours, bank, lock) or a scroll of a window or more;
+  else last picture's damage is restored from the twin lines, and the rows that scrolled in or whose image rows
+  changed (ren_tdirty) are drawn (both twins, both column copies).  Clouds, text and sprites go on top into the
+  window; their rows' group spans are the damage (ren_dspan).  The text layers' passes are recorded per fine shift
+  (ren_pbufs) and streamed while the text is unchanged.
+* Otherwise (the title, the intro, the iris windows) every layer is drawn into the window (black first): the buffer's
+  terrain is lost (drawn whole next time).
+* Shared: a layer's turned image (512 x 512, mask, per row run lists rebuilt only when a tile changed its bytes),
+  tiles drawn where their slot's stamp differs (refresh skipped when no writer flag - the translated stores into
+  tile RAM, per layer: gen.py tile_marks - and the same window and tag), per row the opaque runs as HOG passes
+  (HOP 2 / OP 3, end masks), consecutive full rows as plane passes, rows a later layer covers skipped.
+* `tools/render_test.py` (the window as the STE shows it: base, fine scroll, line width): `--every 3` play 500 / 500,
+  attract 167 / 167 exact, `--edges` 252 / 252.  Musashi: play median 1.3M cycles a picture (the simple renderer:
+  4.1M), attract 3.4M.  Hatari (14 MB, coin, start, intro, stage 1, 210 s): 5.2 arcade frames/s, 1.25 pictures/s.
+* Speed-ups (2026-11-07, R-Type's lessons): the locked water filled per character row (not per pixel: a layer-0
+  redraw 50M -> 23M cycles); a tile shadow per layer (its tile words as last drawn, compared word by word: the
+  per-slot stamps' scan 425k -> 160k a picture); a row's damage gathered over its passes (one ren_dmg a row); a
+  locked layer flagged as written (the translated writers flag a layer on any store) compared with its copy
+  (ren_lkshd) before layer 0 is drawn again - in Hatari this was nearly all of the render time.  render_test
+  FLAGS_ALL=1 sets every writer flag every picture (exact too).  `tools/bench.sh` (BENCH game, frames 600-1600:
+  the intro, then stage 1; PHASES=1 per phase of render_frame): 0.55 -> 7.97 arcade frames/s, 0.24 -> 3.02
+  pictures/s, render 14 VBLs a picture; with R-Type's schedule (-D PIC_EVERY=8 -D MAX_BEHIND=12) 11.2 frames/s,
+  1.40 pictures/s.
+* The intro's lightning as a palette flash (the user, 2026-11-07): layer 0's bank flips 0 <-> 3 every ~35 frames;
+  layer 0 stays drawn with the bank it had when the colours were chosen (ren_l0bank), and while the game shows
+  another the representative pens of the held bank show their colours in the bank shown (ren_flash_pen; the
+  quality check looks pens up in the held bank, ren_unflash_pen, and does not choose again during a flash).
+  Sprites sharing those indices flash too (the hero's blue goes grey in the bright flash).  The copied Galaga '88
+  routines are patched in tools/make_render.py PATCHES.  render_test's model draws layer 0 in the held bank
+  (Harness.held): exact; play 230-560: colour choices 14 -> 6, 1036M -> 711M cycles; colour error over the play
+  states 0.032 -> 0.053.
+* Open (in order): the logic (~0.86 VBL an arcade frame in Hatari); the colour choices (~40-60M); the text layers' passes (~300 a picture: recordings per fine shift
+  rarely reused, the window pans every frame); tile conversion of new terrain rows.
+
 ## Display (decided with the user, 2026-11-07)
 
-Upright (the arcade picture 288 x 224 turned to 224 x 288, as MAME shows it), on the STE's 320-pixel width: the
-picture in the middle, 48-pixel side bands.  The open borders give 277 lines (engine/rt/borders.s, as Galaga '88), 11
-short of 288: the text lines that do not fit are to be placed elsewhere (the side bands) later.
+Upright (the arcade picture 288 x 224 turned, as MAME shows it), widened to the STE's 320 pixels (see the renderer);
+the open borders give 277 lines (engine/rt/borders.s, as Galaga '88).  For development Hatari runs it with 14 MB
+(3.8 MB + the buffers: the 4 MB release is open).
 
 ## Full-game verification status
 

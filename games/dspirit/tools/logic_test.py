@@ -50,11 +50,15 @@ def main():
         tables = sym["%s_page_tables" % cpu_name]
         for p in range(0x400):
             pt = mem.r32(tables + 4 * p)
-            if pt:
-                for off in range(0x2000):
-                    a = mem.r32(pt + 4 * off)
-                    if a != sym["%s_badpc" % cpu_name]:
-                        labels.append((a, "%s%06X" % (pre, (p << 13) | off)))
+            if pt and pt != sym["bad_table"]:
+                for b in range(32):                     # (the page's directory: blocks of 256, core.s dispatch)
+                    blk = mem.r32(pt + 4 * b)
+                    if blk == sym["bad_block"]:
+                        continue
+                    for off in range(b * 256, b * 256 + 256):
+                        a = mem.r32(blk + 4 * (off & 255))
+                        if a != sym["%s_badpc" % cpu_name]:
+                            labels.append((a, "%s%06X" % (pre, (p << 13) | off)))
     labels.sort()
     lv = [v for v, k in labels]
     trail = []

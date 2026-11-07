@@ -148,7 +148,8 @@ cpu_idle:
 	move.l	a5,R_A5(a6)
 	rts
 
-; ---- the dispatcher: d7.w = a 6809 pc, through the table of the page in its slot (TBL); the CCR is kept ----
+; ---- the dispatcher: d7.w = a 6809 pc, through the table of the page in its slot (TBL: a directory of 32 blocks of
+; 256 labels; bad_table / bad_block where no code is); the CCR is kept ----
 main_dispatch:
 sub_dispatch:
 	move.w	sr,d5
@@ -157,8 +158,12 @@ sub_dispatch:
 	and.w	#7,d6
 	add.w	d6,d6
 	add.w	d6,d6
-	move.l	TBL(a6,d6.w),a0
-	and.w	#$1FFF,d7
+	move.l	TBL(a6,d6.w),a0	; the page's directory: 32 blocks of 256 pcs (tools/gen.py dispatch_tables)
+	move.w	d7,d6
+	and.w	#$1F00,d6
+	lsr.w	#6,d6
+	move.l	(a0,d6.w),a0
+	and.w	#$FF,d7
 	add.w	d7,d7
 	add.w	d7,d7
 	move.l	(a0,d7.w),a0
@@ -173,8 +178,12 @@ sub_dispatch_nf:
 	and.w	#7,d6
 	add.w	d6,d6
 	add.w	d6,d6
-	move.l	TBL(a6,d6.w),a0
-	and.w	#$1FFF,d7
+	move.l	TBL(a6,d6.w),a0	; the page's directory: 32 blocks of 256 pcs (tools/gen.py dispatch_tables)
+	move.w	d7,d6
+	and.w	#$1F00,d6
+	lsr.w	#6,d6
+	move.l	(a0,d6.w),a0
+	and.w	#$FF,d7
 	add.w	d7,d7
 	add.w	d7,d7
 	move.l	(a0,d7.w),a0
@@ -465,6 +474,10 @@ rom_image:
 	incbin	"rom_image.bin"
 alias_page:
 	incbin	"alias_page.bin"
+    ifnd SIM
+	even
+vio:		incbin	"snapshot_vio.bin"	; (the snapshot's virtual space: the program's starting state, tools/snapshot.py)
+    endc
 
 	section bss,bss
 ctx_main:	ds.b	CTXSIZE
@@ -472,13 +485,20 @@ ctx_sub:	ds.b	CTXSIZE
 key_regs:	ds.b	8
 sub_pass:	ds.b	1		; (sub_idle: $FF while the sub CPU's pass of its loop runs)
 	even
+tile_written:	ds.b	5		; (set after the translated stores into tile RAM, per layer 0-3 and the fixed ones:
+				; tools/gen.py tile_marks; render.s)
+	even
+	even
 page_base_table:	ds.l	$400
-bad_table:	ds.l	$2000		; (filled with cpu_badpc)
+bad_table:	ds.l	32		; (a page without code: every block bad_block)
+bad_block:	ds.l	256		; (filled with cpu_badpc)
 sprite_latch:	ds.b	2
 badpc:		ds.w	1
 badslot:	ds.w	1
 badctx:		ds.l	1
+    ifd SIM
 vio:		ds.b	$28000
+    endc
 nopage:		ds.b	$2000
 		ds.b	4096
 own_stack_top:
