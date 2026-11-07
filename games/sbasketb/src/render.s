@@ -98,6 +98,15 @@ init_render:
 	move.w	#-1,prev_idx
 	clr.b	frame_ready
 	clr.l	guard_dirty
+	lea	buf_scroll,a0		; (every row drawn at the first picture of each buffer)
+	move.l	#-1,(a0)
+	move.w	#-1,4(a0)
+	clr.l	row_dirty
+	clr.l	row_dirty+4
+	clr.l	row_dirty+8
+	clr.l	row_sdirty
+	clr.l	row_sdirty+4
+	clr.l	row_sdirty+8
 	clr.b	last_bank
 	move.l	#cell_list,cell_ptr
 	lea	tile_copy,a0		; (no cell drawn yet: the first write of each changes it)
@@ -305,6 +314,11 @@ tile_draw:
 	add.l	d4,a0			; the converted tile
 	moveq	#31,d3
 	and.w	d7,d3			; tx
+	moveq	#1,d6			; its row (8 lines: tx) changed in every buffer
+	lsl.l	d3,d6
+	or.l	d6,row_dirty
+	or.l	d6,row_dirty+4
+	or.l	d6,row_dirty+8
 	move.w	d7,d2
 	lsr.w	#5,d2			; ty
 	moveq	#31,d4
@@ -472,11 +486,36 @@ guard_clear:
 .out:	rts
 
 ; ----------------------------------------------------------------------------------------------------------------------
-; compose: the buffer's 256 picture lines from the playfield: lines 0-47 (the fixed columns) as they are, lines 48-255
-; shifted by the scroll: the window's first pixel is P = (16 - scroll) & 255 (HOG passes of one plane and line, 14 words,
-; FXSR and the skew 16 - shift for a shifted line: 15 source words)
+; compose: the buffer's tile rows (8 lines each: 6 fixed ones, picture lines 0-47, and 26 scrolled ones) that the buffer
+; does not hold as the picture has them, from the playfield: all rows when the scroll differs from the one the buffer
+; was composed at (buf_scroll), else the rows the buffer's last sprites covered (row_sdirty) or a changed cell lies in
+; (row_dirty).  A scrolled row is shifted by the scroll: the window's first pixel is P = (16 - scroll) & 255 (HOG passes
+; of one plane and line, 14 words, FXSR and the skew 16 - shift for a shifted line: 15 source words).
 ; ----------------------------------------------------------------------------------------------------------------------
 compose:
+	move.w	draw_idx,d2
+	add.w	d2,d2
+	moveq	#0,d0
+	move.b	sb_mem+$3F80,d0
+	neg.w	d0
+	add.w	#16,d0
+	and.w	#255,d0			; P
+	move.w	d0,cur_p
+	move.w	d2,d1
+	add.w	d1,d1			; the buffer's long
+	lea	row_sdirty,a1
+	move.l	(a1,d1.w),d6		; the rows its last sprites covered
+	clr.l	(a1,d1.w)
+	lea	row_dirty,a1
+	or.l	(a1,d1.w),d6		; the rows with a changed cell
+	clr.l	(a1,d1.w)
+	lea	buf_scroll,a0
+	cmp.w	(a0,d2.w),d0
+	beq.s	.same
+	move.w	d0,(a0,d2.w)
+	moveq	#-1,d6			; (another scroll: every row)
+.same:	tst.l	d6
+	beq	.done
 	move.w	#$0203,B_HOP.w		; source, OP 3
 	moveq	#-1,d0
 	move.w	d0,B_END1.w
@@ -494,11 +533,16 @@ compose:
 	lea	B_CTRL.w,a6
 	moveq	#1,d3
 	moveq	#-$40,d4		; ($C0: start, HOG)
-	move.l	pf_base,a1
-	move.l	draw_base,d2
-	add.l	#PIC0+LEFT/2,d2
-	move.w	#48-1,d5
-.fix:	move.l	a1,(a3)
+	move.l	pf_base,a2
+	move.l	draw_base,a0
+	add.l	#PIC0+LEFT/2,a0
+	moveq	#0,d7			; the row
+.fix:	btst	d7,d6
+	beq.s	.fnx
+	move.l	a2,a1
+	move.l	a0,d2
+	moveq	#8-1,d5
+.fl:	move.l	a1,(a3)
 	move.l	d2,(a4)
 	move.w	d3,(a5)			; four HOG passes of one plane (the addresses run on)
 	move.b	d4,(a6)
@@ -510,25 +554,29 @@ compose:
 	move.b	d4,(a6)
 	lea	PF_LB(a1),a1
 	add.l	#LB,d2
-	dbf	d5,.fix
-	moveq	#0,d0			; the scrolled lines: P = (16 - scroll) & 255
-	move.b	sb_mem+$3F80,d0
-	neg.w	d0
-	add.w	#16,d0
-	and.w	#255,d0
+	dbf	d5,.fl
+.fnx:	lea	8*PF_LB(a2),a2
+	lea	8*LB(a0),a0
+	addq.w	#1,d7
+	cmp.w	#6,d7
+	bne.s	.fix
+	move.w	cur_p,d0		; the scrolled rows
 	moveq	#15,d1
 	and.w	d0,d1			; the shift
 	beq.s	.k0
-	moveq	#16,d6
-	sub.w	d1,d6			; skew 16 - shift, FXSR: 15 source words a line
-	or.b	#FXSR,d6
-	move.b	d6,B_SKEW.w
+	moveq	#16,d5
+	sub.w	d1,d5			; skew 16 - shift, FXSR: 15 source words a line
+	or.b	#FXSR,d5
+	move.b	d5,B_SKEW.w
 	move.w	#2-14*8,B_SYI.w
 .k0:	lsr.w	#4,d0
-	lsl.w	#3,d0
-	add.w	d0,a1			; (a1: line 48: the window's first group)
-	move.w	#208-1,d5
-.scr:	move.l	a1,(a3)
+	lsl.w	#3,d0			; the window's first group
+.scr:	btst	d7,d6
+	beq.s	.snx
+	lea	(a2,d0.w),a1
+	move.l	a0,d2
+	moveq	#8-1,d5
+.sl:	move.l	a1,(a3)
 	move.l	d2,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
@@ -540,8 +588,13 @@ compose:
 	move.b	d4,(a6)
 	lea	PF_LB(a1),a1
 	add.l	#LB,d2
-	dbf	d5,.scr
-	rts
+	dbf	d5,.sl
+.snx:	lea	8*PF_LB(a2),a2
+	lea	8*LB(a0),a0
+	addq.w	#1,d7
+	cmp.w	#32,d7
+	bne.s	.scr
+.done:	rts
 
 ; ======================================================================================================================
 ; draw_sprites: the 64 entries of the shown bank, the first first (the last on top); the guard lines they reach noted
@@ -549,6 +602,7 @@ compose:
 ; ======================================================================================================================
 draw_sprites:
 	clr.b	spr_guard
+	clr.l	spr_rows
 	move.w	#-1,last_mode
 	move.w	#$0203,B_HOP.w
 	lea	sb_mem+$3800,a0
@@ -590,7 +644,12 @@ draw_sprites:
 	bsr	draw_cell
 	movem.l	(sp)+,d0/a0
 .n:	dbf	d0,.e
-	move.w	draw_idx,d0		; the buffer's next picture clears the guard lines these reached
+	move.w	draw_idx,d0		; the buffer's next picture draws the rows these covered again, and clears the guard lines
+	move.w	d0,d1			; they reached
+	add.w	d1,d1
+	add.w	d1,d1
+	lea	row_sdirty,a0
+	move.l	spr_rows,(a0,d1.w)
 	lea	guard_dirty,a0
 	move.b	spr_guard,d2
 	or.b	d2,(a0,d0.w)
@@ -605,7 +664,19 @@ draw_cell:
 	cmp.w	#256-15,d4
 	blt.s	.nog
 	st	spr_guard
-.nog:	bsr	sprite_baked		; a0 = the slot
+.nog:	move.w	d4,d0			; the tile rows it covers: Y / 8 .. (Y + 15) / 8 (bits past 31 fall out)
+	move.w	d0,d1
+	lsr.w	#3,d0
+	add.w	#15,d1
+	lsr.w	#3,d1
+	sub.w	d0,d1
+	addq.w	#1,d1			; rows
+	moveq	#1,d5
+	lsl.l	d1,d5
+	subq.l	#1,d5
+	lsl.l	d0,d5
+	or.l	d5,spr_rows
+	bsr	sprite_baked		; a0 = the slot
 	if REN_GEN
 	; the generated path (engine/sprite_programs.py): the shape's code for the shift and clip case, the end masks
 	; from its stream, the slot's aligned plane words; 64 KB crossings and shapes without code take the row path
@@ -1043,6 +1114,11 @@ last_mode:	ds.w	1
 sc_used:	ds.w	1
 tc_used:	ds.w	1
 guard_dirty:	ds.b	4			; per buffer: the bottom guard lines hold sprites
+row_dirty:	ds.l	NBUF			; per buffer: the tile rows with a changed cell (bit 31 the row 31)
+row_sdirty:	ds.l	NBUF			; per buffer: the tile rows its last sprites covered
+buf_scroll:	ds.w	NBUF			; per buffer: the P its scrolled rows were composed at (-1: never)
+cur_p:		ds.w	1
+spr_rows:	ds.l	1			; draw_sprites: the rows the sprites drawn now cover
 spr_guard:	ds.b	1
 last_bank:	ds.b	1			; the sprite palette bank the sprite cache was baked with
 frame_ready:	ds.b	1
