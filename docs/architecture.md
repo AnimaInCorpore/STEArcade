@@ -366,7 +366,10 @@ strips, allowing interrupts between pieces. The former `wait_borders` policy is 
 and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
 record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
-Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.
+Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.  The first VBL
+looks for TOS's `_MCH` cookie (`bd_speed_poll`); by then a port may have reused TOS's memory, so the jar pointer must
+be even and below 4 MB and at most 32 cookies are read (2026-11-07: an unbounded scan crashed Donkey Kong and
+Gauntlet on a plain STE).
 It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
 during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
 the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz
