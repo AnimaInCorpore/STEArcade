@@ -216,12 +216,76 @@ class ER2055:
         self.set_clk(v & 1)
 
 
+DEFER51 = 200                 # event-driven chips: an edge's handler runs after the main CPU's access, at the latest here
+
+
+def wait51(mcu):
+    """the event-driven 51XX is at a wait point: its main loop with the timer unchanged ($182: TTLA / C / JPL $097 /
+    JMP $182), or the coinage command's waits for the chip select to end ($00D) and to come again ($010); a pending
+    interrupt is taken after the next instruction"""
+    if not mcu.in_irq and mcu.pending & mcu.pio:
+        return False
+    pc = mcu.addr
+    if pc == 0x182:
+        return not mcu.in_irq and mcu.ram[0x09] == mcu.tl
+    if pc == 0x00D:
+        return mcu.irq_line == 1
+    if pc == 0x010:
+        return mcu.irq_line == 0
+    return False
+
+
+def wait53(mcu):
+    """the event-driven 53XX is at its wait point: the input loop of mode 7 ($22C: IN / STIC x3, IN / ST, JMP $22C, the
+    same four ports read again and again): it stops there whenever no interrupt is pending (the chip select is an edge);
+    in a transfer it waits for the chip select to end ($359) and to come again ($35C)"""
+    if not mcu.in_irq and mcu.pending & mcu.pio:
+        return False
+    pc = mcu.addr
+    if pc == 0x22C:
+        return not mcu.in_irq
+    if pc == 0x359:                       # a transfer's bytes: wait for the chip select to end ($359: TSTI / JMP $35C /
+        return mcu.irq_line == 1          # JMP $359) and to come again ($35C: TSTI / JMP $35C)
+    if pc == 0x35C:
+        return mcu.irq_line == 0
+    return False
+
+
+def patch_tests(roms):
+    """The boot self-tests patched out (~700 frames of the main CPU's RAM tests and the sub CPUs' ROM checksums, which
+    would flood the translation's tests): the main CPU's inline video RAM test ($3897) jumps to the clear that follows
+    it and its test routine ($3DE3, called for the other four RAM blocks) to its clear; CPU2's checksum ($1F07) and
+    CPU3's ($067F) report their pass ($FF) at once.  The main CPU's own ROM checksum stays: a dead byte of the replaced routine ($3DE6) keeps the
+    sum of its last 4 KB block (which holds its own check byte, $3FFF)."""
+    main, sub, snd = (bytearray(r) for r in roms)
+    orig = sum(main[0x3000:0x4000])
+    main[0x3897:0x389D] = bytes([0x21, 0x00, 0x80, 0xC3, 0xE0, 0x38])      # ld hl,$8000 / jp $38E0
+    main[0x3DE3:0x3DE6] = bytes([0xC3, 0x27, 0x3E])                        # jp $3E27
+    main[0x3DE6] = (main[0x3DE6] + orig - sum(main[0x3000:0x4000])) & 0xFF         # (dead now: the block's sum is kept)
+    sub[0x1F07:0x1F0A] = bytes([0xC3, 0x20, 0x1F])                         # jp $1F20
+    snd[0x067F:0x0684] = bytes([0x3E, 0xFF, 0xC3, 0x92, 0x06])             # ld a,$FF / jp $0692
+    return bytes(main), bytes(sub), bytes(snd)
+
+
 class DigDug:
-    def __init__(self, frame_line=None, skip_tests=False):
-        """frame_line: the screen line a frame starts at (224 = the start of the vertical blank, MAME's frame_done)"""
+    def __init__(self, frame_line=None, skip_tests=False, mcu_events=False):
+        """frame_line: the screen line a frame starts at (224 = the start of the vertical blank, MAME's frame_done).
+        skip_tests: the boot self-tests patched out.  mcu_events: the 51XX and 53XX without a clock, run from wait
+        point to wait point by their events (wait51, wait53; the model of the STE translation)."""
         self.roms = [load("dd1a.1") + load("dd1a.2") + load("dd1a.3") + load("dd1a.4"),
                      load("dd1a.5") + load("dd1a.6"),
                      load("dd1.7")]
+        if skip_tests:
+            self.roms = list(patch_tests(self.roms))
+        self.mcu_events = mcu_events
+        self.defer = None
+        self.steps_mcu = 0
+        self.port_mode = False                # the STE runtime's schedule (run_frame_port)
+        self.in_nmi06 = False
+        self.booted = [True, False, False]    # CPU2/3 reached their idle loops (port mode)
+        self.handler_runs = [0, 0, 0]
+        self.sound_hook = None
+        self.rnd_state = 0x1234
         self.ram = bytearray(0x2000)          # 8000-9FFF (the gaps are not mapped)
         self.sound = bytearray(0x20)
         self.latch = [0] * 8                  # 6820-6827
@@ -313,6 +377,8 @@ class DigDug:
                 elif chip.held:
                     chip.held = False
                     chip.reset()
+                    if self.mcu_events:
+                        self.run_chip(chip, wait51 if chip is self.n51 else wait53)
             if v and self.held[1]:
                 self.cpus[1].reset()
                 self.cpus[2].reset()
@@ -338,6 +404,8 @@ class DigDug:
             self.n51.write(v)                 # (the 53XX has no write callback)
 
     def ctrl06_w(self, v):
+        if self.port_mode:
+            return self.ctrl06_port(v)
         now = self.cpus[0].cycles
         self.mcu_sync(now)
         self.ctrl06 = v
@@ -373,7 +441,7 @@ class DigDug:
         target = t // Z80_PER_MCU
         for chip in (self.n51, self.n53):
             mcu = chip.mcu
-            if chip.held:
+            if chip.held or self.mcu_events:
                 mcu.cycles = max(mcu.cycles, target)
             else:
                 mcu.run_to(target)
@@ -387,6 +455,169 @@ class DigDug:
             if self.irq_pending[0] and cpu.iff1:
                 cpu.irq()
             cpu.step()
+
+
+    def rnd(self):
+        """What the port's z80_rnd gives for `ld a,r`: a 16-bit shift register byte."""
+        s = self.rnd_state
+        s = (s >> 1) ^ (0xB400 if s & 1 else 0)
+        self.rnd_state = s
+        return s & 0xFF
+
+    # ---- the event-driven chips (the STE runtime's model) --------------
+    def run_chip(self, chip, wait):
+        """run the chip to its next wait point"""
+        if chip.held:
+            return
+        mcu = chip.mcu
+        k = 0
+        while not wait(mcu):
+            mcu.step()
+            k += 1
+            if k > 100000:
+                raise RuntimeError("MCU does not reach a wait point (pc %03X)" % mcu.addr)
+        self.steps_mcu += k
+
+    def run_chips(self):
+        self.run_chip(self.n51, wait51)
+        self.run_chip(self.n53, wait53)
+
+    def ctrl06_port(self, v):
+        """the STE runtime's 06XX (g_ctrl06) with the event-driven chips: the transfer runs right here, one clock period
+        a pass: the R/W line and the chip selects, the main CPU's NMI handler (a read's first pulse is suppressed: the
+        chip puts out its byte first), the chips after the handler's access, the chip selects off; a control write from
+        inside the handler (its stop) only sets the register"""
+        if not self.mcu_events:
+            raise NotImplementedError("the STE schedule (run_frame_port) needs the event-driven chips")
+        self.ctrl06 = v
+        if self.in_nmi06:
+            return
+        n51, n53 = self.n51, self.n53
+        self.in_nmi06 = True
+        first = True
+        k = 0
+        while self.ctrl06 & 0xe0:
+            c = self.ctrl06
+            n51.rw = (c >> 4) & 1
+            n51.mcu.set_irq(c & 1)
+            n53.mcu.set_irq(c & 2)
+            if first and c & 0x10:
+                self.run_chips()
+            else:
+                self.run_handler(self.cpus[0], nmi=True)
+                self.run_chips()
+            n51.mcu.set_irq(0)
+            n53.mcu.set_irq(0)
+            self.run_chips()
+            first = False
+            k += 1
+            if k > 64:
+                raise RuntimeError("06XX transfer does not end")
+        self.in_nmi06 = False
+        n51.mcu.set_irq(0)
+        n53.mcu.set_irq(0)
+        self.run_chips()
+
+    # ---- the STE runtime's schedule ------------------------------------
+    IDLE = [None, 0x0078, 0x00B0]
+    # the spin loops of the boot handshake (CPU1 waits for the self-test results of CPU2 and CPU3 at $3973 / $3980,
+    # they wait for CPU1 to clear the flags: CPU2 at $1F25, CPU3 at $0695): a CPU that reaches one gives the other
+    # booting CPUs a turn (hooks in the translated code, z80_hook)
+    YIELD = [{0x3973, 0x3980}, {0x1F25}, {0x0695}]
+    FOREGROUND2 = 0x1DDC                  # CPU2's main loop: the EAROM commands (a call, then jr $0078)
+
+    def run_until_yield(self, n):
+        """Run cpu n (at a yield point or just released) until it is at a yield point again or in its idle loop."""
+        cpu = self.cpus[n]
+        stop = self.YIELD[n] | {self.IDLE[n]}
+        cpu.step()
+        k = 0
+        while cpu.pc not in stop:
+            cpu.step()
+            k += 1
+            if k > 20_000_000:
+                raise RuntimeError("CPU%d runs away in its boot" % (n + 1))
+        if cpu.pc == self.IDLE[n]:
+            self.booted[n] = True
+
+    def boot_turns(self):
+        for n in (1, 2):
+            if not self.held[n] and not self.booted[n]:
+                self.run_until_yield(n)
+
+    def run_handler(self, cpu, nmi=False):
+        """Run an interrupt handler of cpu to its return (the interrupted pc and sp)."""
+        sp0, pc0 = cpu.sp, cpu.pc
+        if nmi:
+            cpu.nmi()
+        elif not cpu.irq():
+            return False
+        n = 0
+        while not (cpu.sp == sp0 and cpu.pc == pc0):
+            cpu.step()
+            n += 1
+            if n > 2_000_000:
+                raise RuntimeError("handler of %04X did not return" % pc0)
+        return True
+
+    def sound_nmis(self):
+        """the sound CPU's two NMIs of a frame (lines 64 and 192), once booted, while its NMION is off"""
+        if not self.booted[2]:
+            return
+        if self.sound_hook:
+            self.sound_hook(self, "before")
+        for _ in range(2):
+            if self.latch[2]:
+                break
+            self.run_handler(self.cpus[2], nmi=True)
+        if self.sound_hook:
+            self.sound_hook(self, "after")
+
+    def run_foreground2(self):
+        """CPU2's main loop, once a frame after its IRQ handler (the arcade's runs all the time, but only the EAROM
+        command in $9B3D does anything): the call at $0078, with the interrupted pc and sp back afterwards"""
+        cpu = self.cpus[1]
+        if not self.booted[1] or not self.ram[0x1B3D]:
+            return
+        sp0, pc0 = cpu.sp, cpu.pc
+        cpu.sp -= 2
+        self.ram[cpu.sp - 0x8000] = pc0 & 0xFF
+        self.ram[cpu.sp - 0x8000 + 1] = pc0 >> 8
+        cpu.pc = self.FOREGROUND2
+        n = 0
+        while not (cpu.sp == sp0 and cpu.pc == pc0):
+            cpu.step()
+            n += 1
+            if n > 5_000_000:
+                raise RuntimeError("CPU2's foreground did not return")
+
+    def run_frame_port(self):
+        """One frame as the STE runtime schedules it: CPU1's main thread for the frame, then at the vertical blank
+        CPU1's IRQ handler and CPU2's IRQ handler, each to completion, then CPU2's EAROM command if one is pending.
+        CPU2 and CPU3 run their boot code to the idle loop once they are released; then CPU3's NMI handler twice a
+        frame (the sound).  06XX NMIs are synchronous (ctrl06_port)."""
+        self.port_mode = True
+        cpu1 = self.cpus[0]
+        for c in self.cpus:
+            c.r_hook = self.rnd
+        end = cpu1.cycles + CYCLES_PER_FRAME
+        yields = self.YIELD[0]
+        while cpu1.cycles < end:
+            cpu1.step()
+            if cpu1.pc in yields:
+                self.boot_turns()
+        self.boot_turns()                       # the VBL gives the booting CPUs a turn too
+        self.n51.mcu.set_tc(1)                  # the 51XX's frame: TC high, then low
+        self.run_chip(self.n51, wait51)
+        self.n51.mcu.set_tc(0)
+        self.run_chip(self.n51, wait51)
+        if self.latch[0] and self.run_handler(cpu1):
+            self.handler_runs[0] += 1
+        if self.latch[1] and self.booted[1] and self.run_handler(self.cpus[1]):
+            self.handler_runs[1] += 1
+        self.run_foreground2()
+        self.sound_nmis()
+        self.frame += 1
 
     # ---- running -------------------------------------------------------
     def run_frame(self, slice_cycles=128):
