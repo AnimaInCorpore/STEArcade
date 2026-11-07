@@ -25,7 +25,7 @@ from machine import JunoPort, load, PROGRAM, BANKED
 from paths import build_dir, require_coverage
 
 RESET, IRQ = 0xA000, JunoPort.IRQ
-SEEDS = [int(x) for x in os.environ.get("JF_SEEDS", "").split(",") if x] or range(1, 9)
+SEEDS = [int(x) for x in os.environ.get("JF_SEEDS", "").split(",") if x] or range(1, 13)
 NATIVES = {JunoPort.IDLE: "jf_idle"}
 NBANKS = 16
 
@@ -102,6 +102,8 @@ def program(cover):
     prog = JProgram("main", "M", page_bytes, slot_of, roots=[RESET, IRQ] + sorted(NATIVES), exec_cover=set(exec_),
                     acc_cover=flat, targets=tg, page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x88, a3_slot=4,
                     a4_slot=0, natives=dict(NATIVES), opcode_reader=lambda rd: konami1_opcode(rd), pid_checks=True)
+    prog.indirect_io = True                     # (m6809x: JSR [A,U] with the table in the window's data: through main_io_r)
+    prog.a3_pb = True                           # (m6809x: DP and the stack are in slot 4, above $7FFF: a3 = jf_mem + $8000)
     prog.fixed_slots = (0, 1, 2, 3, 5, 6, 7)
     prog.slot_ctx = bank_ctx
     prog.fast_forms = True

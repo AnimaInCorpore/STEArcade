@@ -46,7 +46,7 @@ def inputs(frame, rnd, state):
     if state['phase'] == 'coin':
         t = frame - state['t0']
         if t < 4 or two and 20 <= t < 24:
-            system &= ~0x04                           # coin 1
+            system &= ~(0x01 if state.get('coin2') is None else 0x02)   # coin 1 (coin 2: seeds 2, 6)
         elif 60 <= t < 64:
             system &= ~(0x10 if two else 0x08)        # start 2 / start 1
         elif t >= 64:
@@ -147,7 +147,7 @@ def main():
     video = Video()
     pens = collections.Counter()
     blits = collections.Counter()
-    state = {'two': seed == 7}
+    state = {'two': seed == 7, 'coin2': True if seed in (2, 6) else None}
     for frame in range(frames):
         m.frame = frame
         m.system, m.p1, m.p2 = inputs(frame, rnd, state)
