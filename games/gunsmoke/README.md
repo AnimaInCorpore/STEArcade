@@ -1,6 +1,6 @@
 # Gun.Smoke (Capcom, 1985) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 2026-10-19: scrolling strip clears use a HOP 0 fill path and damage restores use the full-word copy path.
 See the [cross-port measurements](../../docs/virtual-scroll-performance.md#implementation-results).
@@ -9,8 +9,8 @@ See the [cross-port measurements](../../docs/virtual-scroll-performance.md#imple
 
 MAME set `gunsmoke`. The main Z80 program (fixed ROM and four 16 KB banks) is
 statically translated to 68000 code and runs on an 8 MHz Atari STE with 4 MB of RAM and no accelerator
-with keyboard and joystick input. Graphics use a fixed 16-colour Oklab palette; the sound
-driver's effects and music play on the STE's YM2149 (see "Sound").
+with keyboard and joystick input. Graphics use one 16-colour palette from the shared fitter, with checker
+pairs (2026-11-05, above; [colours.md](../../docs/colours.md)); the sound driver's effects and music play on the STE's YM2149 (see "Sound").
 
 ```sh
 python port.py prepare gunsmoke      # verify the 32 ROMs, build the MAME regions
@@ -18,7 +18,7 @@ python port.py cover gunsmoke        # coverage: 14 seeded runs of 20000 frames 
 python port.py build gunsmoke        # -> run/gunsmoke/GUNSMOKE.PRG (ROMs and graphics embedded)
 python port.py test gunsmoke         # reference, lock-step translation, renderer against the reference
 python port.py mame gunsmoke         # the reference renderer against MAME's own picture (needs `mame`)
-python games/gunsmoke/tools/sprite_test.py  # sprites across the window's sides (not in port.py test yet)
+python games/gunsmoke/tools/sprite_test.py  # sprites across the window's sides (also run by port.py test)
 games/gunsmoke/tools/bench.sh        # Hatari speed: ticks and frames a second (bench.ps1 on Windows)
 ```
 
@@ -26,7 +26,7 @@ Controls: **5/6** insert coins, **1/2** start, **arrow keys** move, **Ctrl** or 
 shoots left, **Space** or **X** straight, **Alt** or **C** right, **Esc** quits.
 Joystick port 1 plays player 1, port 0 player 2 (fire shoots straight). Wait for the attract mode
 before inserting a coin.
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A / B / C** shoot left / straight / right, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A / B / C** shoot left / straight / right, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 ## The reference machine
 
@@ -73,8 +73,8 @@ gets past round 1's boss.
 
 ## The renderer
 
-`src/render.s`, the method of Commando's renderer (`docs/porting-guide.md`,
-"Scrolling with virtual screens"):
+`src/render.s`, the method of Commando's renderer (twin-line virtual screens; see
+[speed.md "Scrolling"](../../docs/speed.md#scrolling) and `games/commando/README.md`):
 
 * **Background**: 32 x 32 tiles from the map ROM (2048 columns of 8 tiles), a function of
   the scroll registers alone: D800/D801 along the screen's vertical axis, D802 the map
@@ -95,12 +95,13 @@ gets past round 1's boss.
   buffer). D802 above 192 (never seen) moves the tiles instead, and a change there redraws.
   Background on/off and jumps of more than 200 lines redraw the band (about 1M cycles).
 * **The screen shows 48 pixels on each side of the 224-pixel window**: whole tiles and
-  sprites drawn into the side bars would be visible there, so each tile that reaches a
-  side clears its part there. A sprite across a side draws only its inner word when the
-  window starts on a 16-pixel group (D802 a multiple of 16: nearly always), else it is
-  drawn whole and clears its 16 lines of 16 pixels beside the window (masked: the edges
-  are inside a word then); the damage list restores them from their black twins
-  (2026-10-12 below). `render_test.py` checks the bars.
+  sprites drawn into the side bars would be visible there. When the window starts on a
+  16-pixel group (D802 a multiple of 16: nearly always) a tile across a side draws only
+  its inner chunk (`draw_tile_chunk`, since 2026-10-24) and a sprite only its inner word
+  (since 2026-10-12): nothing touches the bars. Else (the poster slides) the tile is drawn
+  whole and clears its part in the bar, and the sprite is drawn whole and clears its 16
+  lines of 16 pixels beside the window (masked: the edges are inside a word then); the
+  damage list restores them from their black twins. `render_test.py` checks the bars.
 * **Sprites** (128, entry 0 on top, 2048 codes, a y flip that mirrors on the screen):
   `tools/assets.py` generates the Blitter routines and mask streams of
   `games/1942/tools/spritegen.py` for the shapes (code, flip) the coverage drew most,
@@ -108,31 +109,34 @@ gets past round 1's boss.
   take 2.85 MB. The other shapes go through `any_part`: the same Blitter calls, a row at
   a time, the end masks made from the shape's opaque rows (stored with the baked sprite).
 * **Text**: a strip per text row (15 chunks of 8 lines and the opaque pixels as a plane),
-  composed with `movep.l` from the baked characters when the row changes, drawn at the
-  window's pixel offset with the Blitter: NOT mask AND screen, then the four planes ORed
-  in (8 blits a row, only its chunks with characters); `movep.l` alone could only write at
-  8-pixel steps. The transparent pens of a colour are those the lookup PROM marks $4F.
+  composed with `movep.l` from the baked characters when the row changes and cut into
+  stefastbobs2's pieces (`fg_pieces_build`, since 2026-10-24), drawn at the window's pixel
+  offset as Blitter copy passes (HOP 2, OP 3, the opaque pixels as end masks, all four
+  planes in a pass; no AND + OR passes, see "Text drawn like sprites"); `movep.l` alone
+  could only write at 8-pixel steps. The transparent pens of a colour are those the
+  lookup PROM marks $4F. (The header comment of `src/render.s` still describes the old
+  AND + OR passes.)
 * **Baking**: tiles, sprites and characters are kept as pixel-value bit planes; a miss
   of the hashed cache makes the 16 pen masks of each row and a generated routine per
   colour bank ORs them into the four STE planes. One pool per kind.
-* **Timers and HOG blits**: a HOG pass holds the CPU and its interrupts; started near the
-  VBL or a timer event it made a border stay closed or the palette come late. The border
-  code (`engine/rt/borders.s`, shared by the Blitter ports) has each event come early and
-  sync itself to the video, so no pass waits: Timer B fires 2 lines before the palette on,
-  the bottom border and the palette off and polls its counter to the exact line end; the
-  bottom border event starts Timer A for the next frame's top border (line-exact, so a
-  late VBL does not move it), which fires ~3 lines early and picks the right HBL by
-  reading Timer A. A pass may hold the CPU only ~1.5 lines: `blit_go` runs passes over 32
-  words in pieces (64-word pieces still let a palette event start late now and then). The
-  palette off is line-exact now (the last picture line was sometimes black from a varying
-  x before). The DEBUG build counts late events (`bench.ps1`: 0 in 6000 VBLs; `-D
+* **Timers and HOG blits**: the shared `engine/rt/borders.s` and short HOG passes
+  (`blit_go`), see [architecture.md "Border removal"](../../docs/architecture.md#border-removal);
+  Timer B also switches the palette on and off around the picture. Here 64-word pieces still
+  let a palette event start late now and then, so passes over 32 words run in pieces. The
+  palette off is line-exact since 2026-10-09 (the last picture line was sometimes black
+  from a varying x before). The DEBUG build counts late events (`bench.ps1`: 0 in 6000 VBLs; `-D
   BD_PCLOG=1` logs the interrupted PCs of late events). The VBL writes the video counter
   too (the STE loads the base into it before the VBL: without it a frame showed the
   previous buffer's address under the new fine scroll, 3 pixels off, as Black Tiger found).
 
-Memory: 3.07 MB of program, data and buffers on the 4 MB machine.
+Memory: 3.07 MB of program, data and buffers on 2026-10-09; a build of 2026-11-07 needs 3,310,662 bytes (text + data
++ BSS, `build/gunsmoke/gunsmoke.map`), under the load budget of
+[porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release).
 
 ## Speed (2026-10-09)
+
+Superseded figures: the current ones are in "Speed on the recorded play (2026-10-24)" (92% and 25.8 pictures a
+second) and the sections after it.
 
 `tools/bench.sh` (`bench.ps1` on Windows; DEBUG + AUTOPLAY build, 6000 VBLs in Hatari, boot and attract
 included): 53-54 game ticks a second (~90% of the arcade's 59.6) and 26-28 drawn frames a
@@ -264,9 +268,9 @@ recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again 
 
 * All 32 ROM files pass the checked-in MAME CRC32/SHA1 manifest.
 * The reference renderer and palette matched MAME's screenshots exactly at frames 100,
-  700, 1500, 2500, 4000 and 6000 and in play (checked on the machine with MAME 0.289; this
-  Windows machine has no current MAME, so the VBLANK fix of the reference is checked
-  against the driver source and the attract mode, not a MAME run).
+  700, 1500, 2500, 4000 and 6000 and in play (checked with MAME 0.289; the VBLANK fix of the
+  reference was made on a machine without a current MAME, so it is checked against the
+  driver source and the attract mode, not a MAME run).
 * `logic_test.py`: the translation equals the reference (RAM, video RAM, latches, bank,
   sprite latch, every text RAM change flagged) for 6000 frames each of seeds 1, 2, 4, 5,
   6, 9, 12 and 14: attract, coin, start, play, deaths, rounds 1, 2, 3, 6, 9 and the
@@ -280,9 +284,9 @@ recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again 
   57 screenshots (6 in the middle of the slide) without a dropped or shifted picture,
   colour in the side bars or in the line above the picture.
 
-Not done: the flip screen (the DIP switch is upright), the service mode. The last
-line of the picture is sometimes black from a varying x on: Timer A's palette off comes
-in that line (seen in Hatari screenshots before and after the hardware scrolling).
+Not done: the flip screen (the DIP switch is upright), the service mode. (The last
+picture line that was sometimes black from a varying x on was fixed on 2026-10-09 by the
+shared border code: the palette off is line-exact, see "Timers and HOG blits".)
 
 ## Standard PPO exploration
 

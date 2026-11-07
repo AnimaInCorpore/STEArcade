@@ -1,10 +1,9 @@
 # Double Dragon (Technos, 1987) for the Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
-2026-10-19: margin clears use the full-word dispatcher and solid text fills look up their piece sizes.
-Native continuation roots are explicit; `sprite_test.py --seed 1` supplements the default private replay test.
-See [measurements and validation](../../docs/virtual-scroll-performance.md#implementation-results).
+2026-10-19: margin clears and solid text fills made cheaper, native continuation roots explicit: see
+[the review's implementation results](../../docs/virtual-scroll-performance.md#implementation-results).
 
 ![Double Dragon on the STE (Hatari)](docs/screenshot.png)
 
@@ -129,10 +128,18 @@ Lock-step: the three plays (40000, 90000 and 40000 frames, missions 1-4) and see
 
 Trojan's renderer, adapted: two rings of 416-byte lines with the STE's fine scroll; the background in 16x16 cells
 with keys (a cell is drawn again only when its tile, colour or flips change, or a sprite or a text character damaged
-it), the sprites first to last (1, 2 or 4 parts of 16x16, 4 orientations), the text on top.  One fixed palette of 16
-STE colours for the whole game (`ref/palette_fit.py`: weighted k-means in Oklab over the attract mode and the
-plays through mission 4, docs/palette.json; mean error 8-10 of 255 a channel), each of the 24 arcade colour sets
-mapped onto it (a set whose colours change gets a new epoch: its baked images are made again).
+it), the sprites first to last (1, 2 or 4 parts of 16x16, 4 orientations), the text on top.  Colours (2026-11-05): 16
+STE colours by the shared default fitter with checker pairs (`engine/palette_native.py` over the sampled play's RGB
+counts in `docs/colour_training.json`; [colours](../../docs/colours.md)): each 12-bit arcade colour maps to a pair of STE
+colours drawn as a checker (`rgb_map`), the text and HUD to one (`rgb_map_flat`); a colour set's tables are kept for
+both source-row parities (+64 KB conversion tables, a 4 KB flat text lookup).  Each of the 24 arcade colour sets is
+mapped through them (a set whose colours change gets a new epoch: its baked images are made again).  Superseded: the
+one fixed k-means palette of `ref/palette_fit.py` (mean error 8-10 of 255 a channel).
+
+The translated writers mark what changed: every store into the palette, the fg, the sprite RAM or the bg sets
+`pal_written`, `fg_written`, `spr_written` or `bg_written` (`tools/gen.py` writer_marks; a store site the coverage
+never saw sets all four); the renderer compares the palette, the text and the bg with its copies only when their
+flag is set (`spr_written` is set but not read).
 
 * **Sprites**: the rows of each image sorted by their opaque mask at build time (`docs/sprite-preparation.md`: 2.4%
   fewer cycles than the rows' own order, the program 32 KB smaller), baked on first use per (code, flips, colour,
@@ -162,7 +169,7 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
   cost 98k / 163k).
 * `tools/sound_test.py`: both players against their models, every byte / register equal.
 
-## Speed (Hatari, pinned F030Arcade build, 8 MHz STE, 8000 VBLs)
+## Speed (Hatari, pinned F030Arcade build, 8 MHz STE, 8000 VBLs; 2026-10-16)
 
 | | arcade frames a second | pictures a second |
 |---|---|---|
@@ -171,7 +178,8 @@ mapped onto it (a set whose colours change gets a new epoch: its baked images ar
 | the recorded play (`PLAY=1`, missions 1-2) | 15-48, mostly 20-24 (26.0 overall) | 3-11, mostly 4 (8.2 overall) |
 
 The logic comes first (a picture after at most 4 frames not drawn).  Musashi, mission 1 in play (`profile.py 3000
-3200 --seed -1`): the logic 193k cycles a frame (the MCU job 15k, the bank switches 10k, the collision natives 15k,
+3200 --seed -1`), 2026-10-16 (the logic since 2026-10-26 181k, the picture since 2026-11-02 400k median / 490k mean:
+the tables below): the logic 193k cycles a frame (the MCU job 15k, the bank switches 10k, the collision natives 15k,
 the sprite copy 6k, the translated code ~127k: a third of it calls and returns, ~300 a frame; 217k on average over
 the play through mission 4), the sound ~10-20k, a picture 578k with the Blitter (cells 84k, the text ~190k, the
 sprites 142k; `render_test.py 3400 --seed -1 --first 3000 --every 2 --profile`).
@@ -204,8 +212,10 @@ context per bank (bank switches 27k -> 15k), solid text fills (the text's CPU cy
 is left is flat: after the collision no routine of the game takes more than 2.5% of the main CPU's time
 (`ref/routines.py`), and the calls cost ~40 cycles each way already.
 
-The program asks TOS for 3,665,354 bytes (text, data and BSS; the release limit is 3,700,000): the tile cache is 512
-entries, the character cache 256, the sprites' row orders two a byte.
+The program asked TOS for 3,665,354 bytes on 2026-10-16 (text, data and BSS; the release limit is 3,700,000; the 0.7
+release of 2026-11-02 3,613,772): the tile cache is 512 entries, the character cache 256, the sprites' row orders two
+a byte.  The checker pairs of 2026-11-05 added +64 KB of conversion tables and a 4 KB lookup: the load size has to be
+measured again.
 
 ## What is missing
 
@@ -216,7 +226,7 @@ entries, the character cache 256, the sprites' row orders two a byte.
 
 ## Standard PPO exploration
 
-Use `venv/bin/python port.py ppo ddragon test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
+`venv/bin/python port.py ppo ddragon test --steps 256 --frames 2100` checks the shared workflow ([PPO guide](../../docs/ppo.md)).
 
 ## Full-game verification status
 

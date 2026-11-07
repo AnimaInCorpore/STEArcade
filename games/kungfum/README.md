@@ -63,24 +63,25 @@ start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.  For scripted Ha
 `tools/bench.sh` (DEBUG build, 6000 VBLs from power-on, Hatari): the logic (arcade frames a second; the arcade 56.34)
 and the pictures a second, separately; per 100 VBLs in RATE.BIN.
 
-| run | logic | pictures |
-|---|---|---|
-| recorded play (`PLAY=1`), the whole run, 2026-10-25 (the generated sprite path, below) | 52.6 /s (93%) | 33.2 /s |
-| recorded play (`PLAY=1`), the whole run, 2026-11-02 (inline calls, below) | 52.6 /s (93%) | 33.6 /s |
-| the same before (measured the same day) | 52.5 /s (93%) | 33.0 /s |
-| the same before (measured the same day) | 52.1 /s (93%) | 27.4 /s |
-| recorded play (`PLAY=1`), the whole run | 51.9 /s (92%) | 27.1 /s |
-| recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 20-34 /s |
-| AUTOPLAY script (attract, coin, random play) | 48.0 /s (85%) | 27.6 /s |
-| recorded play without the sound (`EXTRA="-D NOSOUND=1"`) | 52.4 /s (93%) | 29.5 /s |
+| measured | run | logic | pictures |
+|---|---|---|---|
+| 2026-11-02 | recorded play (`PLAY=1`), the whole run, with the inline calls (below): **current** | 52.6 /s (93%) | 33.6 /s |
+| 2026-11-02 | the same build without the inline calls | 52.5 /s (93%) | 33.0 /s |
+| 2026-10-25 | recorded play, the whole run, with the generated sprite path (below) | 52.6 /s (93%) | 33.2 /s |
+| 2026-10-25 | the same build with the row loop only | 52.1 /s (93%) | 27.4 /s |
+| 2026-10-16 | recorded play, the whole run (the first build with sound) | 51.9 /s (92%) | 27.1 /s |
+| 2026-10-16 | recorded play, in play (VBLs 2000-6000) | 55-56 /s (~99%) | 20-34 /s |
+| 2026-10-16 | AUTOPLAY script (attract, coin, random play) | 48.0 /s (85%) | 27.6 /s |
+| 2026-10-16 | recorded play without the sound (`EXTRA="-D NOSOUND=1"`) | 52.4 /s (93%) | 29.5 /s |
 
-Musashi (`render_test.py`, a picture's render_frame; `logic_test.py`, a frame's logic, now with the sound's ~10k): the
-logic 37-47k cycles a frame in play (21-27k in the level selection screens) without the sound; a picture 125-160k CPU cycles and 15-36k Blitter bus cycles
-(13 seeds' averages).  Where a picture's time goes (`render_test.py --prof`, seed 4): the sprite rows 25%, the front
-tiles over the sprites 13%, bringing the ring to the window 11%, the sprite list 10%, cell copies 9%, the tile RAM
-compare 7%.  The dips in the timeline are the scene changes (a new floor: the caches flushed, everything baked and
-drawn again) and the window's jumps at the 512-pixel wrap (the ring's whole window copied).  The program needs
-1,504,648 bytes without the sound (text 68 KB, data 454 KB: the dispatch table, the ROM and the graphics; BSS 982 KB:
+Musashi, 2026-10-16 (`render_test.py`, a picture's render_frame; `logic_test.py`, a frame's logic, now with the sound's
+~10k): the logic 37-47k cycles a frame in play (21-27k in the level selection screens) without the sound; a picture
+125-160k CPU cycles and 15-36k Blitter bus cycles (13 seeds' averages).  Superseded for the picture (2026-10-25, the
+generated sprite path below): seed 4 89.0k CPU + 20.0k Blitter, seed 7 95.4k + 20.4k.  Where a picture's time went
+on 2026-10-16 (`render_test.py --prof`, seed 4, the row loop): the sprite rows 25%, the front tiles over the sprites
+13%, bringing the ring to the window 11%, the sprite list 10%, cell copies 9%, the tile RAM compare 7%.  The dips in the timeline are the scene changes (a new floor: the caches flushed, everything baked and
+drawn again) and the window's jumps at the 512-pixel wrap (the ring's whole window copied).  The program needed
+(2026-10-16; the generated path's streams make it 2.8 MB since 2026-10-25, below) 1,504,648 bytes without the sound (text 68 KB, data 454 KB: the dispatch table, the ROM and the graphics; BSS 982 KB:
 the four playfield buffers, the caches); the sound adds 127 KB (the voices 46 KB, the driver's translation, its 64 KB
 memory image): 1,631,532 bytes.
 
@@ -130,9 +131,12 @@ the 5th floor boss's table (`gen.py TABLES`); the other `jp (hl)` tables run who
   cache) into the clean screen and marked in each ring's bitmap; a ring is brought to its picture from the clean
   screen with short HOG Blitter passes (`blit_go`): the columns the window's move brought into the picture span,
   the band columns blackened, its last sprites' rectangles, the marked cells (movep.l when inside the span).
-* **Sprites**: cells baked on first use in natural row order (`REN_ORDER=0`; grouping equal masks measured
-  slower overall and remains optional as `-D REN_ORDER=1`; see `docs/sprite-preparation.md`), a HOG pass a row (4 planes, under
-  2 x 4 words), END1 / END3 from the row mask only when it changes, full destination addresses (no 64 KB limit).
+* **Sprites**: an unclipped cell whose shape the coverage made (99% of the draws) runs its generated routine with its
+  shift's stream (`REN_GEN=1`, the default; "The sprites' generated path" above).  Clipped cells and the rare rest take
+  the row loop: cells baked on first use in natural row order (`REN_ORDER=0`; grouping equal masks measured slower
+  overall and remains optional as `-D REN_ORDER=1`; see [sprite-preparation.md](../../docs/sprite-preparation.md)), a
+  HOG pass a row (4 planes, under 2 x 4 words), END1 / END3 from the row mask only when it changes, full destination
+  addresses (no 64 KB limit).
   The picture's edges are at Wx + 32 and Wx + 288: a cell across the word boundary at or outside an edge draws only
   its inner word (left: FXSR, source X increment 0; right: the first word), a cell wholly outside is culled.  With Wx
   a multiple of 16 that is the edge itself (AGENTS.md); with the edge inside a word up to 15 pixels of a sprite show
@@ -246,8 +250,8 @@ attract sequence only).
 
 ## Default row order (2026-10-17)
 
-`REN_ORDER=0` is now the default, matching the lower whole-picture CPU plus Blitter cost recorded in
-`docs/sprite-preparation.md`; `-D REN_ORDER=1` retains the grouped-mask experiment. Verification: 1,122 synthetic
+The row loop's natural order (`REN_ORDER=0`) became the default on this day (the reasons: "The picture", Sprites;
+since 2026-10-25 the row loop draws only clipped cells and shapes without a generated routine). Verification: 1,122 synthetic
 edge pictures exact (54 pictures crossing 64 KB), and 200 consecutive reference pictures with
 `tools/render_test.py 800 --seed 4 --start 600 --stop`. Pinned Hatari `tools/bench.sh 2000` completed 2,001 VBLs
 with zero late border or palette events (two startup fallback armings). This run checks timing for the selected

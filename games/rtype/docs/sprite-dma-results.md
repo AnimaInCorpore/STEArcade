@@ -15,7 +15,8 @@ deadline decision. Gameplay logic and the native object routines are unchanged.
 ## Regression and reference checks
 
 `python games/rtype/tools/dma_test.py` assembles the actual DMA routine without
-`SIM` and passes 54 cases: both schedulers, pending ticks, cadence boundaries,
+`SIM` and passes 72 cases (3 pending-tick counts x 3 `since_pic` values x 4 slot layouts x the two
+schedulers; this note said 54 before 2026-11-07, the committed test has always run 72): both schedulers, pending ticks, cadence boundaries,
 retained list tails, fixed slots, register/stack preservation and writes to the
 emitter slots after DMA. The pre-fix source fails the deadline-enabled case with
 one pending tick and `since_pic=0`. The check is included in `port.py test rtype`.

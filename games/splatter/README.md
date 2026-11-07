@@ -7,6 +7,31 @@ Atari STE port (4 MB) of the MAME set `splatter` (Namco System 1): the main and 
 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`), the reference board `engine/namcos1.py` (its renderer
 pixel-exact against MAME), and the STE renderer below.  Work in progress.
 
+Current figures (2026-11-07): logic 117.2k 68000 cycles a frame for the two CPUs (Musashi, seed 5, 2026-11-02);
+Hatari BENCH (arcade frames 600-1100) 15.33 arcade frames/s, 7.53 pictures/s (2026-10-14, the natives); Hatari
+recorded play 13.80 arcade frames/s, 6.40 pictures/s (2026-10-15).  Neither Hatari figure was taken again after the
+2026-11-02 changes (`call_summaries`, the NFSR fix 769c6fb).  Since 2026-11-02 the recorded play and seed 15
+lock-step runs stop at a main CPU badpc because coverage pickles were lost (see "Coverage gap" below).
+
+* **MCU**: the CUS64 (HD63701) runs as native 68000 code (`src/mcu.s`, the 68000 side of `tools/mcu.py` MCUNative;
+  `tools/mcu_test.py` checks MCUNative against the board's HD63701, `tools/mcu68k_test.py` checks mcu.s against
+  MCUNative).
+* **No sound**: the sound CPU is not run (`splatter.s` only answers its handshakes) and the MCU's voice starts
+  (`mcu_start`) are not played.
+
+## Build and run
+
+    venv/bin/python games/splatter/tools/prepare.py       # checks splatter.zip (docs/rom_manifest.json), unpacks it
+    venv/bin/python games/splatter/tools/build.py         # run/splatter/SPLATTER.PRG (--sim: the Musashi test build; -D NAME=V)
+    venv/bin/python games/splatter/tools/logic_test.py FRAMES --seed N   # lock-step against the reference (--play: the recorded play)
+    venv/bin/python games/splatter/tools/render_test.py   # every picture against the reference (Tests below)
+    games/splatter/tools/bench.sh [TAG]                   # Hatari benchmark (Tests below)
+
+ROM: the MAME set `splatter` (`assets/roms/splatter.zip`, unpacked to `assets/roms/extracted/splatter/`; build.py runs
+prepare.py when it is missing).  The port is not registered in `port.py` (no `tools/hatari.sh`, no release): start
+`run/splatter/SPLATTER.PRG` in the pinned Hatari (STE, 4 MB) the way `bench.sh` does.  Keys: arrows, space / Z attack,
+Alternate / X jump, 1 start, 5 / 6 coin, Esc quits (COUNTERS.BIN); joystick 1.  Uncovered code: CRASH.TXT.
+
 ## Native routines (`src/natives.s`, `tools/gen.py` NATIVES)
 
 Hand-written 68000 code in place of translated 6809 routines (`NO_NATIVES=1` builds the translation only); each leaves
@@ -34,7 +59,7 @@ returns (RTS ~72 cycles, indirect JSR ~130).
 
 2026-11-02: `tools/gen.py` sets `call_summaries` and `fast_forms` (m6809x, as Hyper Sports and Double Dragon):
 `logic_test.py 1300 --seed 5` identical, 126.2k -> 117.2k cycles a frame for the two CPUs (-7.1%; `call_summaries`
-alone 119.5k in the audit).
+alone 119.5k in [the 2026-11-02 audit](../../docs/speed.md#history-the-audit-of-2026-11-02)).
 
 Coverage gap (2026-11-02): `build/splatter` holds only `cover_1/4/5.pkl` (the seeds 6, 7, 11-17 and the play
 coverage above are gone).  `logic_test.py 9000 --play` (the recorded play) stops at frame 1482 at a main CPU badpc
@@ -180,7 +205,8 @@ pictures 100 frames apart) 0.028 / 0.027 / 0.043.  One palette for the whole pic
   `-D REN_ONEPAL=1` selects the experimental single-palette path.
 * `tools/gen.py` emits `st tile_written` / `st tile_written_fix` after translated tile RAM stores
   (layers 0-3 / the fixed layers' words). `TILE_FLAG=1` is enabled in `splatter.s`: tile RAM is compared after a
-  store (the game changes it in ~4% of its frames). Per-row fixed-layer flags are also implemented.
+  store (the game changes it in ~4% of its frames). Per-row fixed-layer flags (`tile_fix_rows`, `TILE_ROWS=1`) are
+  enabled too: only the rows a writer marked are compared.
 
 ### Tests
 
@@ -200,7 +226,8 @@ fails).  `--png`: STE | reference into `build/splatter/render_*.png`.  `--every 
 `--bench 500-1100`: the states of splatter.s' BENCH game (its scripted inputs: coin at frame 60, start at 140, from
 400 right with an attack 4 frames in 40; `build/splatter/render_bench.pkl`, recorded once): stage 1 scrolling with
 more enemies, the picture Hatari's `dbench` measures.  The fixed layers' flag is set in every frame there (the
-program's HUD writers run every frame), so their diff runs in every picture as in the program.
+program's HUD writers run every frame), so their diff runs in every picture as in the program (with `TILE_ROWS`,
+on in splatter.s, only the rows marked; render_test simulates the rows).
 
 `-D REN_VSW=1`: the Shifter read-back takes the HUD region's lines from the shown buffer's bar image (168 bytes a line,
 fine scroll 0) when the picture was published with the switch.
@@ -211,9 +238,15 @@ path), `-D TILE_FLAG=1`, `-D REN_ONEPAL=1` exact.  2026-10-13 (the speed-up belo
 `--every 2` phases, with and without `TILE_FLAG`, `REN_NBUF=3`, `REN_ONEPAL=1`, `REN_DMG=6`: all exact; and the
 BENCH states (601 pictures, both `--every 2` phases) in all these variants.
 
+Hatari benchmark: `games/splatter/tools/bench.sh [TAG]` (splatter.s' BENCH game, arcade frames 600-1100, in
+`run/splatter_TAG` with Hatari started there: no pkill; `PHASES=1` adds render.s' phase VBLs, `PLAY=1` the recorded
+play with a RATE.BIN timeline, `EXTRA="-D BENCH_NOPIC=1"` the logic alone).  `render_test.py --bench 560-1100 --every
+2 --profile` sums CPU + Blitter cycles by routine (`PROF_FOCUS=label`: that routine's instructions).
+
 ### Measurements
 
-Cycles a picture on Musashi (CPU + Blitter bus cycles; the game's logic is apart: ~150-170k a frame):
+Cycles a picture on Musashi (CPU + Blitter bus cycles; the game's logic is apart: ~150-170k a frame then, 117.2k
+since 2026-11-02):
 
 | | median | 10% | 90% | max (new scene) |
 |---|---|---|---|---|
@@ -243,6 +276,9 @@ bench_inputs at frame 600 starts it) agrees with Musashi per routine within ~5-1
 interrupts (Timer B, the border chain, the HUD plan) take ~6% of the time.  The higher picture cost than the play
 states is the game: the BENCH game scrolls and has more enemies (~340 sprite lines and ~80 behind the cage a
 picture), and the fixed layers are compared in every picture (~33k; the HUD writers set the flag every frame).
+Superseded (2026-10-13, 1f3f24d, `TILE_ROWS`): only the fixed-layer rows the writers marked are compared (the HUD
+writers mark rows 1, 2 and 25 each frame; all rows in the 11-26% of frames in which a generic copy runs): BENCH
+Musashi median 572k -> 547k a picture, Hatari 13.96 -> 14.21 arcade frames/s, the fixed phase 64 -> 34 VBLs.
 
 Tried and dropped (2026-10-13): the full stefastbobs2 method as a prototype (`-D REN_GEN=1`, removed again): code
 generated per (image, skew, flip y) on first use (a pass a row, end masks / X count / Y increment written as
@@ -306,10 +342,6 @@ saved against ~160k for the bookkeeping.
   fade); colours appearing after the choice (stage 4's purple lightning, sprites of a new colour) map to the nearest
   existing colour until the next choice; stage 5's red scene leaves no teal for Rick.
 * Memory: ~250 KB more could come from 4-bit characters with a palette per character (+50% conversion time).
-* Hatari benchmark: `games/splatter/tools/bench.sh [TAG]` (splatter.s' BENCH game, arcade frames 600-1100, in
-  `run/splatter_TAG` with Hatari started there: no pkill; `PHASES=1` adds render.s' phase VBLs, `EXTRA="-D
-  BENCH_NOPIC=1"` the logic alone).  `render_test.py --bench 560-1100 --every 2 --profile` sums CPU + Blitter cycles
-  by routine (`PROF_FOCUS=label`: that routine's instructions).
 
 ## Full-game verification status
 

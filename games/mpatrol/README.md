@@ -238,11 +238,10 @@ Kung-Fu Master's method (its `tools/sound.py`, `sndgen.py`, `src/sound.s`) on th
   the driver translated by `tools/sndgen.py` (engine/m6801x.py; 531 instructions, the NMI and IRQ handlers left
   out), one iteration of the main loop per command ($BC = command & $1F) and per tick (141/32 an arcade frame:
   250 / 56.7376), the busy waits and the loop's port B write skipped (`sound.SKIP`); the two AYs' register files go
-  to the YM2149 each frame (`snd_ym`, Kung-Fu Master's: the three loudest audible channels, kept on their YM channel,
-  periods x 2,000,000 / 894,886).  The voices: decoded offline on the exact board (`sound.voice_signal`: the MSM5205 of
-  MAME's msm5205.cpp, from the start until 20 ms after its reset; voice 2 with voice 3 behind it), resampled to the
-  DMA sound's 6258 Hz as signed bytes (`build/mpatrol/snd_voices.bin`, 8 KB), copied into a 2 KB ring the DMA plays
-  in a loop, 700 bytes ahead of its counter; 0 and $18-$1F end the voice.
+  to the YM2149 each frame through Kung-Fu Master's `snd_ym` ([its README](../kungfum/README.md), "Sound").  The
+  voices: decoded offline on the exact board (`sound.voice_signal`: the MSM5205 of MAME's msm5205.cpp, from the start
+  until 20 ms after its reset; voice 2 with voice 3 behind it), resampled to 6258 Hz as signed bytes
+  (`build/mpatrol/snd_voices.bin`, 8 KB), played through a DMA ring as Kung-Fu Master's (2 KB, 700 bytes ahead); 0 and $18-$1F end the voice.
 * **Verified.**  `tools/sound_test.py` (snd_frame on Musashi against `sound.STEBoard`, the driver on the 6803 model in
   the STE's schedule): the driver's RAM, both AYs' registers, the YM's registers and channel choice and the DMA ring
   equal in every frame: 20,000 frames of each coverage seed's game commands (seeds 1-9: 579-836 commands, 12-17k YM
@@ -253,10 +252,12 @@ Kung-Fu Master's method (its `tools/sound.py`, `sndgen.py`, `src/sound.s`) on th
   periods of tune $18 give; a VOICE_TEST build (`-D VOICE_TEST=1`: voices 1-3 in turn every 128 frames) plays the
   three voices on the DMA sound (0.5-0.75 s each).
 * **Cost.**  snd_frame 10-11.6k 68000 cycles an arcade frame on average (Musashi; median 6.6-8.1k, max 39k: a
-  command's reset and a tick), snd_mix 1.5k.  Hatari (bench.sh, 6000 VBLs of AUTOPLAY): 36.4 arcade frames / 12.8
-  pictures a second without sound (`EXTRA="-D NOSOUND=1"`), 35.1 / 12.1 with it (-3.6 % / -5 %).
+  command's reset and a tick), snd_mix 1.5k.  Hatari (bench.sh, 6000 VBLs of AUTOPLAY, 2026-10-29, the renderer before
+  2026-11-01): 36.4 arcade frames / 12.8 pictures a second without sound (`EXTRA="-D NOSOUND=1"`), 35.1 / 12.1 with it
+  (-3.6 % / -5 %).  Superseded (2026-11-01): with sound now 54.1 / 27.0 ("Speed on the STE"); the share of the sound
+  was not measured again.
 
-## Next steps (docs/porting-guide.md)
+## Next steps ([speed.md](../../docs/speed.md), "Where a picture's time goes")
 
 1. Speed: the hills over the mountains (fewer, cheaper passes), generated sprite code (engine/sprite_programs.py, as
    Time Pilot and Mr. Do!), writer marks for the text RAM (gen.py), the scene change and the game's start baked over

@@ -1,6 +1,6 @@
 # Gyruss (Konami, 1983) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Gyruss on the STE (Hatari)](docs/screenshot.png)
 
@@ -9,7 +9,7 @@ the sub CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 8 KB) that projects t
 sprites.  The picture is MAME's ROT90 picture: 224 x 256, centred in the 320-pixel screen, top and bottom borders
 open.  The sound board's Z80 driver is translated as well; it plays its five AY-3-8910s on the YM2149 (three of the
 fifteen channels).  The i8039's sampled effects are rendered offline and played through the DMA sound.  For a 4 MB
-STE (the program needs 1.2 MB).
+STE (the program asks for ~3.03 MB since the generated sprite path, 2026-10-25; 1.2 MB before).
 
 ```sh
 python games/gyruss/tools/prepare.py      # verify assets/roms/gyruss.zip, unpack to assets/roms/extracted/gyruss/
@@ -59,11 +59,15 @@ music on).
 
 ## Speed
 
-`tools/bench.sh 4000` (DEBUG build with sound, the AUTOPLAY script, Hatari): **31.9 arcade frames a second (53% of
-the arcade's 60.61), 11.7 pictures a second**; in play 22-36 frames and 7-12 pictures a second.  The arcade frame's
-costs on Musashi in play: the main CPU ~56k cycles, the sub CPU ~55k (its hottest routines native, below), the sound
-driver ~52k, the YM mix-down ~8k, a picture ~110k CPU cycles and ~27k Blitter bus cycles.  Without the sound
-(`EXTRA="-D NOSOUND=1"`) the logic ran at 38.7 frames a second before the sub's natives.
+Current (2026-11-02, below): Hatari `bench.sh 4000` (AUTOPLAY) 33.4 arcade frames a second (55% of the arcade's
+60.61) and 12.7 pictures a second on the tree after 7d63539; a picture 75.4k CPU + 12.7k Blitter cycles (Musashi,
+2026-10-25).  The three translated CPUs, not the picture, limit the speed.
+
+Superseded (the first measurement, 2026-10-17): `tools/bench.sh 4000` (DEBUG build with sound, the AUTOPLAY script,
+Hatari): 31.9 arcade frames a second (53%), 11.7 pictures a second; in play 22-36 frames and 7-12 pictures a second.
+The arcade frame's costs on Musashi in play then: the main CPU ~56k cycles, the sub CPU ~55k (its hottest routines
+native, below), the sound driver ~52k, the YM mix-down ~8k, a picture ~110k CPU cycles and ~27k Blitter bus cycles.
+Without the sound (`EXTRA="-D NOSOUND=1"`) the logic ran at 38.7 frames a second, before the sub's natives.
 
 **The sprites' generated path** (2026-10-25, `engine/sprite_programs.py`, as Time Pilot's; docs/sprite-preparation.md):
 the coverage's 1,381 shapes (bank, code, raw flips) get code per pass-type pattern and end-mask streams (4,510
@@ -101,26 +105,28 @@ AUTOPLAY run follows another path at another speed; no baseline run after 7d6353
   (the runtime reads $C180 / $C185 / $C100), `ld ($C080),a` (the sound IRQ) puts the latch into the command ring.
 * **Jump tables**: `rst $30` is a jump through the word table behind it; gen.py's RST30_TABLES bounds each table
   by the code before the site (the coverage's computed jumps all land in them).
-* **The sub CPU's translation** (`tools/gen_sub.py`, engine/m6809x.py on a flat program): the KONAMI-1 opcodes
-  decrypted (`Program.opcode_reader`), slot 2 the sub's RAM (a3: the direct page $42xx and the stack), slot 3 the main
-  CPU's shared RAM (a4: the Z80 block's $A000), slot 7 the ROM; the indirect operands through static pointers
-  (`[$4200]`, `[$4211]`: the sort lists) use the slot the coverage saw (`Program.indirect_slots`).  Natives
+* **The sub CPU's translation** (`tools/gen_sub.py`, engine/m6809x.py on a flat program; the KONAMI-1 decryption and
+  `Program.indirect_slots`: [porting guide](../../docs/porting-guide.md), "6809, HD6309 and KONAMI-1"): slot 2 the
+  sub's RAM (a3: the direct page $42xx and the stack), slot 3 the main CPU's shared RAM (a4: the Z80 block's $A000),
+  slot 7 the ROM; the static pointers `[$4200]`, `[$4211]` (the sort lists) use the slot the coverage saw.
+  `call_summaries = True` (since 2026-10-29): a direct call's live flags come from its callees' summaries instead of
+  the union of every caller's needs at their returns.  Natives
   (src/sub.s, src/natives.s): the first phase's list copy (F48B / F4E4), the scans for a free entry (F6A2 / F6FB),
   the object projections (F273, F2DC, F386, F3F1): sub CPU 99k -> 55k cycles a frame, all exact in lock-step.
 
 ## Sprite multiplexing and the beam
 
-Gyruss shows more than the 48 hardware sprites: after its first phase filled the entries, the sub CPU scans them
-between its processing steps (F695 / F6EE) and gives an entry whose sprite the beam has passed (`line + y` carries:
-it reads the beam's line at $0000 for each entry) to the next object.  MAME redraws the screen up to the beam before
-every sprite RAM write (`update_partial`), so an entry shows its old sprite above the line of the write and the new
-one below; an object placed above the beam is not shown that frame (61% of them in the MAME-timed reference).
+The method (MAME's partial updates, a beam model for the translation, the reference rendered per band): [porting
+guide](../../docs/porting-guide.md), "Checking the reference", "Partial updates" and "Sprite multiplexers that race
+the beam".  Gyruss shows more than the 48 hardware sprites: after its first phase filled the entries, the sub CPU
+scans them between its processing steps (F695 / F6EE), reading the beam's line at $0000 for each entry, and gives an
+entry whose sprite the beam has passed (`line + y` carries) to the next object.  An object placed above the beam is
+not shown that frame (61% of them in the MAME-timed reference).
 
-The port cannot follow the beam, so it models it: the k-th read of an IRQ gives line 25 + 0.6 k (at most 239),
-fitted to the MAME-timed reference (`tools/machine.py Gyruss`, rms 9 lines); the first phase's writes count as the
-VBLANK's.  The reference port renders per band (`GyrussPort.bands`, MAME's method); the STE logs each reused entry's
-old content and line (`sub_spr_seg` after F6CA / F723) and draws every content clipped to its columns (`clip_slot`:
-the slot's row masks cut to the band).
+The model: the k-th read of an IRQ gives line 25 + 0.6 k (at most 239), fitted to the MAME-timed reference
+(`tools/machine.py Gyruss`, rms 9 lines); the first phase's writes count as the VBLANK's.  The reference port renders
+per band (`GyrussPort.bands`); the STE logs each reused entry's old content and line (`sub_spr_seg` after F6CA /
+F723) and draws every content clipped to its columns (`clip_slot`: the slot's row masks cut to the band).
 
 ## The picture (src/render.s)
 
@@ -130,16 +136,21 @@ the slot's row masks cut to the band).
 * **Buffers**: three display buffers and a clean screen of 280 lines x 160 bytes (PIC_TOP lines above the picture,
   guard lines below).  The tiles change rarely (0.6 cells a frame in play): the marked rows of the video RAM are
   compared with a copy; a changed cell is drawn into the clean screen and listed for each buffer.  A buffer is brought
-  to the new picture from the clean screen: its last sprites' rectangles (two 4-line HOG passes each), its listed
-  cells (movep.l); then the sprites (the 48th entry first), then the front tiles (colour bit 4: MAME's group 0, opaque)
+  to the new picture from the clean screen: its last sprites' damage (since 2026-10-25 the lines and words each
+  sprite drew, a HOG copy each in short pieces, `restore_damage`), its listed cells (movep.l); then the sprites (the 48th entry first), then the front tiles (colour bit 4: MAME's group 0, opaque)
   copied back over the sprites that cover one (a long of front rows per cell column decides).
 * **Sprites**: baked on first use per (bank, code, flips, colour) into a 1024-slot cache (the opaque rows, their
-  masks, the plane words in blit order), a HOG pass a row; clipped at the group-aligned edges (screen x 48 and 272:
-  the inner word only), culled when wholly in a band; the pass type's Blitter registers written only when it
-  changes.  Grouping equal row masks was measured and gains nothing (`docs/sprite-preparation.md`).
-* **Colours** (`tools/assets.py`): the arcade shows 28 colours (a 32-byte PROM); black and 15 fitted by a weighted
-  k-means in Oklab to the coverage's pictures, snapped to the STE's 4 bits a gun; every pen maps to the nearest.  The
-  mean error per channel, weighted by pixels, is under 1 of 255.
+  masks, the plane words in blit order, the same aligned for the generated code).  An entry of a shape the coverage
+  drew runs its generated code with its shift's end-mask stream (`draw_one`, "The sprites' generated path" above);
+  entries cut to multiplexing bands, near front tiles or across a 64 KB boundary take the row path (`draw_cell`: a
+  HOG pass a row, the pass type's Blitter registers written only when it changes).  Both clip at the group-aligned
+  edges (screen x 48 and 272: the inner word only) and cull an entry wholly in a band.  Grouping equal row masks was
+  measured and gains nothing ([sprite-preparation.md](../../docs/sprite-preparation.md)).
+* **Colours** (`tools/assets.py` `palette`, since 2026-11-05): the arcade shows 28 colours (a 32-byte PROM); the
+  shared default fitter, flat (`engine/palette_native.py` `prom`, `engine/palette_quantize.py`: one STE index per
+  pen, black fixed in slot 0), trained on the coverage's pen counts ([colours.md](../../docs/colours.md), its audit:
+  non-black error 1.631 -> 2.892, sprites 4.835 -> 2.618 OKLab x 100).  Before: black and 15 fitted by a weighted
+  k-means in Oklab (`fit`, now unused), mean error per channel under 1 of 255.
 
 ## Sound (src/sound.s, tools/sound.py, tools/sndgen.py, tools/i8039.py)
 

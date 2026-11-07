@@ -1,6 +1,6 @@
 # Pooyan (Konami, 1982) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Pooyan on the STE (Hatari)](docs/screenshot.png)
 
@@ -99,9 +99,10 @@ RAM found so far: the score at `$88A2-$88A3` (BCD, in hundreds), the round at `$
   its colour's lookup entry is colour 0, so the masks depend on the colour: 8 transparency classes.  The coverage's 84
   shapes (class, code, flips) have generated code (`engine/sprite_programs.py`: 1,398 routines, 132 KB of end-mask
   streams), the rest and 64 KB crossings take the row path; clipped at the side edges (the inner word only), whole into
-  the guard lines.  Colours (`tools/assets.py`): black and the 15 most frequent of the 17 the arcade shows; the two
-  left out ((104, 0, 251), (33, 71, 251): 0.003% of the pixels) map to the nearest; mean error 0.5 a channel, nearly
-  all of it the STE's 4 bits a gun.
+  the guard lines.  Colours (`tools/assets.py` `palette()`): since 2026-11-05 the shared flat fit
+  (`engine/palette_native.py`, one STE index per PROM pen, black slot 0; see the note at the top).  Superseded: until
+  then black and the 15 most frequent of the 17 the arcade shows, the two left out ((104, 0, 251), (33, 71, 251):
+  0.003% of the pixels) mapped to the nearest, mean error 0.5 a channel.
 * **Picture** (`tools/render_test.py`, 2026-10-29): exact in the shown colours, the side bands black: seed 1 667
   pictures of play (every 3rd of frames 1000-3000), seed 5 900 (rounds 2-4), seed 9 700 (the high score), seed 10 625
   (two players).  `tools/sprite_test.py`: 158 made-up pictures exact (both side edges at every shift, flips, the

@@ -1,8 +1,9 @@
-# Mr. HELI: the main CPU's side of the i8751 MCU (agent A, 2026-11-02)
+# Mr. HELI: the i8751 MCU and the main CPU (2026-11-02)
 
 What the translated V30 program (games/mrheli/tools/gen.py, src/core.s) does with the MCU, for the STE MCU model.
-Measured on the reference board (engine/m72board.py, MAME 0.286 m72.cpp `m72_mcu_state`) with the scripts in the
-session scratchpad: 1500 attract frames and 6000 frames of invulnerable play (seed 8) from power-on.
+Measured on the reference board (engine/m72board.py, MAME 0.286 m72.cpp `m72_mcu_state`) with one-off scripts that
+are not in the repository: 1500 attract frames and 6000 frames of invulnerable play (seed 8) from power-on.  The MCU
+side (the native model) is in "The MCU after the boot" below.
 
 ## The hardware (MAME `m72_8751`, `m72_protected_map`)
 
@@ -32,14 +33,14 @@ loads it into the image) and needs no MCU for the main CPU's logic.
 |---|---|---|---|
 | 0040:034C | 0078C | `inc byte ptr [0FFEh]` with DS0 = B000 (read, then write) | every VBL, first thing in the handler: the MCU's INT0 once an arcade frame |
 | 0040:7F20 | 08320 | `mov aw,[ix]` with DS0 = B000, then `cmp al,49h` ('I') | the protection check, a subroutine at 0040:7F1A, called from 0040:2327 (IX = $B00), 0040:7F26 (IX = $900) and 0040:96AD; if the byte is not 'I' the object is killed (jump to 0040:20A8) |
-| 0040:1ECA | 022CA | `out 0C0h,al` with AL = $10, the object's next state 0040:1ED9 | command $10 (agent B: the MCU copies its ROM $0C3F-$0C5D, 31 bytes, to $B0000) |
+| 0040:1ECA | 022CA | `out 0C0h,al` with AL = $10, the object's next state 0040:1ED9 | command $10 (the MCU copies its ROM $0C3F-$0C5D, 31 bytes, to $B0000: "The main loop" below) |
 | 0040:1ED9 | 022D9 | `call B000:0000` (one arcade frame after the $10) | runs the MCU's code in the dual-port RAM (a protection check) |
 
-The last two were not reached in my first measured runs (1500 attract, 6000 play frames), so no MCU write showed
-there; agent B found them in the MCU program.  The translation takes the 31 bytes from the MCU ROM as code at
-B000:0000 (they are static).  The reference's port schedule runs the real i8051 (engine/i8051.py), so the copy, the
-wipe of $B0000-$B001F three timer ticks later and the watchdog byte $B0FFC appear in the lock-step as on the board.
-The mailbox byte is a frame counter (it wraps; the MCU counts its writes as a watchdog).
+The last two were not reached in the first measured runs (1500 attract, 6000 play frames), so no MCU write showed
+there; the analysis of the MCU program found them.  The translation takes the 31 bytes from the MCU ROM as code at
+B000:0000 (they are static).  The reference's port schedule runs the real i8051 (engine/i8051.py), so the command's
+copy, its wipe and the watchdog byte (all described in "The main loop" below) appear in the lock-step as on the
+board.
 
 ## Sound (no main CPU involvement)
 
@@ -59,7 +60,7 @@ $0002); the MCU plays them from the sample ROM (c-v0-b.rom) on its port 1 DAC.
 * Exactness: `tools/logic_test.py` compares the whole dual-port RAM ($B0000-$B0FFF) with the reference every frame
   (the reference's port schedule runs the i8051 too: tools/machine.py MrHeli).
 
-## The MCU (agent B)
+## The MCU after the boot (the native model)
 
 The i8751 (`assets/roms/mh_c-pr-.ic1`, 4 KB, 654 instructions; `engine/i8051dis.py`) after the boot as a native
 model: `tools/mcu.py` (Python, the twin) and `src/mcu.s` (68000). MAME's "protection simulation" comment block in
@@ -80,7 +81,8 @@ jumps to the game (`0040:0168`); 481-483: 16 copies of ROM `$002F-$006E` to `$B0
 
 ### The main loop (what the model does)
 
-* **Heartbeat / watchdog.** INT0 = a V30 write to `$B0FFE/F` (`$5D + 1`). Timer 0 (reload `$D0AA`, restarted by its
+* **Heartbeat / watchdog.** INT0 = a V30 write to `$B0FFE/F` (`$5D + 1`; the mailbox byte is a frame counter that
+  wraps). Timer 0 (reload `$D0AA`, restarted by its
   handler: 12118 cycles + latency = 1.0013 frames): exactly one heartbeat since the last tick resets `$44`, else
   `$44 + 1`; at `$44 >= $1E` the MCU writes `$44` to `$B0FFC` for ever and does nothing else (no samples). The model
   ticks once a frame, so its `$44` stays 0 while the V30 increments `$B0FFE` every VBL; the real tick drifts against
@@ -103,7 +105,7 @@ jumps to the game (`0040:0168`); 481-483: 16 copies of ROM `$002F-$006E` to `$B0
     its priority is below the playing one's (`$FF` idle; set again when the byte 0 ends a sample) or equal with the
     restart bit. The DAC gets the byte (`$80` = 0) scaled: volume 0 as is, `$10-$70` x (1 + v/256) clipped at `$7F`,
     `$80-$F0` x v/256 (`mcu.dac_value`). The table's 0-5 are real (0: an empty sample = stop); the game used 1, 3, 4.
-* The V30 reads (after the boot) `$B0900/1`, `$B0B00/1` (agent A's 0040:7F20), `$B0FFE` and, in the check,
+* The V30 reads (after the boot) `$B0900/1`, `$B0B00/1` (the protection check 0040:7F20 above), `$B0FFE` and, in the check,
   `$B0000-$B0018`, `$B001E`.
 
 ### Files and checks
@@ -137,7 +139,10 @@ at most once a frame, as it does). For the sound code (DMA, later): `mcu_snd_sta
 none: the sound code clears it), `mcu_snd_count.w` + 1 a start; the sample's data from `mcu_sample_addr`, its DAC
 stream = `mcu.dac_value` of its bytes at 8.03 kHz (prepare per command at build time; a new start cuts the old).
 
-Cost (Musashi): `mcu_frame` ~420 cycles mean (1900 with the wipe), `mcu_cmd` ~550 (1650 for `$10`), `mcu_hb` ~70.
+Cost (Musashi, `tools/mcu68k_test.py`, 2026-11-02 on synthetic traces): `mcu_frame` ~420 cycles mean (1900 with the
+wipe), `mcu_cmd` ~550 (1650 for `$10`), `mcu_hb` ~70.  Again 2026-11-07 (mcu.s unchanged): a 3000-frame synthetic
+trace ~405 (1892), ~535 (1646), ~68; the board's trace `build/mrheli/mcu_trace_check.z` (frames 484-759, fewer
+commands) ~354 (1838), 1646, 66, the README's figures.
 
 Python port schedule (`tools/machine.py MrHeli`): `self.mcu = mcu.MCU.from_board(self)` after `boot()` (it shares
 `self.dpram`), `self.mcu.frame()` at each port frame's start, `self.mcu.v30_write(o, n)` at dual-port RAM writes,

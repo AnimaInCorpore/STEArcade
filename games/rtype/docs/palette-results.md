@@ -15,28 +15,21 @@ local MAME 0.286 `src/mame/irem/m72.cpp`; the arcade palette model is unchanged.
 
 ## Colour policy and rendering
 
-- Fit original 5-bit arcade RGB before snapping the resulting palette to the
-  STE's four-bit grid. Black is fixed at index zero.
-- Compress sprite and tile counts separately with exponent 0.75; apply sprite
-  priority afterwards (8x). The chroma bonus is `1 + C²/(C²+0.1²)` in float OKLab,
-  bounded below 2x. The old factor reached about 32x.
-- Keep the demo's lightness-weighted OKLab metric, 40 deterministic initial fits
-  and constrained checker refinement. Checker pairs have lightness difference
-  at most 0.12, chroma-plane distance at most 0.08, and must beat a flat colour by
-  0.012. Their perceived mix is evaluated in linear RGB.
-- Keep 16 playfield slots, including the four dedicated changing pens in scene 6.
-  The HUD has flat colours and its own palette. Dedicated pens use one index in
-  both parity nibbles.
-- Store even/odd source-parity indices in a byte. Build two conversion-table
-  banks. Tile conversion follows the original source row and flips; sprite
-  preparation preserves each piece's source parity through cropping and row
-  reordering. Runtime cache misses consume the same signed parity-bank deltas
-  as build-time precolouring. The checker moves with the asset.
-- Opaque masks, priority, drawing routines, end-mask streams, Blitter pass count
-  and pass order are unchanged. The drawing-code hash and pass-stream hash are
-  identical to the previous default. No new mask/OR passes or colour fitting run
-  in the drawing loop. Conversion-table storage increases by 96 KiB; colour-row
-  setup and cold cache baking do extra work.
+The fitter's rules (5-bit arcade RGB fitted in OKLab, then snapped to the STE grid; black fixed; sprite and tile
+counts compressed with exponent 0.75, sprite priority 8x, the bounded chroma bonus; checker pairs as a packed
+even/odd byte whose phase follows the source) are in the [colour guide](../../../docs/colours.md), "The default
+fitter".  R-Type's own settings and costs:
+
+- 40 deterministic initial fits; checker pairs at most 0.12 apart in lightness and 0.08 in the chroma plane, and
+  0.012 better than a flat colour, their mix evaluated in linear RGB.
+- 16 playfield slots, including the four dedicated changing pens of scene 6 (one index in both parity nibbles);
+  the HUD flat, with its own palette.
+- Two conversion-table banks (tiles follow the source row and flips; sprite pieces keep their source parity
+  through cropping and row reordering; runtime cache misses use the same parity-bank deltas as build-time
+  precolouring): +96 KiB of conversion tables; colour-row setup and cold cache baking do extra work.
+- Opaque masks, priority, drawing routines, end-mask streams, Blitter pass count and order unchanged: the
+  drawing-code and pass-stream hashes equal the previous default's; no mask/OR passes or colour fitting in the
+  drawing loop.
 
 All 1,112 recorded/curated sprite definitions are retained. The automatic build
 includes the separate warship recording for sprite coverage and colour training
@@ -84,4 +77,4 @@ Small results and captures are retained under `build/rtype/palette_default_audit
 four native-renderer PNGs and source/previous/default comparison panels.
 `tools/palette_test.py --capture-only` regenerates the visual captures.
 The original preview variants remain in `build/rtype/quantization_preview/`.
-See the [cross-port audit](../../../docs/palette-audit.md) for the other games.
+See the [colour guide](../../../docs/colours.md) for the other games.

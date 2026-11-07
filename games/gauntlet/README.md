@@ -1,6 +1,6 @@
 # Gauntlet (Atari Games, 1985) for the Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 2026-10-26: the game runs at the arcade's 60 frames a second (it ran one frame a VBL: 83%); the playfield and the
 alphanumerics are compared only where the game's writers marked them (the patched program calls the runtime), the
@@ -124,14 +124,17 @@ alphanumerics' columns 30-41, the arcade's x 240-335) at 224-319.
   reordered-source variant (`-D MO_ORDER=1`) measured slower (`docs/sprite-preparation.md`).
 * **Full-width screens**: when the panel's characters are not all opaque (the title, the high scores), the arcade's
   x 240-335 of the playfield and the objects are composed in a separate buffer and copied in.
-* **Colours**: one fixed palette of 16 (`ref/palette_fit.py`, `docs/palette.json`): weighted k-means in Oklab over the
-  attract mode and play in levels 1-16, 20 and 30 (the level poked at $904004), a colour's weight the square root of
-  its share, the four player colours kept; mean error 4-5 of 255 a channel.  Every IRGB word maps to its nearest
-  colour; when a pen's colour changes, what uses it is drawn again.
+* **Colours** (2026-11-05): 16 by the shared default fitter with checker pairs (`engine/palette_native.py`;
+  [colours](../../docs/colours.md)) over the sampled play's RGB counts in `docs/colour_training.json`, with the four
+  player colours fixed (red, blue, yellow, green).  Every IRGB word maps to a pair of STE colours drawn as a checker
+  (`irgb_map`), the text and HUD to one (`irgb_map_flat`: +64 KB; the 128 KB alpha tables moved into the BSS below
+  the fixed buffers at $200000); when a pen's colour changes, what uses it is drawn again.  Superseded: the k-means
+  palette of `ref/palette_fit.py` / `docs/palette.json` (mean error 4-5 of 255 a channel).
 * Every Blitter pass is HOG and at most 256 bus cycles (`BLIT_STATS=256`).
 * **Tests**: `tools/render_test.py`: the STE picture equals the reference picture through the palette, pixel for
   pixel (attract mode, play in any level with `--level`, consecutive pictures in both rings: 4,950 pictures, 0
-  differ); `tools/sprite_test.py`: objects at every edge, all 16 shifts, both flips, 1-8 tiles wide, holes and
+  differ, 2026-10-17, before the checker pairs; the 2026-11-05 rollout checked 4 gameplay pictures and 307 sprite
+  pictures with them); `tools/sprite_test.py`: objects at every edge, all 16 shifts, both flips, 1-8 tiles wide, holes and
   shadows, priority, partial band lists, the transparent panel, 64 KB crossings (305 pictures, 0 differ).
 * **Speed** (Musashi, CPU + Blitter): 115k-390k cycles a picture in play (median by scenario), about 10-12k an
   object with its restore; the attract mode's title (about 260 fading objects, baked again each picture) is the

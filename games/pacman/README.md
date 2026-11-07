@@ -133,9 +133,12 @@ mark their cell (`pm_mark_*`) for the renderer.
 `tools/logic_test.py [frames] --seed N` runs `run/pacman_sim/PACMAN.PRG` on Musashi against `PacmanPort` with the
 coverage's inputs and cheats, and compares every frame: RAM `$4000-$47FF` and `$4C00-$4FFF` (the dead stack below SP
 left out), latch bit 0, the vector, IFF1, the WSG registers, the sprite coordinates; every changed video RAM cell must
-be marked.  2026-10-29: seeds 1-12 pass (seed 1 3000 frames, 2-12 12000 each), the logic takes 34-44k 68000 cycles an
-arcade frame on Musashi (Hatari counts about 1.35 times that: 46-60k; at 60 arcade frames to the STE's 50 VBLs 35-45%
-of the 160k cycles of a VBL, an estimate to be measured in Hatari).  Seeds 13 and 14 (random play the coverage never
+be marked.  2026-10-29: seeds 1-12 pass (seed 1 3000 frames, 2-12 12000 each).  The cycles it prints (34-44k a frame
+then) overstate the logic: the script runs Musashi in slices of 2000 cycles and stops four times a frame, so each
+stop adds up to a slice of idle spin.  Rerun 2026-11-07 (seed 2, 1000 frames) with 40-cycle slices, `logic_test.py`
+and `render_test.py` agree: 29.3k and 29.1k a frame (with the default slices 37.8k over 3000 frames and 33.8k).  So
+the logic is the 27-29k a frame of "The picture"; Hatari runs the game at full speed ("Hatari" below), which
+supersedes the old estimate of 35-45% of a VBL.  Seeds 13 and 14 (random play the coverage never
 ran, 15000 frames each) pass too: no code outside the coverage's was reached (it would stop at `z80_badpc`).
 
 ## The picture
@@ -171,7 +174,8 @@ the intermissions, two players), every third from frame 300: 17,400 pictures equ
 patterns, 36 pictures with 64 KB crossings, the bands, the wrapped copy, moving sequences in all three buffers).
 `BLIT_STATS=256`: 121,916 HOG passes from 691 places, the longest 256 bus cycles, none sharing the bus.
 Cost on Musashi: a picture 16-49k CPU cycles (the higher when levels change often: a maze redraw) and 6-7k Blitter bus
-cycles, the logic 27-29k a frame.
+cycles, the logic 27-29k a frame (the logic span alone; see "Lock-step test" for why the scripts' printed figures
+come out higher).
 
 **Hatari** (`tools/hatari.ps1`, 2026-10-29; the attract mode, no input): 4500 VBLs, 5043 arcade frames, 4181
 pictures.  After the boot it runs at full speed: 59.9 arcade frames and 49.8 pictures a second (the last 3000 VBLs).

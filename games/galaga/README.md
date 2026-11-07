@@ -4,8 +4,9 @@
 
 Second port (started 2026-10-08), the first with several CPUs: three Z80s translated into one 68000 program, the
 Blitter sprite renderer of Donkey Kong extended to double-size sprites and a starfield.  Paths in this file are
-relative to `games/galaga/`; the shared pieces are described in `docs/architecture.md` and the method in
-`docs/porting-guide.md`.
+relative to `games/galaga/`, except `engine/` and the shared scripts `tools/hatari.sh`, `port.py` of the repository
+root; the shared pieces are described in [the architecture](../../docs/architecture.md) and the method in
+[the porting guide](../../docs/porting-guide.md).
 
 * `src/` the runtime and renderer (`galaga.s`, `render.s`, `sprites.s`, `stars.s`)
 * `tools/` `machine.py` (reference machine), `gen.py` (translation), `assets.py` (graphics), `sound.py` (the WSG on the
@@ -17,18 +18,23 @@ Build and run from the repository root: `python port.py build galaga`, `python p
 
 Controls: **5** coin, **1/2** start, **left/right** move, **Space/Ctrl/Alt** fire, **Esc** quits.  Players take turns:
 both joysticks and both pads move the fighter.
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): either pad, the D-pad moves, **A / B / C** fire, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture](../../docs/architecture.md), "Input"): either pad, the D-pad moves, **A / B / C** fire, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#** quit.
 
-State (2026-10-11): complete.  The game runs at one game frame per VBL (the arcade's 60.6 a second become 50, no
-skipped interrupts) with everything drawn (tiles, the formation, explosions, the starfield, the high score table) and
-its sound (the sound CPU translated, the WSG's three voices as the YM2149's square waves, the 54XX's explosion as
-noise, see "Sound"); the display drops frames: 33 a second on average over the attract mode, 17-21 with the full
-formation, up to 49 in the title phases (Hatari, `-D RATE=500`, see below).  Build
+State: the whole game is translated and drawn, but the status is **Verification pending** (see "Full-game
+verification status" and the root README): no full natural playthrough has been checked yet.  The game runs at one
+game frame per VBL (the arcade's 60.6 a second become 50, no skipped interrupts) with everything drawn (tiles, the
+formation, explosions, the starfield, the high score table) and its sound (the sound CPU translated, the WSG's three
+voices as the YM2149's square waves, the 54XX's explosion as noise, see "Sound"); the main CPU talks to the real 51XX
+program since 2026-10-21 ("The real 51XX on the STE").  The display drops frames: the latest Hatari figure is 31.1
+pictures a second on average over the attract mode (`tools/bench.sh 9000`, 2026-10-21; the starfield change of
+2026-11-02 is not measured in Hatari yet); the formation windows were 17.4-20.7 on 2026-10-12.  Superseded: the
+2026-10-11 figures of this paragraph (33 on average, 17-21 with the formation, up to 49 in the title phases) were
+taken with the simulated 51XX.  Build
 `python port.py build galaga [--debug] [--full-selftest]` -> `run/galaga/GALAGA.PRG` (needs the six ROM
 files of the `galaga` set extracted to `assets/roms/extracted/galaga/`).  The main CPU's boot
 RAM test (about 600 of the 850 frames to the attract mode) is patched out of the translation
 (`machine.skip_ram_test`, the bank checksum byte compensates; `--full-selftest` keeps it).
-`python port.py run galaga shot@30` (`tools/hatari.sh`) runs the port in the F030Arcade Hatari and grabs
+`python port.py run galaga shot@30` (the repository's `tools/hatari.sh`) runs the port in the F030Arcade Hatari and grabs
 screenshots at the given times (`/tmp/hrun`); the display starts at buffer line `CROP_TOP` = 24.
 
 Reference: `tools/machine.py` models the arcade from MAME's galaga.cpp: three Z80s at
@@ -127,13 +133,17 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
 
 ### Findings (2026-10-08, later)
 
+Superseded figures: the frame rates in this list (14.3 / 22.3 / 22.6 average) are those of 2026-10-09; the current ones
+are in "Renderer speed (2026-10-09, later)", "Sprites clipped at the picture's left and right edges" and "The real
+51XX on the STE".
+
 - Sources: MAME's Galaga video code is in the F030Arcade checkout,
   `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/namco/galaga_v.cpp`
   (also `galaga.cpp`, `namco/galaga_a.cpp`; commit 5913928b159).  Sprite flags there: bit 0
   flip x, bit 1 flip y, bit 2 double width, bit 3 double height; x = spriteram_2[offs+1] - 40
   + 0x100 * (spriteram_3[offs+1] & 3), y = 256 - spriteram_2[offs] + 1.  Check against it
   before trusting `tools/machine.py` or the renderer.
-- Hatari: use the F030Arcade build (`tools/hatari.sh galaga shot@N`: runs the port,
+- Hatari: use the F030Arcade build (the repository's `tools/hatari.sh galaga shot@N`: runs the port,
   screenshots through `--cmd-fifo` + `hatari-debug screenshot` into `/tmp/hrun`; `PRG=` picks
   another program).  Debugger commands go through the same FIFO (`hatari-debug m $addr 8`
   prints memory to Hatari's stdout) - that is how the `--debug` counters are read:
@@ -199,10 +209,10 @@ instructions of work per frame), 5-13 sprites change per frame, 100 stars a fram
 
 ## Translator speed (2026-10-08)
 
-CPU1 `z80x.FAST`, CPU2 / CPU3 `z80x.FAST_LONG`; `g_ctrl06` reads DE' from the upper word of d2 (it read a1).  The
-clears (`ld (hl),n; ldir` over $37F bytes) are long fills now, the cost of the half registers (`ld d,(hl)` 48 -> 34
-cycles, `ld a,c` 30 -> 16) and of `adc` / `rl` (the carry into X without a branch) went down.  `engine/xprof.py galaga`
-(game frames 800-1200, attract): translated code 47.6k -> 27.6k cycles a game frame (1.73x).  There is no lock-step test
+CPU1 `z80x.FAST`, CPU2 / CPU3 `z80x.FAST_LONG`; `g_ctrl06` reads DE' from the upper word of d2 (it read a1).
+`engine/xprof.py galaga` (game frames 800-1200, attract): translated code 47.6k -> 27.6k cycles a game frame (1.73x,
+mostly the `ldir` clears as long fills and the half registers; what changed and the other ports' figures:
+[architecture](../../docs/architecture.md), "Tests and measurements of the translator").  There is no lock-step test
 of the main and sub CPU's translated code against the reference (`tools/schedule_test.py` checks the reference only; the
 sound CPU's has one: `sound_test.py`); the change was checked
 with `engine/xdiff.py galaga <the old build>`: the arcade's RAM is the same at all 400 game frames (interrupts on a
@@ -341,16 +351,16 @@ attract mode.  Released in 0.2.1.
 
 ## Sprites clipped at the picture's left and right edges (2026-10-12)
 
-The picture's left and right edges lie on 16-pixel groups (`GAME_X` = 3 chunks, 224 pixels = 14 chunks), so, as the
-renderer rules now allow there, a sprite part across one draws only its inner destination word and the side bands of
-the 512-pixel lines get no sprite pixels; top and bottom stay whole in the guard rows.  `draw_part`: the two range
+The picture's left and right edges lie on 16-pixel groups (`GAME_X` = 3 chunks, 224 pixels = 14 chunks), so sprites
+are clipped there by the shared rule ([porting guide](../../docs/porting-guide.md), "Renderer correctness"); the side
+bands of the 512-pixel lines get no sprite pixels.  `draw_part`: the two range
 compares of the left column became one unsigned compare (`cmp #224-16,d0 / bhi .edge_x`); `.edge_x` culls a part wholly
 outside and marks the others (d0 bits 30 + 31), which then take the generic path (the 64 KB one) to `edge_blits`: one
 word a line (xcount 1, the 4 planes as the Y count), right edge the first word with END1 = the line's first mask, left
 edge the second word at +8 with FXSR and source Y increment 0 (END1 = the line's second mask), lines without bits in
 the inner word skipped (source address + 8).  The record keeps the inner chunk only (`S_RECT`, `S_WORDS` 4, the two
 cells), so restores and marks never touch the bands either.  The generated sprite code and the common path are
-unchanged; nothing is erased after drawing.  The stars and characters are drawn in the picture only, as before.
+unchanged.  The stars and characters are drawn in the picture only, as before.
 
 Cost, CPU + Blitter cycles on Musashi:
 * `tools/perf_test.py` (new): 1201 consecutive arcade RAM states of the attract mode (VBL 2400-3600, recorded once from

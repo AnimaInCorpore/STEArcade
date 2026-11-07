@@ -4,7 +4,13 @@
 
 Third port; paths in this file are relative to `games/bublbobl/` (`src/` runtime and renderer, `tools/` reference machine,
 translation, build and tests, `ref/` analysis scripts (one-off probes in `ref/probes/`); generated files in `build/bublbobl/`).  Shared pieces:
-`docs/architecture.md`; method: `docs/porting-guide.md`.
+[architecture](../../docs/architecture.md); method: [porting guide](../../docs/porting-guide.md); speed:
+[speed](../../docs/speed.md).
+
+Current state, in short: logic exact against the reference, pictures exact; the play runs at 45% of the arcade's
+speed with 12 pictures a second in Hatari (see "Speed, measured right (2026-10-12)"); frames in layers go to the sprite
+renderer (`src/srender.s`, Blitter sprites and block copies), the others to the general renderer (`src/render.s`); the
+fixed palette is the default.  The sections below are dated; older ones say where they were superseded.
 
 Started 2026-10-08.  The `bublbobl` set (Taito 1986, with the protection MCU): three Z80s (main, sub, sound) and
 an MC6801 whose own firmware (`a78-01.17`) is in the set.  Built the way the Galaga port is: a reference machine,
@@ -80,11 +86,10 @@ the general renderer below (switching draws everything once).  On the 8 x 8 grid
   automatically. The Blitter supplies the skew, so moving across any of the 16 shifts reuses the same cache entry.
   Block copies find their runs of groups with two byte tables (`sr_tz`, `sr_to`): one to three groups by the CPU,
   longer runs (up to 8 groups) in HOG passes of one line, at most 256 bus cycles.
-* **Palette stamps** (2026-10-12): a change of a pen's slot starts a new palette epoch (`pal_epoch`) and records it for
-  that pen and its bank (`pen_epoch`, `bank_epoch`).  A baked tile (`tcache`), a sprite image and a cell composite
-  carry the epoch they were made under; a lookup with an older stamp checks only the pens its tiles use against
-  `pen_epoch` (`get_tile`'s `.stamp`, `sr_valid`) and refreshes the stamp if none changed.  Nothing is walked at a
-  palette change; the keys stay exact (tile, bank, flips); the epoch wrapping flushes everything (`pal_wrapped`).
+* **Palette stamps** (2026-10-12; the method: [speed.md](../../docs/speed.md), "Change detection, caches and
+  palettes"): the epoch `pal_epoch`, per pen and bank `pen_epoch`, `bank_epoch`; the baked tiles (`tcache`), sprite
+  images and cell composites carry it, checked by `get_tile`'s `.stamp` and `sr_valid`.  The keys stay exact (tile,
+  bank, flips); the epoch wrapping flushes everything (`pal_wrapped`).
 * The virtual screen is 512 pixels wide (256 bytes per row). The 320-pixel hardware window starts at x=96,
   centring the 256-pixel game picture at x=128. The sprite renderer's Blitter path (`sr_draw1`) clips a sprite
   across the left or right picture edge (2026-10-12): the edges lie on 16-pixel groups, so the word outside gets an
@@ -115,13 +120,14 @@ arcade (per channel, 0-255): gameplay 1.38 with 94.7% of the pixels exact (`pale
 second round (7.2-7.9 there).  DawnBringer 16 (black for its darkest) would be 17.8 (68% exact); the earlier Oklab default
 `docs/palette16.json` 8.0.
 
-## Renderer (`src/render.s`)
+## General renderer (`src/render.s`)
 
 The arcade draws a list of objects (strips of 8 x 8 tiles, shape from a PROM, columns chained across objects;
 `tools/machine.py render_raw` is the reference, checked against MAME with `ref/mame_cmp_bublbobl.py`: 0 pixels
-differ).  The STE port:
+differ).  Since 2026-10-10 this renderer draws only the frames that are not in layers (see "Sprite renderer"); the
+colours are the fixed palette's unless built with `-D DYNPAL=1`.  The STE port:
 
-* 16 colours: the 15 most used colours of the banks in use + the background; every (bank, pen) maps to its
+* 16 colours (`-D DYNPAL=1` only; the default is "Fixed palette" above): the 15 most used colours of the banks in use + the background; every (bank, pen) maps to its
   slot.  Colours that change (flashing) get a slot of their own, so the mapping survives them; a palette change
   that leaves the mapping alone only rewrites the STE palette.  The colour choice is made again (`rf_palette`)
   when an entry starts to flash, when a colour that does not flash changed together with the tile entries (a new
@@ -159,8 +165,8 @@ differ).  The STE port:
 ## Reference captures, palette, ROM manifest
 
 `docs/` (see `docs/README.md`): 64 MAME attract-mode frames with all 68 on-screen colours, the 16-colour Oklab palette
-adopted from the JsOklabQuantizer default (`docs/palette16.json`, not yet checked against gameplay frames; it has no
-green), the CRC manifest of the `bublbobl` (Japan) and `bublboblr` (US / Romstar) sets, and hardware notes with
+of the JsOklabQuantizer default (`docs/palette16.json`, the first choice; it has no green and against gameplay frames
+errs 8.0 of 255, so `docs/palette_static.json` replaced it on 2026-10-10), the CRC manifest of the `bublbobl` (Japan) and `bublboblr` (US / Romstar) sets, and hardware notes with
 evidence grades.  The scripts that produce them are in `ref/`: `mame_attract_collage.py`, `quantize_collage.py`
 (+ `oklab_quantize.mjs`), `palette16.py`, `rom_manifest.py`; the fixed palette the port uses: `palette_fit.py`
 (`docs/palette_static.json`, see "Fixed palette").  The port itself is built on the `bublbobl` set; the US set
@@ -202,7 +208,10 @@ pictures drawn a second (`--hist` gives a routine's per-VBL distribution).  The 
 the top of the 4 MB RAM: they used to write them into the tile ROM data (`$60000`, `$7F000`), where the baked tiles of
 a build with another code size were damaged.
 
-## Status (2026-10-08)
+## Status (2026-10-08, superseded)
+
+Superseded: the state of 2026-10-08, before the sprite renderer (`src/srender.s`, Blitter, 2026-10-10), the fixed
+palette and the natives.  Current speed: "Speed, measured right (2026-10-12)"; current renderer: "Sprite renderer".
 
 Works: boots in the F030Arcade Hatari straight into the attract mode (the boot self-tests are skipped), every
 screen of it is drawn correctly (title, the instruction pages, the demo play), the picture is centred with the
@@ -241,7 +250,7 @@ change colour) the frame still costs ~6.5 M cycles.
 costs ~1.8 M cycles in the play (~0.4 M in the attract mode), so drawing one every VBL would have to fit in 53-71k:
 25-35 times less.  Nothing measured comes close: the renderer changes above took ~10%, the Blitter (below) would take
 another 7.5% at best, a micro-optimising pass perhaps 20-30%.  Full speed needs a CPU several times faster (the Falcon's
-16 MHz 030 with its caches is the obvious candidate: it has no Blitter, which this renderer does not use anyway, but the
+16 MHz 030 with its caches is the obvious candidate: it has no Blitter, which the renderer of 2026-10-08 did not use, but the
 STE-specific parts, the border removal and the palette writes, would need checking) or a different division of work.  That is an
 estimate from simulator cycles; nothing has run on such a machine, and the STE Blitter would not be there to help.
 
@@ -270,15 +279,15 @@ pixels) and 79 shifted ones (40 even, 40 odd), 198 cells cleared in 51 whole-gro
 Blitter would save 113k cycles on the shifted tiles (6.3% of a 1.82 M frame), 13.6k on the clears (0.7%) and 8k on the copies
 (0.5%): **7.5%**; in the coin / start window 4.8%, in the attract mode 1.7%.  The aligned tiles, the bulk, gain nothing: an 8 x 8
 tile is too small to pay the blit set-up.  Caveats: the long run blits (up to 2.2 k cycles) hog the bus and would delay the border
-timers (see the Blitter notes in `docs/porting-guide.md`), so they would have to be split, which costs part of the gain; the
+timers (see "Only short HOG passes" in [porting guide](../../docs/porting-guide.md), "The STE, the simulator and
+Hatari"), so they would have to be split, which costs part of the gain; the
 numbers are simulated bus cycles, not Hatari frame times.  A Blitter renderer for this game would pay for a background layer
 composited by rectangle copies and for sprite-like objects, i.e. a different renderer, not a different inner loop.
 
-**Current edge rule:** the old `rf_cleanup` eraser described in the 2026-10-09 experiments below has been
-removed. The 512-pixel virtual screen restores old guard damage before drawing the next picture. Left and right
-picture edges are group-aligned and clip in both the Blitter sprite path and the general tile fallback; top and
-bottom draw whole into guard rows. Side bands within the hardware window are visible and must stay clean.
-Next, in order: the steady cost of the play, i.e. the per-cell work (the aligned tile: ~300 cycles of set-up before
+**Edges:** the old `rf_cleanup` eraser of the 2026-10-09 experiments below is removed; both renderers follow the
+shared edge rule ([porting guide](../../docs/porting-guide.md), "Renderer correctness"; the port's details in "Sprite
+renderer").
+Next, in order (2026-10-08): the steady cost of the play, i.e. the per-cell work (the aligned tile: ~300 cycles of set-up before
 its first row, `get_tile`'s hash, the clearing of a cell an opaque tile overwrites anyway, `rf_redraw`'s object loop),
 fewer dirty cells (an object marks all its tiles, old and new), table driven `obj_slots`; the scene change (draw the
 tiles of the banks that changed over several frames, or fade through the old colours); the video RAM diff (4%, a write
@@ -478,8 +487,8 @@ frames exact, no stray pixels around the picture (the check finds 14 at frame 51
 `tools/bench.sh 1500` in Hatari: no late border event, no pass in pieces, no crash file.  Memory: 3,931,904 bytes
 (+4 KB: the epochs and the cells' bank masks).
 
-Memory (2026-10-15): 3,942,912 -> 3,659,008 bytes, 393 KB left from the desktop (4,061,212 on a 4 MB STE with TOS
-2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start it).  What start
+Memory (2026-10-15): 3,942,912 -> 3,659,008 bytes, 393 KB left from the desktop (the load budget:
+[porting guide](../../docs/porting-guide.md), "Memory and release").  What start
 reads once lies under the tile cache: the CPU ROMs (`load_roms` copies them, 132 KB) and the dispatch entries (`gen.py`'s
 `bb_entries_data`, 145 KB, read by `init_table`) are the last thing in the data section, from `tcache` on, and the rest
 of the cache is the first thing in the BSS (`tcache_tail`; the data's end is aligned to the BSS's 256 so that the two
@@ -520,7 +529,8 @@ second; the windows are VBLs, so after a faster window the game is further on):
 
 The scheduler puts the game's pace first: with `y_near` alone the saved time went to the pictures, with all three the
 game runs 18-40% more rounds a VBL in these windows.  `tools/bench.sh 3000` (Hatari; rounds per VBL / pictures a
-second, before -> after): VBLs 1200-1499 0.95 / 27.5 -> 0.95 / 34.0, 1500-1799 1.00 / 31.3 -> 1.00 / 40.3, 1800-2099
+second, before -> after; counted before the late-VBL fix b89956a, so about twice too high, see "Speed, measured right
+(2026-10-12)"): VBLs 1200-1499 0.95 / 27.5 -> 0.95 / 34.0, 1500-1799 1.00 / 31.3 -> 1.00 / 40.3, 1800-2099
 0.98 / 21.0 -> 1.00 / 34.2, 2100-2399 0.87 / 14.8 -> 1.00 / 29.7; later the faster build is in a heavier scene (2400-2999:
 0.98 / 23.0 and 0.97 / 27.3 before, 0.89 / 14.0 and 0.82 / 11.2 after).  Next candidate: the object table copy `$04B6`
 (`ldir`, 5k).
@@ -553,11 +563,11 @@ was not still busy in, and were about twice too high).
 
 ## Speed, measured right (2026-10-12)
 
-`tools/bench.sh` counted VBLs with `frame_counter`, which a VBL that arrives while the game's interrupts of the last one
-still run (`vbl_late`, counted in `cnt_late`) does not advance.  A play round costs more than a VBL in Hatari, so about
-every other VBL was missing and the rates were about twice too high (all Hatari rates in this file before this section,
-and the release text of 0.3: "67-80% of the arcade's speed and 15-27 frames a second").  COUNTERS.BIN now counts every
-VBL.  `ROUNDS=1 tools/bench.sh 3600` (the same game in every build), rounds 1200-2700 (play):
+The general rule ("Count every VBL"): [speed.md](../../docs/speed.md), "Measuring".  Here `tools/bench.sh` counted
+VBLs with `frame_counter`, which a late VBL (`vbl_late`, counted in `cnt_late`) does not advance; a play round costs
+more than a VBL in Hatari, so all Hatari rates in this file before this section were about twice too high, and so was
+the release text of 0.3 ("67-80% of the arcade's speed and 15-27 frames a second").  COUNTERS.BIN now counts every
+VBL (b89956a).  `ROUNDS=1 tools/bench.sh 3600` (the same game in every build), rounds 1200-2700 (play):
 
 | Build | Game rounds per VBL | Of the arcade's speed | Pictures a second |
 |---|---|---|---|

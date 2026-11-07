@@ -2,8 +2,10 @@
 
 Atari STE port (4 MB) of the MAME set `dspirit` (Namco System 1, ROT90): the main and sub MC6809E programs translated
 to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) on the reference board `engine/namcos1.py`, as
-Galaga '88 (`games/galaga88`) and Splatterhouse (`games/splatter`).  Work in progress: the translated logic runs in
-lock-step with the reference (SIM build only); the STE program, the MCU, the renderer and sound are not written yet.
+Galaga '88 (`games/galaga88`) and Splatterhouse (`games/splatter`).  Work in progress (2026-11-07): the translated
+logic is identical to the reference over 7700 frames on six seeds; the STE program runs in Hatari with Splatterhouse's
+native MCU and a 320-pixel renderer (exact against the reference model), at 7.97 arcade frames and 3.02 pictures a
+second on the BENCH game (14 MB); no sound yet.
 This port uses its standalone scripts and is not registered in `port.py` or included in releases.
 
 ## Logic
@@ -74,8 +76,7 @@ the built program); 106.8k -> 89.3k (seed 5) and 143.1k -> 117.5k (seed 22) cycl
 dynamic slots, D built from A and B) are most of what is left: at 60 frames a second the logic alone needs more
 than the STE's 160k cycles a VBL.
 
-Next: the STE program (snapshot at frame 300, the MCU - Splatterhouse's native model of the CUS64 program, to be
-checked for Dragon Spirit -, the display, a renderer from Galaga '88's), then sound.
+The STE program, the MCU and the renderer followed (below); sound is still to come.
 
 ## The STE program (src/dspirit.s, from Galaga '88's)
 
@@ -86,8 +87,9 @@ custom's and the MCU's), the MCU (Splatterhouse's native CUS64 model, the same R
 writes around a sample's start - the voice, not the game), a picture every PIC_EVERY (2) arcade frames.  Keys: arrows,
 space / Z air shot, X / Alternate bomb, 1 start, 5 / 6 coin, Esc quits (COUNTERS.BIN); joystick 1, its button both
 air shot and bomb.  Uncovered code: CRASH.TXT.  The dispatcher's page tables are two-level (a directory of 32 blocks
-of 256 labels a page: tools/gen.py dispatch_tables; 556 -> 267 KB).  Size 3.79 MB (text + data + bss): it loads on a
-4 MB STE; for development Hatari may run it with 14 MB (as R-Type; the user, 2026-11-07).
+of 256 labels a page: tools/gen.py dispatch_tables; 556 -> 267 KB).  Size 3.79 MB (text + data + bss) before the
+renderer's buffers, over the release's 3.7 MB load budget: for development Hatari runs it with 14 MB (as R-Type; the
+user, 2026-11-07); the 4 MB release is open.
 
 ## Renderer (src/render.s)
 

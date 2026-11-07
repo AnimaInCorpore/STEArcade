@@ -6,8 +6,10 @@
 ![1942 on the STE (Hatari)](docs/screenshot.png)
 
 Fourth port (started 2026-10-08), the first with a **hardware scrolled** background.  The `1942` set (Capcom 1984, Revision B,
-`assets/roms/1942.zip`, extracted to `assets/roms/extracted/1942/`).  Paths in this file are relative to `games/1942/`; the
-shared pieces are described in `docs/architecture.md`, the method in `docs/porting-guide.md`.
+`assets/roms/1942.zip`, extracted to `assets/roms/extracted/1942/`).  Paths in this file are relative to `games/1942/`,
+except `engine/...`, `tools/hatari.sh`, `tools/memfree.sh` and the commands, which are relative to the repository root; the
+shared pieces are described in [architecture.md](../../docs/architecture.md), the method in
+[porting-guide.md](../../docs/porting-guide.md), the speed techniques in [speed.md](../../docs/speed.md).
 
 * `src/` the runtime and renderer: `1942.s` (start, schedule, input, timers), `render.s` (video, palette banks, baking),
   `bg.s`, `chr.s` + `chr2.s`, `spr.s`, `frame.s` (one frame, data, variables), `sound.s` (the YM2149)
@@ -15,11 +17,14 @@ shared pieces are described in `docs/architecture.md`, the method in `docs/porti
   `logic_test.py`, `render_test.py`, `profile.py`, `perf_test.py` (cost of a tick), `bench.sh` / `record.sh` (speed and frames in Hatari),
   `sound.py` (the sound driver's programs recorded, the player model), `sound_test.py`
 * `ref/` coverage (`cover.py`), the MAME check (`mame_cmp_1942.py`, `mame_dump.lua`), `palette_stats.py`
-* `docs/` `palette_stats.json` (how often every palette entry shows) and `palettes.json` (the four 16 colour palettes)
+* `docs/` `palette_stats.json` (how often every palette entry shows), `palettes.json` (the four 16 colour palettes),
+  `window-sites.json` (the window read sites, below), `rom_manifest.json`, the screenshots, and the Dreamer playtest
+  reports of 2026-10-20 (below): `1942-70f2-regression-2026-10-20.md` / `.json`, `1942-ending-regression-2026-10-20.md` /
+  `.json`, `1942-6eda-crash-2026-10-20.txt`, `1942-6eeb-crash-2026-10-20.txt`
 
 Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** loop, **Esc** quits.  Joystick port 1
 plays player 1, port 0 player 2 (fire = fire).
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** loop, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** loop, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 Tap the coin key: the game ignores a coin held for 40 ticks (the reference machine credits 3-20).
 
 Build and run from the repository root (needs the venv of the quick start; `python port.py cover 1942` first, 16 runs of 60000 frames, about an hour;
@@ -81,10 +86,9 @@ axis and scrolls by one line every second frame, sprites (16 x 16, 16 colours) a
 * **Colours**: 16 per palette bank (`tools/palettes.py`: weighted k-means in Oklab over the colours of the bank's background, the sprite
   and the character entries, weights from `ref/palette_stats.py`).  The pen masks of the graphics (`tools/assets.py`) are baked into STE
   planes on first use (`tile_get`, `sprite_get`, `char_get`) and cached; a bank change flushes the caches and redraws the background.
-* **Timers**: `engine/rt/borders.s` (shared by the Blitter ports): Timer A removes the top border, Timer B the bottom one and
-  switches the palette on at the picture's first line and off after its last (the black bars).  Blits that hog the bus delay the
-  interrupts, so every event comes ~2-3 lines early and syncs itself to the video (Timer B polls its line counter, Timer A picks its
-  HBL by reading its own counter); no blit waits.  `blit_copy` runs rows longer than 32 words a line a pass (`blit_go`).
+* **Timers**: the shared `engine/rt/borders.s` and short HOG passes (`blit_go`), see
+  [architecture.md "Border removal"](../../docs/architecture.md#border-removal).  Here Timer B also switches the palette on at
+  the picture's first line and off after its last (the black bars); `blit_copy` runs rows longer than 32 words a line a pass.
 * **Sprites** (`src/spr.s`, `tools/spritegen.py`, the method of `stefastbobs2/FAST_BLITTER_SPRITES.md`): the baked source of a part
   has its rows in blit order (equal opaque masks adjacent, transparent rows left out, `assets.sprite_orders`), one Blitter call per
   row draws the four planes (Y count 4, the opaque mask cut into the two destination words as END1 / END3, holes included, NFSR for
@@ -112,17 +116,8 @@ play three fixed channels each (`PICKS`: octave doublings dropped, the louder ke
 8.8 KB of program words).  The latch is read at every tick (`.deliver`, the command of the tick before), the YM gets
 the registers that changed; no interrupt handler of the port touches the YM.
 
-Room for it: `tile_ptr` holds word numbers of the baked tiles instead of pointers (128 KB less); the program leaves
-about 125 KB free from the desktop (`tools/memfree.sh`).
-
-Memory (2026-10-15): 3,933,862 bytes in 0.3 -> 2,940,232, 1,094 KB left from the desktop (4,061,212 on a 4 MB STE with
-TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start 0.3).  The
-memory work of 2026-10-10 below (its branch merged on 2026-10-15), and the tiles as the arcade's three bit planes
-(`tile_planes.bin`, two flip y variants: 96 KB instead of 256 KB of pen masks); `bake_tile` makes a row's eight masks
-as it bakes (`engine/rt/penmasks.s` `pm_expand`, ~250 cycles a row).  Musashi (`perf_test.py`, the simulator's
-default 4 MB: with 16 MB the same build counts ~1.4% more): a tick 139,461 -> 139,528, the 99th percentile 238,852 ->
-242,414.  The sprites as planes would save 196 KB more, but their bakes made the 99th percentile 266,472 (+12%), so
-they keep their masks.
+Room for it: `tile_ptr` holds word numbers of the baked tiles instead of pointers (128 KB less); the program then left
+about 125 KB free from the desktop (`tools/memfree.sh`; since 2026-10-15 about 1 MB, see "Memory (2026-10-15)").
 
 Checks: `sound.py check 3000` (the model against the driver run beside the game and with random commands): 273 of 3000
 game ticks differ, 230 of them by a volume step of 1-2 (an effect that resumes in the middle of a tick: the model steps
@@ -193,11 +188,15 @@ frames drawn a second, VBLs between two ticks, CPU idle.  The first 300 VBLs are
 PID: `tools/hatari.sh` stops every running Hatari, other benchmarks and interactive sessions too.  Items (`shot@60`,
 `tap:5@20`, `dump:...`) work as in `tools/hatari.sh`; results land in `run/1942_bench`.
 
-| | game ticks / s | frames drawn / s |
+| 2026-10-08 | game ticks / s | frames drawn / s |
 |---|---|---|
 | before (one tick per drawn frame), the heavy scene (stage 1, many sprites) | about 40 (67% of the arcade) | about 40 |
-| now, the same scene | 57.8 (full speed) | 35.3 |
-| now, stages skipped every 600 frames | 57.6 (full speed) | 43.6 |
+| after, the same scene | 57.8 (full speed) | 35.3 |
+| after, stages skipped every 600 frames | 57.6 (full speed) | 43.6 |
+
+Later figures (same bench): 58.2 / 36.2 after the memory work (2026-10-10), 58.1 / 35.7 after the edge clipping
+(2026-10-12); the inline leaves of 2026-11-02 were not measured in Hatari.  The cross-port rates are in
+[speed.md "Which port uses what"](../../docs/speed.md#which-port-uses-what-2026-11-07).
 
 What was lost before: (1) a double buffer that blocked the renderer while the finished ring waited for the VBL (the CPU idled for a tenth
 of its time), (2) one tick per drawn frame, so every slow frame slowed the game, (3) the characters redrawn at every ring visit (the
@@ -207,15 +206,23 @@ sprites 50%, characters 30%), 8M cycles a second do not allow 60 ticks and 50 fr
 `tools/perf_test.py [ticks] [finish] [first] [norender|profile]` gives the cost of a tick, the heaviest ticks (stage changes cost 1-2.4M
 cycles: the palette bank changes and every cached picture is baked again) and a profile by routine and by Z80 region.
 
-Ideas for speed: sprite entries kept in registers (`sprite_entry` / `draw_part` are 15% of the frames of busy scenes), fewer rectangles
-(one restore per sprite part), a faster bake of tiles at a stage change, native replacements for the kernel's timer loop (`$0055`) and the
-task switch; a 4th ring (200 KB) would fit now (see "Memory").
+The open ideas for speed are listed under "Not done".
+
+## Memory (2026-10-15)
+
+3,933,862 bytes in 0.3 -> 2,940,232, 1,094 KB left from the desktop; 0.3 did not start on a tester's Mega STE (the load
+budget: [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).  The
+memory work of 2026-10-10 below (its branch merged on 2026-10-15), and the tiles as the arcade's three bit planes
+(`tile_planes.bin`, two flip y variants: 96 KB instead of 256 KB of pen masks); `bake_tile` makes a row's eight masks
+as it bakes (`engine/rt/penmasks.s` `pm_expand`, ~250 cycles a row).  Musashi (`perf_test.py`, the simulator's
+default 4 MB: with 16 MB the same build counts ~1.4% more): a tick 139,461 -> 139,528, the 99th percentile 238,852 ->
+242,414.  The sprites as planes would save 196 KB more, but their bakes made the 99th percentile 266,472 (+12%), so
+they keep their masks.
 
 ## Memory (2026-10-10)
 
-A plain 4 MB STE has at most about 4.1 MB free in GEMDOS before the desktop, a hard disk driver and accessories take
-theirs: the program needed text + data + BSS = **4,015,620 bytes** (`build/1942/1942.map`) and did not start on real
-machines.  Now **3,192,326 bytes** (text 86,044, data 1,336,460, BSS 1,769,822), with nothing traded for it:
+The program needed text + data + BSS = **4,015,620 bytes** (`build/1942/1942.map`) and did not start on real
+machines (more than a 4 MB STE leaves free, see the load budget above).  After it **3,192,326 bytes** (text 86,044, data 1,336,460, BSS 1,769,822), with nothing traded for it:
 
 | | before | now | why it costs nothing |
 |---|---|---|---|
@@ -260,19 +267,27 @@ skipped or repeated), `NOTICK60=1` one tick per VBL, `STAGES=1` progress as colo
 
 The two AYs' six channels (three play); the flip screen (cocktail / DIP switch); the service mode (code in ROM bank 2); the arcade's
 wrap around of sprites at the raw 256 pixel edges (entirely outside parts are not drawn); a palette per
-scanline band (the HUD's colours are quantized with the playfield's); real hardware (only Hatari was used).  Ideas for speed: native
-replacements for the kernel's hot routines, characters of the HUD rows drawn only when they change (static bands), pre-baked tiles for the
-common colour codes.
+scanline band (the HUD's colours are quantized with the playfield's); real hardware (only Hatari was used).
 
-## Translator speed (2026-10-08)
+Ideas for speed (none measured; the scheduler's scan is native already, `scan_native`): sprite entries kept in registers
+(`sprite_entry` / `draw_part` are 15% of the frames of busy scenes); fewer rectangles (one restore per sprite part);
+native replacements for the kernel's other hot routines (the timer loop `$0055`, the task switch); characters of the HUD
+rows drawn only when they change (static bands); a faster bake of tiles at a stage change, or pre-baked tiles for the
+common colour codes; a 4th ring (200 KB, fits since 2026-10-15).  The ideas that other ports measured (writer marks for
+the character RAM, contour restores, caches keyed by the colour mapping) are in
+[speed.md "Techniques that look applicable elsewhere"](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).
 
-`alt_af="upper"` (A' in d0's upper bits, F' in d6's upper word: `ex af,af'` is two swaps, a3 is free for `ret`).  The
-whole `z80x.FAST` passes the tests too (2026-10-09: `scan_native` writes d1-d3 as words now, the DEBUG histogram in
-`z80_hook` saves d0/d1/a0), but it was 0.4% slower, and the engine's `ldir` was slower than 1942's own on its short
-copies with the alternates in a0-a2: both stay as they were.  `scan_native` clears F with `clr.w d6` (a `moveq` would
-clear F').  `gen.py` goes through
+## Translator speed (2026-10-08, FAST 2026-10-09)
+
+`gen.py` uses the whole `z80x.FAST` register map (`alt_af="upper"`, `alt_regs="upper"`, `iy_reg="a2"`: A' in d0's
+upper bits, F' in d6's upper word, BC' / DE' / HL' in the upper words of d1-d3, IY in a2, `ex af,af'` is two swaps, a3 is free for `ret`).
+On 2026-10-08 only `alt_af="upper"` was used: FAST had measured 0.4% slower, but that was 1942's own `ldir`, which ended
+with `moveq #0,d1` and wiped BC' in the upper word.  It clears only the low word now (`clr.w d1`), and since 2026-10-09
+(a234c67) FAST is in: `engine/xprof.py` ticks 1100-1500, 24,254 cycles a tick against 24,306 with `alt_af="upper"`
+alone.  1942's own `ldir` stays (the engine's: 24,407).  `scan_native` writes d1-d3 as words, clears F with `clr.w d6`
+(a `moveq` would clear F'), and the DEBUG histogram in `z80_hook` saves d0/d1/a0.  `gen.py` goes through
 `translate.compile_code` (precise flag liveness over calls; the tasks started with `jp (hl)` and the hooks keep their
-exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -> 24.3k cycles a tick (1.16x).  The
+exact flags).  `engine/xprof.py 1942` (ticks 1100-1500): translated code 28.1k -> 24.3k cycles a tick (1.16x; 24.25k with FAST).  The
 rest is spread thin: `ret`, `ldir` (by longs already), `push`/`pop af` around calls, `bit n,(ix+d)` with the exact S.
 Tests: `logic_test.py 6000`, `sprite_test.py`, `render_test.py seq 200 1 1200` pass; Hatari runs the attract mode.
 
@@ -314,7 +329,7 @@ without cheats is untested. Complete, issue-free playability is **not verified**
 The fixed private build replayed all 347 retained RAM checkpoints exactly,
 completed the previously fatal input (tick 41,650), and continued another 1,200
 ticks without a crash or input mismatch. `$E103` remained 32. See
-[the regression report](../../docs/1942-70f2-regression-2026-10-20.md) for hashes,
+[the regression report](docs/1942-70f2-regression-2026-10-20.md) for hashes,
 reproduction and scope. `python games/1942/tools/gen_test.py` checks that the task
 and its swapped dispatch entry survive even when absent from coverage.
 
@@ -329,7 +344,7 @@ The subsequent assisted ending exploration reached the final ending screen and
 then exposed two more missing high-score task entries, `$6EEB` and `$6EDA`, both
 installed through BC / `rst $38` at `$6CC2-$6CCD`. They are now explicit roots
 alongside `$70F2`, with coverage-independent dispatch regression checks. See
-[the ending regression report](../../docs/1942-ending-regression-2026-10-20.md).
+[the ending regression report](docs/1942-ending-regression-2026-10-20.md).
 The ROM finishes with game-over/continue handling rather than an automatic
 difficulty loop; the recorded continuation uses explicit coin/start inputs.
 The final build completed 51,176 ticks, reached the ending and then stage byte 6

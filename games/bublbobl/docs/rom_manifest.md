@@ -1,6 +1,8 @@
-# ROM manifest (verified by tools/bbrom.py, 2026-10-08)
+# ROM manifest (recorded 2026-10-08; check with `ref/rom_manifest.py`, verified again 2026-11-07)
 
-Common to both sets (identical CRCs) plus the two main-CPU ROMs per set.
+Each set in full: the files common to both (identical CRCs) plus its two main-CPU ROMs.
+
+## `bublbobl` (Japan, the set the port uses)
 
 | file | bytes | crc32 | sha1 | role |
 |---|---:|---|---|---|
@@ -22,6 +24,9 @@ Common to both sets (identical CRCs) plus the two main-CPU ROMs per set.
 | a78-18.33 | 32768 | 9f243b68 | 32dce8d311a4be003693182a999e4053baa6bb0a | gfx plane 2/3 |
 | a78-19.34 | 32768 | 66e9438c | b94e62b6fbe7f4e08086d0365afc5cff6e0ccafd | gfx plane 2/3 |
 | a78-20.35 | 32768 | 9ef863ad | 29f91b5a3765e4d6e6c3382db1d8d8297b6e56c8 | gfx plane 2/3 |
+
+## `bublboblr` (US / Romstar)
+
 | file | bytes | crc32 | sha1 | role |
 |---|---:|---|---|---|
 | a71-25.41 | 256 | 2d0f8545 | 089c31e2f614145ef2743164f7b52ae35bc06808 | sprite strip PROM |

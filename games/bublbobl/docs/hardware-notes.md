@@ -80,10 +80,10 @@ No tilemap. A frame is a list of up to 192 *strips* in objectram: Y, `num`, X, `
   (`tools/bbvideo.py:decode_chars`). Text and the logo are legible, which also settles the plane order.
 * Visible area 256x224 (lines 16..239 of the 256-line strip space).
 
-## Open items
+## Open items (updated 2026-11-07)
 
-* Sound: nothing beyond logging $FA00 / YM writes. Needs its own phase (YM2203 + YM3526 -> STE has no FM).
-* DIP defaults: model feeds `$FF` to all four ports; the US set then shows the "FOR USE IN JAPAN ONLY"
-  notice screen — DSW bit meanings must be read from code before choosing the shipped defaults.
-* Player inputs (IN0/IN1 bit assignment) not yet mapped.
-* Flip-screen ($FB40 bits 6/7) not rendered.
+* Sound: done (2026-10-11): the driver's output recorded per command and played on the YM2149 (README "Sound").
+* DIP defaults and inputs: done; the port runs the Japan set with DSW0 `$FE`, DSW1 `$FF` (`src/bublbobl.s`,
+  `tools/machine.py`) and maps the keys, joysticks and pads (README, controls).  The US set's DIP meanings were not
+  read.
+* Flip-screen ($FB40 bits 6/7): still not rendered (the runtime keeps the bit in `video_flip`, no renderer reads it).

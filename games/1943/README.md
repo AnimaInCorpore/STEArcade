@@ -25,7 +25,7 @@ games/1943/tools/bench.sh                   # Hatari speed: ticks and frames a s
 
 Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2),
 **Escape** quits.  Joystick port 1 plays player 1, port 0 player 2.
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 Both sets have 38 ROMs. Manifests come from the local MAME driver. The supplied
 `1943.zip` plus `assets/roms/bm.7k` verifies completely as the Euro set.
@@ -106,7 +106,9 @@ ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
   endmask streams of `games/1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (each baked as a
   small `movep.l` routine; the list is rebuilt when the character RAM changes, compared only in the 32-cell blocks
   its 55 translated writers mark).  A fully opaque front tile's damage is left where the next frame's opaque tiles
-  cover it.  What an object draws into the 48 pixel margins beside the window is cleared.
+  cover it.  Sprites and front tiles across the window's left or right edge draw only their words inside the window
+  (since 2026-10-12, see the two sections of that date); the 48 pixel side bands stay black, nothing is cleared after
+  drawing.
 * **Front-follow rings through cloud banks**: when the window's fully opaque front cells outnumber the blank ones (by
   16 of the 72, back again the other way; both layers on, no horizontal front scroll), a ring follows the front layer
   instead: its twin lines hold the front layer, drawn as its lines scroll in, and a sea pass draws the back layer where
@@ -118,10 +120,9 @@ ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
   (`ref/palette_stats.py` -> `docs/palette_stats.json`, `docs/palette.json`).  Tiles of both layers are baked at
   build time (`tools/assets.py`: 396 back, 583 front tiles); sprites and characters are baked on first use into a
   pool with hashed caches.
-* **Borders**: `engine/rt/borders.s` (shared with Commando and Gun.Smoke): Timer B fires 2 lines before the palette
-  on, the bottom border and the palette off and polls to the line end, the bottom border starts Timer A for the next
-  top border, which syncs to its HBL; nothing waits, HOG passes over 32 words run in pieces (`blit_go`).  Hatari, 4000
-  VBLs: 0 late events.
+* **Borders**: the shared `engine/rt/borders.s` and short HOG passes (`blit_go`), see
+  [architecture.md "Border removal"](../../docs/architecture.md#border-removal); Timer B also switches the palette on
+  and off around the picture.  Hatari, 4000 VBLs: 0 late events.
 * **Not exact**: where a sprite of colour 10/11 comes earlier in the list than an overlapping sprite of another
   colour, the arcade shows the first (or the front layer over it), the port the second.  The test recognises such
   pictures by rendering the reference in the port's order.
@@ -139,7 +140,11 @@ of 2000 pictures, a few pixels each).
 
 ## Speed (2026-10-09)
 
-| | first runtime | now |
+Superseded figures: the table is the state of 2026-10-09.  The sound, the short passes and the window guards
+(2026-10-11) brought the bench to 51.4 ticks (86%) and 7.9 frames a second (below); the MCU's INT1 in 68000 code
+(2026-10-12) and the native scan with inline leaves (2026-11-02) cut the logic further, not measured in Hatari since.
+
+| | first runtime | 2026-10-09 |
 |---|---|---|
 | a tick's logic, Musashi (`tools/perf_test.py 1400 1300`, play) | 110k (MCU interpreter 62k) | 46k (translated MCU 8k) |
 | a frame, open sea and a carrier | 340k | 222k |
@@ -180,20 +185,24 @@ with random commands 70 of 48,000 chip-IRQs differ audibly (the noise period an 
 game's commands (`logic_test.py`'s play) 0.  `sound_test.py` (in `port.py test`): the 68000 player against the model,
 0 of 20,000 ticks differ; ~7,900 cycles a tick.  Hatari (DEBUG + AUTOPLAY, 4000 VBLs): 53.6 game ticks (90%) and 9.4 drawn
 frames a second; without the sound (`-D NOSOUND=1`) 55.7 and 11.3 (the frames get what the ticks leave).  Hatari: sound in the attract mode and play.
-Memory (2026-10-15): the program needs 3,668,442 bytes and leaves 384 KB from the desktop (`tools/memfree.sh`:
-4,061,212 on a 4 MB STE with TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554, and
-the 4,051,070 bytes of 0.3 did not start).  Most of it is the memory work of 2026-10-10 below, whose branch was only
+
+## Memory (2026-10-15)
+
+The program needs 3,668,442 bytes and leaves 384 KB from the desktop (`tools/memfree.sh`); the 4,051,070 bytes of 0.3
+did not start on a tester's Mega STE (the load budget:
+[porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).  Most of it is the memory work of 2026-10-10 below, whose branch was only
 merged on 2026-10-15 (0.3 was built without it).  A bank's dispatch table, flat over its code's span (104 KB for
 banks 0, 1, 4, 6), became a directory long per 64 window addresses and pages of words, (the entry - the page) / 2,
 pages without an entry shared (50 KB): ~3 window dispatches a tick, ~50 cycles more each.  The fixed code's table stays
 flat (80 cycles a dispatch).  Musashi (`perf_test.py 1600 1200`): logic 48,133 -> 48,062 cycles a tick, frames
-unchanged (236.8k), 28.1 ticks and frames a second.  The tests' fixed buffers (`front_test.py`, `sprite_test.py`)
+unchanged (236.8k): a tick and a frame together cost ~285k cycles, so 8 MHz would allow 28.1 ticks a second with a
+frame drawn after each (an estimate from the simulator's cycles, not a Hatari rate).  The tests' fixed buffers (`front_test.py`, `sprite_test.py`)
 moved above the program, which now reached them.
 
 ## Memory (2026-10-10)
 
 text + data + BSS from `build/1943/1943.map`: **3,587,774 bytes** (was 4,003,336: more than GEMDOS leaves on a real
-4 MB STE with a hard disk driver and accessories, Pexec failed).  The program allocates nothing at run time (no
+4 MB STE with a hard disk driver and accessories, Pexec failed; see the load budget above).  The program allocates nothing at run time (no
 `Malloc`).  Nothing changed in the logic or the pictures, and nothing got slower:
 
 | what | before | after |
@@ -230,12 +239,20 @@ text + data + BSS from `build/1943/1943.map`: **3,587,774 bytes** (was 4,003,336
   | `EXTRA="-D STAGE=3"`, 6000 VBLs | 6631 / 4017, 6566 / 3873 | 6637 / 4105, 6626 / 3963 |
   | `EXTRA="-D STAGE=9"` (cloud banks), 8000 VBLs | 8469-8473 / 8625-8726 (6 places) | 8481 / 8591-8742 (3 places) |
 
+  The STAGE=9 rows count more frames than VBLs: the counter is `cnt_renders` (renders finished, `src/1943.s`), not
+  pictures shown, and more than one new picture a VBL cannot be shown, so these rows are not a picture rate (why the
+  renders exceed the VBLs there was not explained).  [virtual-scroll-performance.md](../../docs/virtual-scroll-performance.md#ports-and-first-experiments)
+  flags them; validate the counters before using cloud bank results.
+
 ## Not done
 
 The flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
 busiest scenes (the game's own logic is 86k cycles a tick there).
 
 ## Whole objects at borders (2026-10-11)
+
+Superseded (2026-10-12): sprites and front tiles are clipped at the window's left and right edges now, see the two
+sections below; the side bands stay black.  What was done on 2026-10-11:
 
 Partially visible sprites and front tiles now draw whole into the virtual ring. Removed the post-draw
 `clear_outside` eraser and the one-word front-tile edge path. Their complete damage rectangles are restored
@@ -253,7 +270,7 @@ word inside: `sprite_part` sends sprites left of window x 0 or right of 208 (one
 which culls those wholly in the right band and draws the others with `clip_part`: one word a line, the right edge's
 first word with the skewed source under END1, the left edge's second word with FXSR and source Y increment 0 under
 the stream's END3 mask; only that word is listed as damage.  The 48-pixel side bands no longer show sprites (front
-tiles may still spill there).  Cost (Musashi, CPU + Blitter a frame): play 237,010 -> 237,061, stage 3 346,033 ->
+tiles still spilled there until the next section, the same day).  Cost (Musashi, CPU + Blitter a frame): play 237,010 -> 237,061, stage 3 346,033 ->
 346,166 (+0.02-0.04%, the compare); Hatari (bench.sh, 6000 VBLs) 51.2 ticks/s, 7.9 frames/s, no late border event.
 `tools/sprite_test.py`: 4 sprites with holes, all 16 shifts, both edges and the culled band, plain and across 64 KB
 (376 cases, 232 clipped) against the same sprite drawn whole by its generated routine, the bands untouched (the old

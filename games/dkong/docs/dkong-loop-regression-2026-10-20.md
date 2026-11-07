@@ -96,7 +96,7 @@ difficulty `$6229`, pointer `$622A/B` nor phase `$600A` was directly written.
 
 [Machine-readable results](dkong-loop-regression-2026-10-20.json) retain the
 manifests, transition stream, assists and input/checkpoint hashes.
-[Level 6 framebuffer](../games/dkong/docs/loop-level6-2026-10-20.png) shows the
+[Level 6 framebuffer](loop-level6-2026-10-20.png) shows the
 next loop in gameplay.
 
 Local evidence in `C:/Arbeit/dreamerv3/runs/`:
@@ -118,4 +118,4 @@ replay. Canonical port sources and recordings were not replaced. Compressed
 inputs/checkpoints and private builds remain in ignored local `runs/` folders.
 
 Portable copies of the replay runners and their local prerequisites are now
-retained under [tools/playtests](../tools/playtests/README.md).
+retained under [tools/playtests](../../../tools/playtests/README.md).

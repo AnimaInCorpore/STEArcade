@@ -55,7 +55,7 @@ not capture the scroll latches reliably in the installed MAME.
 
 ## STE scrolling reference: stedaimakaimura
 
-Checked `/Users/saschaspringer/Work/stedaimakaimura/emulator.s`:
+Checked `emulator.s` of a local stedaimakaimura checkout (outside this repository):
 
 * Lines 1344–1537 (`scroll_horizontal`) and 1539–1723 (`scroll_vertical`)
   redraw newly exposed tile strips when the scroll crosses 16-pixel boundaries.
@@ -101,5 +101,5 @@ or cycle-accurate board timing.
 The STE uses two 768 by 544 buffers and a clean background cache. Its viewport
 fits inside each buffer at every physical phase, so Timer B only removes the
 bottom border; no video-counter wrap handler is necessary. Native drawing
-permits at most two consecutive skipped frames to avoid starving the display
-when the tick queue remains nonempty.
+permits at most `MAX_SKIPS` (4, `src/blktiger.s`) consecutive skipped frames to
+avoid starving the display when the tick queue remains nonempty.

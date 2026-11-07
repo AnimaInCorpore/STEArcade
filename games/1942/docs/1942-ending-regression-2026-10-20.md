@@ -86,7 +86,7 @@ Pinned Hatari SHA256:
 
 [Machine-readable results](1942-ending-regression-2026-10-20.json) include the
 manifests, transitions, markers and stream hashes.
-[Ending framebuffer](../games/1942/docs/ending-2026-10-20.png) is decoded directly
+[Ending framebuffer](ending-2026-10-20.png) is decoded directly
 from guest framebuffer/palette memory, not a headless host screenshot.
 
 Local evidence directories in `C:/Arbeit/dreamerv3/runs/`:
@@ -121,4 +121,4 @@ binaries, compressed timelines and RAM checkpoints remain local in ignored
 `runs/`; the original campaign and failing evidence folders are preserved.
 
 Portable copies of the replay runners and their local prerequisites are now
-retained under [tools/playtests](../tools/playtests/README.md).
+retained under [tools/playtests](../../../tools/playtests/README.md).

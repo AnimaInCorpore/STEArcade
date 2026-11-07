@@ -2,21 +2,33 @@
 
 Experimental port work; see the [port table](../../README.md) for current status.
 
-## Full-game verification status
+State (2026-11-07): the V30 logic is exact (lock-step to 40000 frames), the i8751 MCU runs as a native model, the STE
+program runs on the shared M72 renderer (`engine/rt/m72render.s`) at ~2 pictures a second; no sound yet.
+**Rule violation, to be converted:** that renderer draws FG over BG with AND + OR Blitter passes (a BG copy, the FG
+opaque plane ANDed out, the FG planes ORed in), which AGENTS.md forbids; R-Type's stage renderer, the planned
+replacement, has none.
 
-Automated players such as Dreamer can attempt a full playthrough once this port's
-adapter and native Hatari replay transport are verified. An attempt or assisted
-stage visit does not establish completion; a successful natural Hatari playthrough
-and graphics, sound and control checks are required for green **Complete** status.
-See the shared [status and verification policy](../../docs/port-status.md) and
-[current port status](../../README.md). Existing test results above retain their
-stated scope; this note does not claim a new successful run or Dreamer integration.
+## Build and run
 
-## The main CPU's translation (agent A, 2026-11-02)
+    venv/bin/python games/mrheli/tools/prepare.py        # checks mrheli.zip (docs/rom_manifest.json), unpacks it
+    venv/bin/python games/mrheli/tools/build.py          # run/mrheli/MRHELI.PRG (--sim: the Musashi test build; -D NAME=V)
+    venv/bin/python games/mrheli/tools/logic_test.py FRAMES --seed N   # lock-step against the reference (below)
+    venv/bin/python games/mrheli/tools/render_test.py    # R-Type's render_test.py --game mrheli (sprite_test.py likewise)
+    games/mrheli/tools/bench.sh [hatari items ...]       # its own Hatari (14 MB, stopped by its PID), COUNTERS.BIN
 
-Mr. HELI's V30 program translated R-Type's way (engine/v30x.py; see games/rtype/README.md and docs/architecture.md
-"The V30 translator"). The simulator build is exact in long lock-step runs; the STE program (below) runs on the
-shared m72render as the exact baseline.
+ROM: the MAME set `mrheli` (`assets/roms/mrheli.zip`, unpacked to `assets/roms/extracted/mrheli/`; build.py runs
+prepare.py when it is missing).  Older archives lack the i8751 program `mh_c-pr-.ic1` (4 KB, crc32 897dc4ee): put it
+as `assets/roms/mh_c-pr-.ic1` (prepare.py's docstring).  The port is not registered in `port.py` (no
+`tools/hatari.sh`, no release): run it with `bench.sh`.  Keys: arrows, space / Control fire, Alternate button 2,
+1 / 2 start, 5 / 6 coin, Esc quits; joystick 1 (player 1), joystick 0 (player 2), the Jaguar pads.  A crash writes
+CRASH.TXT.
+
+## The main CPU's translation (2026-11-02)
+
+Mr. HELI's V30 program translated R-Type's way (`engine/v30x.py`; see [R-Type's README](../rtype/README.md) and
+[docs/architecture.md, "The V30 translator"](../../docs/architecture.md#the-v30-translator-enginev30xpy-r-type-2026-10-13)).
+The simulator build is exact in long lock-step runs; the STE program (below) runs on the shared m72render as the
+exact baseline.
 
 * **The port's schedule** (`tools/machine.py` `MrHeli`): the board runs MAME's schedule up to `START` = frame 500,
   after the boot and the MCU's code in the dual-port RAM (the main CPU runs MCU-supplied code at B000:xxxx until
@@ -114,13 +126,13 @@ shared m72render as the exact baseline.
   These are the candidates for natives: the object loop, 0040:84E5, the handler at 0040:6000-60F3, and the text
   writer 0040:27B5-27C6 (store marks at 126 cycles a store on title screens).
 
-### The STE program (2026-11-07)
+## The STE program (2026-11-07)
 
 `src/mrheli.s` without `SIM` is R-Type's m72render program of 138cd90, adapted:
 
 * It starts from the snapshot (`tools/snapshot.py`, `build/mrheli/snapshot.bin`): the reference at START = 500, or
   at a replay point (`REPLAY=seed:frame`). The snapshot carries the dual-port RAM and the MCU model's 14-byte state.
-* The MCU is agent B's `src/mcu.s`:
+* The MCU is `src/mcu.s` (the native model, below):
   * `mcu_init` runs after the snapshot;
   * `mcu_frame` runs at the start of each `port_frame`, before the VBL interrupt;
   * `mcu_cmd` runs at each port C0 write, with 128 units;
@@ -148,7 +160,7 @@ Hatari (STE, 14 MB, `-D DEBUG`):
 A coin and a start reach the game (`bench.sh tap:06@32 tap:02@35`: the screenshot shows the helicopter in the hangar under the top panel; not checked against the reference pixel by pixel).
 
 This is the baseline, not the goal. The picture costs ~0.8M cycles in the shared renderer. That renderer also still
-draws FG over BG with AND + OR passes, which AGENTS.md forbids; R-Type's stage renderer has none.
+draws FG over BG with AND + OR passes, which AGENTS.md forbids (to be converted); R-Type's stage renderer has none.
 
 Open:
 
@@ -157,12 +169,12 @@ Open:
 * sound: the Z80 / YM2151 music, and the MCU's samples by DMA;
 * a stage select or RAM poke.
 
-## The i8751 MCU on the STE (agent B, 2026-11-02)
+## The i8751 MCU on the STE (2026-11-02)
 
 Native model, no interpreter: after the boot the MCU only answers the heartbeat (watchdog), command `$10` (the
 protection check's code at `$B0000`, wiped 3 ticks later), command `$11` (the ROM test's answer) and plays samples.
 `tools/mcu.py` (Python twin) and `src/mcu.s` (68000); interface, boot analysis and timing in
-[docs/mcu-interface.md](docs/mcu-interface.md), "The MCU (agent B)". The boot (frames 0-483) is timing-bound (code
+[docs/mcu-interface.md, "The MCU after the boot"](docs/mcu-interface.md#the-mcu-after-the-boot-the-native-model). The boot (frames 0-483) is timing-bound (code
 placed at a timer-dependent offset) and not modelled: the port starts after it.
 
 Results (`tools/mcu_test.py`, the real program in the reference board from power-on, the model from frame 484):
@@ -175,6 +187,19 @@ Results (`tools/mcu_test.py`, the real program in the reference board from power
 | seed 4, `--starve 1200` (watchdog) | 484-2000 | 1513 | 0 | 0 | 1 of 1 |
 
 `tools/mcu68k_test.py` (mcu.s on Musashi) on those four traces, with and without `MCU_HB_POLL`, and on 30000-frame
-synthetic traces (`--synthetic`, `--noswap`): 0 differences. 68000 cycles: `mcu_frame` ~350 mean (1840 with the
-wipe), `mcu_cmd` 550-1650, `mcu_hb` 66. Open: the samples' DMA player (tables ready: `mcu_samples`,
-`mcu_sample_addr`, `mcu.dac_value`); random play never reached the game's own `$10` task (forced by `--check`).
+synthetic traces (`--synthetic`, `--noswap`): 0 differences. 68000 cycles (mcu.s unchanged since 7690461; measured
+again 2026-11-07): on the board's trace `build/mrheli/mcu_trace_check.z` (frames 484-759) `mcu_frame` ~354 mean (1838
+with the wipe), `mcu_cmd` 1646 (its 2 calls), `mcu_hb` 66; on a 3000-frame synthetic trace (more commands and samples)
+`mcu_frame` ~405 (1892), `mcu_cmd` ~535 (1646), `mcu_hb` ~68 (docs/mcu-interface.md's ~420 / ~70 are such a run).
+Open: the samples' DMA player (tables ready: `mcu_samples`, `mcu_sample_addr`, `mcu.dac_value`); random play never
+reached the game's own `$10` task (forced by `--check`).
+
+## Full-game verification status
+
+Automated players such as Dreamer can attempt a full playthrough once this port's
+adapter and native Hatari replay transport are verified. An attempt or assisted
+stage visit does not establish completion; a successful natural Hatari playthrough
+and graphics, sound and control checks are required for green **Complete** status.
+See the shared [status and verification policy](../../docs/port-status.md) and
+[current port status](../../README.md). Existing test results above retain their
+stated scope; this note does not claim a new successful run or Dreamer integration.

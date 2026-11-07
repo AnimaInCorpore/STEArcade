@@ -9,7 +9,7 @@ higher-level experiments disabled. This is not a 2x speedup.
 The installed stage program is rebuilt: `run/rtype/RTYPE.PRG`, 6,055,376 bytes
 (+1,909 bytes). There is no additional runtime table/cache or BSS allocation.
 The renderer, gameplay inputs, frame scheduler, sounds and sprite preparation
-are unchanged. Existing unrelated working-tree edits are preserved.
+are unchanged.
 
 ## Retained changes and 68000-specific choices
 
@@ -186,5 +186,5 @@ After creating its matching baseline oracle with `--benchmark --variant base`,
 use `--benchmark --variant emit|return_aw|append|tiles|pc_tiles|posadd|fade_pairs|move_flags|dma`.
 Summaries, source hashes, compressed profiles and checkpoints remain in
 `build/rtype/native_structure_audit/`; logs are `build/rtype/native_structure_*.log`.
-Private generated programs are removed. The existing higher-level audit and
-unrelated untracked `hot_native_audit.py` are preserved.
+Private generated programs are removed. The higher-level audit
+(`tools/logic_level_audit.py`) and `tools/hot_native_audit.py` are separate tools.

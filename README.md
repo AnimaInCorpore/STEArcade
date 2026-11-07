@@ -35,7 +35,7 @@ reference renderer and MAME.
 | <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
 | <a href="games/timeplt/README.md"><img src="games/timeplt/docs/screenshot.png" width="160" alt="Time Pilot"></a> | [Time Pilot](games/timeplt/README.md) | Z80 (translated) + Z80 sound (not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed, 24-33 pictures a second in play |
 | <a href="games/trackfld/README.md"><img src="games/trackfld/docs/screenshot.png" width="160" alt="Track & Field"></a> | [Track & Field](games/trackfld/README.md) | KONAMI-1 (encrypted 6809, translated) + Z80 sound (translated; SN76489A on the YM, speech and tunes on the DMA) | ![Incomplete](docs/status/incomplete.svg)<br>Full speed, 20-50 pictures a second; no full-game verification yet |
-| <a href="games/hyperspt/README.md"><img src="games/hyperspt/docs/screenshot.png" width="160" alt="Hyper Sports"></a> | [Hyper Sports](games/hyperspt/README.md) | KONAMI-1 (encrypted 6809, translated) + Z80 sound (translated; SN76489A on the YM, speech and tunes on the DMA) | ![Incomplete](docs/status/incomplete.svg)<br>83% speed with sound, 5-50 pictures a second; no full-game verification yet |
+| <a href="games/hyperspt/README.md"><img src="games/hyperspt/docs/screenshot.png" width="160" alt="Hyper Sports"></a> | [Hyper Sports](games/hyperspt/README.md) | KONAMI-1 (encrypted 6809, translated) + Z80 sound (translated; SN76489A on the YM, speech and tunes on the DMA) | ![Incomplete](docs/status/incomplete.svg)<br>85% speed with sound, 26.9 pictures a second on average; no full-game verification yet |
 |  | [Splatterhouse](games/splatter/) | Namco System 1: 3 x MC6809 + HD63701 MCU (main and sub translated, the MCU native) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Mr. HELI no Daibouken](games/mrheli/README.md) | Irem M72: NEC V30 (translated) + i8751 (a native model) + Z80 (sound: not yet) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>STE program on the shared M72 renderer: logic exact (lock-step to 40000 frames), about 2 pictures a second; R-Type's stage renderer and natives next |
@@ -106,7 +106,9 @@ ports (pad A player 1, pad B player 2; Option coin, Pause start, * + # quit); th
                        on Hatari's ACSI / IDE disks), release.py, lz4prg.py + lz4stub.s (self-unpacking programs;
                        lz4prg_test.py runs the stub on Musashi), stdisk.py (bootable .ST images), windows/
                        (PowerShell helpers; run.ps1 finds the repository itself, F030ARCADE and MSYS2 override the tool locations)
-    docs/              architecture.md, porting-guide.md, sprite-preparation.md, reference/ (68000 and Z80 manuals)
+    docs/              architecture.md (how a port works), porting-guide.md (method, correctness lessons), speed.md
+                       (speed techniques, measuring, which port uses what), sprite-preparation.md, colours.md,
+                       port-status.md, ppo.md, go-explore.md, megaste-*.md, dated reports, reference/ (68000 and Z80 manuals)
     assets/roms/       the ROM archives (assets/roms/README.md); extracted/<game>/ is unpacked by port.py prepare (not in git)
     build/ run/        generated code, assets, coverage data / the .PRG (ROMs embedded) (not in git)
     release/           port.py release: the packed programs (not in git)
@@ -131,7 +133,7 @@ self-unpacking program in the disk's AUTO folder; the stub unpacks in place behi
 8 MHz), needs ~0.9 KB more memory than the program and is checked by `tools/lz4prg_test.py` for every port.
 
 Reading order: `docs/architecture.md` (how a port works), `docs/porting-guide.md` (method, MAME check, lessons),
-then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
+`docs/speed.md` (speed, and the techniques each port uses), then the game README.  Rules that hold for all ports: translate whole programs, no silent NOPs (unknown instructions
 are a deliberate failure), check the reference against MAME before building graphics, and verify with the pinned
 F030Arcade Hatari build.  MAME source: `F030Arcade/third_party/jsm68kdisassembler/third_party/mame`.
 

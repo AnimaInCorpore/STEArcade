@@ -25,36 +25,7 @@ unpacked by `port.py prepare`, not in git), `tools/` (`hatari.sh`, `release.py`,
 and the list of the ports), `legacy/` (superseded, not built).  `engine/paths.py` knows where things are; `engine/toolchain.py` assembles and links (VASM/VLINK environment
 variables select the tools).
 
-## Renderers of the ports
-
-The table covers the registered ports in `port.py list`. Splatterhouse and Galaga '88 have standalone runtimes
-and renderer tests; Mr. HELI has an STE program on the shared M72 renderer (not registered yet). Their READMEs and local tools describe
-current limitations; the other game folders contain reference/board work. See `docs/sprite-preparation.md` for
-which preparation experiments have actually been measured.
-
-| game | tiles | sprites | what is exact |
-|---|---|---|---|
-| Donkey Kong | CPU, shadow diff of the tile map, dirty queue per draw screen | Blitter, generated per shape/skew code | pixel for pixel against the reference and MAME |
-| Galaga | CPU, 8 x 8 cells per colour quad, `chars_over` on top of sprites | Blitter, double sizes split into 16 x 16 parts, stars plotted after | renderer against MAME (RAM injected), reference identical |
-| Bubble Bobble | CPU tile bake cache; static column layers and dirty blocks | Blitter, unshifted cached 16 x 16 sprites with mask-grouped rows; CPU tile fallback for other object layouts | game picture pixel for pixel against the reference; whole sprites in the guards |
-| 1942 | hardware scroll of a 768 line ring (three draw rings + clean), tiles baked per palette bank, characters redrawn when the window moves | Blitter, one blit per line, masks as end masks, rectangles put back from the clean ring | pixel for pixel against the reference (which equals MAME) |
-| Commando | hardware scroll of three virtual screens with twin lines (line l = line l+320), only scrolled-in tile rows and changed tiles drawn, no clean map; characters a list rebuilt on change, `movep.l` | Blitter, baked shift streams; a damage list put back from the twin lines | pixel for pixel against the reference (which equals MAME) |
-| 1943 | cached background and front layers in hardware-scrolled rings | reordered source, prepared shift masks, one-word side clipping | renderer and reference tests, including front-layer priority and edge sweeps |
-| Black Tiger | hardware-scrolled tile ring, cached tiles and characters | reordered equal-mask rows, clipped at full band words | reference pictures, moving window edges and sprite priority |
-| Gun.Smoke | hardware-scrolled rings and a separate character strip | reordered streams; aligned clipping and whole drawing at fine offsets | reference pictures, scroll sweeps and edge tests |
-| R-Type | shared M72 layer composition, separate HUD image and palette | converted pieces, generated line routines; clipped and priority fallback | reference indices after colour reduction; centred 320 of 384 pixels |
-| Kung-Fu Master | hardware-scrolled rings and a separate score panel | cached opaque rows in natural order by default; optional mask grouping | reference indices, sprite edges and panel/playfield composition |
-| Trojan | cached background layers and foreground characters | reordered equal-mask rows and prepared masks | reference pictures, sprite priority and side-edge tests |
-| Double Dragon | cached background and foreground characters | reordered equal-mask rows, multipart sprite objects | reference pictures, sprite priority and side-edge tests |
-| Gauntlet | the playfield torus as a bitmap, two hardware-scrolled rings copying only new strips and damage; text runs as Blitter copies | objects baked per colour mapping, a pass a row, shadows from a shadow-coloured playfield | reference pictures (any level), edges, 16 shifts, shadows, 64 KB |
-
-Bubble Bobble uses static column layers and a dirty-block sprite renderer for the usual object layouts.
-The 512-pixel virtual screen has horizontal margins and vertical guards. Cached sprites contain unshifted
-plane words in mask-group order; all 16 horizontal positions share a cache entry. The general tile
-renderer handles other layouts. Restore old guard damage before drawing; never erase new overhang.
-The translated game logic and scene rebuilds still prevent a steady 25 fps (see the game README).
-
-## Translator (`engine/z80x.py`)
+## The Z80 translator (`engine/z80x.py`)
 
 Static translation, one 68000 snippet per Z80 instruction, labelled `Z<pc>`.  A
 `z80x.Config` describes the program (several per machine: Galaga has two): label prefix,
@@ -81,11 +52,12 @@ a6 = the Z80 block, a4 = the dispatch table, d5/d7 scratch.  Where A' F' BC' DE'
 |---|---|---|---|---|
 | default | a3 / a block word | a0-a2 (`exx` = 3 `exg`) | a block word | (old builds) |
 | `alt_af="upper"` | bits 16-23 of d0 / upper word of d6: `ex af,af'` = `swap d0; swap d6` (8 cycles, was 34) | | | all |
-| `z80x.FAST` (signed mode) | as above | upper words of d1-d3: `exx` = 3 `swap` | a2 (the low word, `(d,a6,a2.w)`) | DK, Galaga CPU1, Bubble Bobble main, Commando, Black Tiger, 1943 |
+| `z80x.FAST` (signed mode) | as above | upper words of d1-d3: `exx` = 3 `swap` | a2 (the low word, `(d,a6,a2.w)`) | the Z80 ports' main programs (Galaga CPU1, Bubble Bobble main) |
 | `z80x.FAST_LONG` (long mode) | as above | a0-a2 (the long mode needs the upper words 0) | the block | Galaga CPU2/3, Bubble Bobble sub |
 
-1942 uses `alt_af="upper"` only: `FAST` works there too (`scan_native` writes d1-d3 as words), but it was 0.4% slower
-(1942 uses IY and `exx` little; `ld a,n` and `ex de,hl` cost a few cycles more), and 1942 keeps its own `ldir`.  With A' out of a3, a3 is free in every program: a computed jump is
+1942 first measured `FAST` 0.4% slower: its own `ldir` cleared BC' with `moveq #0,d1`; with `clr.w d1` it uses `FAST`
+since 2026-10-09 (a234c67; xprof 1100-1500: 24,254 cycles a tick against 24,306 with `alt_af="upper"` alone; its own
+`ldir` beats the engine's, 24,407).  With A' out of a3, a3 is free in every program: a computed jump is
 `move.l (a4,d7.l),a3; jmp (a3)` (50 cycles instead of 66 for `move.l ...,-(sp); rts`).  The rules a runtime must keep
 (see `porting-guide.md`): no long writes to d0/d6 (`moveq` clears A' / F'), with `FAST` none to d1-d3 either, and
 a0-a2 are scratch for the translated code (`ldir`), not for the runtime between instructions.
@@ -181,7 +153,8 @@ hooks or natives, in the fixed code) is emitted as the function's instructions, 
 point: no return address pushed, no dispatch at the ret (~70 cycles a call).  The callee's liveness and its CCR
 knowledge (the meet over its callers) hold at every call; only the final emission inlines, the analysis sees ordinary
 calls.  The return address the Z80 would leave below SP is not written (dead).  `ret_cands` leaves out the inlined
-calls' return points.  Off by default (0); Bubble Bobble uses 16: its main CPU 92.5k -> ~83.5k cycles a game frame.
+calls' return points.  Off by default (0).  Bubble Bobble used 16 (its main CPU 92.5k -> ~83.5k cycles a game frame), 48 since 2026-11-02;
+every Z80 port has leaves since the audit of 2026-11-02 (`speed.md`).
 
 ### The 68030 forms (`Config(cpu030=True)`, F030Arcade)
 
@@ -233,259 +206,6 @@ Black Tiger guarded every indirect access as a possible window read (a window ch
 translated cycles); since 2026-10-11 only the coverage's sites are guarded, as in Bubble Bobble (`docs/window-sites.json`,
 `logic_test.py --audit`: the logic in play 80.7k -> 65.3k cycles a tick).  A factor of 2 for every
 port is not in reach of the translation alone; the renderers are the larger part of most frames anyway.
-
-## Runtime schedule (all ports)
-
-The arcade's CPUs are not run as threads.  At every vertical blank the runtime delivers the arcade's interrupts in a
-fixed order and runs each handler to completion (Galaga: main CPU IRQ, sub CPU IRQ; Bubble Bobble: MCU IRQ1, main
-CPU IM 2 interrupt, sub CPU IRQ).  What the arcade's main loop does between interrupts is only the boot and
-idle loops, so the foreground "thread" is the boot until the idle loop and the renderer afterwards.  The handler's
-return address is a token pc (the dispatch table maps it to the runtime's return label), which also lets code that
-inspects the interrupted pc run (Bubble Bobble requires its high byte < $C0).  `run_frame_port` in each machine.py is
-the same schedule in Python: the lock-step tests compare against it, not against the interleaved reference.
-
-Rules learned the hard way (details in `docs/porting-guide.md`):
-
-* The VBL handler arms the border timers first, then runs the game's interrupts at IPL 3 (`move #$2300,sr`), then draws.
-  A VBL arriving during the drawing runs the handlers again and skips the drawing: the game keeps its pace and the
-  display drops frames.
-* Timer A lowering the IPL can let a pending VBL nest 28 deep: guard with an `in_logic` flag.
-* When the game logic alone takes longer than a frame the renderer starves: throttle (`render_age`, Galaga's star
-  levels) - skip the logic every other VBL while drawing.
-* Boot self-tests (RAM, ROM, checksums) are patched out in the reference and the translation; the code that
-  checksums ROM while running is compensated by a dead byte.  Never use frames of a self-test as a performance
-  reference: they fill video RAM and load the renderer unrealistically.
-
-Compared with F030Arcade's spare-time renderer (a preemptible render thread on its own stack, started by Timer B once
-the game is parked, its pages queued for the VBL) this schedule is the Heavy Barrel case there: the frame is the
-interrupt handlers, so their return is the "frame is done" point and no park test is needed.  Bubble Bobble's three
-screens are the queued pages; in the other ports a VBL nested into the drawing runs the game, so the drawing may go on
-with a changed state (not checked port by port).  See `docs/porting-guide.md`, "Two related projects compared".
-
-## Blitter sprite renderer (`games/dkong/src/sprites.s`, `engine/sprite_codegen.py`)
-
-Blitter, like the bob routines of `stefastbobs2/main.s`: one blit per sprite line writes the
-four planes of the line (Y count 4, source = destination), and the endmasks are the mask:
-END1/END3 hold the outline of the line (holes included) shifted to the two screen words, so
-the opaque pixels replace what is below and the rest stays.  No clearing pass, no colour
-mixing: the screen equals the reference renderer pixel for pixel (frozen at frames 650, 800,
-1000 and 1200: 0 of 57344 pixels differ; frame 800 re-checked after the MAME fixes below), and
-the reference equals MAME's screenshot (see "Checking a reference against MAME").  A sprite's
-left display column is u0 = y - 23 (it was y - 22 until 2026-10-08, see below).  The masks of every (shape, flip y, skew) are
-a table (`dk_spr_masks`, 256 KB), the line words come from colour data baked per colour quad
-(`dk_spr_data`, 608 KB: 19 distinct mappings of the pen values to the planes) that the
-Blitter's source address walks through, `NFSR` lets the second destination word reuse the
-one source word of a plane (a sprite of skew 0 is one word wide), flip x draws the lines
-upwards.  The blitter registers of the line loop are written through preloaded pointers
-(END1, END3, control, Y count, and the low word of the destination address, advanced with
-`add d4,(a3)` as in the demo; sprites whose lines cross a 64 KB boundary of the screen use
-full address writes).  The empty lines at both ends of a shape are left out (`dk_spr_span`). The fast
-path now selects generated code for the shape/skew (`engine/sprite_codegen.py`): masks
-that stay the same are not written again, empty interior lines are skipped, and a
-line whose END3 is zero uses X count 1 even at a nonzero skew. Such a line clears
-NFSR and sets destination Y increment to 2; a two-word line sets NFSR and Y increment
--6. Both finish eight bytes past their starting destination and consume eight source
-bytes. Lines whose END1 alone is zero still use two words: their source would need a
-different shift/pipeline arrangement. Colour data remains shared by every skew.
-The generated instruction sequences and compressed mask streams are deduplicated
-separately. Sprites near a 64 KB boundary retain the original unrolled full-address
-path. `-D NOSPRITECODE=1` selects the generic renderer for comparison. END2 is unused.  Not implemented: the 16-sprites-per-
-scanline limit and the wrap-around of the arcade hardware. Sprites are clipped at the aligned
-left/right picture edges, including the generic 64 KB fallback; top and bottom use guard rows.
-
-Most of the 128 list entries are empty, and visiting them all twice a frame cost 24K
-cycles: a frame first lists the entries that are not empty (`tst.l` over the list), and
-each draw screen keeps the list it was last drawn with.  Each draw screen remembers per
-slot what it got there (list entry, colour bank, rectangle, cells).  A frame restores the
-background under the sprites of the screen's old list that changed or are gone, then
-draws the active list: a sprite that is unchanged is drawn only if its rectangle touches
-an 8x8 cell that was redrawn (tile), restored or drawn (a sprite earlier in the list) in
-this frame.  The cells are a bitmap (`tile_marks`, 8 bytes per display row, cleared each
-frame); a sprite's cells are a window of four bits in up to three rows, kept in its slot
-record, so a test is three `and.l` and a mark three `or.l`.
-
-`z80_dma` (`engine/rt/rtlib.s`) is the 8257 sprite DMA, hooked on the `ld ($7D85),a` stores.
-
-### Sprite blitter revision (2026-10-08)
-
-`venv/bin/python engine/sprite_blit_test.py` builds both paths and executes the
-assembled 68000 code on Musashi with a blitter model. For each port it verifies all
-8192 shape/skew/line-direction combinations against independent masked pixels,
-then compares 48 successive complete sprite renders against the generic path,
-including overlap, background restoration, colour changes and 64 KB crossings.
-The workload gives 3.2% less CPU plus blitter bus work for Donkey Kong and 4.3% for
-Galaga; isolated line bodies save 9.0% and 9.9%. These are simulated cycle counts,
-not Hatari frame-rate measurements. Executables grow by about 407 KB and 558 KB;
-both ports still fit the configured 4 MB STE. Both rebuilt binaries also completed
-5000 VBLs in the pinned Hatari with no crash file; screenshots confirmed the games
-running (including Galaga's sprites). Bubble Bobble gained a separate reordered Blitter sprite
-renderer in `games/bublbobl/src/srender.s`; its tile renderer remains the fallback.
-
-The reference's arbitrary row reordering relies on matching reordered source data.
-Copying that order without also preparing matching source data would break their sequential source walk.
-This revision retains the source layout and uses register reuse and variable-width blits. The later
-`engine/sprite_reorder_audit.py` is an instruction-cost estimate for source seeks, not an executed prototype of
-reordered source data; the full preparation experiment remains outstanding (see `docs/sprite-preparation.md`).
-
-## Tiles (`games/dkong/src/render.s`)
-
-The 1 KB tile map is compared with a shadow every frame (the 224 visible longs, eight
-per turn); changed tiles go into the background screen at once and into a queue for each
-draw screen.  A palette bank change (level starts, the title wipe, the title logo's colour
-cycle: 48 changes in 96 frames) draws only the visible tiles that look different in the new
-bank: `dk_tile_pens` (the pens a tile code uses) against `dk_bank_change` (per old and new
-bank and colour code, the pens whose palette index moves), both from `assets.py`.  In the
-logo cycle that is about 160 of 896 tiles; the first frame draws all of them.
-
-## Border removal
-
-`engine/rt/borders.s` schedules events early and synchronizes them to the video. Timer B opens the bottom
-border and arms Timer A at that line-exact point for the following top border. The VBL restarts Timer B and arms
-Timer A as a fallback only when the preceding bottom event did not do so (including startup). `BD_HUD` extends
-Timer B with palette switches; `BD_VSWITCH` also switches video addresses for separate HUD images.
-
-Every Blitter pass is HOG and at most 256 bus cycles. `blit_go` splits longer transfers into lines or column
-strips, allowing interrupts between pieces. The former `wait_borders` policy is superseded by these short passes
-and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
-record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
-
-Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.
-It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
-during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
-the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz
-path remains available. [Mega STE timing verification](megaste-border-timing.md) records the
-pulse windows, mixed-HOG load test, cache-placement sweeps and the physical-hardware limit.
-
-Known full-mask, unskewed copies/fills use `blit_go_copy`; HOP 0 fills with arbitrary masks use
-`blit_go_fill`. Both can budget 32 words per piece because there are at most two bus accesses per word.
-The generic dispatcher accounts for masked destination reads and FXSR fetches. Strip line counts come from
-tables rather than a division per strip. `engine/borders_blit_test.py` checks pixels, register endpoints,
-preservation and pass lengths; `engine/m72_bitmap_test.py` checks the M72 contribution-bitmap rotation.
-
-## Input (all ports)
-
-Each port has its own IKBD handler (`acia_isr`): the keyboard through `key_table` (scancode -> the bits it sets in
-the arcade's input bytes, active high), the two IKBD joysticks (port 1 player 1, port 0 player 2; Donkey Kong and
-Galaga OR them into one player), Esc quits.  The IKBD gives a joystick one fire button: button 2 (and Gun.Smoke's
-third) is on the keyboard, or Bubble Bobble's joystick up.
-
-The byte stream itself is framed by `engine/rt/ikbd.s` (`ikbd_byte` at the top of every handler's loop, `ikbd_vars`
-in the bss): a data byte read as a key is a key, and a joystick's "up" byte is $01 = Esc ("down" $02 = the key 1).
-So every packet is skipped by its length ($F6-$FD too), an ACIA overrun (OVRN after a read: the next byte was lost)
-drops the packet being read and the next byte when it can be a joystick data byte, and Esc quits only on its release
-right after its press.  `engine/ikbd_test.py` feeds it streams with lost bytes (the MC6850's / Hatari's overrun: the
-byte arriving into a full buffer is lost).  In Hatari the handlers read every byte within 2 lines (an overrun needs
-~20), so this is a guard, not a cure: a "sudden quit" is more likely a crash (below).
-
-A crash (an exception: `crash_stubs`; or `z80_badpc`, the vector 99) writes `CRASH.TXT` next to the program, gives the
-hardware back and then shows `crash_notice` (`engine/rt/rtlib.s`): the message waits for Return, after dropping what
-was typed, since a key still pressed from the game would take a "press a key" away at once (the ports quit
-silently before).
-
-The pads of the STE's enhanced joystick ports (Jaguar pad / PowerPad: pad A player 1, pad B player 2, A / B / C the
-buttons, Option coin, Pause start, keypad 1 / 2 / 5 / 6 as the number keys, * + # quit) are read once a VBL by
-`engine/rt/jagpad.s`.  The port only says which bits a pad button sets (`JP1_UP` ... `JP_COIN2`, longs in its
-key_table's byte order); `jagpad_poll` ORs them into `jp_in`, which the port merges where it merges the keyboard: the
-VBL's copy into the arcade's input bytes (`jp_merge`), Donkey Kong's and Galaga's input reads, Bubble Bobble's
-`compose_inputs` (also called from the VBL, at IPL 6 against the keyboard's).  `jagpad_init` probes $FF9202 (a bus
-error on a plain ST: the pads stay off); the SIM build does not call it.  `engine/jagpad_test.py` checks the reader
-against Hatari's model of the pads.
-
-An arcade program may reject a coin held too long: 1942 ignores one of 40 ticks (credits 3-20, the reference machine),
-so a test script taps the coin key (`tools/hatari.sh tap:5@20`), a long `hold:` is lost.
-
-## Hard disk streaming (`engine/rt/hdd.s`, 2026-10-13)
-
-The driver for the plan in `docs/sprite-preparation.md` ("Memory: prepared data from the hard disk"); the blueprint
-is stedaimakaimura's `dma_test.s`.  No port uses it yet.  Two phases:
-
-* **`hdd_open`, while TOS still owns the machine** (before `init_hardware`, supervisor mode, interrupts on): reads the
-  data file once through GEMDOS with a hook in `hdv_rw` ($476) that logs every sector read GEMDOS makes straight into
-  the scan buffer.  With Getbpb (logical -> 512-byte sectors) and the AHDI partition table (`pun_info` at $516: the
-  partition's start, ACSI or IDE, the unit) that gives the file's extents (file sector -> physical sector), so a
-  fragmented file works (up to `HDD_EXTENTS` pieces).  An IDE drive is asked for LBA and its geometry (CHS otherwise).
-  The file and the scan buffer are multiples of 32 KB: a partial sector or cluster goes through GEMDOS's own buffer,
-  which the hook does not see (`HDD_E_CACHED`).
-* **`hdd_read` / `hdd_poll` while the game runs**: one request at a time, started by `hdd_read` and advanced by
-  `hdd_poll` from the main loop (never inside the border or VBL handlers), split at extents and into commands of
-  `HDD_STEP` sectors.  ACSI: READ(6) through the DMA chip, which moves the data alone; only the six command bytes are
-  waited for, completion is GPIP bit 5 (polled: the ports keep that MFP interrupt off), the floppy locked out (flock)
-  meanwhile.  IDE ($FFF00000, the Falcon's registers and the ST / STE adapters that copy them): PIO, at most
-  `HDD_IDE_POLL` sectors a call (~2600 cycles each), checked on the alternate status (no wait, no interrupt line).
-  Timeouts count the port's VBLs (`hdd_vbl` in its handler).  `hdd_stop` before giving the hardware back (quit, crash)
-  lets a command in flight finish.  Errors are codes (`HDD_E_*`): the caller keeps drawing by the path that needs no
-  prepared data (the plan's fallback), so a slow or missing disk costs speed, never correctness.
-
-Tests: `engine/hdd_test.py` (`port.py test engine`) runs `hdd_read` / `hdd_poll` against register models of the DMA
-chip with an ACSI target and of an IDE drive: requests across extents and longer than a command, the ACSI command
-bytes, IDE in LBA and CHS (master and slave), a request while busy, beyond the file, no ACSI target, error statuses,
-an IDE drive busy for good.  `tools/hddtest.sh` runs the whole module in Hatari with EmuTOS's own drivers: a FAT16
-image whose test file lies in two pieces, on ACSI and on IDE (LBA) with 512-byte logical sectors and on ACSI with
-2 KB ones; every request reads back without a bad sector.  Not measured yet: the reads' cost in a game picture and
-how the DMA chip's transfers share the bus with the Blitter's HOG passes.
-
-## Measuring (`games/dkong/tools/build.py` options, `games/dkong/tools/frametimes.py`)
-
-* `--debug`: frame, Timer A, Timer B, VBL and skipped-VBL counters as bits in the top-left
-  corner (plane 0, lines 0-4; read them back from a Hatari AVI).  An AVI starts at power
-  on; the program starts about 300 VBLs later.
-* `--dumpat N`: at frame N write Z80 memory `$6000-$7FFF` to `DUMP.BIN` and freeze the game;
-  the screen can then be compared with `games/dkong/tools/machine.py render_raw()` of the same memory.
-  `--dumpbank N`: the same at the Nth palette bank change (frame numbers of two builds show
-  different game phases; 20 and 21 are in the title logo's colour cycle).  With TIMES, give
-  `--frames` more than the run reaches: the frame count goes on while the game stands still.
-* `-D TIMES=1 --debug --frames N`: MFP Timer D (81 us ticks) is started at every VBL and
-  its count recorded when the NMI and when the drawing end, with the skipped-VBL count
-  and the palette bank; `TIMES.BIN` is written when the program quits after N frames
-  (`python games/dkong/tools/frametimes.py TIMES.BIN` prints the histogram).  Run with
-  `--run-vbls` of about N*5/4+600.
-* `--nosprites`: no sprite drawing (frame-rate comparison).  `-D NAME=VALUE`: any define.
-* Profile: in the Hatari debugger `profile on` at one VBL breakpoint and `profile save` at
-  a later one; Hatari 2.6 prints the per-address lines to its stdout.
-
-Measured on 2026-10-07 (2400 frames of attract mode and demo play, 50 Hz frame =
-160256 cycles): the average frame takes 44% of a frame (Z80 NMI 14%, drawing 30%),
-play frames 50-80%, the busiest play frames 96-119% (6 of 2400), 0.5% of the frames run
-into the next VBL; before this round the average was 75% and 9% of the VBLs were skipped.
-Level starts and the title wipe redraw every tile and take about ten frames each.
-
-Measured on 2026-10-09 (4096 frames, coverage of `port.py cover dkong`, after the
-translator speed-up and the selective bank redraw): average 35% (Z80 NMI 9%, drawing 26%),
-2.6% of the frames run into the next VBL.  The title logo's colour cycle (96 frames,
-1.6 s on the arcade) lost 618 VBLs when every bank change redrew all tiles, now 148 (2 at
-a change, 1 the frame after, for the other draw screen; the game's own code takes 32% of
-a frame there).  The rest are the start, the title wipe (0 -> 2: nearly every tile) and
-single level starts.  The game runs one NMI per 50 Hz VBL: 5/6 of the arcade's speed.
-
-
-## Sprite edges and guard damage (all ports)
-
-The hardware display window and the arcade picture inside it are different bounds. Pixels outside the hardware
-window are hidden; side bands inside it remain visible. Reserve a wider virtual screen and vertical guard rows
-for shifted objects, and restore each draw buffer's old sprite damage, including guard damage, before drawing again.
-
-At a picture's left or right edge on a 16-pixel group boundary, cull sprites wholly outside and draw only the inner
-destination word of a crossing sprite. Use the prepared opaque masks with the outer end mask zero, or a one-word
-pass using the inner word's prepared end mask. Do not calculate another edge mask or erase new overhang after drawing.
-This applies to every sprite path, including generic, cache-miss and address-crossing fallbacks. Top and bottom:
-draw whole sprites into guard rows. Where a side edge falls inside a group, keep whole drawing into margins;
-ports with moving windows may clip at the surrounding full band words while preserving the partial edge group.
-
-The former blanket no-clipping rule was superseded on 2026-10-12. See `AGENTS.md` for the current rules and
-`docs/sprite-preparation.md` for the preparation method and per-port results. Verify all four edges, all 16 shifts,
-transparent holes, priority, 64 KB address crossings and consecutive frames against an independent reference.
-
-Try the full stefastbobs2 preparation in each port: opaque runs and chains, grouping equal masks, reordered source,
-prepared masks and generated code per shift, with reusable Blitter state and advancing source addresses. Retain an
-optimization only after measuring CPU plus Blitter bus cycles; keep logic speed separate from picture rate. Cost
-estimates and partial prototypes do not complete that experiment. Every HOG pass must stay at or below 256 bus
-cycles and use the shared early, synchronized border handlers; verify timer timing in the pinned Hatari build.
-
-The eight ports measured on 2026-10-12 were Donkey Kong, Galaga, Bubble Bobble, 1942, 1943, Black Tiger,
-Commando and Gun.Smoke. Their picture costs on Musashi, before -> after clipping: 1942 -0.004% a tick,
-1943 +0.02-0.04%, Black Tiger -0.05..+0.06%, Bubble Bobble cheaper overall (edge sprite +2%, guard columns gone),
-Commando +0.04%, Donkey Kong +0.03%, Galaga -0.17%, Gun.Smoke -0.10%. These are historical results for that
-cohort, not a claim that every current or future port has completed the same validation.
 
 ## The 6809 translator (`engine/m6809x.py`, Splatterhouse 2026-10-12)
 
@@ -587,3 +307,145 @@ A port's schedule (`games/splatter/tools/machine.py` `run_frame_port`) is simple
 the sound CPU for a frame, then the main CPU's IRQ until its idle point, then the sub CPU's.  The port starts from the
 reference's state after the boot (`tools/snapshot.py`); the MCU is native (`src/mcu.s`, checked against
 `tools/mcu.py`, which is checked against the real MCU); the sound CPU only reads what the main CPU writes.
+
+## Runtime schedule (all ports)
+
+The arcade's CPUs are not run as threads.  At every vertical blank the runtime delivers the arcade's interrupts in a
+fixed order and runs each handler to completion (Galaga: main CPU IRQ, sub CPU IRQ; Bubble Bobble: MCU IRQ1, main
+CPU IM 2 interrupt, sub CPU IRQ).  What the arcade's main loop does between interrupts is only the boot and
+idle loops, so the foreground "thread" is the boot until the idle loop and the renderer afterwards.  The handler's
+return address is a token pc (the dispatch table maps it to the runtime's return label), which also lets code that
+inspects the interrupted pc run (Bubble Bobble requires its high byte < $C0).  `run_frame_port` in each machine.py is
+the same schedule in Python: the lock-step tests compare against it, not against the interleaved reference.
+
+Rules learned the hard way (details in `docs/porting-guide.md`):
+
+* The VBL handler arms the border timers first, then runs the game's interrupts at IPL 3 (`move #$2300,sr`), then draws.
+  A VBL arriving during the drawing runs the handlers again and skips the drawing: the game keeps its pace and the
+  display drops frames.
+* Timer A lowering the IPL can let a pending VBL nest 28 deep: guard with an `in_logic` flag.
+* When the game logic alone takes longer than a frame the renderer starves: throttle (`render_age`, Galaga's star
+  levels) - skip the logic every other VBL while drawing.
+* Boot self-tests (RAM, ROM, checksums) are patched out in the reference and the translation; the code that
+  checksums ROM while running is compensated by a dead byte.  Never use frames of a self-test as a performance
+  reference: they fill video RAM and load the renderer unrealistically.
+
+### The schedules in use
+
+The rule above has grown into four forms; a new port picks the one its board fits:
+
+| Schedule | How | Ports |
+|---|---|---|
+| VBL-locked | one round of the arcade's interrupts a VBL, then the drawing in the VBL handler (a nested VBL skips it): 50 of the arcade's 60 rounds, the game 5/6 slow | Donkey Kong, Donkey Kong Junior, Galaga (with its star throttle), Bubble Bobble (three screens; `-D TICK60` two rounds at most) |
+| Idle hook, frames counted | the VBL only counts arcade frames (`vbl_phase`: six for five VBLs at 60 Hz; `ARCADE_FRAC` for other rates, Moon Patrol's 56.74 Hz); the idle hook of the arcade program (its wait loop, reached through a token return) runs the pending frames and draws; up to `MAX_PENDING` frames wait, at most `MAX_SKIP` in a row are not drawn; three buffers plus a clean screen | `MAX_PENDING` 3 / `MAX_SKIP` 3: Pac-Man, Pooyan, Mr. Do!, Time Pilot, Track & Field, Hyper Sports, Commando, Gun.Smoke, Moon Patrol; `MAX_SKIP` 2: Gyruss, Kung-Fu Master, 1942 (its cooperative kernel's idle point); the game first, `MAX_SKIPS` 4-8: 1943, Black Tiger, Trojan (`MAX_PENDING` 5), Double Dragon |
+| Picture every n frames | one arcade frame a VBL, a picture every `PIC_EVERY` frames at most, the logic at most `MAX_BEHIND` frames behind; R-Type also starts a picture when `PIC_VBLS` VBLs passed (`pic_due`, Timer D) | `PIC_EVERY` 2 / `MAX_BEHIND` 3: Splatterhouse, Galaga '88, Dragon Spirit (8 / 12 measured as an option); 8 / 12: R-Type (with `PIC_VBLS` 3), Mr. HELI |
+| Two threads | the picture is the foreground; the game runs per arcade interrupt until its wait loops (TRAP), a sixth IRQ every fifth VBL for 60 Hz | Gauntlet (its 68010 program runs natively) |
+
+The names differ by port (rings, buffers, screens; `NBUF`, `ST_NBUF`, `REN_NBUF`): they are the same draw buffers.
+At an idle hook whose flags the interrupt handler never reads, keep no flags (`flags_at=set()`, Black Tiger's `00D4`:
+logic -2.5%).  A scheduler that can start a picture later than the frame it was planned for must capture the sprite list at every
+DMA the arcade does (R-Type, `games/rtype/docs/sprite-dma-results.md`: with `PIC_VBLS` a picture used the current
+scroll with an older list; copying the live slots before drawing is wrong too, the emitters may already have
+overwritten them).
+
+Compared with F030Arcade's spare-time renderer (a preemptible render thread on its own stack, started by Timer B once
+the game is parked, its pages queued for the VBL) this schedule is the Heavy Barrel case there: the frame is the
+interrupt handlers, so their return is the "frame is done" point and no park test is needed.  Bubble Bobble's three
+screens are the queued pages; in the other ports a VBL nested into the drawing runs the game, so the drawing may go on
+with a changed state (not checked port by port).  See `docs/porting-guide.md`, "Two related projects compared".
+
+## Border removal
+
+`engine/rt/borders.s` schedules events early and synchronizes them to the video. Timer B opens the bottom
+border and arms Timer A at that line-exact point for the following top border. The VBL restarts Timer B and arms
+Timer A as a fallback only when the preceding bottom event did not do so (including startup). `BD_HUD` extends
+Timer B with palette switches; `BD_VSWITCH` also switches video addresses for separate HUD images.
+
+Every Blitter pass is HOG and at most 256 bus cycles. `blit_go` splits longer transfers into lines or column
+strips, allowing interrupts between pieces. The former `wait_borders` policy is superseded by these short passes
+and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
+record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
+
+Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.
+It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
+during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
+the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz
+path remains available. [Mega STE timing verification](megaste-border-timing.md) records the
+pulse windows, mixed-HOG load test, cache-placement sweeps and the physical-hardware limit.
+
+Known full-mask, unskewed copies/fills use `blit_go_copy`; HOP 0 fills with arbitrary masks use
+`blit_go_fill`. Both can budget 32 words per piece because there are at most two bus accesses per word.
+The generic dispatcher accounts for masked destination reads and FXSR fetches. Strip line counts come from
+tables rather than a division per strip. `engine/borders_blit_test.py` checks pixels, register endpoints,
+preservation and pass lengths; `engine/m72_bitmap_test.py` checks the M72 contribution-bitmap rotation.
+
+## Input (all ports)
+
+Each port has its own IKBD handler (`acia_isr`): the keyboard through `key_table` (scancode -> the bits it sets in
+the arcade's input bytes, active high), the two IKBD joysticks (port 1 player 1, port 0 player 2; Donkey Kong and
+Galaga OR them into one player), Esc quits.  The IKBD gives a joystick one fire button: button 2 (and Gun.Smoke's
+third) is on the keyboard, or Bubble Bobble's joystick up.
+
+The byte stream itself is framed by `engine/rt/ikbd.s` (`ikbd_byte` at the top of every handler's loop, `ikbd_vars`
+in the bss): a data byte read as a key is a key, and a joystick's "up" byte is $01 = Esc ("down" $02 = the key 1).
+So every packet is skipped by its length ($F6-$FD too), an ACIA overrun (OVRN after a read: the next byte was lost)
+drops the packet being read and the next byte when it can be a joystick data byte, and Esc quits only on its release
+right after its press.  `engine/ikbd_test.py` feeds it streams with lost bytes (the MC6850's / Hatari's overrun: the
+byte arriving into a full buffer is lost).  In Hatari the handlers read every byte within 2 lines (an overrun needs
+~20), so this is a guard, not a cure: a "sudden quit" is more likely a crash (below).
+
+A crash (an exception: `crash_stubs`; or `z80_badpc`, the vector 99) writes `CRASH.TXT` next to the program, gives the
+hardware back and then shows `crash_notice` (`engine/rt/rtlib.s`): the message waits for Return, after dropping what
+was typed, since a key still pressed from the game would take a "press a key" away at once (the ports quit
+silently before).
+
+The pads of the STE's enhanced joystick ports (Jaguar pad / PowerPad: pad A player 1, pad B player 2, A / B / C the
+buttons, Option coin, Pause start, keypad 1 / 2 / 5 / 6 as the number keys, * + # quit) are read once a VBL by
+`engine/rt/jagpad.s`.  The port only says which bits a pad button sets (`JP1_UP` ... `JP_COIN2`, longs in its
+key_table's byte order); `jagpad_poll` ORs them into `jp_in`, which the port merges where it merges the keyboard: the
+VBL's copy into the arcade's input bytes (`jp_merge`), Donkey Kong's and Galaga's input reads, Bubble Bobble's
+`compose_inputs` (also called from the VBL, at IPL 6 against the keyboard's).  `jagpad_init` probes $FF9202 (a bus
+error on a plain ST: the pads stay off); the SIM build does not call it.  `engine/jagpad_test.py` checks the reader
+against Hatari's model of the pads.
+
+An arcade program may reject a coin held too long: 1942 ignores one of 40 ticks (credits 3-20, the reference machine),
+so a test script taps the coin key (`tools/hatari.sh tap:5@20`), a long `hold:` is lost.
+
+## Hard disk streaming (`engine/rt/hdd.s`, 2026-10-13)
+
+The driver for the plan in `docs/sprite-preparation.md` ("Memory: prepared data from the hard disk"); the blueprint
+is stedaimakaimura's `dma_test.s`.  No port uses it yet.  Two phases:
+
+* **`hdd_open`, while TOS still owns the machine** (before `init_hardware`, supervisor mode, interrupts on): reads the
+  data file once through GEMDOS with a hook in `hdv_rw` ($476) that logs every sector read GEMDOS makes straight into
+  the scan buffer.  With Getbpb (logical -> 512-byte sectors) and the AHDI partition table (`pun_info` at $516: the
+  partition's start, ACSI or IDE, the unit) that gives the file's extents (file sector -> physical sector), so a
+  fragmented file works (up to `HDD_EXTENTS` pieces).  An IDE drive is asked for LBA and its geometry (CHS otherwise).
+  The file and the scan buffer are multiples of 32 KB: a partial sector or cluster goes through GEMDOS's own buffer,
+  which the hook does not see (`HDD_E_CACHED`).
+* **`hdd_read` / `hdd_poll` while the game runs**: one request at a time, started by `hdd_read` and advanced by
+  `hdd_poll` from the main loop (never inside the border or VBL handlers), split at extents and into commands of
+  `HDD_STEP` sectors.  ACSI: READ(6) through the DMA chip, which moves the data alone; only the six command bytes are
+  waited for, completion is GPIP bit 5 (polled: the ports keep that MFP interrupt off), the floppy locked out (flock)
+  meanwhile.  IDE ($FFF00000, the Falcon's registers and the ST / STE adapters that copy them): PIO, at most
+  `HDD_IDE_POLL` sectors a call (~2600 cycles each), checked on the alternate status (no wait, no interrupt line).
+  Timeouts count the port's VBLs (`hdd_vbl` in its handler).  `hdd_stop` before giving the hardware back (quit, crash)
+  lets a command in flight finish.  Errors are codes (`HDD_E_*`): the caller keeps drawing by the path that needs no
+  prepared data (the plan's fallback), so a slow or missing disk costs speed, never correctness.
+
+Tests: `engine/hdd_test.py` (`port.py test engine`) runs `hdd_read` / `hdd_poll` against register models of the DMA
+chip with an ACSI target and of an IDE drive: requests across extents and longer than a command, the ACSI command
+bytes, IDE in LBA and CHS (master and slave), a request while busy, beyond the file, no ACSI target, error statuses,
+an IDE drive busy for good.  `tools/hddtest.sh` runs the whole module in Hatari with EmuTOS's own drivers: a FAT16
+image whose test file lies in two pieces, on ACSI and on IDE (LBA) with 512-byte logical sectors and on ACSI with
+2 KB ones; every request reads back without a bad sector.  Not measured yet: the reads' cost in a game picture and
+how the DMA chip's transfers share the bus with the Blitter's HOG passes.
+
+## Renderers of the ports
+
+Every port has its own renderer (`games/<game>/src/render*.s`; R-Type's `stage.s`; Mr. HELI the shared
+`engine/rt/m72render.s`), checked pixel for pixel against its reference machine through the colour table.  Which
+scrolling, sprite, damage, text and colour method each one uses is tabled in `speed.md`, "Which port uses what"; the
+sprite methods and their measurements are in `sprite-preparation.md`, the rules for edges and guards in `AGENTS.md`
+and `porting-guide.md`, "Renderer correctness".  The first renderer, Donkey Kong's (generated Blitter code per sprite
+line, the tile map compared with a shadow), is described in its README.

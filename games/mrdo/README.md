@@ -1,6 +1,6 @@
 # Mr. Do!, Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Mr. Do! on the STE (Hatari)](docs/screenshot.png)
 
@@ -35,8 +35,10 @@ parallel), `python games/mrdo/tools/build.py --sim` (`run/mrdo_sim/MRDO.PRG`), t
 `python games/mrdo/tools/logic_test.py 12000 --seed <n>`; the palette needs `python games/mrdo/ref/pens.py <seed>`
 for seeds 7, 10, 11, 12 (`build/mrdo/pens<seed>.pkl`, ~5 minutes each), then `tools/assets.py` (or `build.py
 --assets`); `tools/render_test.py 8000 --seed 10 --every 4`, `tools/sprite_test.py`.  `build.py` without `--sim` builds `run/mrdo/MRDO.PRG`.
-Controls (planned as on the other ports): arrows or joystick move, Space / Control / Z fire, **5** / **6** coin,
-**1** / **2** start, **Esc** quits; either Jaguar pad plays (the players take turns on the upright cabinet).
+Controls (`key_table` in `src/mrdo.s`): **arrows** or either joystick move, **Space** / **Control** / **Z** fire,
+**5** / **6** coin, **1** / **2** start, **Esc** quits.  Jaguar pad / PowerPad (`engine/rt/jagpad.s`): either pad
+plays (the players take turns on the upright cabinet), the D-pad moves, **A / B / C** fire, **Option** coin, **Pause**
+start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 ## ROMs
 
@@ -134,7 +136,8 @@ past the `inc hl` it read a stale flag (seed 7 differed from frame 1043 on).  No
 shape.
 
 Hatari (`tools/hatari.ps1`, DEBUG + AUTOPLAY, 3000 VBLs, the stand-in renderer): no crash, 59.5 arcade frames a
-second (the arcade's 59.94).
+second (the arcade's 59.94).  Superseded (2026-10-29): that build drew a stand-in picture; with the real renderer see
+"The picture" (`tools/bench.sh 4000`: 59-60 arcade frames a second in most windows, 44-50 pictures in play).
 
 ## The picture (src/render.s, tools/assets.py)
 
@@ -161,10 +164,12 @@ After Time Pilot's renderer; the method's details are in `src/render.s`'s header
   a stream) for the coverage's 203 shapes (code x flips): 2,964 routines, 332 KB of streams; others and 64 KB crossings
   the row path (`draw_cell`).  Clipped at the group-aligned side edges (the inner word only), culled wholly outside;
   whole into the guard lines.  Damage: the drawn lines and words, restored by short HOG copies.
-* **Colours**: the arcade shows 26 colours (at most 15 in one picture); one palette of black and 15 fitted in Oklab
-  to `ref/pens.py`'s counts with square-root weights: mean error 3.7 a channel; pure blue (some sprite colours) shows
-  as a duller blue, the three yellow-greens, the two pale yellows and the ochres merge.  Per-scene palettes (exact:
-  each picture has at most 15) would need a switch by scene with a full redraw and a sprite cache flush.
+* **Colours**: the arcade shows 26 colours (at most 15 in one picture); since 2026-11-05 one palette of black and 15
+  from the shared flat fit (`engine/palette_native.py`, one STE index per pen, trained on `ref/pens.py`'s counts; see
+  the note at the top and [colours](../../docs/colours.md)).  Superseded: the earlier fit in Oklab with square-root
+  weights (mean error 3.7 a channel; pure blue shown as a duller blue, the three yellow-greens, the two pale yellows
+  and the ochres merged).  Per-scene palettes (exact: each picture has at most 15) would need a switch by scene with
+  a full redraw and a sprite cache flush.
 
 Measured (`tools/render_test.py`, Musashi, CPU + Blitter bus cycles a picture, exact): seed 4's play (frames
 1600-2200) 30.1k + 12.9k with the generated sprite code, 43.0k + 14.6k with every sprite on the row path

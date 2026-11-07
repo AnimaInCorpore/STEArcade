@@ -66,8 +66,4 @@ has never run, and for bug finding.
 
 ## Port completion claims
 
-For every port, automated exploration can attempt full progression after its
-adapter and native replay transport are verified. Success is not guaranteed by
-agent support. Use the shared [status and full-game verification policy](port-status.md)
-to distinguish natural completion, assisted coverage and incomplete verification;
-reserve green **Complete** for verified Hatari playability with graphics and sound.
+See the [status and full-game verification policy](port-status.md).

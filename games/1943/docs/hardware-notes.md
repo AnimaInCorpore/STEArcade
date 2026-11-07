@@ -37,7 +37,8 @@ Source: `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/cap
   building the STE graphics.
 
 Reference boot, MCU command checks, and MAME pixel comparison are implemented.
-Next steps: bank-aware code coverage and whole-program translation;
-lock-step logic verification; STE runtime and renderer using the whole-object
-Blitter approach in the porting guide; simulator pixel tests and Hatari gameplay
-and timing checks on an 8 MHz 4 MB STE.
+The former next steps are all done (see `../README.md`): bank-aware code
+coverage and whole-program translation; lock-step logic verification; the STE
+runtime and renderer (since 2026-10-12 sprites and front tiles are clipped at
+the window's edges instead of drawn whole); simulator pixel tests and Hatari
+gameplay and timing checks (Hatari only, not real hardware).

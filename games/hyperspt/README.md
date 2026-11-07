@@ -1,6 +1,6 @@
 # Hyper Sports (Konami, 1984) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Hyper Sports on the STE (Hatari)](docs/screenshot.png)
 
@@ -85,8 +85,10 @@ lists its cell for the renderer.  ROM page $E000-$FFFF holds data only: no dispa
   moving sprites, scrolls and tiles).  `BLIT_STATS=256`: every pass HOG, the longest 132 bus cycles.
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot, attract, coin, the name entry, swimming, the game over;
   no crash, no late border event in 6,000 VBLs.
-* **Colours**: black and 15 fitted in Oklab (`tools/assets.py`): mean error 1.0 a channel, weighted by pixels; the
-  worst-matched pens are rare (a pink, a brown).
+* **Colours** (2026-11-05): black and 15 by the shared default fitter, flat (`engine/palette_native.py`;
+  [colours](../../docs/colours.md)): mean OKLab distance x 100 over the non-black pixels 1.617 (the old Oklab k-means
+  fit 0.733), sprite pixels 1.447 (2.681), tile pixels 0.799 (0.330): the sprites gain, the tiles lose.  Superseded:
+  the old fit's "mean error 1.0 a channel".
 * Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (P3_P4).
 
 ## Speed (2026-10-29, 2026-11-02)
@@ -113,7 +115,8 @@ the row path, `-D REN_GEN=0`: 87.6k + 50.4k); the renderer is Track & Field's (s
 drawn only where their scroll or cells changed or sprites were, the sprites' generated code and row path).  The
 generated code covers the most drawn shapes up to 98% of the coverage's draws (`tools/assets.py` SHARE: 147 of 405
 shapes, 1,612 routines, 126 KB of streams; 6 transparency classes): code for all of them would need ~1.6 MB and take
-the program over the load budget (4.67 MB against `tools/release.py` MAX_LOAD 3.7 MB); now 3.50 MB.
+the program over the load budget (4.67 MB against `tools/release.py` MAX_LOAD 3.7 MB); with the 147 shapes 3.50 MB
+(the 0.7 release, 2026-11-02; Sound).
 
 ## Sound
 
@@ -157,10 +160,12 @@ tune 0 4.5 s (a game's start; the only one the game's coverage sends), 1-7 4.0, 
   the note's counter runs).  Seed 5's logic (`logic_test.py 3000 --seed 5`): 77.2k -> 75.2k (the tick) -> 74.0k
   cycles an arcade frame; `sound_test.py` seeds 1, 5, 9 (6,000 frames) equal; Hatari 83% -> 85%, 24.6 -> 26.9
   pictures a second.  The rest of the sound (~8.6k cycles a frame in seed 5's play, against ~67k for the game's
-  logic) is spread thinly: the channels' handlers, the runtime's tick loop (`snd_next`, `snd_frame`), the SN writes.  Hatari: 93% ->
-  **83%** of the speed, the pictures 34.6 -> **23.6** a second (Speed).  The program grows from 381,843 to 2,154,009
-  bytes (the samples 1,344 KB, the dispatch table 256 KB, the 64 KB block): 2,879,340 bytes to load (MAX_LOAD
-  3,700,000); packed with LZ4 690,820 bytes: it still fits a 720 KB floppy.
+  logic) is spread thinly: the channels' handlers, the runtime's tick loop (`snd_next`, `snd_frame`), the SN writes.
+  Hatari without the sound / with it: 93% / **85%** of the speed, 34.6 / **26.9** pictures a second (Speed; when the
+  sound was added, before the generated sprite code and the sound's natives: 83%, 23.6).  When the sound was added
+  (2026-10-29) the program grew from 381,843 to 2,154,009 bytes (the samples 1,344 KB, the dispatch table 256 KB, the
+  64 KB block): 2,879,340 bytes to load, packed with LZ4 690,820 bytes (a 720 KB floppy).  With the generated sprite
+  code (the 0.7 release, 2026-11-02): 3,500,396 bytes to load (MAX_LOAD 3,700,000), its floppy an 800 KB image.
 * Not done: the DAC's pulses outside the tunes (the $400B envelope: 600-8,300 pulses in a 20,000-frame game seed, the
   attract's most; Track & Field's README); the relative levels of the YM and the DMA are a guess.
 

@@ -1,6 +1,6 @@
 # Black Tiger (Capcom, 1987)
 
-2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Black Tiger on the STE (Hatari)](docs/screenshot.png)
 
@@ -18,7 +18,7 @@ python port.py cover blktiger 1       # optional additional bank-aware coverage
 games/blktiger/tools/perf_test.py     # Musashi: a tick's and a frame's cycles (profile, logic, frames)
 games/blktiger/tools/bench.sh         # Hatari: DEBUG + AUTOPLAY build, ticks and frames a second
 games/blktiger/tools/sprite_test.py   # edge sprites: the whole hardware window, side bands included
-python games/blktiger/ref/palette_fit.py   # refit the fixed palette (docs/palette.json), its error against the one before
+python games/blktiger/ref/palette_fit.py   # the old fixed-palette fit (docs/palette.json); not used by the build since 2026-11-05
 ```
 
 Supply `assets/roms/blktiger.zip`. Preparation checks all 20 ROMs against the
@@ -31,7 +31,7 @@ Committed instruction roots and window-guard sites (`docs/`) make a fresh build 
 Controls: **5/6** insert coins, **1/2** start, **arrow keys** move,
 **Space/Ctrl** attack, **Alt** jumps, **Escape** returns to the desktop.
 Joystick fire attacks; use Alt for jump (joystick port 1 player 1, port 0 player 2).
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A** attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 For scripted Hatari events, use ST
 scancodes for special keys: Right `77`, Space `57`, Alt `56`, Escape `01`.
 
@@ -71,25 +71,38 @@ they draw whole, as described below. Per frame
 * **The black side margins** (32 pixels each side of the 320-pixel window) are
   a mask per cell and ring, changed only where the window moved; the two word
   columns the fine scroll masks in part are copied whole by the Blitter (the
-  clean screen AND the visible bits) before drawing when the window moved. Whole new sprites may spill
-  into the side bands; no mask is applied after drawing.
-* **Change detection**: the translated writers of the background RAM set
-  `bg_dirty` (`gen.BG_WRITERS`, from coverage) and the block copies to the
-  palette note their ranges before they run (`pal_note`, `gen.PAL_WRITERS`:
-  only those blocks of 128 entries are compared and mapped again); 256 / 128
-  bytes a frame are compared in case a writer is missing (a DEBUG build counts
-  what that finds). The text RAM (about 80 writers) is compared each frame.
-  A tile the game changes (an animation) is drawn where it shows only; its
-  twins are found stale when the page jumps there.
+  clean screen AND the visible bits) before drawing when the window moved. Sprites across the
+  band words' group boundaries (words 1|2, 18|19) draw only their inner word, so the always-black band words
+  0, 1, 19, 20 stay black; the band part of words 2 and 18 (the game's edge plus the fine scroll) still shows
+  whole sprites; no mask is applied after drawing (see "Sprites clipped at the band words (2026-10-12)").
+* **Change detection**: every translated write to the background RAM goes
+  through the window check (the RAM is not in the Z80 image) and notes its map
+  entry (`bg_note`); the frame checks only the window's cells that show a noted
+  entry (`check_noted`). The palette writers set `pal_dirty` and the block
+  copies to the palette note their ranges before they run (`pal_note`,
+  `gen.PAL_WRITERS`: only those blocks of 128 entries are compared and mapped
+  again); 128 bytes a frame are compared in case a writer is missing. The text
+  RAM's writers (`gen.TEXT_WRITERS`) mark their row in `text_rows_dirty`, a block
+  copy sets `text_compare`; only those rows are rebuilt, one row a frame is
+  compared in case a writer is missing. A tile the game changes (an animation)
+  is drawn where it shows only; its twins are found stale when the page jumps
+  there.
 
 Whole sprites use precomputed shifted masks and equal-mask row groups, including
 mirrored variants. Tiles, sprites and characters are baked into planes with a
 byte table a colour (two pixels a lookup, `movep` for the plane bytes; 32 tables
 cached). Background split priority and viewport-anchored text follow
-MAME. A fixed 16-colour STE palette approximates the arcade palette; renderer
-comparisons use that same colour mapping.
+MAME.
 
-**The palette** is fixed: black and 15 colours fitted by a weighted k-means in
+**The palette** (since 2026-11-05): the shared fitter with checker pairs
+(`engine/palette_native.py` `ram`, trained on `docs/colour_training.json`; text
+flat through `rgb_map_flat.bin`), every possible palette word mapped at build
+time; see [colours.md](../../docs/colours.md). A palette change remaps the pens
+of the colours it touched; their tiles and sprites are baked again unless one of
+the colour's last eight mappings returns. Renderer comparisons use the same
+mapping.
+
+Superseded (2026-11-05), the fixed palette before: black and 15 colours fitted by a weighted k-means in
 Oklab (`ref/palette_fit.py`, Bubble Bobble's method) to the reference's
 pictures of the logic test's script and of each stage 0-7 (cover.py's cheats),
 each set's colour histogram normalised, the colours snapped to ones that occur
@@ -103,7 +116,7 @@ colour mapping.
 | palette | error per channel (0-255), mean of the 9 sets | exact pixels | worst set |
 |---|---|---|---|
 | before: median cut of the script's colours, RGB-weighted map | 17.2 | 27.7% | 38.8 (stage 5) |
-| now | 11.6 | 42.7% | 17.9 (stage 7) |
+| the fixed fit (2026-10 to 2026-11-05) | 11.6 | 42.7% | 17.9 (stage 7) |
 | square-rooted weights (as Bubble Bobble) | 15.5 | 35.4% | 40.4 |
 | 13 colours + 2 lent to flashing entries | 12.4 | 40.3% | 21.1 |
 
@@ -117,6 +130,15 @@ The cooperative task scheduler yields at the game's idle loop. Native VBLs
 queue six game ticks per five 50 Hz fields; drawing is skipped while ticks are
 pending, at most `MAX_SKIPS` (4) frames in a row: the game first, then the frames.
 
+## Memory (2026-10-15)
+
+text + data + BSS: 3,972,764 bytes in 0.3 -> 3,546,696, 504 KB left from the desktop; TOS
+refused to start 0.3 on a tester's Mega STE (the load budget:
+[porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).  The memory work of 2026-10-10 ("Memory work of 2026-10-10" below: word dispatch tables built as data, the fixed ROM in
+place, shared sprite row orders; its fixed palette fit came with it) was only merged on 2026-10-15 (0.3 was built
+without it).  Musashi (`perf_test.py`): logic 37,414 -> 37,805 cycles a tick, frames unchanged (168.6k ->
+168.7k), 38.8 -> 38.7 ticks a second.
+
 ## Memory (2026-10-10)
 
 text + data + BSS = 3,484,734 bytes (`build/blktiger/blktiger.map`: text 297,744,
@@ -124,9 +146,10 @@ data 2,089,628, BSS 1,097,362); there is no Malloc, the screens are BSS.  It was
 4,023,518, more than GEMDOS leaves on a 4 MB STE with a hard disk driver,
 accessories and TOS 1.62 (TOS 2.06 without AUTO programs: 4,145,998).
 
-`MAX_SKIPS=2` gave 33.5 ticks/s and 14.0 frames/s. The logic is the larger
-part: the bank switches of the background RAM (4 KB copied out and in, the game
-reads its map for collisions) and the guarded window reads. `perf_test.py`
+`MAX_SKIPS=2` gave 33.5 ticks/s and 14.0 frames/s (2026-10-10, an old build). The logic was the larger
+part then: the bank switches of the background RAM (4 KB copied out and in, the game
+reads its map for collisions; since 969e91b, 2026-10-10, the banks are addressed in place and a switch is a
+pointer, `g_bgbase`) and the guarded window reads (since 2026-10-11 only at the coverage's sites). `perf_test.py`
 takes `profile` (render_frame by routine; `PERF_CPU=1` without the Blitter's
 bus cycles), `logic [regions]` (the tick by routine or Z80 page), `frames` (a
 frame's cost and the renderer's DEBUG counters: bakes, cells restored, tiles
@@ -177,7 +200,7 @@ The firmware test exercises all 256 commands. CPU checks compare work RAM,
 saved task stacks, background banks, sprite buffers, scroll and control latches
 against the cooperative reference. Renderer checks cover both map layouts,
 normal/flipped video, all 16 fine-scroll positions, page-boundary crossings,
-and whole sprites at viewport edges. The independent MAME comparison validates
+and sprites at viewport edges (clipped at the band words, whole at the fine edges; the band words black). The independent MAME comparison validates
 reference pixels using MAME's actual memory and saved video state; it does not
 validate the reference CPU's timing.
 
@@ -213,15 +236,8 @@ byte-aligned LZ77, 57 KB) and unpacked when they start into one of two 17.7 KB b
 slot); the unpacking runs in the idle hook (`bt_snd_load`, up to 0.5 M cycles), not in the VBL: a tune starts when it
 is unpacked.  Data 91 KB, the buffers 35 KB; the player ~9,500 cycles a VBL (Musashi, random commands).  `tools/bench.sh` (DEBUG + AUTOPLAY, 6000 VBLs): 51.5 game ticks (86%) and 21.2 frames a
 second; without the sound (`EXTRA="-D NOSOUND=1"`) 52.8 and 22.9 (the renderer work of 2026-10-09 and later
-made the 65% / 12 frames above out of date).  With the renderer work of 2026-10-11 (see "Speed"): 54.0 ticks
-(90%) and 23.8 frames a second.
-
-Memory (2026-10-15): 3,972,764 bytes in 0.3 -> 3,546,696, 504 KB left from the desktop (4,061,212 on a 4 MB STE with
-TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start 0.3).  The
-memory work of 2026-10-10 ("Memory work of 2026-10-10" above: word dispatch tables built as data, the fixed ROM in
-place, shared sprite row orders; its fixed palette fit came with it) was only merged on 2026-10-15 (0.3 was built
-without it).  Musashi (`perf_test.py`): logic 37,414 -> 37,805 cycles a tick, frames unchanged (168.6k ->
-168.7k), 38.8 -> 38.7 ticks a second.
+made the earlier figures, 65% and 12 frames a second, out of date).  With the renderer work of 2026-10-11 (see
+"Renderer work of 2026-10-11"): 54.0 ticks (90%) and 23.8 frames a second.
 
 Checks: `sound.py check 120` runs the real driver beside the model, a step at a time: the effects 0 of 59,958
 chip-steps differ audibly (random commands and the game's own); the music 794 of 102,068 sounding channel-steps differ
@@ -242,7 +258,7 @@ read: the checks are a quarter of the cycles (`ld a,(hl)` 58 cycles); the covera
 Bobble uses them, would make most of them plain moves.  Tests: `logic_test.py 1600`, `logic_test.py 4000 --walk`,
 `render_test.py --frames 3 --step 375 --scroll-sweep --flip-layout-sweep --sprite-edges` all match.  The first build
 with the new translator did not boot: each gen's own window wrapper saved a0 in the middle of `ld (hl),c`'s stack use
-(see `docs/architecture.md`, "Banked windows"); the engine's wrapper fixed it for all ports.
+(the banked windows: [architecture.md](../../docs/architecture.md#what-makes-the-translated-code-cheap)); the engine's wrapper fixed it for all ports.
 
 ### Window guards at the coverage's sites (2026-10-11)
 
@@ -273,7 +289,7 @@ That replay and its PPO plays found code and accesses the coverage here never re
   type, timer or script (MARP game, frame 6,832).  2,426 -> 2,577 guarded sites.
 
 `port.py test blktiger` passes; Hatari (`tools/bench.sh`): 58.0 -> 57.9 game ticks and 29.5 -> 29.3 frames a second
-(noise), 2,436,385 -> 2,471,966 bytes.  Not taken over: F030Arcade's Z80 cycle budget (`CYCLES=1`), which a
+(noise); the program file (`BLKTIGER.PRG`, text + data) 2,436,385 -> 2,471,966 bytes.  Not taken over: F030Arcade's Z80 cycle budget (`CYCLES=1`), which a
 recorded game needs to stay in step with MAME (without it the game's tasks finish in zero frames and the random
 generator runs ahead) but which costs the STE logic time.
 
@@ -341,6 +357,9 @@ picture (the Blitter's part 45k -> 18.5k, the CPU's 38.7k -> 38.8k), a scrolling
 all 16 shifts).
 
 ## Whole sprites at borders (2026-10-11)
+
+Superseded (2026-10-12): sprites are clipped at the band words and the side bands are black in every frame, see the
+next two sections.  What was done on 2026-10-11:
 
 Removed the final side-band masking pass. Background restoration still prepares its margin cells before
 sprites are drawn; `strip_track` records those cells for the next camera move without changing pixels.

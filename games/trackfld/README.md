@@ -1,6 +1,6 @@
 # Track & Field (Konami, 1983) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Track & Field on the STE (Hatari)](docs/screenshot.png)
 
@@ -72,8 +72,10 @@ first, what it passes through) instead of every caller's needs, which halved the
   a row with moving sprites, scrolls and tiles).  `BLIT_STATS=256`: every pass HOG, the longest 132 bus cycles.
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot, attract, coin, the name entry, the 100 m dash, deaths;
   no crash, no late border event in 6,000 VBLs.
-* **Colours**: the arcade shows 24 colours in the coverage; black and 15 fitted in Oklab (`tools/assets.py`): mean
-  error 0.8 a channel, weighted by pixels; the worst-matched pens are rare (magenta, a dark grey).
+* **Colours** (2026-11-05): the arcade shows 24 colours in the coverage; black and 15 by the shared default fitter,
+  flat (`engine/palette_native.py`; [colours](../../docs/colours.md)): mean OKLab distance x 100 over the non-black
+  pixels 0.651 (the old Oklab k-means fit 0.604), sprite pixels 1.200 (1.345), tile pixels 0.346 (0.319).
+  Superseded: the old fit's "mean error 0.8 a channel".
 * Not done: the DAC's pulses outside the tunes (Sound), the cocktail flip, the service mode, players 3 and 4 (IN1).
 
 ## Speed (2026-10-29, 2026-11-02)
@@ -82,8 +84,8 @@ first, what it passes through) instead of every caller's needs, which halved the
 percentiles; the logic `logic_test.py 3000 --seed N`):
 * **Video RAM stores inline** (`tools/gen.py` video_inline, engine/m6809x.py): a byte store at an I/O site whose address
   is in $3000-$3FFF writes the byte and lists its cell itself; main_io_w only for other addresses (246 of 344 sites;
-  word stores still call it).  The logic 42.3k -> **39.7k** cycles an arcade frame (seed 6, -6.0%), seed 1 35.1k ->
-  33.4k (-4.9%); in the render run median 30.1k -> 26.1k, the screen changes' maximum 1.24M -> 0.94M.
+  word stores still call it).  The logic, the sound included, 42.3k -> **39.7k** cycles an arcade frame (seed 6, -6.0%),
+  seed 1 35.1k -> 33.4k (-4.9%); in the render run median 30.1k -> 26.1k, the screen changes' maximum 1.24M -> 0.94M.
 * **Sprite damage restores only the sprites' groups**: a row that only the buffer's last sprites covered (its scroll
   and cells unchanged) is copied over the 16-pixel groups g0 .. g1 they touched (X count n, FXSR's pre-read kept); the
   spans are noted per buffer and row where the sprites are drawn.  A picture, CPU + Blitter: mean 75.5k -> **66.1k**
@@ -107,14 +109,11 @@ bus cycles (every sprite on the row path, `-D REN_GEN=0`: 69.7k + 36.7k).  Of th
   holds there, a cell of it changed, or the buffer's last sprites covered it: one HOG pass per plane and line (16
   words, FXSR and the skew for the scroll: 132 bus cycles, the addresses running on to the next plane); a row only
   the sprites covered only over their 16-pixel groups.
-* **Sprites**: baked on first use per (code, colour, flips) into a cache slot (the opaque rows grouped by mask, their
-  masks, the plane words in that order, the same aligned).  The generated path (`tools/assets.py` sprite_programs,
-  `engine/sprite_programs.py`, as Time Pilot's and Pooyan's): a shape is (transparency class, code, flips): 5 classes
-  over the 16 colours (a pen is transparent where the colour's lookup entry is 0); code for the coverage's 414 shapes
-  (3,774 routines, 274 KB of end mask streams), per shift and clip case one- or two-word passes as stefastbobs2
-  chooses them; others and 64 KB crossings the row path (a row one HOG pass, OP 3 with the opaque pixels as end masks;
-  docs/sprite-preparation.md).  The rows' order is computed where a sprite is baked (no table).  Clipped at the group-aligned edges (screen x 32 and 288: the inner word only), whole into 16 guard lines above and
-  below (cleared before the buffer's next picture).
+* **Sprites**: baked on first use per (code, colour, flips) into a cache slot; generated code (`tools/assets.py`
+  sprite_programs, `engine/sprite_programs.py`) for the coverage's 414 shapes (3,774 routines, 274 KB of end mask
+  streams), the row path for the others and 64 KB crossings: the method, the shapes and the measurement are in
+  [sprite-preparation.md](../../docs/sprite-preparation.md).  Clipped at the group-aligned edges (screen x 32 and 288),
+  whole into 16 guard lines above and below (cleared before the buffer's next picture).
 
 ## Sound
 
@@ -178,9 +177,11 @@ s, the DAC alone).
   of the played parts 94-1,700 Hz.
 * **Cost**: Musashi, the logic with the sound / without (`logic_test.py`, 3,000 frames): seed 1 35.0k / 19.7k cycles an
   arcade frame, seed 6 42.2k / 31.9k (20,000 frames of seed 6: 50.4k / 37.5k).  Hatari (`tools/bench.sh 6000`, above):
-  the logic keeps its 95%, the pictures 44.0 -> **40.8** a second (median 49 -> 47.5, 10th percentile 30 -> 22).
-  The program grows from 331,595 to 1,198,772 bytes (the samples 451 KB, the driver's dispatch table 256 KB, its
-  64 KB block): 2,058,348 bytes to load (MAX_LOAD 3,700,000); packed with LZ4 366 KB: it still fits a floppy.
+  the logic keeps its 95%, the pictures 44.0 -> **41.9** a second (median 49 -> 47.5, 10th percentile 30 -> 23; 40.8
+  and 22 before the generated sprite code).
+  When the sound was added (2026-10-29) the program grew from 331,595 to 1,198,772 bytes (the samples 451 KB, the
+  driver's dispatch table 256 KB, its 64 KB block): 2,058,348 bytes to load, packed with LZ4 366 KB.  With the
+  generated sprite code (the 0.7 release, 2026-11-02): 3,225,196 bytes to load (MAX_LOAD 3,700,000), a 720 KB floppy.
 * Not done: the DAC's pulses outside the tunes (effect $0D's envelope, $400B: a pulse of a decaying level every 7
   ticks, ~125 Hz; 1,000-1,400 pulses in a 20,000-frame game seed): the single DMA stream plays phrases and tunes,
   pulses would need a mixing ring as Kung-Fu Master's voices; the relative levels of the YM and the DMA are a guess;

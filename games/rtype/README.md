@@ -1,7 +1,12 @@
 # R-Type (Irem, 1987)
 
-2026-10-19: the shared M72 renderer uses cheaper contribution-bitmap rotations and reuses its access-count
-table in transfer fallback paths. This also serves Mr. HELI. See [measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+**Current state (2026-11-07):** logic exact through all eight stages; the stage renderer (`src/stage.s`), sprites
+restored by contour.  Hatari 14 MB (`tools/bench.sh` REPLAY FAST, `-D INVULN -D DEBUG`): stage 2 34.5 arcade frames/s,
+18.4 pictures/s; stage 7 27.0 / 17.3.  No sound; not released (14 MB development target, `tools/release.py` NOT_RELEASED).
+
+Legacy renderer (`--legacy-renderer`), 2026-10-19: the shared M72 renderer uses cheaper contribution-bitmap rotations
+and reuses its access-count table in transfer fallback paths (also Mr. HELI's). See
+[measurements](../../docs/virtual-scroll-performance.md#implementation-results).
 
 ![R-Type on the STE (Hatari)](docs/screenshot.png)
 
@@ -15,12 +20,13 @@ is fitted. Restrained checker pairs are baked in source coordinates, including c
 pieces; the pattern moves with each asset. The HUD stays flat and changing pens keep their reserved indices.
 The ordinary build selects this renderer and regenerates palettes and sprite colours when their inputs change.
 `--legacy-renderer` builds the older shared M72 path. See [colour validation](docs/palette-results.md) and the
-[cross-port audit](../../docs/palette-audit.md).
+[colour guide](../../docs/colours.md).
 
 **Memory: development targets a 14 MB ST RAM system** (the user, 2026-10-31; `tools/bench.sh` runs Hatari with
 `--memsize 14`).  R-Type alone may use it, for speed (e.g. sprites coloured at build time instead of at run time).
 A 4 MB STE is not a target for now; how to fit the game back into 4 MB (per-stage loading, packing) is decided later.
-`tools/release.py` lets RTYPE.PRG pass the load limit with a warning (`OVER_LOAD`).
+`tools/release.py` leaves R-Type out of releases (`NOT_RELEASED`; it was in `OVER_LOAD`, passed with a warning,
+until 0.6).
 
 **Guard rows are never erased** (the user, 2026-10-31): the stage renderer (`src/stage.s`) draws sprites whole into
 the 64 guard lines above and below the picture but erases only the visible lines 0-255; the display never shows the
@@ -124,6 +130,12 @@ The goal (the user): a steady 25 pictures a second at the arcade's full speed (5
 schedule).  The rule: keep the gameplay, drop what only costs work (effects, parallax, colour cycling); the logic stays
 exact.  Development targets the 14 MB machine.
 
+Superseded (2026-11-03): the Hatari figures of 2026-10-31 to 11-02 in this section (the tables and "Game speed
+first") were taken before the sprite DMA
+fix, when pictures could be drawn with an old object list; the corrected figures of every stage are in
+[docs/sprite-dma-results.md](docs/sprite-dma-results.md), "Uninstrumented corrected timing", the latest in "Current
+state" above.  The tables are kept as history.
+
 Measured 2026-10-31 / 11-01 (Hatari, `tools/bench.sh` REPLAY=seed:start:end FAST=true, recorded play; the stage
 renderer `src/stage.s`):
 
@@ -205,7 +217,8 @@ against the model (`tools/stage_test.py build/rtype/stage_states_*.pkl --quiet -
 apart.  For an instruction-level comparison (`logic_test.py --steplock F`) build with `NO_NATIVES=1 NO_INLINE=1`
 (natives and inlined calls skip the labels the interpreter stops at).
 
-Memory: with every stage's sprites pre-coloured (1112 definitions, 3437 colourings) RTYPE.PRG is 5.9 MB - fine on
+Memory: with every stage's sprites pre-coloured (1112 definitions, 3437 colourings) RTYPE.PRG is 5.9 MB (6.1 MB with the 2026-11-05 colours, [docs/palette-results.md](docs/palette-results.md); TOS
+load with BSS 13.8 MB) - fine on
 the 14 MB machine, far over the 3.7 MB release limit (per-stage loading or packing, decided later).
 
 Renderer experiments, 2026-11-01: damage coalescing saved only 0.6% over the full stage-5 recording and did not improve
@@ -319,16 +332,22 @@ The port keeps the main CPU's sound commands in a ring (`src/core.s`).  The plan
   (`mov word ptr [bp+0h], imm`), code after RETs that nothing refers to.
 * **Schedule** (`src/rtype.s`, `src/core.s`): an arcade frame is the VBL interrupt's handler (the game's logic, at the
   main loop's idle point 0040:00D0) and then the raster interrupt's (the status bar's scroll), each to the idle point
-  again (`tools/machine.py` RType.run_frame_port is the same in Python).  The VBL counts 11 arcade frames per 10 fields;
-  the main loop runs one arcade frame per count and a picture after every second arcade frame (`PIC_EVERY`, or when no
-  frame is waiting); more than 3 frames behind are dropped.
-* **Picture** (`src/video.s`): the translated stores into the video RAMs and palettes mark their 256-byte blocks
-  (`tools/gen.py` store_marks; logic_test checks that every changed block is marked); before each picture the marked
-  blocks are copied to the renderer's video state in the V30's byte order, the sprite list after each DMA, and the
-  bands from the scroll registers before and after the raster interrupt.  The renderer: `engine/rt/m72render.s`
-  (its header; `tools/render_test.py`, `tools/sprite_test.py`).
+  again (`tools/machine.py` RType.run_frame_port is the same in Python).  The VBL counts one arcade frame a field (50 Hz,
+  the game 9% slower than the arcade's 55.02 Hz; `-D TICK55`: 11 per 10 fields); the main loop runs one arcade frame
+  per count, a picture when the logic has caught up or at the latest after `PIC_EVERY` (8) arcade frames, and in heavy
+  scenes when one more frame would let the picture end later than `PIC_VBLS` (3) fields after the last (pic_due, Timer D
+  estimates); more than `MAX_BEHIND` (12) frames behind are dropped.
+* **Picture** (`src/stage.s`, its header): the stage renderer reads the program's state directly, no copies: the V30
+  image's palettes and video RAMs, the 64-byte blocks the translated stores marked (`tools/gen.py` MARKS / store_marks,
+  `v30_vmarks`; logic_test checks that every changed block is marked), the native emitters' object records, the scroll
+  registers before and after the raster interrupt.  Checked by `tools/stage_test.py` against `tools/stage_model.py`.
+  The legacy renderer (`--legacy-renderer`: `src/video.s` copying the marked blocks into `engine/rt/m72render.s`'s
+  video state; `tools/render_test.py`, `tools/sprite_test.py`) is the first renderer.
 
 ## Measurements
+
+Superseded: these are the first renderer's (`engine/rt/m72render.s`, PIC_EVERY 2, before the stage renderer and the
+natives); the current figures are in "Current state" and "Speed on the STE" above.
 
 68000 cycles per arcade frame of the translated logic (Musashi, `tools/logic_test.py`): play 92-125k, attract with the
 demo ~105k, heavy invulnerable play 150-176k; the picture 0.7-1.7M (the renderer's header).  Hatari (`tools/bench.sh`):
@@ -342,6 +361,16 @@ demo ~105k, heavy invulnerable play 150-176k; the picture 0.7-1.7M (the renderer
 Memory: text 233 KB (the translation), data 1.2 MB (the renderer's graphics 836 KB, the ROM 256 KB, the snapshot, the
 dispatcher's tables), BSS 2.2 MB (the V30 image's RAM and video part 640 KB, the IP table 256 KB, the renderer's layer
 images, buffers and caches 1.17 MB).
+
+## Documents (`docs/`)
+
+* [native-results.md](docs/native-results.md): native logic optimisations, 2026-11-03 - integrated.
+* [native-structure-results.md](docs/native-structure-results.md): native structural changes, 2026-11-04 - integrated.
+* [later-native-results.md](docs/later-native-results.md), [logic-level-results.md](docs/logic-level-results.md),
+  [route1-results.md](docs/route1-results.md), [prepared-layer-prototype.md](docs/prepared-layer-prototype.md),
+  [renderer-audit.md](docs/renderer-audit.md): measured dead ends, not integrated.
+* [palette-results.md](docs/palette-results.md): the default colours, 2026-11-05 - current.
+* [sprite-dma-results.md](docs/sprite-dma-results.md): the sprite DMA fix and the corrected timing, 2026-11-03 - current.
 
 ## Standard PPO exploration
 

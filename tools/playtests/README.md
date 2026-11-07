@@ -22,7 +22,7 @@ Positive `--extend` budgets continue assisted exploration and retain the added
 inputs/checkpoints. Donkey Kong's diagnostic capture schedule is retained in
 the manifest and must remain identical during replay. Inputs/assist commands,
 checkpoints, build identities, transition logs and private builds stay local;
-small reports and screenshots are kept in `docs/` and the game docs.
+small reports and screenshots are kept in the games' `docs/` folders.
 
 The original `$70F2`-only regression can be rerun with
 `stearcade_1942_regression.py SOURCE NEW_OUTPUT`. Current translation roots also

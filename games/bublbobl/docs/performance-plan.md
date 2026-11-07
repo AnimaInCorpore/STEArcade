@@ -1,4 +1,9 @@
-# Bubble Bobble: the next performance work
+# Bubble Bobble: the performance plan of 2026-10-11
+
+> Dated plan (investigation 2026-10-11, implemented 2026-10-12).  Its results and what was not done are in the
+> port's README, "Performance plan, implemented (2026-10-12)", and "Implementation status" at the end of this file;
+> the current speed is in the README, "Speed, measured right (2026-10-12)".  The figures here are Musashi estimates of
+> 2026-10-11; "the current" below means the tree of that day.
 
 Investigation: 2026-10-11, against the current working tree, including its existing
 whole-sprite and reordered-source changes. The recommendation is to keep the
@@ -44,6 +49,10 @@ Use the budget equation, rather than adding speedup percentages:
 `50 * logic_cycles_per_round + 25 * renderer_cycles_per_picture +
 50 * fixed_cycles_per_VBL <= 8,000,000`.
 
+The picture budgets in this file and the README differ because their assumptions do: ~102k above (96k logic, 13k
+fixed, no reserve), 120k in the target below (70k logic, 10k fixed, 12.5% reserve), ~125k in the README's result
+(the ~93k logic a round measured after the changes).
+
 A useful engineering target is 70k/120k/10k respectively: 7M cycles/s, with
 12.5% reserve. These are acceptance targets, not predicted gains. Fifty rounds/s
 is the port's current full pace; the arcade runs about 59.19 rounds/s. Busy play
@@ -52,7 +61,7 @@ more on the sub CPU. A representative-window result cannot establish steady 25 f
 
 ## Experiments that constrain the solution
 
-Temporary builds and patches are in `/tmp/bublbobl-solution-probe/`. Neither
+The temporary builds and patches were in `/tmp/bublbobl-solution-probe/` (not kept). Neither
 experiment was installed into the working renderer. They have no Hatari validation.
 
 The fixed-state comparison used `render_bench.py 900 40 1200 40 --step 2 --prof`

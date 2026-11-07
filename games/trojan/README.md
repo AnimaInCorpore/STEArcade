@@ -10,25 +10,30 @@ translated whole (bank-aware), the three tile layers, the 96 sprites and the tex
 effects and the music of the YM2203 pair on the YM2149.  4 MB STE, the borders open: all 240 lines.
 
 ```sh
-python games/trojan/tools/prepare.py        # verify assets/roms/trojanr.zip, unpack it, MAME's ROM folder
-python games/trojan/tools/build.py          # run/trojan/TROJAN.PRG (--sim: run/trojan_sim/ for the tests; --sound: record the driver again)
+python port.py prepare trojan               # verify assets/roms/trojanr.zip, unpack it, MAME's ROM folder (tools/prepare.py)
+python port.py cover trojan                 # coverage seeds 0-51 (ref/cover.py; docs/coverage.json is committed)
+python port.py build trojan                 # run/trojan/TROJAN.PRG (--sim: run/trojan_sim/ for the tests; --sound: record the driver again)
+python port.py test trojan                  # the simulator build, logic_test 3000 and 6000 --seed 5, render_test, sprite_test, native_test
+python port.py run trojan                   # Hatari (tools/hatari.sh)
+python port.py mame trojan                  # the reference board against MAME 0.289 (ref/mame_cmp_trojan.py, see "Reference")
+# single tests and tools with other arguments (no port.py form):
 python games/trojan/tools/logic_test.py 10000 --seed 4        # lock-step against the reference (seeds: ref/cover.py)
 python games/trojan/tools/render_test.py 4000 --seed 6 --first 1000 --every 5   # the pictures against the reference
 python games/trojan/tools/sprite_test.py    # sprites at every edge, 16 shifts, holes, a 64 KB crossing
+python games/trojan/tools/native_test.py    # the in-place rst helpers and the natives against the Z80
+python games/trojan/tools/profile.py 2000 2100 --seed 4      # where the cycles go (Musashi), cells / sprites / text a picture
 games/trojan/tools/bench.sh                 # Hatari (pinned F030Arcade build, its own instance): AUTOPLAY, logic and picture rates
 PLAY=1 games/trojan/tools/bench.sh          # the same with the recorded play (tools/play_search.py)
-python games/trojan/tools/profile.py 2000 2100 --seed 4      # where the cycles go (Musashi), cells / sprites / text a picture
-python games/trojan/tools/native_test.py    # the in-place rst helpers and the natives against the Z80
-python games/trojan/ref/mame_cmp_trojan.py  # the reference board against MAME 0.289 (see "Reference")
 ```
 
 Supply `assets/roms/trojanr.zip` (the old file names `tb01.bin`-`tb25.bin`, `mb7114e.1e`, `tbp24s10.7j`; checked
 against `docs/rom_manifest.json`).  Nothing ROM-derived is in git: the graphics, the program image, the sound data
-and the coverage pickles are made in `build/trojan/`.  `python port.py test trojan` runs the main tests;
-`tools/native_test.py` checks the natives (below).
+and the coverage pickles are made in `build/trojan/`.  `python port.py test trojan` runs the tests listed above,
+`tools/native_test.py` (the natives, below) among them.
 
 Controls: **5/6** coin, **1/2** start, **arrows** move, **Space/Ctrl** attack (button 1), **Alt** jump (button 2),
-**Esc** quits.  Joystick port 1 player 1 (fire attacks), port 0 player 2.  Jaguar pad / PowerPad: pad A player 1, pad
+**Esc** quits.  Joystick port 1 player 1 (fire attacks), port 0 player 2.  Jaguar pad / PowerPad
+([architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad
 B player 2, **A** attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2/5/6**, **\*** + **#** quit.
 
 ## The board
@@ -117,9 +122,9 @@ seed 1 73k, seeds 4-9 51k, 88k, 91k, 64k, 94k, 87k (the recorded play 65k).
 * **Colours**: one fixed 16-colour palette (`ref/palette_fit.py`: Oklab k-means over the attract mode and levels
   1-6, black for colour 0; mean error 4-5 of 255 a channel, level 5 12.2); every pen maps to its nearest colour; a
   16-pen set whose mapping changes gets a new epoch, the baked images keyed by it (fades re-bake).
-* **Sprite preparation** (stefastbobs2, `docs/sprite-preparation.md`): rows sorted by opaque mask, baked in that
-  order, END1 / END3 written only on a change, the source address running on.  Against the rows' own order
-  (`TR_SPRITE_PLAIN=1`): the sprite drawing 35.7k -> 34.3k CPU cycles a picture, the Blitter the same.  Kept.
+* **Sprite preparation** (stefastbobs2): rows sorted by opaque mask, END1 / END3 written only on a change, the source
+  address running on; -4% CPU against the rows' own order (`TR_SPRITE_PLAIN=1`), kept.  The details and the
+  measurement: [sprite-preparation.md "What the ports found"](../../docs/sprite-preparation.md#what-the-ports-found).
 * **HOG passes**: every pass is HOG and short (`blit_go` / `blit_go_lines` pieces of 4 lines when the destination is
   read, the bg2 plane passes 48 bus accesses).  Border events late in Hatari: 0 of 8000 VBLs.
 
@@ -136,7 +141,7 @@ Recorded per command on a model of the board (IRQs at lines 32, 96, 160, 224 of 
 channel ticks differ, the effects 5 of 32,000 chip-IRQs audibly (random commands), 0 in the game's own sequence.
 Played by `cs_tick` once an arcade frame.  The ADPCM voices (shouts, the MSM5205) are not played.
 
-## Speed (Hatari, pinned F030Arcade build, 8 MHz STE, 8000 VBLs)
+## Speed (2026-10-16; Hatari, pinned F030Arcade build, 8 MHz STE, 8000 VBLs)
 
 | | logic (arcade frames/s) | pictures/s |
 |---|---|---|
@@ -159,7 +164,7 @@ line addresses from tables -> 578k (467.7k CPU + 110.5k Blitter).  Seed 6 (level
 2000-2100: 765k -> 695k (a wrap of bg2_gen no longer flushes the caches: `bake` 27k -> 0).  Tried and dropped: clean images of the text's cells put
 back instead of drawn again (+5k: those cells are cheap).  Every Blitter pass HOG and at most 256 bus cycles
 (`BLIT_STATS=256`: 0 over); border events late in Hatari: 0 of 8000 VBLs.  Load size 2,779,608 bytes (text + data +
-BSS + 256; the limit 3,700,000).
+BSS + 256; under the load budget of [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).
 
 ## What is missing
 

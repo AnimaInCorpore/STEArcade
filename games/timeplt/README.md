@@ -1,12 +1,13 @@
 # Time Pilot (Konami, 1982) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded flat fit (one STE index per PROM pen). Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 ![Time Pilot on the STE (Hatari)](docs/screenshot.png)
 
 MAME set `timeplt`.  The main Z80 program (24 KB) is statically translated to 68000 code and checked against a
 reference board in lock-step; the picture is MAME's ROT90 picture, 224 x 256, centred in the 320-pixel screen with
-the top and bottom borders open.  Work in progress: no sound yet, one fitted 16-colour palette.  Started 2026-10-25
+the top and bottom borders open.  Work in progress: no sound yet; one 16-colour palette (the shared flat fit since
+2026-11-05, see the note above).  Started 2026-10-25
 from F030Arcade's Falcon port (`F030Arcade/games/timeplt`: its executed-pc roots, the cloud-reuse capture, the
 scanline-255 schedule).
 
@@ -60,13 +61,14 @@ lists.
 * **Picture**: exact in the shown colours: `tools/render_test.py`, 0 differences in 600 consecutive pictures of
   seed 1's play and in 3,000 of seed 8 (era 5); `tools/sprite_test.py`: 150 made-up pictures exact (both side edges at
   every shift, the generated and the row path, holes, flips, reused clouds, the score bands, 64 KB crossings, 60
-  pictures in a row).  Sprites clip at the picture's group-aligned left and right edges (AGENTS.md), whole into the
-  guard lines below.  `BLIT_STATS=256`: every pass HOG, the longest 256 bus cycles.
+  pictures in a row).  Sprites clip at the picture's group-aligned left and right edges
+  ([AGENTS.md](../../AGENTS.md)), whole into the guard lines below.  `BLIT_STATS=256`: every pass HOG, the longest 256 bus cycles.
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): attract, coin, start, play, deaths; no crash, no late border
   event.
-* **Colours**: the arcade shows 18-22 colours in an era (25 in all); one palette of black and 15 fitted in Oklab
-  (`tools/assets.py`): mean error 1.3 a channel, but pure green maps to yellow and red to orange.  Per-era palettes
-  are the next step.
+* **Colours**: the arcade shows 18-22 colours in an era (25 in all); one palette of black and 15 (`tools/assets.py`
+  `palette()`): since 2026-11-05 the shared flat fit (`engine/palette_native.py`, one STE index per PROM pen, coverage
+  seeds including 13; [colours](../../docs/colours.md)).  Superseded: the earlier Oklab fit (mean error 1.3 a channel,
+  pure green shown as yellow and red as orange).  Per-era palettes would be exact.
 * Not done: sound (the board's Z80 and two AY-3-8910s), the cocktail flip, Space Pilot (`spaceplt`, the bootleg: its
   own code ROMs, coverage and checks).
 
@@ -87,7 +89,7 @@ translated, not lock-step tested: `$2BD5`-`$2C70`, `$2DD2`, `$3C7F`, `$4597`, `$
 `$109F`-`$1195` run in MAME's schedule only.  18 sprite shapes (codes 62-63, 141-143, 184-191 flipped in y, 200-203,
 252) take the row path.
 
-
+## Speed (2026-10-25)
 
 `PLAY=1 tools/bench.sh 9000` (the recorded play, `tools/play_search.py`: 9,000 ticks, infinite lives from tick 840;
 DEBUG build, Hatari): **100% of the arcade's speed (59.9 frames a second); in play 32.5 pictures a second (median of
@@ -103,10 +105,12 @@ checksums folded into the random byte every frame (constant sums: `CK_*`), the t
 translated code is near its floor elsewhere (the collision loop's inner loop is ~80 cycles an iteration already).
 
 A picture in play (`tools/render_test.py --prof`, Musashi): ~73k CPU + ~30k Blitter bus cycles, from ~211k + 55k:
-* **Sprites** (docs/sprite-preparation.md): per shape (code x flips, the 358 the coverage saw) and shift, rows grouped
-  by mask, a pass type per row as stefastbobs2 chooses it (a 16-pixel row whose pixels stay in one destination word
-  after the shift is a one-word pass: the left word plain, the right word with FXSR; two words with NFSR otherwise),
-  and for the clipped side cases one word only.  Code per shape and pattern of types (4,085 routines shared by
+* **Sprites** ([sprite preparation](../../docs/sprite-preparation.md)): per shape (code x flips, the 358 the coverage
+  saw) and shift, rows grouped by mask, a pass type per row as stefastbobs2 chooses it (a 16-pixel row whose pixels
+  stay in one destination word after the shift is a one-word pass; two words with NFSR otherwise), and for the
+  clipped side cases one word only.  Since 2026-10-25 (73ff9b3) each row is baked aligned at the left of its source
+  word with its own skew, so a one-word pass in the right word needs no FXSR any more (it did before); only the left
+  clip of a straddling row keeps one.  Code per shape and pattern of types (4,085 routines shared by
   content), end masks from a stream (217 KB, shared by content); the Blitter state written only where it changes, the
   destination's low word stepped.  ~42 CPU cycles a row.  The per-sprite setup (`draw_one`, ~900 cycles) keeps the
   Blitter pointers in registers; damage is the drawn lines and words only.

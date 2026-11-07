@@ -25,7 +25,7 @@ so changed code/data sizes cannot change the frequency of 64 KB sprite crossings
 Those addresses are private simulator memory; they are not a proposed STE memory
 layout. Every prototype picture is compared to the same independent model.
 
-## 2. Restore overlapping damage once, omit transparent areas
+## 1. Restore overlapping damage once, omit transparent areas
 
 The table gives optimistic **transfer-only ceilings**, not measured speedups.
 Duplicated groups are repeated copies of the same address. Untouched groups are
@@ -96,7 +96,7 @@ rendered workload; the fixed-picture simulator comparisons above establish the
 actual renderer saving. Neither result justifies retaining this merge. Both
 Hatari runs report one startup border fallback and zero late border/palette events.
 
-## 3. Prepare/compile secondary-layer pieces
+## 2. Prepare/compile secondary-layer pieces
 
 Both experiments preserve the existing HOP 2 / OP 3 drawing and the pass order.
 They execute both halves of stage 3's hybrid: BG pieces over the FG buffer, then

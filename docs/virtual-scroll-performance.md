@@ -1,5 +1,9 @@
 # Virtual screen scrolling performance review — 2026-10-19
 
+A dated report. Its lasting rules (the 25-pictures-a-second budget, what to record per VBL) are in
+[speed.md](speed.md), with the current figures and techniques of every port; the figures below are those of
+2026-10-19 and later rounds, not the current state.
+
 Initial audit: source review and existing recorded measurements. Implementation and fresh
 measurements from the subsequent work are recorded below, under "Implementation results".
 Figures below come from each game's README and its profiling tools. They use different

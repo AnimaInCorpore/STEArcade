@@ -1,6 +1,6 @@
 # Commando (World) for Atari STE
 
-2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour rollout](../../docs/palette-defaults.md) for training, native checks and limits.
+2026-11-05: the ordinary build now uses the shared bounded fit with checker pairs baked in source coordinates. Text and HUD glyphs stay flat. Black stays slot zero; gameplay and graphics priorities are unchanged. See the [colour guide](../../docs/colours.md) for training, native checks and limits.
 
 2026-10-19: margin clears and larger damage restores use the shared full-word dispatcher.
 [Measurements](../../docs/virtual-scroll-performance.md#implementation-results) keep logic and drawing apart.
@@ -8,8 +8,8 @@
 ![Commando on the STE (Hatari)](docs/screenshot.png)
 
 The main Z80 program is statically translated to 68000 code and runs with keyboard
-and joystick input on an 8 MHz Atari STE with 4 MB of RAM and no accelerator. Graphics use a fixed
-16-colour Oklab palette. The sound effects and the music play on the STE's YM2149 (see "Sound effects" and "Music").
+and joystick input on an 8 MHz Atari STE with 4 MB of RAM and no accelerator. Graphics use one 16-colour
+palette from the shared fitter, with checker pairs (2026-11-05, above). The sound effects and the music play on the STE's YM2149 (see "Sound effects" and "Music").
 
     python3 port.py build commando
     python3 port.py run commando
@@ -21,7 +21,7 @@ Controls: **5** inserts a coin, **1** starts, **arrows** move, **Space/Ctrl** fi
 **Alt** throws a grenade, and **Esc** exits. Joystick port 1 also controls player 1.
 Wait for startup before inserting a coin. Player 2 uses joystick port 0; **6**
 inserts its coin and **2** starts a two-player game.
-Jaguar pad / PowerPad (STE enhanced ports, `docs/architecture.md` "Input"): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** grenade, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** grenade, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
 
 The Python reference has separate encrypted operand/data and decrypted opcode
 buses, including ordinary CB/ED prefixes and the data-bus indexed-CB tail. The
@@ -37,20 +37,64 @@ screens scrolled by the video address, following stedaimakaimura: buffer lines
 guard lines above and below for whole sprites) are contiguous wherever the
 window is, without a Timer B wrap (Timer A/B remove the borders). Only the tile
 rows that scroll into the 288-line band and tiles whose RAM changed (tile RAM
-compared with a copy as longs) are drawn, into every buffer; the twin period is
+compared with a copy as longs after a translated writer flagged it, see the
+speed history) are drawn, into every buffer; the twin period is
 320, not 288, because whole tiles at the band's edges overhang by up to 15 lines
 into unused slots. What sprites and characters covered in a buffer is a damage
 list of rectangles, copied back from the twin lines (short HOG Blitter bursts)
 the next time that buffer is drawn. There is no clean map and no per-frame
 background copy. Characters are a list of the visible, non-blank cells, rebuilt
 only when the character RAM changes, drawn with `movep.l` (a keep mask and the
-four plane bytes per row). Whole sprites draw into the guard lines and margin
-chunks using reordered source rows, shared mask groups and baked shift streams,
-with a full-address path for 64 KB crossings. A horizontal scroll that is not a
+four plane bytes per row; since 2026-11-01 only the rows the writers marked are
+compared). Sprites use reordered source rows, shared mask groups and baked shift
+streams, with a full-address path for 64 KB crossings; they draw whole into the
+guard lines at the top and bottom, and across the left or right edge only their
+inner word (since 2026-10-12, see "Sprites clipped at the left and right edges").
+Their damage is their opaque rows (since 2026-10-23). A horizontal scroll that is not a
 multiple of 16 (never seen in play) clears the margin chunks; a new horizontal
 scroll or a jump of more than 200 lines draws the band whole. Foreground
 transparency is pen 3; sprite transparency is pen 15. Flip-screen/cocktail mode is
 not exposed by the STE runtime; its default DIP setting is upright.
+
+Validation:
+
+* All 22 ROM files pass the checked-in MAME CRC32/SHA1 manifest.
+* The reference renderer and palette match actual MAME screenshots exactly at
+  frames 100, 700, 1500 and 2500.
+* Translation matches all work/video RAM, sprite latches and scroll/control
+  registers for 12,000 reference frames with attract mode, coin/start and play.
+* Edge checks pass at all four edges: whole sprites in the top and bottom guard
+  lines, the left and right edges clipped to the inner word with the side bands
+  unchanged (`render_test.py 4 edges`, `sprite_test.py`).
+* Consecutive rendered frames (incremental scrolling, damage restore, character
+  list) and scroll/wrap probes (full redraws) match reference pixels
+  exactly through the STE colour map.
+* 48,064 generated sprite/shift pairs pass the independent Blitter model.
+* The pinned Hatari build runs the port with 4 MB RAM through coin/start, movement,
+  fire, deaths and player restarts.
+* Shared Donkey Kong/Galaga sprite regressions pass after the FXSR model fix.
+* The music player matches its model tick for tick; the converted main theme matches MAME's audio in pitch and time
+  (see "Music").
+
+`docs/coverage.json` retains baseline instruction and sprite-latch coverage for
+reproducible clean builds. `port.py cover commando` expands it with seeded
+attract/play runs in `build/commando/`; it does not overwrite the baseline.
+Recursive discovery also translates unobserved branches. Unsupported speculative
+code entries remain explicit traps; any unsupported instruction actually seen
+by coverage stops the build. No unknown opcode becomes a silent NOP.
+
+`python3 port.py build commando --assets` regenerates the palette, pen planes, bake routines and sprite
+streams. The palette comes from the shared fitter (`engine/palette_native.py`, `engine/palette_quantize.py`; see
+[colours.md](../../docs/colours.md)); the sprite code from 1942's `spritegen.py`.
+`--sim` produces `run/commando_sim/COMMANDO.PRG`; `--debug` enables diagnostic
+files, `--frames N` exits after N VBLs, and `-D AUTOPLAY=1` supplies coin/start,
+movement and fire according to the arcade tick counter for Hatari checks.
+
+## Speed history (2026-10-08 and 2026-10-09)
+
+Superseded figures: the current state is "Full speed in play (2026-10-23)" and "R-Type's renderer ideas tried
+(2026-11-01)" below (100% and 27.0 pictures a second on the recorded play); the paragraphs here record how the
+renderer got there.
 
 Speed (2026-10-08): `tools/bench.sh` (DEBUG + AUTOPLAY build, 6000 VBLs in Hatari,
 boot included) measured 52.2 game ticks and 21.5 drawn frames a second (the
@@ -83,51 +127,19 @@ so compare runs of one build or use `perf_test.py`). A Hatari profile in play (V
 Z80 code at 31% of the CPU, the sprite pass (loop, generated routines, 64 KB
 parts) at 34%, the damage restore at 14% (nearly all of it Blitter time) and the
 characters at 8%. Damage cut to each shape's opaque rows and chunks saved as much
-Blitter time as the lookup cost the CPU, and was left out.
+Blitter time as the lookup cost the CPU, and was left out then.  Adopted on
+2026-10-23 with the sprite slots ("Full speed in play"): a slot keeps the shape's
+first opaque row and its count (`SL_FR`, `SL_LINES256`, from `spr_vrange`) and the
+damage's words and lines (`SL_DMG`: one chunk unshifted, two shifted), so the
+lookup is paid only when the slot's entry changes.
 
-2026-10-09, borders without waiting (`engine/rt/borders.s`, shared by the Blitter
-ports): a HOG blit holds the CPU and its interrupts, and the old guards made every
-blit near the VBL or a timer event wait. Now each event comes early and syncs itself
-to the video: Timer B fires 2 lines before its line (palette on, bottom border,
-palette off) and polls its counter down to that line's end; the bottom border event
-starts Timer A for the next frame's top border (a line-exact point, so a late VBL no
-longer moves it), which fires ~3 lines early and picks its HBL by reading Timer A.
-No blit waits; a restore rectangle longer than 32 words runs in pieces (`blit_go`).
-The palette switches are line-exact now. The DEBUG build counts events that started
+2026-10-09, borders without waiting: the old guards made every blit near the VBL or
+a timer event wait; since then the shared `engine/rt/borders.s` schedules each event
+early and syncs it to the video, and long restores run in short HOG pieces
+(`blit_go`), see [architecture.md "Border removal"](../../docs/architecture.md#border-removal).
+The palette switches are line-exact. The DEBUG build counts events that started
 too late; `bench.ps1` prints them (0 in 6000 VBLs) and 55.7 game ticks, 27.3 drawn
 frames a second.
-
-Validation:
-
-* All 22 ROM files pass the checked-in MAME CRC32/SHA1 manifest.
-* The reference renderer and palette match actual MAME screenshots exactly at
-  frames 100, 700, 1500 and 2500.
-* Translation matches all work/video RAM, sprite latches and scroll/control
-  registers for 12,000 reference frames with attract mode, coin/start and play.
-* Whole-sprite guard checks pass at all four edges, including every opaque
-  pixel outside the game window.
-* Consecutive rendered frames (incremental scrolling, damage restore, character
-  list) and scroll/wrap probes (full redraws) match reference pixels
-  exactly through the STE colour map.
-* 48,064 generated sprite/shift pairs pass the independent Blitter model.
-* The pinned Hatari build runs the port with 4 MB RAM through coin/start, movement,
-  fire, deaths and player restarts.
-* Shared Donkey Kong/Galaga sprite regressions pass after the FXSR model fix.
-* The music player matches its model tick for tick; the converted main theme matches MAME's audio in pitch and time
-  (see "Music").
-
-`docs/coverage.json` retains baseline instruction and sprite-latch coverage for
-reproducible clean builds. `port.py cover commando` expands it with seeded
-attract/play runs in `build/commando/`; it does not overwrite the baseline.
-Recursive discovery also translates unobserved branches. Unsupported speculative
-code entries remain explicit traps; any unsupported instruction actually seen
-by coverage stops the build. No unknown opcode becomes a silent NOP.
-
-`python3 port.py build commando --assets` regenerates the palette, pen planes, bake routines and sprite
-streams. The generator reuses the existing 1942 Oklab and sprite-code tools.
-`--sim` produces `run/commando_sim/COMMANDO.PRG`; `--debug` enables diagnostic
-files, `--frames N` exits after N VBLs, and `-D AUTOPLAY=1` supplies coin/start,
-movement and fire according to the arcade tick counter for Hatari checks.
 
 ## Full speed in play (2026-10-23)
 
@@ -341,18 +353,11 @@ in the band).  `render_test.py 4 edges` now expects the clipped left/right sprit
 `render_test.py 300 seq` and `20 scroll` exact; `logic_test.py 3000`, `reference_test.py`, `sfx_test.py 1000`,
 `music_test.py 20000` pass.
 
-## Memory (2026-10-15)
-
-3,990,068 bytes in 0.3 (4,047,656 with the music) -> 2,994,006, 1,040 KB left from the desktop (4,061,212 on a 4 MB STE
-with TOS 2.06; a tester's Mega STE with a hard disk driver and accessories had 3,831,554: TOS refused to start 0.3).
-The memory work of 2026-10-10 below was merged on 2026-10-15.  Musashi on the recorded play (`PLAY=1 perf_test.py 2000
-400 profile`): a frame 183,154 -> 168,224 cycles, the 99th percentile picture 618,048 -> 323,834, the bake 15,707 ->
-1,925 cycles a picture; the logic unchanged (40,676).
-
 ## Memory (2026-10-10)
 
 text + data + BSS = 2,944,160 bytes (`build/commando/commando.map`: text 85,264, data 2,072,588, BSS 786,308);
-it was 3,990,068, more than GEMDOS leaves on a real 4 MB STE with a hard disk driver and accessories.  The program
+it was 3,990,068, more than GEMDOS leaves on a real 4 MB STE with a hard disk driver and accessories (the merge and
+the release figures: "Memory (2026-10-15)" below).  The program
 does not Malloc (GEMDOS: Super, Fcreate / Fwrite / Fclose for the dumps, Pterm0); the screens are BSS.
 
 * **Dispatch table** (`gen.dispatch_table`): the same 256 KB long table in byte swapped pc order, built as data
@@ -385,6 +390,14 @@ Speed: `perf_test.py 2500 900` (play): logic 41,918 cycles a tick before and aft
 Musashi cycles (174.0k with the screens at the old 64 KB alignment: which sprites cross a 64 KB boundary and take
 `generic_part` depends on where the screens are); `render_test.py 20 scroll` median 1.71M -> 1.57M.  Hatari
 `bench.sh`: 55.8 -> 57.0 game ticks and 26.7 -> 26.9 drawn frames a second.
+
+## Memory (2026-10-15)
+
+3,990,068 bytes in 0.3 (4,047,656 with the music) -> 2,994,006, 1,040 KB left from the desktop; TOS refused to start
+0.3 on a tester's Mega STE (the load budget: [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).
+The memory work of 2026-10-10 above was merged on 2026-10-15.  Musashi on the recorded play (`PLAY=1 perf_test.py 2000
+400 profile`): a frame 183,154 -> 168,224 cycles, the 99th percentile picture 618,048 -> 323,834, the bake 15,707 ->
+1,925 cycles a picture; the logic unchanged (40,676).
 
 ## Standard PPO exploration
 

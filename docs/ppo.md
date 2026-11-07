@@ -90,8 +90,8 @@ of unrelated language models. No global cache, ROM archive, normal build or unre
 
 The retired Kev experiment's downloaded weights, checkout and unneeded MLX/language-model packages were removed.
 The dedicated PPO environment retains Torch, Gymnasium and Stable-Baselines3; its interpreter is `build/ppo-venv`.
-Small historical measurement reports remain available as evidence. Local adapter results are recorded in
-[ppo-rollout-results.json](ppo-rollout-results.json).
+Small historical measurement reports remain available as evidence. Local adapter results were recorded in
+`ppo-rollout-results.json`, which is not in the repository.
 
 ## Full-game claims and indirect tasks
 
@@ -111,8 +111,4 @@ picture inspection; that still does not check hardware scanout or border timing.
 
 ## Port completion claims
 
-For every port, automated exploration can attempt full progression after its
-adapter and native replay transport are verified. Success is not guaranteed by
-agent support. Use the shared [status and full-game verification policy](port-status.md)
-to distinguish natural completion, assisted coverage and incomplete verification;
-reserve green **Complete** for verified Hatari playability with graphics and sound.
+See the [status and full-game verification policy](port-status.md).

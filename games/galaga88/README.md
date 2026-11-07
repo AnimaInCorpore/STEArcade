@@ -77,11 +77,10 @@ the HUD (priority 6), fixed layer 5 the backdrop (opaque, priority 1); ~250 dist
   Sprites of a priority below layer 3 or 4 (the '88 emblem under the HUD layer) lose the pixels those layers cover;
   a hidden sprite pixel still takes the pixel from the entries the arcade draws after it (the emblem's dissolve), so
   with such a sprite on the picture the entries are painted in the arcade's order with a taken plane.
-* **Colours**: 15 + black per scene (as Splatterhouse: samples of the background, the stars and the sprites, weighted
-  by the root of their counts, a median cut and 3 rounds of k-means in Oklab); a pen's index is the nearest centre of
-  its colour when they were chosen; an index's STE colour is the current colour of a representative pen (fades and
-  colour cycling cost nothing).  Chosen again: a new scene (a new backdrop: layer 5's bank or 64+ of its tiles;
-  black until the palette rests 2 pictures), or every 16 pictures when the colours on the picture (126 background
+* **Colours**: 15 + black per scene, chosen as Splatterhouse's ([its Colours section](../splatter/README.md#colours):
+  pens to the nearest centre, representative pens, so fades and colour cycling cost nothing), with the stars sampled
+  too and 3 rounds of k-means; see also [docs/colours.md](../../docs/colours.md).  Chosen again: a new scene (a new
+  backdrop: layer 5's bank or 64+ of its tiles; black until the palette rests 2 pictures), or every 16 pictures when the colours on the picture (126 background
   cells, the sprites) fit clearly worse than right after the choice (the mean Oklab distance above 1.25 x + 3: the
   space station fading in after a choice).
 * Restores: the cells composed since (per 16-pixel group, or the whole picture by the Blitter after a full
@@ -94,23 +93,35 @@ picture, the reasons of the colour choices.  2026-10-13: play 1500 / 1500 and at
 version); the final one every 3rd state: play 500 / 500, attract 167 / 167 exact; colour error 0.028 (play) /
 0.032 (attract).
 
-Hatari (BENCH: arcade frames 600-1600 of the scripted game): 6.4 -> 10.6 arcade frames/s, 3.2 -> 5.3 pictures/s
-(a picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame (~130k cycles), the renderer the rest.  The
-BENCH game's states (`tools/states.py --bench`, `render_test.py --bench`): a picture 1.1M cycles on average (Musashi,
+Current figures: Hatari BENCH 12.14 arcade frames/s, 6.08 pictures/s (bank maps, measured as the `REN_BANKDIFF`
+prototype; not run again since they became the default on 2026-11-02); a picture 890k cycles on average on the BENCH
+states (2026-11-02, Musashi, CPU + Blitter), the stars 334k of it (37.5%); logic 100.7k cycles a frame (2026-11-02,
+seed 5).
+
+Hatari BENCH figures: build with `tools/build.py -D BENCH=1` (`bench_inputs` in galaga88.s: coin at arcade frame 60,
+start at 140, then right / left every 60 frames and fire every 20; the counters kept at frame 600, the program quits
+at 1600) and start `run/galaga88/GALAGA88.PRG` in the pinned Hatari (STE, 4 MB, `--cpu-exact`, fast-forward), as
+`games/splatter/tools/bench.sh` does; the port has no bench.sh of its own.  COUNTERS.BIN holds eight longs at the end
+and the same eight at frame 600 (VBLs, arcade frames, pictures, frames dropped, pictures skipped, colour choices, VBLs
+in the logic, VBLs in render_frame): arcade frames/s = 50 x frames / VBLs of the difference.
+
+2026-10-13 (superseded by the figures above): Hatari BENCH 6.4 -> 10.6 arcade frames/s, 3.2 -> 5.3 pictures/s (a
+picture every 2 arcade frames); the logic ~0.8 VBL an arcade frame (~130k cycles), the renderer the rest.  The BENCH
+game's states (`tools/states.py --bench`, `render_test.py --bench`): a picture 1.1M cycles on average then (Musashi,
 CPU), stars ~30% (the warps' streaks: ~1400 pixels a picture), the background's compositions (colour choices, layer
 3's bank cycling through all 8 banks every ~7 frames) ~25%, restores ~9%, sprites ~15%; a calm picture ~0.4M.
-Tried and dropped: star runs by the Blitter (`-D REN_STARBLIT=1`: most runs are 1-2 rows, a pass costs more than
-four bit operations).
+Tried and dropped: star runs by the Blitter (`-D REN_STARBLIT=1`; see [speed.md, Blitter
+costs](../../docs/speed.md#blitter-costs)).
 
 Measurement switches (2026-10-13, Hatari BENCH, arcade frames 600-1600, a picture every 2 frames):
 
 | build | arcade frames/s | pictures/s | render VBLs | colour choices |
 |---|---|---|---|---|
-| as shipped | 10.62 | 5.32 | 3882 | 10 |
+| baseline (as shipped 2026-10-13, before bank maps) | 10.62 | 5.32 | 3882 | 10 |
 | `-D REN_NOSTARS=1` (no star layers) | 16.10 | 8.06 | 2262 | 8 |
 | `-D REN_NOCYCLE=1` (layer 3 / 4 bank changes ignored, no re-choice for a worse fit) | 15.08 | 7.55 | 2499 | 3 |
 | both | 25.06 | 12.57 | 1176 | 3 |
-| bank maps (then `-D REN_BANKDIFF=1`, the default since 2026-11-02) | 12.14 | 6.08 | 3292 | 10 |
+| bank maps (then `-D REN_BANKDIFF=1`; the default since 2026-11-02: the current build) | 12.14 | 6.08 | 3292 | 10 |
 
 The logic stays ~810-840 VBLs in the baseline and the first three variants.  Both off, a picture is ~291k cycles in Musashi (BENCH states), sprites
 the largest part (draw 48k, conversion 40k, geometry 28k).
@@ -126,7 +137,8 @@ other cells keep their converted lines.  Exact (render_test --bench, --every 3, 
 2026-11-02 (with the NFSR fix, 769c6fb), `render_test.py --bench --play 300-1600 --attract "" --every 2`: 693M ->
 613M cycles (-11.5%), median 595k -> 569k a picture, 90% 2381k -> 1527k, big pictures 102 -> 59; exact (650 / 650),
 and the default test (`--every 3`: play 500 / 500, attract 167 / 167) and `--edges` (252) exact.  BENCH profile
-600-1600: 890k a picture (the audit's 1053k before), the stars 334k of it (37.5%).
+600-1600: 890k a picture (1053k before, in [the 2026-11-02
+audit](../../docs/speed.md#history-the-audit-of-2026-11-02)), the stars 334k of it (37.5%).
 
 The stefastbobs2 method (`docs/sprite-preparation.md`, `AGENTS.md`): prototyped as `-D REN_SB2=1` (plans per image
 and shift on first use: pieces ordered by their shifted masks, the reordered source, generated code); exact
