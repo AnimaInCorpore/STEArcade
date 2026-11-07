@@ -32,7 +32,7 @@ reference renderer and MAME.
 | <a href="games/1943/README.md"><img src="games/1943/docs/screenshot.png" width="160" alt="1943"></a> | [1943](games/1943/README.md) | Z80 + i8751 (firmware translated; sound CPU omitted) | ![Incomplete](docs/status/incomplete.svg)<br>Clipping and busy-scene speed limitations |
 | <a href="games/bublbobl/README.md"><img src="games/bublbobl/docs/screenshot.png" width="160" alt="Bubble Bobble"></a> | [Bubble Bobble](games/bublbobl/README.md) | 3 x Z80 + MC6801 (its own firmware, translated) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
 | <a href="games/rtype/README.md"><img src="games/rtype/docs/screenshot.png" width="160" alt="R-Type"></a> | [R-Type](games/rtype/README.md) | Irem M72: NEC V30 (translated) + Z80 (sound: not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented |
-| <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown |
+| <a href="games/ddragon/README.md"><img src="games/ddragon/docs/screenshot.png" width="160" alt="Double Dragon"></a> | [Double Dragon](games/ddragon/README.md) | HD6309 (6809 code, translated) + HD63701Y0 sprite MCU (native) + MC6809 sound (recorded; ADPCM on the DMA sound) | ![Incomplete](docs/status/incomplete.svg)<br>Significant gameplay slowdown (about 38% speed in play, 8.2 pictures a second over the recorded play); developed with 14 MB in Hatari, the release still fits 4 MB |
 | <a href="games/timeplt/README.md"><img src="games/timeplt/docs/screenshot.png" width="160" alt="Time Pilot"></a> | [Time Pilot](games/timeplt/README.md) | Z80 (translated) + Z80 sound (not yet) | ![Incomplete](docs/status/incomplete.svg)<br>Sound not implemented; full speed, 24-33 pictures a second in play |
 | <a href="games/trackfld/README.md"><img src="games/trackfld/docs/screenshot.png" width="160" alt="Track & Field"></a> | [Track & Field](games/trackfld/README.md) | KONAMI-1 (encrypted 6809, translated) + Z80 sound (translated; SN76489A on the YM, speech and tunes on the DMA) | ![Incomplete](docs/status/incomplete.svg)<br>Full speed, 20-50 pictures a second; no full-game verification yet |
 | <a href="games/hyperspt/README.md"><img src="games/hyperspt/docs/screenshot.png" width="160" alt="Hyper Sports"></a> | [Hyper Sports](games/hyperspt/README.md) | KONAMI-1 (encrypted 6809, translated) + Z80 sound (translated; SN76489A on the YM, speech and tunes on the DMA) | ![Incomplete](docs/status/incomplete.svg)<br>85% speed with sound, 26.9 pictures a second on average; no full-game verification yet |
@@ -40,7 +40,7 @@ reference renderer and MAME.
 |  | [Galaga '88](games/galaga88/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
 |  | [Mr. HELI no Daibouken](games/mrheli/README.md) | Irem M72: NEC V30 (translated) + i8751 (a native model) + Z80 (sound: not yet) | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>STE program on the shared M72 renderer: logic exact (lock-step to 40000 frames), about 2 pictures a second; R-Type's stage renderer and natives next |
 |  | [Pac-Mania](games/pacmania/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
-|  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>Early implementation / reference work |
+|  | [Dragon Spirit](games/dspirit/) | Namco System 1: 3 x MC6809 + HD63701 MCU | ![Experimental / deferred](docs/status/experimental-deferred.svg)<br>STE program: logic exact (lock-step, 7700 frames), 320-pixel renderer, 13% speed, 3 pictures a second; no sound; developed with 14 MB in Hatari |
 
 Port status (2026-11-07; based on the linked port reports; sorted by status):
 
@@ -57,7 +57,8 @@ what an automated player can attempt and what evidence establishes completion.
 
 `python port.py list` lists the ports supported by the common build, test, run and release commands. The table
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI
-has an STE program (its own build, lock-step and bench scripts) but is not registered yet; the remaining entries currently provide board/reference work. Use their local scripts;
+and Dragon Spirit have STE programs (their own build, lock-step and bench scripts) but are not registered yet; Pac-Mania
+provides board/reference work only. Use their local scripts;
 their presence in the table does not put them in the release. Input and release instructions below refer to
 registered ports. Current source capabilities and measurements may be newer than release 0.7.
 
@@ -74,7 +75,9 @@ R-Type © 1987 Irem; Kung-Fu Master © 1984 Irem; Trojan © 1986 Capcom; Double 
 [Release 0.7](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.7): `STEArcade-0.7.zip` with one
 self-contained TOS program per game (the arcade's code and graphics are built in: no separate ROM files are needed),
 bootable floppy images (`DISKS/`) for the games that fit on one and a README.TXT with the controls.  R-Type is not in
-it (it needs more than 4 MB while it is developed).  Requirements: an Atari STE with 4 MB.
+it (it needs more than 4 MB while it is developed).  Requirements: an Atari STE with 4 MB.  For development, Hatari
+runs R-Type, Double Dragon and Dragon Spirit with 14 MB (allowed by the author); a released program must still load
+on a 4 MB STE.
 
 The ROM sets are not part of this repository.  To build from the sources, put the MAME archives listed in
 [`assets/roms/README.md`](assets/roms/README.md) into `assets/roms/` and follow the Quick start.
