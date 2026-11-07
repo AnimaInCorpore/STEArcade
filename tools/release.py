@@ -106,6 +106,10 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
+    ("rocnrope", "ROCNROPE.PRG", "Roc'n Rope (Konami 1983)",
+     "work in progress: the arcade's logic exact, the 224 x 256 picture in 16 colours; no sound yet",
+     "left / right / up / down: the arrows, joystick, pad.  Button 1 (Space, Z, fire, pad A / C), button 2\n"
+     "  (Control, X, pad B).  1/2 start, 5/6 coins."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
      "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
