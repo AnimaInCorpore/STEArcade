@@ -8,7 +8,8 @@ statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitm
 turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
 here both draw into the planar STE picture directly.  Status **Experimental**: logic and picture are exact against the
 reference, but the program runs at ~58% speed and has **no sound**.  The sound board (a Z80 with an AY-3-8910, an i8039 with a
-DAC) is not done; the commands to it are collected (`snd_ring`) for later.
+DAC) is not done; the commands to it are collected (`snd_ring`) for later.  The driver's structure and the plan are in
+the session notes (tick = port A bit 5 edge, 14.4 a frame; Gyruss's `TickBoard` / `sndgen.py` / `sound.s` are the template).
 
 ## Build and run
 
