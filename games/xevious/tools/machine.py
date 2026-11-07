@@ -139,6 +139,7 @@ class Namco54MCU:
         self.cmd = 0
         self.held = True
         self.log = []
+        self.log_cmds = []
         self.out = []
 
     def write_o(self, v, mask):
@@ -153,6 +154,7 @@ class Namco54MCU:
 
     def write(self, v):
         self.log.append((self.m.frame, v))
+        self.log_cmds.append(v)
         self.cmd = v
 
 
@@ -201,6 +203,19 @@ def skip_ram_test(rom):
     rom = bytearray(rom)
     rom[0x15A:0x15F] = bytes([0x3E, 0x10, 0xC3, 0xB4, 0x01])
     rom[0x0FFF] = (rom[0x0FFF] + sum(orig[0:0x1000]) - sum(rom[0:0x1000])) & 0xFF   # block 0's checksum ($0240) stays 0
+    return bytes(rom)
+
+
+def ste_rom(rom, skip_tests=True):
+    """The main CPU's ROM as the STE runs it: the self-test skipped (skip_ram_test) and the boot's clear of the sound
+    registers ($6800-$681F: `ld (hl),b` at $0152) a no-op, because the STE keeps the DIP switch cells at $6800-$6807 (the
+    arcade's reads of the switches) and the sound registers (writes) in different places (the sound CPU's block).  Block
+    0's checksum stays 0 (its last byte compensates)."""
+    rom = bytearray(skip_ram_test(rom) if skip_tests else rom)
+    assert rom[0x152] == 0x70
+    before = sum(rom[0:0x1000])
+    rom[0x152] = 0x40                           # ld b,b
+    rom[0x0FFF] = (rom[0x0FFF] + before - sum(rom[0:0x1000])) & 0xFF
     return bytes(rom)
 
 
@@ -290,6 +305,7 @@ class Xevious:
         self.mcu_events = False               # port mode: the 51XX without a clock, run from wait point to wait point
         self.defer51 = None
         self.in_nmi06 = False
+        self.new_read = False
         self.handler_runs = [0, 0, 0]
         self.rnd_state = 0x1234
         self.stall = None                     # port mode: a CPU that ran away without reaching an idle loop or a yield
@@ -399,6 +415,8 @@ class Xevious:
                 elif chip.held:
                     chip.held = False
                     chip.reset()
+                    if chip is self.n51 and self.port_mode:
+                        self.run51()               # (the event-driven 51XX runs its boot to the main loop)
             if v and self.held[1]:
                 self.cpus[1].reset()
                 self.cpus[2].reset()
@@ -492,6 +510,8 @@ class Xevious:
         answers do not depend on the time)."""
         self.ctrl06 = v
         if self.in_nmi06:
+            if (v & 0xe0) and v & 0x10:
+                self.new_read = True              # a read started from inside the handler (the next queued transfer)
             return
         n51, n50 = self.n51, self.n50
         self.in_nmi06 = True
@@ -514,7 +534,8 @@ class Xevious:
             n50.mcu.set_irq(0)
             self.run51()
             self.run50()
-            first = False
+            first = self.new_read                 # (a control write that starts a read: MAME's read_stretch)
+            self.new_read = False
             k += 1
             if k > 64:
                 raise RuntimeError("06XX transfer does not end")

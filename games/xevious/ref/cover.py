@@ -3,7 +3,7 @@ sites of the I/O accesses and the 50XX's commands, in the STE schedule (run_fram
     python ref/cover.py <seed> <frames>  ->  build/xevious/xevious_cover_<seed>.pkl
 
 Seeds: 1-3 random play (1 player); 4-5 two players; 6 no coin (the whole attract mode); 7-9 more play with lives
-(DIP) variants; the later ones are added with what the first runs did not reach (README "Coverage").
+(DIP) variants; the 11-14 infinite lives (MAME's cheat), 60000 frames: the later areas.
 """
 import os, pickle, random, sys
 sys.path[:0] = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
@@ -16,6 +16,7 @@ rnd = random.Random(seed)
 m = Xevious(skip_tests=True)
 PLAYERS = 2 if seed in (4, 5) else 1
 NOCOIN = seed == 6
+INFINITE = seed >= 11                    # infinite lives: the later areas (random play dies in the first ones)
 if seed in (7, 8):
     m.dswa = 0xff & ~0x60 | (0x40 if seed == 7 else 0x00)      # 1 life / 5 lives
 if seed == 9:
@@ -23,7 +24,8 @@ if seed == 9:
 
 pcs = [set(), set(), set()]
 vwrites = [set(), set(), set()]       # the instructions that write the tile RAMs ($B000-$CFFF)
-sites = {"bb_read": [set(), set(), set()], "latch": [set(), set(), set()], "bs": [set(), set(), set()]}
+sites = {"bb_read": [set(), set(), set()], "latch": [set(), set(), set()], "bs": [set(), set(), set()],
+         "latch06": [set(), set(), set()]}
 cur = [0, 0, 0]
 orig = [c.step for c in m.cpus]
 for n in range(3):
@@ -37,6 +39,8 @@ for n in range(3):
             vwrites[n].add(cur[n])
         elif 0xd000 <= a < 0xd080:
             sites["latch"][n].add(cur[n])
+        elif 0x6820 <= a <= 0x6827:
+            sites["latch06"][n].add(cur[n])
         elif a >= 0xf000:
             sites["bs"][n].add(cur[n])
         return f(a, v)
@@ -61,6 +65,8 @@ t0 = 0
 for f in range(frames):
     m.in0 = m.in1 = 0xff
     m.dswb |= 1
+    if INFINITE:
+        m.mem[0x8183] = 9                                   # MAME's Infinite Lives cheat ($8183)
     if state == "attract" and f >= coin_at and not NOCOIN:
         state, t0 = "coin", f
     if state == "coin":
@@ -88,7 +94,7 @@ for f in range(frames):
     m.run_frame_port()
     if f % 2000 == 0:
         print(seed, "frame", f, state, "pcs", [len(p) for p in pcs], flush=True)
-pickle.dump({"pcs": pcs, "vwrites": vwrites, "sites": sites, "frames": frames, "seed": seed, "n50": m.n50.log[:200]},
+pickle.dump({"pcs": pcs, "vwrites": vwrites, "sites": sites, "frames": frames, "seed": seed, "n50": m.n50.log[:200], "n50_cmds": sorted({v for k, f, v in m.n50.log if k == "w"}), "n50_reads": sum(1 for e in m.n50.log if e[0] == "r"), "n54_cmds": sorted(set(m.n54.log_cmds))},
             open(build_dir("xevious") / ("xevious_cover_%d.pkl" % seed), "wb"))
 print("done", seed, [len(p) for p in pcs], "tile RAM writers", [len(w) for w in vwrites], "games", games,
       "bb read sites", [sorted(s) for s in sites["bb_read"]])
