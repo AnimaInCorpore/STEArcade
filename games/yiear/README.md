@@ -17,7 +17,7 @@ Speed: 96% of the arcade's rate (58.2 arcade frames a second), 34.2 pictures a s
 ## Build and run
 
 ```sh
-python port.py cover yiear                  # coverage: ref/cover.py seeds 1-11 (~4 min in parallel)
+python port.py cover yiear                  # coverage: ref/cover.py seeds 1-26 (~25 min in parallel)
 python port.py build yiear                  # -> run/yiear/YIEAR.PRG
 python port.py test yiear                   # lock-step (seeds 1, 3, 9), render (seeds 1, 2), sprite edges
 python port.py run yiear shot@30            # Hatari (F030Arcade build), screenshot at 30 s
@@ -64,9 +64,17 @@ the third button, **Option** coin, **Pause** start.  DIP switches: MAME's defaul
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, 2,500 and 3,000 VBLs of the AUTOPLAY script: coin, start, moves and
   kicks): attract, the "next opponent" screen, the fight with Buchu, game over; no crash, late border events 0,
   border fallbacks 2.
-* Not done, most important first: a full-game playthrough (the coverage's random play reaches the first opponents
-  only: the later ones, the high-score entry and the bonus stages are translated from the program but not exercised);
-  the cocktail flip (control bit 0: the reference stops at it); the VLM's real time (below); the service mode's screens
+* **Later opponents** (2026-11-07): MAME's cheats (`yiear.xml`: lives $5430, the stage word $5431/$5432, the
+  opponent's energy $508A, the player's $508C) drive `ref/cover.py` seeds 12-26 through all eleven stages and their
+  repeats (a stage finished every 500 / 900 frames, 30,000 frames each): the translation grew from 7,751 to 8,656
+  instructions.  Lock-step 20,000 frames each on seeds 1, 3, 9, 14, 19, 21, 22, 24, 26 and 30,000 on seed 23 (186
+  VLM phrases started and followed on the DMA), pictures exact on seeds 17, 20, 23, 24 (every 7th-9th frame).  Hatari
+  (`hatari.ps1 ... -Extra -D AUTOPLAY=1 -D STAGE=n -D STAGEBCD=n -D FINISH=1`, the same cheats in the VBL): 9,000 VBLs
+  from stage 1 through Buchu, Star, Nuncha, Pole, Feedle, Chain, Club, Fan, Sword to the second background, and 12,000
+  from stage 7 through Tonfun and Blues into the next round; 59 arcade frames a second, 34-36 pictures; no crash, no
+  `z80_badpc`.
+* Not done, most important first: a full-game playthrough without cheats (nothing here was played to the end; the
+  high-score name entry and round 99 are not reached by any seed, the cheats do not make a high score); the cocktail flip (control bit 0: the reference stops at it); the VLM's real time (below); the service mode's screens
   are covered by one seed only.
 
 ## How it works
@@ -127,7 +135,7 @@ reference's BSY and the runtime's are the same function of the frame count.
 * **Rows**: a tile row is copied from the playfield into a buffer only when a cell of it changed, the buffer never held
   it, or the buffer's last sprites covered it (only their 16-pixel groups then): one HOG pass per plane and line.
 * **Sprites**: baked on first use per (code, flips) into a cache slot; generated code (`tools/assets.py`) for the
-  coverage's 402 shapes (5,357 routines, 507 KB of end mask streams), the row path for the others and 64 KB crossings
+  coverage's 488 most drawn shapes (99% of the draws; ~6,800 routines, 640 KB of end mask streams), the row path for the others and 64 KB crossings
   ([sprite-preparation.md](../../docs/sprite-preparation.md)).  The first 19 entries are drawn a line lower (MAME's
   `sy++`).  Clipped at the group-aligned edges (screen x 32 and 288; x is a byte, so only the right edge is crossed),
   whole into 16 guard lines above and below.
@@ -186,13 +194,24 @@ Techniques other ports use that may apply:
 * **A spin on the VLM's BSY**: the NMI handler waits at $C8C5 until BSY is low before it starts a phrase; with a
   frame-counted BSY that loop never ends.  The cause was a missing rule: RST rising while BSY resets the chip, so BSY is
   already low there.
+* **A page-crossing fall-through lost the flags** (lock-step seed 23, frame 13,728): `engine/m6809x.py` ends an
+  instruction at an 8 KB page boundary with `move.w #pc,d7` / `jmp main_dispatch`, and the `move` changes the 68000
+  flags that the dispatcher saves as the 6809's: Yie Ar's `CMPU #$5110` at $BFFF lost its Z before `BEQ` at $C003, one
+  object not compacted, 17 RAM bytes different 13,000 frames into a game.  `gen.py keep_flags_at_dispatch` keeps them
+  (2 sites here); the engine has the same flaw, other ports with an instruction across a page boundary may have it
+  (not changed here).  Seeds that only reach the first stages never executed it.
+* **Cheats must not fight the game**: MAME's infinite energy writes $508C only every 300 frames; set every frame it kept
+  Buchu's round from ever ending.  An instruction-level trace (`TRACE=<frame> logic_test.py`) compares the reference's
+  registers with the translation's at each instruction label (NOPs share an address: one false alarm).
+* **Sprite shapes grow with the stages**: 402 shapes for the first stages, 886 with all of them (3.9 MB program);
+  `assets.py SHARE = 0.99` keeps 488 (99% of the draws; the rest take the row path), 2.3 MB.
 * **The self-test is the DIP switches' too**: the RAM it leaves depends on the DIP switches, so a build with others
   needs its own image.
 * **Windows**: a scratch script named `dis.py` shadows the standard library's (it broke `import inspect` inside numpy).
 
 ## Verification
 
-No playtest beyond the AUTOPLAY script in Hatari (coin, start, moves and kicks: the first opponent, a game over) and the
-lock-step seeds' random play; the later opponents are not reached by either.
+No playtest beyond the AUTOPLAY script in Hatari (coin, start, moves and kicks: the first opponent, a game over) and the lock-step seeds' random play and cheats; the stills of the cheated runs show the stage backgrounds and the
+opponent screens of all stages as the reference draws them (some stills catch the arcade's own partial redraws).
 
 Full-game verification follows the [status policy](../../docs/port-status.md); nothing here claims a complete playthrough.

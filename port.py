@@ -92,8 +92,10 @@ TESTS = {
               ("tools/logic_test.py", ["{n}"], 3000),
               ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
               ("tools/logic_test.py", ["6000", "--seed", "9", "--quiet"], None),    # two players
+              ("tools/logic_test.py", ["16000", "--seed", "23", "--quiet"], None),  # stages finished in turn by cheat
               ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
               ("tools/render_test.py", ["3000", "--seed", "2", "--start", "100", "--every", "3"], None),
+              ("tools/render_test.py", ["9000", "--seed", "24", "--start", "100", "--every", "9"], None),   # later stages
               ("tools/sprite_test.py", [], None)],              # edges, 16 shifts, holes, guards, 64 KB crossings
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
