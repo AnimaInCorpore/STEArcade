@@ -662,8 +662,9 @@ class DigDug:
         self.frame += 1
 
     # ---- rendering -----------------------------------------------------
-    def render_raw(self):
-        """288 x 224 (y, x) bitmap of palette indices 0-31 (digdug_v.cpp)."""
+    def render_raw(self, wrap=True):
+        """288 x 224 (y, x) bitmap of palette indices 0-31 (digdug_v.cpp).  wrap=False: without the copies of the
+        sprites 256 pixels to the right (MAME draws them; the STE's renderer does not, tools/render_test.py)."""
         if self.gfx is None:
             self.gfx = Gfx()
         g = self.gfx
@@ -713,7 +714,7 @@ class DigDug:
                     tile = g.sprites[code]
                     if flipx: tile = tile[:, ::-1]
                     if flipy: tile = tile[::-1, :]
-                    for px0 in ((sx + 16 * x) & 0xff, ((sx + 16 * x) & 0xff) + 0x100):
+                    for px0 in (((sx + 16 * x) & 0xff, ((sx + 16 * x) & 0xff) + 0x100) if wrap else ((sx + 16 * x) & 0xff,)):
                         py0 = sy + 16 * y
                         for yy in range(16):
                             ry = py0 + yy
