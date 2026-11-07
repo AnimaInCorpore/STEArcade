@@ -614,10 +614,18 @@ main_io_w:
 	move.b	d0,jb_rst
 	tst.b	d0
 	bne.s	.rrise
-	move.b	jb_vlm_latch,d1		; RST falling: the data latch's speed parameter
+	move.b	jb_vlm_latch,d1		; RST falling: the data latch's parameter: the table's row = step * 8 + speed
+	move.b	d1,d2
 	lsr.b	#3,d1
 	and.b	#7,d1
-	move.b	d1,jb_speed
+	btst	#1,d2
+	beq.s	.s1
+	add.b	#16,d1			; (bit 1: 9600 bps, no interpolation)
+	bra.s	.s2
+.s1:	btst	#0,d2
+	beq.s	.s2
+	add.b	#8,d1			; (bit 0: 4800 bps)
+.s2:	move.b	d1,jb_speed
 	bra.s	.pdone
 .rrise:	tst.b	jb_bsy			; RST rising on a busy chip: reset
 	beq.s	.pdone

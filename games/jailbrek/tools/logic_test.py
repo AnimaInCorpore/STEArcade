@@ -81,6 +81,8 @@ def main():
         ctrl = list(mem.r_block(sym['jb_ctrl'], 8))
         if ctrl != m.ctrl:
             raise RuntimeError('frame %d: ctrl %s, reference %s' % (f, ctrl, m.ctrl))
+        if mem.r16(sym['jb_bsy_left']) != m.bsy_left:
+            raise RuntimeError('frame %d: BSY count %d, reference %d' % (f, mem.r16(sym['jb_bsy_left']), m.bsy_left))
         if mem.r8(sym['jb_bsy']) != m.bsy:
             raise RuntimeError('frame %d: BSY %d, reference %d' % (f, mem.r8(sym['jb_bsy']), m.bsy))
 

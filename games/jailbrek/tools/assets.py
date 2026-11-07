@@ -139,12 +139,12 @@ def build():
     lines += ['jb_tpen:']
     lines += ['\tdc.b ' + ','.join(str(x) for x in tpen[i:i + 16]) for i in range(0, 256, 16)]
     lines += ['\teven']
-    # the speech chip's BSY pin in NMIs (machine.vlm_nmis): per speed parameter (RST's latch bits 3-5) and per data
-    # latch value the NMIs a phrase runs
+    # the speech chip's BSY pin in NMIs (machine.vlm_nmis): per parameter (RST's latch: the bit rate step 0-2 = bits 0-1,
+    # 4 (2400 bps) / 2 / 1 interpolators, times 8 + the speed, bits 3-5) and per data latch value the NMIs a phrase runs
     rom = load('507l01.8c')[:0x2000]
     lines += ['jb_vlm_ticks:']
-    for sp_i in range(8):
-        t = [vlm_nmis(rom, d, sp_i, 0) for d in range(256)]
+    for sp_i in range(24):
+        t = [vlm_nmis(rom, d, sp_i & 7, (0, 1, 2)[sp_i >> 3]) for d in range(256)]
         lines += ['	dc.w ' + ','.join(str(x) for x in t[i:i + 16]) for i in range(0, 256, 16)]
     progs, stream = sprite_programs(v)
     lines += progs

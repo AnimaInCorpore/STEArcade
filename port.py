@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "jailbrek": "JAILBREK.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -53,6 +53,7 @@ COVER = {
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
+    "jailbrek": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles
     "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
     "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
@@ -131,6 +132,13 @@ TESTS = {
                  ("tools/render_test.py", ["3000", "--seed", "5", "--start", "500", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
                  ("tools/native_test.py", ["2000"], None)],       # src/natives.s against the 6809 (edge cases too)
+    "jailbrek": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["20000", "--seed", "3"], None),   # play, lives and weapons cheats
+                 ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # the other DIP switches, two players
+                 ("tools/render_test.py", ["3000", "--seed", "3", "--start", "700", "--every", "3"], None),
+                 ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, guards, 64 KB crossings
     "trackfld": [("tools/prepare.py", [], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
