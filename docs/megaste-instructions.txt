@@ -1,0 +1,233 @@
+DARKLORD'S MEGA STE DIAGNOSTIC - VERSION 4
+========================================
+
+PURPOSE
+-------
+Find differences between a real Mega STE and the pinned Hatari emulator,
+especially at 16 MHz with cache ON. Check sprite pixels AND positions,
+Blitter setup timing, screen opening and open borders.
+
+The .TOS files launch in console mode, keeping the GEM mouse pointer hidden.
+
+The main test runs AUTOMATICALLY. No key presses are needed to advance it.
+Keyboard, mouse and joystick checks are optional. Untouched controls are
+reported as NOT EXERCISED, rather than failed.
+
+
+1. BEFORE STARTING
+------------------
+  [ ] Use a colour display and 4 MB of RAM.
+  [ ] Extract the WHOLE archive into a NEW, writable hard-disk folder.
+  [ ] Keep the REF folder with the other files.
+  [ ] Leave the normal disk driver, AUTO programs and accessories enabled
+      for the first run. We want to test the setup that showed the problem.
+  [ ] Close other applications. Set the audio to a comfortable level if you
+      want to listen to the optional sound check.
+
+This package contains no game ROMs. Use a hard disk; the main program is
+larger than a standard floppy disk. If TOS reports insufficient memory,
+see section 6 below.
+
+
+2. START THE AUTOMATIC TEST
+---------------------------
+Double-click DLTEST.TOS. Allow several minutes for the complete run.
+A busy or motionless screen during an automatic test is normal.
+
+The program records its progress in DLTEST.TXT. It performs the following
+stages, then repeats them at each applicable CPU setting:
+
+  STAGE                  WHAT TO EXPECT
+  ---------------------  -----------------------------------------------
+  Machine information    TOS, machine type, memory and original settings.
+
+  TOS keyboard baseline  A 30-second text screen. No input is required.
+
+  CPU and private RAM    Arithmetic, modified instruction fetches,
+                         37 RAM patterns, byte lanes, transitions and
+                         long writes. Only its own 128 KiB is written.
+
+  File round-trip        A temporary 128 KiB file is written, closed,
+                         reopened, read, compared and deleted.
+                         An existing DLIO.TMP is NOT overwritten.
+
+  Bob setup timing       Two 65,536-pass kernel families, each with padding:
+                         0, 1, 2, 4 and 8 NOPs after the start write.
+                         Includes immediate destination-register RMW.
+                         No per-pass completion poll hides the fast path.
+
+  Blitter case matrix    All 16 shifts, holes, colour planes, clipped
+                         edges, forward/reverse increments, source and
+                         destination 64 KiB crossings. 1,308 cases in
+                         24 setup/address configurations per CPU mode.
+
+  Palette / 320x200      Palette register checks and perforated strips.
+
+  Input screen           The strip screen stays for 30 seconds.
+                         Optional physical controls are described below.
+
+  32 bob scenes          Original 32x32 shiny bobs move through known
+                         positions. Holes, overlaps, clipped side edges,
+                         top/bottom guards and two culled objects are
+                         checked against an independent CPU renderer.
+                         The final scene remains visible for 10 seconds.
+
+  Sound                  Short YM beep; then DMA sound on the LEFT,
+                         followed by a different tone on the RIGHT.
+                         No answer or key press is requested.
+
+  Open borders           A full 320x256 test image: top colour strip,
+                         centre cross, diagonals and thin edge markers.
+                         First idle, then under short-HOG Blitter load.
+                         Both phases advance automatically.
+
+CPU SETTINGS ON A MEGA STE:
+  Mode 0:   8 MHz, cache OFF   (baseline)
+  Mode 1:  16 MHz, cache OFF
+  Mode 2:  16 MHz, cache ON    (the target setting for the ports)
+
+An ordinary STE performs mode 0 only. Mega STE control registers are not
+accessed on an ordinary STE. The open-border test keeps the selected CPU
+mode; it does not silently drop to 8 MHz.
+
+Original CPU/cache, display, palette and interrupt settings are restored
+on normal exit. A hard hang or reset cannot run that cleanup.
+
+
+COUNTDOWN DISPLAY
+-----------------
+  7-0020s   Stage 7 has 20 ACTUAL seconds remaining.
+  5~0008s   Stage 5 has an ESTIMATED 8 seconds remaining.
+  5~----s   Collecting the first timing sample for an estimate.
+
+Stage IDs: 0 keyboard baseline, 1 CPU, 2 RAM, 3 file, 4 setup timing,
+5 Blitter matrix, 6 palette, 7 raw input, 8 bob scenes, 9 sound,
+A open borders, B final bob observation hold.
+
+Estimates can change as the test measures its throughput. Very short stages
+may finish between timer updates. Tight setup loops update the display only
+BETWEEN profiles, preserving the tested instructions. The countdown is
+removed from BMPs by restoring the ACTUAL saved pixels underneath it.
+
+
+3. OPTIONAL CONTROLS AND OBSERVATIONS
+------------------------------------
+You may leave the test entirely unattended.
+
+If you are watching, during the keyboard and patterned INPUT screens:
+
+  - Tap 5 (coin), 1 (start), all four arrows, Space and Control.
+  - Control alone is a modifier, so it is expected only in the raw-input
+    report, not as a TOS console character.
+  - Move the mouse and click both buttons.
+  - Move a normal joystick in port 1 in all directions and press fire.
+  - The eight bottom indicators latch for:
+       5 | 1 | Up | Down | Left | Right | Space | Control
+  - F10 snapshots the current input screen. Its disk write is deferred
+    until the timing-sensitive phase ends. Without F10, an automatic
+    snapshot is taken at the end instead.
+
+If the monitor shows missing lines, shifted planes, flicker, unstable
+borders or misplaced bobs, take a PHOTO or short VIDEO and note the mode.
+The top and bottom markers of the 256-line picture should be complete.
+
+IMPORTANT: BMPs capture the framebuffer, not the monitor's scanout. A
+video-timing or analogue display problem can leave a perfectly correct
+BMP. A photo is useful evidence in that case.
+
+No physical input means NOT EXERCISED, not failure. The program cannot
+judge sound quality or monitor stability automatically.
+
+
+4. RETURN THESE FILES
+---------------------
+When the program finishes and returns control to the desktop, zip the
+output folder. At minimum, return:
+
+  DLTEST.TXT       Detailed report, checkpoints and failure details.
+
+  INPT0.BMP        320x200 input screen,  8 MHz / cache off.
+  INPT1.BMP        320x200 input screen, 16 MHz / cache off.
+  INPT2.BMP        320x200 input screen, 16 MHz / cache on.
+
+  BOBS0.BMP        320x200 FIXED bob scene,  8 MHz / cache off.
+  BOBS1.BMP        320x200 FIXED bob scene, 16 MHz / cache off.
+  BOBS2.BMP        320x200 FIXED bob scene, 16 MHz / cache on.
+
+  OPEN0.BMP        320x256 open-border picture,  8 MHz / cache off.
+  OPEN1.BMP        320x256 open-border picture, 16 MHz / cache off.
+  OPEN2.BMP        320x256 open-border picture, 16 MHz / cache on.
+
+An ordinary STE creates only the files ending in 0. The files are standard
+uncompressed 4-bit Windows BMPs, including the palette. No Atari-specific
+image reader is required on a PC.
+
+Also include a short note:
+  - TOS version, RAM size, disk driver and hardware modifications;
+  - any screen or sound issue, and the affected CPU mode;
+  - whether the controls were exercised or the run was unattended;
+  - the game executable that originally failed, if it becomes known.
+
+
+5. IF IT STOPS OR FAILS
+-----------------------
+  1. Keep DLTEST.TXT, even if incomplete. The last BEGIN line identifies
+     the active stage and mode. Unexpected exceptions record native CPU
+     registers, vector, PC, stack and program load address.
+  2. Keep every BMP already saved and note the last visible screen.
+  3. If it is genuinely hung, reset if necessary.
+  4. Repeat from a CLEAN BOOT without AUTO applications or accessories.
+     Retain the disk driver needed to access the test folder.
+  5. Use a DIFFERENT folder. Return both runs labelled NORMAL SETUP and
+     CLEAN BOOT. Do not replace the first run's evidence.
+
+
+6. OPTIONAL SMALL HARDWARE REPORT
+---------------------------------
+MSTEDIAG.TOS is a separate, smaller companion. Use it if DLTEST cannot be
+started, or if we need more machine/pad information. It writes
+MSTEDIAG.TXT and displays live readings. Press a key to exit this companion.
+The MAIN DLTEST program needs no key presses.
+
+On a Mega STE, the pad probe should say the games IGNORE enhanced pads.
+Phantom raw pad readings are expected: a Mega STE has no enhanced joystick
+sockets. Return MSTEDIAG.TXT and any TOS launch error.
+
+
+7. REFERENCE COMPARISON (ON A PC / MAC)
+--------------------------------------
+REF contains independent CPU images, native BMPs from Hatari and
+monitor PNGs for the open-border stage. The fixed bob scenes use the same
+positions and priorities in every CPU mode.
+
+With Python and Pillow installed, run:
+
+  python3 COMPARE.PY RETURNED_FOLDER --reference REF
+
+This produces comparison/comparison.json and, when pixels differ,
+magenta difference PNGs. It reports changed pixel counts, the affected
+rectangle and the first differences. Missing or wrong-sized files are
+reported explicitly. Dynamic input screens are kept for inspection.
+
+BLITCASE.JSN describes each automatic fixture ID. SCENES.JSN lists the
+bob coordinates and priority order. BUILD.JSN and SHA256.TXT identify
+the exact source, program, reference files and verification runs.
+
+Passing this diagnostic narrows the problem. It does not certify the
+whole computer: only private RAM is tested, and the file round-trip is
+not a complete disk/ACSI test. Physical display and sound observations
+remain important.
+
+
+CACHE-ON BORDER CORRECTION IN VERSION 4
+---------------------------------------
+Version 3 exposed cropped scanout at 16 MHz/cache ON despite a correct BMP.
+Version 4 uses the corrected shared border handler. It keeps the processor
+at 16 MHz with cache ON and opens the full image in the pinned Hatari build,
+including under mixed short-HOG Blitter load. The reference monitor PNGs
+have been refreshed. The CPU/cache register is never written by the handler.
+
+The 16 MHz/cache-OFF path retains its earlier timing and can still show
+legacy missed-event counts. Version 4 specifically fixes cache-ON timing.
+We still need the returned report, BMPs and any monitor photographs to
+confirm the result on a physical Mega STE.
