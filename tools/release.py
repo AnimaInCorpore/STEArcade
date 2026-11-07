@@ -100,6 +100,13 @@ GAMES = [
      "  288 lines (the never or hardly drawn ones left out); the WSG's voices on the YM",
      "the arrows, the joystick or a pad move Pac-Man; no buttons.  One player at a time: both joysticks and both\n"
      "  pads move him."),
+    ("mikie", "MIKIE.PRG", "Mikie (Konami 1984)",
+     "work in progress: no sound yet; exact logic (lock-step) and picture (224 x 256, turned as the arcade's
+"
+     "  monitor), 16 fitted colours; speed measured in Hatari (see the game's README)",
+     "move: the arrows, the joystick or a pad; kick / hit: Space, Control, Z, joystick fire, pad A / C;
+"
+     "  second button: Alternate, X, pad B.  Coins 5 / 6, start 1 / 2."),
     ("trackfld", "TRACKFLD.PRG", "Track & Field (Konami 1983)",
      "work in progress: the arcade's full speed, 20-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
