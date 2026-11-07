@@ -257,3 +257,15 @@ unchanged. Galaga '88 (1,390 sprites of 32 x 32, pen 15 transparent, 35,143 row 
 `stage_sprites.pieces_dp` over `assets.turned()`, unweighted): overhead 32 cuts no row, overhead 8 -0.03%: nothing to
 gain. The gain in R-Type comes from runs wider than 32 pixels; Gauntlet's 32-pixel strips and Splatterhouse's rows
 (at most 32) are expected to behave like Galaga '88 and were not estimated.
+
+### R-Type stage renderer: contour restores, 2026-11-07
+
+stefastbobs2's contour clear (one pass a 16-pixel column, from its first to its last opaque line) as a copy from the
+clean buffer, prepared per whole sprite and shift at build time (`games/rtype/tools/stage_sprites.py` stk_*, shared by
+content: 7,779 for 1,106 sprites x 16 shifts) and run by `src/stage.s` st_crest in place of the damage rectangle.
+Exact on every recording. Musashi CPU + Blitter a picture -0.3% (stage 3: the warship) to -5.0% (stage 2, the most
+sprites); Hatari stage 2 33.1 -> 34.5 arcade frames/s, stage 7 26.7 -> 27.0. The words saved (15-24%) come from the
+corners of the composed sprites; a column's setup (source, destination, Y count) costs about what a rectangle's
+strip did, so the saving is almost all Blitter words. Skipping restores under the sprite's new position (exact
+movement) was estimated at 1.5-9% of the contour's words over three buffers' movement, below its bookkeeping; a halo
+of background colour does not apply over a drawn background. See `games/rtype/README.md`.

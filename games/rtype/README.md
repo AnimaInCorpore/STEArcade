@@ -212,6 +212,29 @@ Renderer experiments, 2026-11-01: damage coalescing saved only 0.6% over the ful
 Hatari's picture rate; unrolled secondary-layer loops were neutral and cached shifted masks slower. No runtime change
 kept. See [the audit, bounds and measurements](docs/renderer-audit.md), including sample windows in all eight stages.
 
+**Sprites restored by contour** (the user, 2026-11-07; stefastbobs2's contour clear as a copy).  In the FG mode a
+sprite's damage is its contour for its shift (`tools/stage_sprites.py` stk_*: per 16-pixel destination column its
+first opaque line and its lines; the record's 16 pointers at offset 88) instead of its rectangle: `src/stage.s`
+st_crest copies those columns from the clean buffer (4 words x 8 lines a pass), clipped to lines 0-255 when the sprite
+crosses the top or the bottom (bit 0 of the pointer).  The BG scroll mode and the squeezed scenes keep rectangles.
+`-D ST_RECTS` builds the old restore.  7,779 contours (shared by content).  `stage_test.py`: every recording whole
+(every 2nd frame, 14,150 pictures) and stages 1, 2, 7 at every frame and every 3rd: exact.  Musashi, frames 300-1500
+every 2nd, mean CPU + Blitter a picture, rectangles -> contours: stage 1 -1.2%, 2 -5.0%, 3 -0.3%, 4 -1.9%, 5 -1.9%, 6
+-2.0%, 7 -1.9%, 8 -1.5%.  Hatari (bench.sh REPLAY FAST, -D INVULN -D DEBUG): stage 2 (10 11000-13000) 33.1 -> 34.5
+arcade frames/s, 18.0 -> 18.4 pictures/s, erase words -24%; stage 7 (10 64500-67500) 26.7 -> 27.0, 17.2 -> 17.3, -15%.
+Restoring only what the sprite's new position leaves uncovered was estimated first (1.5-9% of the contour's words,
+the same slot's sprite 6 frames later): not tried.
+
+Stage 3's warship over black, erased by being drawn over (the user, 2026-11-07; not kept).  The rows of the warship
+over no walls are erased by clearing their old rectangles (st_sync); the ship moves slowly against the walls (BG x 1/4
+pixel a frame, y up to 1/4), so most of an old row lies under the new rows.  Upper bound (no clearing at all, pictures
+wrong): Musashi seed 1 frames 12900-13320 (every 2nd) mean 349.5k -> 330.6k cycles a picture (-5.4%), 12600-12900
+242.8k -> 237.4k (-2.2%).  Prototype (exact): each row's chunks opaque on all 8 lines recorded with its pieces, the
+clear only the runs of groups the new rows leave uncovered, per new-row line segment: 54% fewer words cleared, but
+349.5k -> 382.5k (+9%) and 242.8k -> 252.8k (+4%) - 24 segments and 40 runs a picture, each a CPU scan and a Blitter
+start, cost more than 1300 cleared words (~4 cycles each) save.  A black border baked into the graphics would need the
+same width as three pictures' movement (three buffers) and cost on every picture.  Patch kept outside the tree.
+
 Prepared secondary-layer prototype, 2026-11-02: native source packing, generated row routines and lazy masks for
 all 16 shifts, including preparation costs. Stage 3: 266,396 -> 268,203 cycles a picture (+0.68%) drawing every
 second arcade frame; 230,692 -> 229,140 (-0.67%) drawing consecutive frames. Both runs are exact; 113 focused

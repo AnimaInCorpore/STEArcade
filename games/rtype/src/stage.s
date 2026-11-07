@@ -16,7 +16,7 @@
 ; address and fine scroll, m72r_vbl), nothing is moved.  The clean buffer holds the composed map cells (composed
 ; when they come into the window or their tiles change: st_cells, tile conversions cached); each composition is
 ; logged (st_log) and copied into a display buffer before its next picture; a display buffer's sprites are erased
-; by copying their rectangles from the clean buffer.
+; by copying their contours (st_crest; the BG scroll mode, the squeezed scenes: their rectangles) from the clean buffer.
 ;
 ; Sprites: an object record (definition BW, entries, colour, x, y) -> its whole sprite (tools/stage_sprites.py:
 ; st_defs, per definition its strips: a shape of engine/sprite_programs.py's stream mode with long destinations, and
@@ -2553,7 +2553,9 @@ st_sync:
 	move.w	d0,BLT_END2.w
 	move.w	d0,BLT_END3.w
 	subq.w	#1,d7
-.cr:	tst.w	6(a2)
+.cr:	tst.b	4(a2)			; (a contour: never cleared)
+	beq.s	.cn
+	tst.w	6(a2)
 	beq.s	.cn
 	move.l	(a2),d6			; (the offset)
 	moveq	#0,d0
@@ -2622,8 +2624,14 @@ st_sync:
 	lea	st_lpp,a3
 	subq.w	#1,d7
 	bmi.s	.dx
-.d:	tst.w	6(a2)			; (cleared before the log)
+.d:	tst.b	4(a2)
+	beq.s	.dk
+	tst.w	6(a2)			; (cleared before the log)
 	beq.s	.dc
+	addq.l	#8,a2
+	dbf	d7,.d
+	rts
+.dk:	bsr	st_crest		; (a sprite's contour)
 	addq.l	#8,a2
 	dbf	d7,.d
 	rts
@@ -2695,6 +2703,79 @@ st_rect:
 	add.l	d2,d6
 	sub.w	d2,d0
 	bne.s	.s
+	rts
+
+; st_crest: a2 = a sprite's damage record (the FG mode: the offset of its top line and first group, 0, its contour |
+; 1 when clipped; tools/stage_sprites.py stk_*: count - 1, per destination group its offset, first line, lines):
+; per group the lines from its first to its last opaque line copied from the clean buffer (stefastbobs2's contour
+; clear as a copy; the user, 2026-11-07), the visible lines 0 .. ST_PL - 1 when clipped.  a3 st_lpp, a4 BLT_YC, a5,
+; a6 the buffers, d5 the start kept; scratch d0-d4, d6, a0, a1
+st_crest:
+	movem.l	d7/a2-a3,-(sp)
+	move.l	(a2)+,d6
+	move.l	(a2),d0
+	move.w	#4,BLT_XC.w
+	move.w	#ST_LB-6,BLT_SYI.w
+	move.w	#ST_LB-6,BLT_DYI.w
+	lea	(a5,d6.l),a1		; (the bases)
+	lea	(a6,d6.l),a3
+	moveq	#8,d3			; (lines a pass: 4 words, 32 a pass)
+	bclr	#0,d0
+	move.l	d0,a0
+	bne.s	.clp
+	move.w	(a0)+,d7
+.c:	move.l	(a0)+,d0
+	lea	(a1,d0.l),a2
+	move.l	a2,BLT_SRC.w
+	lea	(a3,d0.l),a2
+	move.l	a2,BLT_DST.w
+	addq.l	#2,a0
+	move.w	(a0)+,d1
+    ifd DEBUG
+	move.w	d1,d2
+	lsl.w	#2,d2
+	add.l	d2,st_nrectw
+    endc
+	ST_PASSES
+	dbf	d7,.c
+	movem.l	(sp)+,d7/a2-a3
+	rts
+.clp:	move.l	d6,d4			; (clipped: its top line T)
+	moveq	#9,d2
+	lsr.l	d2,d4
+	sub.w	#ST_G,d4
+	move.w	(a0)+,d7
+.k:	move.l	(a0)+,d0
+	move.w	(a0)+,d2		; the first line
+	move.w	(a0)+,d1
+	add.w	d4,d2			; (in the picture)
+	bpl.s	.k1
+	add.w	d2,d1			; (from line 0)
+	neg.w	d2
+	ext.l	d2
+	moveq	#9,d6
+	lsl.l	d6,d2
+	add.l	d2,d0
+	moveq	#0,d2
+.k1:	move.w	#ST_PL,d6
+	sub.w	d2,d6			; (lines left in the picture)
+	cmp.w	d6,d1
+	ble.s	.k2
+	move.w	d6,d1
+.k2:	tst.w	d1
+	ble.s	.kn
+	lea	(a1,d0.l),a2
+	move.l	a2,BLT_SRC.w
+	lea	(a3,d0.l),a2
+	move.l	a2,BLT_DST.w
+    ifd DEBUG
+	move.w	d1,d2
+	lsl.w	#2,d2
+	add.l	d2,st_nrectw
+    endc
+	ST_PASSES
+.kn:	dbf	d7,.k
+	movem.l	(sp)+,d7/a2-a3
 	rts
 
 ; st_copy: a0 source, a1 destination (the same layout: ST_LB a line), d0 words a line, d1 lines, d2 / d4 / d3 END1 /
@@ -2949,6 +3030,23 @@ st_obj2:
 	move.l	d0,d3			; visible lines (the guard rows are drawn into, never erased: never shown)
 	sub.l	st_dbuf,d3
 	move.l	d3,(a3)+
+    ifnd ST_RECTS
+	tst.b	st_bgon
+	bne.s	.rct
+	move.w	(sp),d3			; the FG mode: the shift's contour (byte 4 zero: st_crest), bit 0 when clipped
+	and.w	#15,d3
+	lsl.w	#2,d3
+	move.l	88(a4,d3.w),d3
+	move.w	2(sp),d6
+	bmi.s	.cc
+	add.w	4(a4),d6
+	cmp.w	#ST_PL,d6
+	ble.s	.cn
+.cc:	addq.l	#1,d3
+.cn:	move.l	d3,(a3)+
+	bra.s	.lnd
+.rct:
+    endc
 	move.w	(sp),d3
 	and.w	#15,d3
 	add.w	6(a4),d3
@@ -2978,7 +3076,7 @@ st_obj2:
 .top:	sub.w	2(sp),d3
 	move.b	d3,(a3)+
 .lns:	clr.w	(a3)+			; (no clear test here: measured twice, 2026-11-01 - the test and the exact black
-	move.l	a3,d6			; cells cost what clearing saves; st_object's sprites - the title - have it)
+.lnd:	move.l	a3,d6			; cells cost what clearing saves; st_object's sprites - the title - have it)
 	move.w	10(a0),d3		; (a 64 KB crossing: the long-destination code)
 	add.w	d0,d3
 	scs	d3
@@ -3348,7 +3446,7 @@ st_bake:
 	move.l	20(a2),a0		; its pens
 	move.l	a3,a1
 	move.w	10(a2),d5		; its groups
-	lea	88(a2),a4		; (class, rows, signed parity-bank delta per piece)
+	lea	88+64(a2),a4		; (class, rows, signed parity-bank delta per piece; after the 16 contours)
 	subq.w	#1,d5
 .grp:	move.b	(a4)+,d3		; the class
 	moveq	#0,d7

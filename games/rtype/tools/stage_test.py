@@ -282,6 +282,8 @@ def main():
               "max %d (frame %d)" % (
             len(tot), np.median(tot), tot[1:].mean() if len(tot) > 1 else tot.mean(), np.percentile(tot, 10),
             np.percentile(tot, 90), tot.max(), costs[int(tot.argmax())][0]))
+    if "st_nclrw" in h.sym:
+        print("BG rows cleared: %d words, rectangles copied: %d words" % (h.r32("st_nclrw"), h.r32("st_nrectw")))
     if "st_nclr" in h.sym:
         print("sprite rectangles cleared %d" % h.r32("st_nclr"))
     print("FAIL" if fails else "PASS")
