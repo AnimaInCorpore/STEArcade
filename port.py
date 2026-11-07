@@ -90,7 +90,9 @@ TESTS = {
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/logic_test.py", ["6000", "--seed", "5", "--quiet"], None),    # 256 lives
-                 ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet"], None)],   # two players
+                 ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet"], None),   # two players
+                 ("tools/render_test.py", ["3000", "--seed", "1", "--quiet"], None),
+                 ("tools/sprite_test.py", ["400"], None)],            # the fast blit against the reference blit
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),
