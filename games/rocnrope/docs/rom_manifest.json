@@ -1,0 +1,98 @@
+[
+ {
+  "name": "rr1.1h",
+  "size": 8192,
+  "crc32": "83093134",
+  "sha1": "c9509cfb9f9043cd6c226cc84dbc2e2b744488f6"
+ },
+ {
+  "name": "rr2.2h",
+  "size": 8192,
+  "crc32": "75af8697",
+  "sha1": "70bb4b838cdafedf3d94425fad84f77815898d83"
+ },
+ {
+  "name": "rr3.3h",
+  "size": 8192,
+  "crc32": "b21372b1",
+  "sha1": "c08ab3caaa646f4752f890d8339bce6b723864bb"
+ },
+ {
+  "name": "rr4.4h",
+  "size": 8192,
+  "crc32": "7acb2a05",
+  "sha1": "93762d1890f40abc98372a2aa9fe0f63252b6389"
+ },
+ {
+  "name": "rnr_h5.vid",
+  "size": 8192,
+  "crc32": "150a6264",
+  "sha1": "930ccf8dcf4971d0a15f406d9114be5ecfaa1727"
+ },
+ {
+  "name": "rnr_7a.snd",
+  "size": 4096,
+  "crc32": "75d2c4e2",
+  "sha1": "b701019b4e7b06b268be660ce7958b5367318c27"
+ },
+ {
+  "name": "rnr_8a.snd",
+  "size": 4096,
+  "crc32": "ca4325ae",
+  "sha1": "34ac035c0c2ed6bcafde1491d976bb9e9d2a2a7d"
+ },
+ {
+  "name": "rnr_a11.vid",
+  "size": 8192,
+  "crc32": "afdaba5e",
+  "sha1": "27c090cb1c3767c997daeedbe1ba24786f9e78f1"
+ },
+ {
+  "name": "rnr_a12.vid",
+  "size": 8192,
+  "crc32": "054cafeb",
+  "sha1": "4c3cd850b347217af3dd5c9bb84bcff7b30689bd"
+ },
+ {
+  "name": "rnr_a9.vid",
+  "size": 8192,
+  "crc32": "9d2166b2",
+  "sha1": "42d2b05360e58b1b2b3ad06c98eb46d9da2b1c21"
+ },
+ {
+  "name": "rnr_a10.vid",
+  "size": 8192,
+  "crc32": "aff6e22f",
+  "sha1": "476d67821519feddc9f9c8537b46e6eede790035"
+ },
+ {
+  "name": "rnr_h12.vid",
+  "size": 8192,
+  "crc32": "e2114539",
+  "sha1": "0ea19ae4d7c2da14f23c81abb8e2c931785b2715"
+ },
+ {
+  "name": "rnr_h11.vid",
+  "size": 8192,
+  "crc32": "169a8f3f",
+  "sha1": "182c7c9b9849ebb57b3ff7c0b629f2f8e2efa9ba"
+ },
+ {
+  "name": "a17_prom.bin",
+  "size": 32,
+  "crc32": "22ad2c3e",
+  "sha1": "1c2198b286c75aa9e78d000432795b1ce86ad6b9"
+ },
+ {
+  "name": "b16_prom.bin",
+  "size": 256,
+  "crc32": "750a9677",
+  "sha1": "7a5b4aed5f87180850657b8852bb3f3138d58b5b"
+ },
+ {
+  "name": "rocnrope.pr3",
+  "size": 256,
+  "crc32": "b5c75a27",
+  "sha1": "923d6ccf015fd7458494416cc05426cc922a9238"
+ }
+]
