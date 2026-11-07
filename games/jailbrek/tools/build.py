@@ -41,8 +41,6 @@ def main():
                                                        indent=1, default=str) + '\n')
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
-    if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')            # (no sound yet: the README's State)
     tag = args.tag or ('jailbrek_sim' if args.sim else 'jailbrek')
     out = ROOT / 'run' / tag / 'JAILBREK.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

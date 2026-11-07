@@ -24,7 +24,8 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ, NMI = 0x81A6, JailBreakPort.IRQ, JailBreakPort.NMI
 SEEDS = [int(x) for x in os.environ.get("JB_SEEDS", "").split(",") if x] or range(1, 13)
-NATIVES = {JailBreakPort.IDLE: "jb_idle"}
+NATIVES = {JailBreakPort.IDLE: "jb_idle",
+           0xAF96: "nat_sn_AF96"}                      # the SN76489A write (src/sound.s)
 # a read-modify-write of the video RAM (m6809x cannot send one through the runtime): `dec $0830` runs on the memory and
 # lists the cell (the video RAM's $0830 is cell $030) itself afterwards
 RMW_VIDEO = {0x907B: 0x0830}

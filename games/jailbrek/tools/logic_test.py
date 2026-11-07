@@ -85,6 +85,43 @@ def main():
             raise RuntimeError('frame %d: BSY count %d, reference %d' % (f, mem.r16(sym['jb_bsy_left']), m.bsy_left))
         if mem.r8(sym['jb_bsy']) != m.bsy:
             raise RuntimeError('frame %d: BSY %d, reference %d' % (f, mem.r8(sym['jb_bsy']), m.bsy))
+        sound(f)
+
+    sn = {'regs': [0] * 8, 'latch': 0, 'at': 0, 'vlm': 0, 'st': 0, 'rst': 0, 'param': 0}
+
+    def sound(f):
+        """the SN76489A's register file (MAME sn76496 write) and the speech request against the reference's log"""
+        log = m.sound_log
+        asked = None
+        for fr, kind, v in log[sn['at']:]:
+            if kind == 'sn':
+                if v & 0x80:
+                    sn['latch'] = v >> 4 & 7
+                    sn['regs'][sn['latch']] = sn['regs'][sn['latch']] & 0x3F0 | v & 15
+                elif sn['latch'] & 1 or sn['latch'] == 6:
+                    sn['regs'][sn['latch']] = sn['regs'][sn['latch']] & 0x3F0 | v & 15
+                else:
+                    sn['regs'][sn['latch']] = sn['regs'][sn['latch']] & 15 | (v & 0x3F) << 4
+            elif kind == 'vlm':
+                sn['vlm'] = v
+            else:
+                st, rst = v >> 1 & 1, v >> 2 & 1
+                if rst != sn['rst']:
+                    sn['rst'] = rst
+                    if not rst:
+                        sn['param'] = sn['vlm']
+                if st != sn['st']:
+                    sn['st'] = st
+                    if not st:
+                        asked = sn['vlm'] << 8 | sn['param']
+        sn['at'] = len(log)
+        got = [mem.r16(sym['jb_sn'] + 2 * i) for i in range(8)]
+        if got != sn['regs']:
+            raise RuntimeError('frame %d: SN registers %s, reference %s' % (f, got, sn['regs']))
+        ptr = mem.r32(sym['snd_dma_last'])
+        if asked is not None and ptr and mem.r16(ptr) != asked and any(
+                mem.r16(sym['jb_phr_tab'] + 10 * i) == asked for i in range(24)):
+            raise RuntimeError('frame %d: phrase %04x asked, the DMA has %04x' % (f, asked, mem.r16(ptr)))
 
     run_to({wait})
     m.frame = -1
@@ -117,7 +154,7 @@ def main():
         run_to({wait})
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact (lives %d)' % (f + 1, m.mem[cover.LIVES1]), flush=True)
-    print('PASS: %d frames (seed %d), RAM, video RAM, scroll RAM, control registers and BSY exact' % (args.frames, args.seed))
+    print('PASS: %d frames (seed %d), RAM, video RAM, scroll RAM, control registers, BSY, the SN76489A registers and the speech requests exact' % (args.frames, args.seed))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

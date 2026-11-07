@@ -20,9 +20,6 @@ MAX_SKIP = 3				; arcade frames in a row that are not drawn while the game is be
 	ifnd FRAMES
 FRAMES = 0
 	endc
-	ifnd NOSOUND
-NOSOUND = 1				; (no sound yet)
-	endc
 
 KEY_ESC = $01
 
@@ -92,6 +89,11 @@ start:
 	bsr	init_render
 	ifnd NOSOUND
 	bsr	snd_init
+	endc
+	ifd SPEECHTEST			; (a test: the phrase (latch, parameter) = SPEECHTEST >> 8, & $FF asked once at the start)
+	move.b	#SPEECHTEST>>8,jb_vlm_latch
+	move.b	#SPEECHTEST&$FF,jb_param
+	bsr	jb_phrase
 	endc
 
 	ifnd SIM			; (the test harness sets the ports, the DIP switches of its seed)
@@ -569,6 +571,11 @@ main_io_w:
 	beq.s	.pins
 	cmp.w	#$5000,d7
 	beq.s	.data
+	cmp.w	#$3100,d7
+	bne.s	.out
+	ifnd NOSOUND
+	bsr	jb_sn_w			; (the SN76489A)
+	endc
 .out:	rts
 .ram:	move.l	a0,-(sp)
 	lea	jb_mem,a0
@@ -605,6 +612,9 @@ main_io_w:
 	add.w	d1,d1
 	lea	jb_vlm_ticks,a0
 	move.w	(a0,d1.w),jb_bsy_left
+	ifnd NOSOUND
+	bsr	jb_phrase		; (the DMA plays the phrase)
+	endc
 .rst:	moveq	#0,d0
 	move.b	d5,d0
 	lsr.b	#2,d0
@@ -616,6 +626,7 @@ main_io_w:
 	bne.s	.rrise
 	move.b	jb_vlm_latch,d1		; RST falling: the data latch's parameter: the table's row = step * 8 + speed
 	move.b	d1,d2
+	move.b	d1,jb_param
 	lsr.b	#3,d1
 	and.b	#7,d1
 	btst	#1,d2
@@ -632,6 +643,9 @@ main_io_w:
 	clr.b	jb_bsy
 	clr.w	jb_bsy_left
 	clr.b	jb_speed
+	ifnd NOSOUND
+	bsr	jb_phrase_stop
+	endc
 .pdone:	movem.l	(sp)+,d0-d2/a0
 	rts
 .vid:	move.l	a0,-(sp)
@@ -944,9 +958,7 @@ dbg_name4:
 	endc
 
 	include	"render.s"
-	ifnd NOSOUND
-	include	"sound.s"
-	endc
+	include	"sound.s"			; (NOSOUND: the chips' writes are kept, nothing plays)
 
 ; ------------------------------------------------------------------------------
 ; The translated program (and its dispatch tables in the data section)
@@ -1016,6 +1028,7 @@ jb_or:		ds.b	1
 jb_bsy:		ds.b	1		; the speech chip's BSY pin (read at $6000)
 jb_st:		ds.b	1
 jb_rst:		ds.b	1
+jb_param:	ds.b	1		; the parameter byte RST's falling edge latched
 jb_speed:	ds.b	1		; the speed parameter RST's falling edge latched
 jb_vlm_latch:	ds.b	1		; the data latch ($5000)
 	even

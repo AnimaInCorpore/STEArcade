@@ -111,6 +111,60 @@ def coverage_shapes(cls, share=1.0):
     return sorted(out), acc / max(total, 1)
 
 
+# the speech phrases (ref/speech_combos.py): (the data latch at ST's falling edge, the parameter RST's falling edge latched)
+SPEECH = [(0, 144), (2, 17), (4, 17), (4, 136), (8, 8), (10, 128), (12, 176), (14, 128), (16, 128), (18, 8), (20, 0),
+          (22, 0), (24, 0), (26, 0), (28, 0), (30, 0), (32, 0), (34, 8), (36, 8), (38, 8), (42, 0), (44, 136), (46, 8),
+          (48, 0)]
+DMA_RATE = 12517                          # the STE's DMA sound: 12517 Hz, 8 bits mono
+SN_CLOCK = 1536000                        # 18.432 MHz / 12
+VTAB = (15, 14, 14, 13, 12, 12, 11, 10, 10, 9, 8, 8, 7, 6, 6, 0)   # SN attenuation (2 dB steps) -> YM level (~3 dB)
+
+
+def ym_period(n):
+    """the YM period (2 MHz / 16 P) for an SN tone period (clock / 32 N; 0 counts as 1024)"""
+    return ((n or 1024) * 4000000 + SN_CLOCK // 2) // SN_CLOCK
+
+
+def ym_noise(n2):
+    """the YM noise period for noise mode 3 (the shift period 2 x tone 2's), at most 31"""
+    return min(31, (2 * (n2 or 1024) * 2000000 + SN_CLOCK // 2) // SN_CLOCK)
+
+
+def sound_lines():
+    """-> (assembler lines: the YM's tables, the phrase table, the samples; the samples): the phrases of SPEECH rendered
+    by engine/vlm5030.py, resampled to the DMA's rate, scaled together (their loudest to ~100), signed 8 bits"""
+    from vlm5030 import phrase, RATE
+    rom = load('507l01.8c')[:0x2000]
+    parts = []
+    for d, p in SPEECH:
+        s, n = phrase(rom, d, p)
+        while s and s[-1] == 0:
+            s.pop()
+        x = np.asarray(s, np.float64)
+        m = int(len(x) * DMA_RATE / RATE)
+        parts.append(np.interp(np.arange(m) * (RATE / DMA_RATE), np.arange(len(x)), x) if len(x) else np.zeros(0))
+    peak = max(np.abs(x).max() for x in parts if len(x))
+    blob, index = bytearray(), []
+    for x in parts:
+        b = np.clip(np.round(x * (100 / peak)), -128, 127).astype(np.int8).tobytes()
+        if len(b) & 1:
+            b += bytes(1)
+        index.append((len(blob), len(b)))
+        blob += b
+    lines = ['jb_ptab:	; SN tone period -> YM period']
+    vals = [ym_period(n) for n in range(1024)]
+    lines += ['	dc.w ' + ','.join('%d' % v for v in vals[i:i + 16]) for i in range(0, 1024, 16)]
+    lines += ['jb_ntab:	; tone 2 period & 15 -> the YM noise period (noise mode 3, period < 16)',
+              '	dc.b ' + ','.join('%d' % ym_noise(n) for n in range(16)),
+              'jb_vtab:	dc.b ' + ','.join(map(str, VTAB)), '	even',
+              'JB_PHRASES = %d' % len(SPEECH),
+              'jb_phr_tab:	; per phrase: the latch << 8 | the parameter, the samples (offset in jb_pcm, length)']
+    for (d, p), (o, n) in zip(SPEECH, index):
+        lines += ['\tdc.w $%02X%02X' % (d, p), '\tdc.l %d,%d' % (o, n)]
+    lines += ['	cnop 0,4', 'jb_pcm:	incbin "jb_pcm.bin"', '	even']
+    return lines, bytes(blob)
+
+
 def sprite_programs(v):
     """-> (assembler lines: the class table, the generated code and records; the streams)"""
     cls, sets = transparency(v)
@@ -146,6 +200,10 @@ def build():
     for sp_i in range(24):
         t = [vlm_nmis(rom, d, sp_i & 7, (0, 1, 2)[sp_i >> 3]) for d in range(256)]
         lines += ['	dc.w ' + ','.join(str(x) for x in t[i:i + 16]) for i in range(0, 256, 16)]
+    snd, pcm = sound_lines()
+    lines += snd
+    (BUILD / 'jb_pcm.bin').write_bytes(pcm)
+    print('speech: %d phrases, %d bytes of samples' % (len(SPEECH), len(pcm)))
     progs, stream = sprite_programs(v)
     lines += progs
     (BUILD / 'jb_sstream.bin').write_bytes(stream)

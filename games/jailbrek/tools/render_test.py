@@ -12,6 +12,7 @@ picture exact, the side bands (screen x 0-47, 288-319: on 16-pixel groups) black
 """
 from pathlib import Path
 import argparse
+import os
 import bisect
 import collections
 import random
@@ -73,10 +74,11 @@ class Harness:
         self.cyc = collections.Counter()
         self.prof = collections.Counter() if prof else None
         self.prof_start = 0
+        self.prof_what = 'render'
         self.pcs = collections.Counter()
         import re as _re
         absolute = {m[1] for m in _re.finditer(r'\s0x[0-9a-f]{8} (\S+?): \S+ abs', (BUILD / (tag + '.map')).read_text())}
-        labels = sorted((x, k) for k, x in sym.items() if not k.startswith(('M0', 'L')) and k not in absolute)
+        labels = sorted((x, k) for k, x in sym.items() if not k.startswith(('L',) if os.environ.get('PROF_M') else ('M0', 'L')) and k not in absolute)
         self.lv, self.labels = [x for x, _ in labels], labels
         self.run_to({sym['sim_wait']})
         m.frame = -1
@@ -87,7 +89,7 @@ class Harness:
     def run_to(self, targets, count=None):
         cpu, s = self.cpu, self.s
         total = 0
-        chunk = 64 if (self.prof is not None and count == 'render' and self.f >= self.prof_start) else 2000
+        chunk = 64 if (self.prof is not None and count == self.prof_what and self.f >= self.prof_start) else 2000
         while total < 2_000_000_000:
             n = cpu.execute(chunk).cycles
             total += n
@@ -162,12 +164,14 @@ def main():
     ap.add_argument('--every', type=int, default=1)
     ap.add_argument('--shots', default=None)
     ap.add_argument('--stop', action='store_true', help='stop at the first difference')
-    ap.add_argument('--prof', action='store_true', help='sample render_frame\'s pc every 64 cycles: cycles by routine')
+    ap.add_argument('--prof', nargs='?', const='render', choices=('render', 'logic'),
+                    help='sample the pc every 64 cycles of the picture (render_frame) or of the logic: cycles by routine')
     ap.add_argument('--tag', default='jailbrek_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     pmap = np.frombuffer((BUILD / 'jb_penmap.bin').read_bytes(), np.uint8)
     h = Harness(args.seed, args.prof, args.tag)
     h.prof_start = args.start
+    h.prof_what = args.prof or 'render'
     v = Video()
     bad_frames = checked = 0
     for f in range(args.frames):
