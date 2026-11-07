@@ -1,0 +1,158 @@
+[
+ {
+  "name": "cpu_3p.rom",
+  "size": 4096,
+  "crc32": "1c8d27d5",
+  "sha1": "2c41303d8c74acb5840295a4b460a39a9a8e21bb"
+ },
+ {
+  "name": "cpu_3m.rom",
+  "size": 4096,
+  "crc32": "fd04e615",
+  "sha1": "7169e7f3bd1e9cfae9671b89f2a45f56b968e1ff"
+ },
+ {
+  "name": "xv3_3.2m",
+  "size": 4096,
+  "crc32": "294d5404",
+  "sha1": "ecc39fb2c0065a36f20541747089b4e30dfb99b1"
+ },
+ {
+  "name": "xv3_4.2l",
+  "size": 4096,
+  "crc32": "6a44bf92",
+  "sha1": "0ca726f7f9528789f2a718df55e59406a283cdfa"
+ },
+ {
+  "name": "xv3_5.3f",
+  "size": 4096,
+  "crc32": "d4bd3d81",
+  "sha1": "5831bb306bd650779207936bfd00f25864733abb"
+ },
+ {
+  "name": "xv3_6.3j",
+  "size": 4096,
+  "crc32": "af06be5f",
+  "sha1": "5a020822387ab8c69214db961180760fa9853e6e"
+ },
+ {
+  "name": "xvi_7.2c",
+  "size": 4096,
+  "crc32": "dd35cf1c",
+  "sha1": "f8d1f8e019d8198308443c2e7e815d0d04b23d14"
+ },
+ {
+  "name": "xvi_12.3b",
+  "size": 4096,
+  "crc32": "088c8b26",
+  "sha1": "9c3b61dfca2f84673a78f7f66e363777a8f47a59"
+ },
+ {
+  "name": "xvi_13.3c",
+  "size": 4096,
+  "crc32": "de60ba25",
+  "sha1": "32bc09be5ff8b52ee3a26e0ac3ebc2d4107badb7"
+ },
+ {
+  "name": "xvi_14.3d",
+  "size": 4096,
+  "crc32": "535cdbbc",
+  "sha1": "fb9ffe5fc43e0213231267e98d605d43c15f61e8"
+ },
+ {
+  "name": "xvi_15.4m",
+  "size": 8192,
+  "crc32": "dc2c0ecb",
+  "sha1": "19ddbd9805f77f38c9a9a1bb30dba6c720b8609f"
+ },
+ {
+  "name": "xvi_17.4p",
+  "size": 8192,
+  "crc32": "dfb587ce",
+  "sha1": "acff2bf5cde85a16cdc98a52cdea11f77fadf25a"
+ },
+ {
+  "name": "xvi_16.4n",
+  "size": 4096,
+  "crc32": "605ca889",
+  "sha1": "3bf380ef76c03822a042ecc73b5edd4543c268ce"
+ },
+ {
+  "name": "xvi_18.4r",
+  "size": 8192,
+  "crc32": "02417d19",
+  "sha1": "b5f830dd2cf25cf154308d2e640f0ecdcda5d8cd"
+ },
+ {
+  "name": "xvi_9.2a",
+  "size": 4096,
+  "crc32": "57ed9879",
+  "sha1": "3106d1aacff06cf78371bd19967141072b32b7d7"
+ },
+ {
+  "name": "xvi_10.2b",
+  "size": 8192,
+  "crc32": "ae3ba9e5",
+  "sha1": "49064b25667ffcd81137cd5e800df4b78b182a46"
+ },
+ {
+  "name": "xvi_11.2c",
+  "size": 4096,
+  "crc32": "31e244dd",
+  "sha1": "3f7eac12863697a98e1122111801606759e44b2a"
+ },
+ {
+  "name": "xvi-8.6a",
+  "size": 256,
+  "crc32": "5cc2727f",
+  "sha1": "0dc1e63a47a4cb0ba75f6f1e0c15e408bb0ee2a1"
+ },
+ {
+  "name": "xvi-9.6d",
+  "size": 256,
+  "crc32": "5c8796cc",
+  "sha1": "63015e3c0874afc6b1ca032f1ffb8f90562c77c8"
+ },
+ {
+  "name": "xvi-10.6e",
+  "size": 256,
+  "crc32": "3cb60975",
+  "sha1": "c94d5a5dd4d8a08d6d39c051a4a722581b903f45"
+ },
+ {
+  "name": "xvi-7.4h",
+  "size": 512,
+  "crc32": "22d98032",
+  "sha1": "ec6626828c79350417d08b98e9631ad35edd4a41"
+ },
+ {
+  "name": "xvi-6.4f",
+  "size": 512,
+  "crc32": "3a7599f0",
+  "sha1": "a4bdf58c190ca16fc7b976c97f41087a61fdb8b8"
+ },
+ {
+  "name": "xvi-4.3l",
+  "size": 512,
+  "crc32": "fd8b9d91",
+  "sha1": "87ddf0b9d723aabb422d6d416aa9ec6bc246bf34"
+ },
+ {
+  "name": "xvi-5.3m",
+  "size": 512,
+  "crc32": "bf906d82",
+  "sha1": "776168a73d3b9f0ce05610acc8a623deae0a572b"
+ },
+ {
+  "name": "xvi-2.7n",
+  "size": 256,
+  "crc32": "550f06bc",
+  "sha1": "816a0fafa0b084ac11ae1af70a5186539376fc2a"
+ },
+ {
+  "name": "xvi-1.5n",
+  "size": 256,
+  "crc32": "77245b66",
+  "sha1": "0c4d0bee858b97632411c440bea6948a74759746"
+ }
+]
