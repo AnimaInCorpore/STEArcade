@@ -321,6 +321,11 @@ class Rthunder:
                 delta = target - local[i]
                 if delta >= CPU_AS:
                     n = (delta >> _SHIFT) // _DIV
+                    if suspended[i]:
+                        local[i] += n * CPU_AS            # held (the port's schedule): its time passes
+                        if local[i] < target:
+                            target = max(local[i], self.base)
+                        continue
                     c = cpus[i]
                     self.executing = i
                     self.slice_start = start = c.cycles
@@ -528,3 +533,127 @@ class Rthunder:
     def render_rgb(self, int_weights=False):
         raw = self.render_raw()
         return self.palette(int_weights)[raw]
+
+
+class RthunderPort(Rthunder):
+    """The port's schedule (translated code on the STE cannot interleave the two 6809 at MAME's grain).  A frame:
+
+      1. the vertical blank: the sprite list latched, the MCU run for the frame on the board's scheduler (cpu1 and cpu2
+         held), as MAME runs it (`run_others`);
+      2. both 6809 take their IRQ at their idle point (the main loop's head with its queues empty), then run
+         cooperatively, cpu1 first: a CPU runs until it is idle again, until it *writes a semaphore byte* (shared RAM
+         $5606 / $5607 = cpu2's $1606 / $1607) or until a spin wait would go round again (`SPIN`: the backward branch
+         of a loop that reads and waits); then the other CPU runs, and so on.
+
+    The two programs run in lock step through those bytes (cpu1: clear $5606, work, set it to 1, spin until $5607 = 1;
+    cpu2: spin until $1606 = 0, clear $1607, spin until $1606 = 1, work, set $1607 to 1; the many variants of it).  On the
+    board the spins last a few cycles; the yield at every write of the bytes and at every spin keeps the order in which
+    the two CPUs see each other's writes that the hardware's timing gives them, and is the same in the translation.
+    """
+    START = 200
+    IDLE = {0: 0x81B6, 1: 0x80A3}
+    SPIN = {0: {0x903A, 0x918A}, 1: {0x858F, 0x8597}}      # backward branches of spin waits (ref/cover.py finds them)
+    SEM = ({0x5606, 0x5607}, {0x1606, 0x1607})
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.port_frames = 0
+        self.state = ["idle", "idle"]
+        self.instructions = [0, 0]
+        self.yield_req = False
+        self.writes = 0
+
+    # the IRQ acknowledges are no-ops in the port: the line is only high while the CPU takes the interrupt
+    def wr1(self, a, v):
+        if a == 0x8400:
+            return
+        self.writes += 1
+        super().wr1(a, v)
+        if a in self.SEM[0]:
+            self.yield_req = True
+
+    def wr2(self, a, v):
+        if a == 0x8800:
+            return
+        self.writes += 1
+        super().wr2(a, v)
+        if a in self.SEM[1]:
+            self.yield_req = True
+
+    def idle(self, i):
+        c = self.cpus[i]
+        s = self.shared
+        if i == 0:
+            return c.pc == 0x81B6 and s[0x16B4] == s[0x16B3] and s[0x166F] == s[0x166E]
+        return c.pc == 0x80A3 and s[0x1668] == s[0x1667]
+
+    def boot(self, frames=None):
+        """MAME's schedule up to the port's start, then both CPUs to their idle points"""
+        frames = self.START if frames is None else frames
+        while self.frame < frames:
+            self.run_frame()
+        for i in (0, 1):
+            self.queues.pop((i, "irq"), None)
+            self.cpus[i].set_irq(False)
+        self.state = ["run", "run"]
+        self.cooperate()
+
+    def run_others(self):
+        held = self.suspended[0], self.suspended[1]
+        self.suspended[0] = self.suspended[1] = True
+        self.run_frame()
+        self.suspended[0], self.suspended[1] = held
+        for i in (0, 1):
+            self.queues.pop((i, "irq"), None)
+            self.cpus[i].set_irq(False)
+
+    def run_cpu(self, i, limit=3000000):
+        """-> 'idle' (at the idle point), 'yield' (wrote a semaphore byte), 'blocked' (a spin wait goes round again)"""
+        c = self.cpus[i]
+        spin = self.SPIN[i]
+        self.yield_req = False
+        n = 0
+        while n < limit:
+            if self.idle(i):
+                self.instructions[i] += n
+                return "idle"
+            pc = c.pc
+            c.step()
+            n += 1
+            if self.yield_req:
+                self.yield_req = False
+                self.instructions[i] += n
+                return "yield"
+            if pc in spin and c.pc < pc:
+                self.instructions[i] += n
+                return "blocked"
+        raise RuntimeError("cpu %d runs on (pc %04X) after %d instructions" % (i + 1, c.pc, limit))
+
+    def cooperate(self):
+        stuck = 0
+        while "run" in self.state:
+            before = (self.writes, tuple(c.pc for c in self.cpus))
+            for i in (0, 1):
+                if self.state[i] != "run":
+                    continue
+                r = self.run_cpu(i)
+                if r == "idle":
+                    self.state[i] = "idle"
+            if before == (self.writes, tuple(c.pc for c in self.cpus)):
+                stuck += 1
+                if stuck > 2:
+                    raise RuntimeError("deadlock: cpu1 pc %04X cpu2 pc %04X" % (self.cpu1.pc, self.cpu2.pc))
+            else:
+                stuck = 0
+
+    def run_frame_port(self):
+        self.run_others()
+        for i in (0, 1):
+            c = self.cpus[i]
+            assert self.idle(i), "cpu %d not idle (pc %04X)" % (i + 1, c.pc)
+            c.set_irq(True)
+            c.step()                                      # the interrupt entry
+            c.set_irq(False)
+            self.state[i] = "run"
+        self.cooperate()
+        self.port_frames += 1
