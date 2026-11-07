@@ -24,9 +24,11 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "engine"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import EXTRACTED
 from m6809 import M6809
 from vlm5030 import VLM5030
+import vlm_frames
 import mamegfx as G
 
 CPU_HZ = 1536000
@@ -220,8 +222,8 @@ class YieArPort(YieAr):
     BCS $807C (the queue at $52C0-$52FF, its read pointer at $51DA; an entry with bit 7 set is empty); the IRQ
     handler ($897D) plays the game and queues the tasks, the NMI handler ($C78E, eight a frame in the arcade: the
     music tempo) plays the sound channels.  The port's idle point is $807C with an empty queue: there the eight NMIs
-    are delivered one after the other (while the control latch's bit 1 is 1), then the IRQ (bit 2, with I clear) with
-    $807C as the return address; after the IRQ's RTI the foreground runs the queued tasks until the queue is empty.
+    BSY of the VLM5030 is frame based (vlm_frames).  A frame: the IRQ (control bit 2, I clear) with $807C as the return
+    address, the queued tasks to the idle point, then the eight NMIs (bit 1), each followed by the tasks it queued.
     """
     ENTRY = 0x8000
     IDLE = 0x807C
@@ -234,12 +236,30 @@ class YieArPort(YieAr):
         super().__init__(*a, **k)
         self.booted = False
         self.irqs = self.nmis = 0
-        self.c0 = 0
+        self.vbusy, self.vend, self.vst = False, None, 0
         self.nmi_cycles = self.irq_cycles = 0
 
-    def vlm_time(self):
-        # the port has no time between its frames: a frame is FRAME cycles, plus what the frame's work has run so far
-        return self.frame * FRAME + self.cpu.cycles - self.c0
+    def rd(self, a):
+        if a == 0:
+            return int(self.vbusy and (self.vend is None or self.frame < self.vend))
+        return super().rd(a)
+
+    def wr(self, a, v):
+        if a == 0x4A00:
+            # the port has no time between its frames: BSY is high from ST's rise until the phrase's length in frames
+            # (tools/vlm_frames.py) after ST's fall, counted from the frame the phrase starts in
+            self.sound_log.append((self.frame, 'vc', v))
+            st = v >> 1 & 1
+            if st and not self.vst:
+                self.vbusy, self.vend = True, None
+            elif self.vst and not st:
+                self.vend = self.frame + vlm_frames.frames()[self.vlm_data]
+            self.vst = st
+        elif a == 0x4B00:
+            self.sound_log.append((self.frame, 'vd', v))
+            self.vlm_data = v
+        else:
+            super().wr(a, v)
 
     def waits(self):
         m = self.mem
@@ -265,10 +285,8 @@ class YieArPort(YieAr):
 
     def run_frame_port(self):
         c = self.cpu
-        self.c0 = c.cycles
         if not self.booted:
             self.boot()
-            self.c0 = c.cycles                        # (the boot's time is not the game's)
             self.run_to_idle()
             self.booted = True
         if self.control & 4 and not c.cc & 0x10:
@@ -282,16 +300,11 @@ class YieArPort(YieAr):
         for _ in range(self.NMIS):
             if not self.control & 2:
                 break
-            t, s = c.cycles, c.s
+            t = c.cycles
             c.set_nmi(True)
             c.step()
             assert c.pc == self.NMI, hex(c.pc)
             self.nmis += 1
-            for _ in range(2000000):
-                c.step()
-                if c.pc == self.IDLE and c.s == s:
-                    break
-            else:
-                raise RuntimeError('the NMI handler did not return (pc %04X, frame %d)' % (c.pc, self.frame))
+            self.run_to_idle()
             self.nmi_cycles += c.cycles - t
         self.frame += 1
