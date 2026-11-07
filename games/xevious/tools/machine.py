@@ -194,8 +194,14 @@ class Namco50MCU:
 
 
 def skip_ram_test(rom):
-    """The boot RAM test, if the program has a long one (found by tools/probe_boot.py): identity until measured."""
-    return rom
+    """The main CPU's boot self-test (ROM checksum passes and RAM tests at $015D-$01A8, ~4.7 million instructions, 630
+    frames) replaced by its pass result: `ld a,$10; jp $01B4` ($01B4 stores the result at $8500; $10 is what $01DA
+    wants)."""
+    orig = rom
+    rom = bytearray(rom)
+    rom[0x15A:0x15F] = bytes([0x3E, 0x10, 0xC3, 0xB4, 0x01])
+    rom[0x0FFF] = (rom[0x0FFF] + sum(orig[0:0x1000]) - sum(rom[0:0x1000])) & 0xFF   # block 0's checksum ($0240) stays 0
+    return bytes(rom)
 
 
 def unpack_gfx3():
@@ -280,6 +286,13 @@ class Xevious:
         self.frame = 0
         self.gfx = None
         self.io_log = []
+        self.port_mode = False                # the STE runtime's schedule (run_frame_port)
+        self.mcu_events = False               # port mode: the 51XX without a clock, run from wait point to wait point
+        self.defer51 = None
+        self.in_nmi06 = False
+        self.handler_runs = [0, 0, 0]
+        self.rnd_state = 0x1234
+        self.stall = None                     # port mode: a CPU that ran away without reaching an idle loop or a yield
         r = bytearray(0x4000)                 # the region gfx4
         r[0:0x1000] = load("xvi_9.2a")
         r[0x1000:0x3000] = load("xvi_10.2b")
@@ -393,23 +406,31 @@ class Xevious:
 
     # ---- the 06XX and the MCUs (MAME's namco06.cpp) ---------------------
     def data06_r(self):
-        self.mcu_sync(self.cpus[0].cycles)
+        if not self.port_mode:
+            self.mcu_sync(self.cpus[0].cycles)
         if not (self.ctrl06 & 0x10):
             return 0
         v = 0xff
         if self.ctrl06 & 1: v &= self.n51.read()
         if self.ctrl06 & 4: v &= self.n50.read()
+        if self.port_mode:
+            self.access51()
         return v
 
     def data06_w(self, v):
         if self.ctrl06 & 0x10:
             return
-        self.mcu_sync(self.cpus[0].cycles)
+        if not self.port_mode:
+            self.mcu_sync(self.cpus[0].cycles)
         if self.ctrl06 & 1: self.n51.write(v)
         if self.ctrl06 & 4: self.n50.write(v)
         if self.ctrl06 & 8: self.n54.write(v)
+        if self.port_mode:
+            self.access51()
 
     def ctrl06_w(self, v):
+        if self.port_mode:
+            return self.ctrl06_port(v)
         now = self.cpus[0].cycles
         self.mcu_sync(now)
         self.ctrl06 = v
@@ -447,7 +468,7 @@ class Xevious:
         target = t // Z80_PER_MCU
         for chip in self.chips:
             mcu = chip.mcu
-            if chip.held:
+            if chip.held or self.port_mode:
                 mcu.cycles = max(mcu.cycles, target)
             else:
                 mcu.run_to(target)
@@ -461,6 +482,160 @@ class Xevious:
             if self.irq_pending[0] and cpu.iff1:
                 cpu.irq()
             cpu.step()
+
+    # ---- the STE runtime's 06XX (xevious.s g_ctrl06, as Galaga's) --------
+    def ctrl06_port(self, v):
+        """the transfer runs right here, one clock period a pass: the R/W line and the chip selects, the main CPU's NMI
+        handler (a read's first pulse is suppressed: the chips put out their bytes first), each chip after the
+        handler's access, the chip selects off; a control write from inside the handler (its stop) only sets the
+        register.  The 51XX is event-driven; the 50XX's real program gets a fixed number of machine cycles a step (its
+        answers do not depend on the time)."""
+        self.ctrl06 = v
+        if self.in_nmi06:
+            return
+        n51, n50 = self.n51, self.n50
+        self.in_nmi06 = True
+        first = True
+        k = 0
+        while self.ctrl06 & 0xe0:
+            c = self.ctrl06
+            n51.rw = n50.rw = (c >> 4) & 1
+            if not n51.held: n51.mcu.set_irq(c & 1)
+            if not n50.held: n50.mcu.set_irq(c & 4)
+            if first and c & 0x10:
+                self.run51()
+                self.run50()
+            else:
+                self.defer51 = 0
+                self.run_handler(self.cpus[0], nmi=True)
+                self.access51()
+                self.run50()
+            n51.mcu.set_irq(0)
+            n50.mcu.set_irq(0)
+            self.run51()
+            self.run50()
+            first = False
+            k += 1
+            if k > 64:
+                raise RuntimeError("06XX transfer does not end")
+        self.in_nmi06 = False
+        n51.mcu.set_irq(0)
+        self.run51()
+
+    MCU50_CYCLES = 3000
+
+    def run50(self):
+        if not self.n50.held:
+            self.n50.mcu.run_to(self.n50.mcu.cycles + self.MCU50_CYCLES)
+
+    def run51(self):
+        """event-driven 51XX: run it to its next wait point"""
+        if self.n51.held:
+            return
+        mcu = self.n51.mcu
+        k = 0
+        while not wait51(mcu):
+            mcu.step()
+            k += 1
+            if k > 100000:
+                raise RuntimeError("51XX does not reach a wait point (pc %03X)" % mcu.addr)
+
+    def access51(self):
+        if self.defer51 is not None:
+            self.defer51 = None
+            self.run51()
+
+    def rnd(self):
+        """What the port's z80_rnd gives for ld a,r: a 16-bit shift register byte."""
+        s = self.rnd_state
+        s = (s >> 1) ^ (0xB400 if s & 1 else 0)
+        self.rnd_state = s
+        return s & 0xFF
+
+    # ---- the STE runtime's schedule ------------------------------------
+    # IDLE: (pc, the flag byte that must be 0) where a CPU waits for its interrupt handler's flag; YIELD: spin loops of
+    # the boot handshake where the other CPUs get a turn (hooks in the translated code, z80_hook)
+    IDLE = [(0x044C, 0x8000), (0x0356, 0x8002), (0x0098, None)]
+    # spin loops that wait for something an interrupt handler or another CPU produces: pc -> (address, mask): the loop
+    # spins while (memory & mask) == 0 (the CPU is then at a yield point)
+    YIELD = [{0x02AD: (0x8018, 0x80), 0x0310: (0x8018, 0x80)}, {}, {}]
+
+    def at_idle(self, n):
+        cpu = self.cpus[n]
+        pc, flag = self.IDLE[n]
+        return cpu.pc == pc and (flag is None or self.mem[flag] == 0)
+
+    def run_until_stop(self, n, limit=30_000_000):
+        """Run cpu n until it is idle (waiting for its interrupt's flag) or at a yield point."""
+        cpu = self.cpus[n]
+        yields = self.YIELD[n]
+        mem = self.mem
+        k = 0
+        first = True
+        while True:
+            if not first:
+                if self.at_idle(n):
+                    return "idle"
+                y = yields.get(cpu.pc)
+                if y and not (mem[y[0]] & y[1]):
+                    return "yield"
+            first = False
+            cpu.step()
+            k += 1
+            if k > limit:
+                self.stall = (n, cpu.pc)
+                raise RuntimeError("CPU%d runs away (pc %04X)" % (n + 1, cpu.pc))
+
+    def foreground(self):
+        """The frame's foreground: every released CPU runs to its idle loop or its yield point (a spin loop that waits
+        for an interrupt's or another CPU's result)."""
+        for n in (0, 1, 2):
+            if not self.held[n] and not self.at_idle(n):
+                self.run_until_stop(n)
+
+    def run_handler(self, cpu, nmi=False):
+        """Run an interrupt handler of cpu to its return (the interrupted pc and sp)."""
+        sp0, pc0 = cpu.sp, cpu.pc
+        if nmi:
+            cpu.nmi()
+        elif not cpu.irq():
+            return False
+        n = 0
+        while not (cpu.sp == sp0 and cpu.pc == pc0):
+            cpu.step()
+            n += 1
+            if n > 2_000_000:
+                raise RuntimeError("handler of %04X did not return" % pc0)
+        return True
+
+    def sound_nmis(self):
+        """the sound CPU's two NMIs of a frame (lines 64 and 192), once it is idle, while its NMION is off"""
+        if self.held[2] or self.cpus[2].pc < 0x80:
+            return
+        for _ in range(2):
+            if self.latch[2]:
+                break
+            self.run_handler(self.cpus[2], nmi=True)
+
+    def run_frame_port(self):
+        """One frame as the STE runtime schedules it: the CPUs' foregrounds to their idle loops, then at the vertical
+        blank CPU1's IRQ handler and CPU2's IRQ handler, each to completion, and CPU3's NMI handler twice.  The 06XX's
+        NMIs are synchronous (ctrl06_port)."""
+        self.port_mode = True
+        self.mcu_events = True
+        self.cpus[0].r_hook = self.rnd
+        self.foreground()
+        if not self.n51.held:
+            self.n51.mcu.set_tc(1)              # the 51XX's frame (xevious.s n51_vbl): TC high, then low
+            self.run51()
+            self.n51.mcu.set_tc(0)
+            self.run51()
+        if self.latch[0] and not self.held[0] and self.run_handler(self.cpus[0]):
+            self.handler_runs[0] += 1
+        if self.latch[1] and not self.held[1] and self.run_handler(self.cpus[1]):
+            self.handler_runs[1] += 1
+        self.sound_nmis()
+        self.frame += 1
 
     # ---- running -------------------------------------------------------
     def run_frame(self, slice_cycles=128):
