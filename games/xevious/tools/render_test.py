@@ -53,7 +53,7 @@ def main():
     def run_to(targets, limit=900_000_000):
         total = 0
         while total < limit:
-            total += cpu.execute(20000).cycles
+            total += cpu.execute(300).cycles
             pc = cpu.r_pc()
             if pc in targets:
                 return total

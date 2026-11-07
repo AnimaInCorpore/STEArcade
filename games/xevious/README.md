@@ -1,6 +1,6 @@
 # Super Xevious (Namco, 1984) on the Atari STE
 
-![Super Xevious drawn by the STE renderer (simulator, frame 3300 of seed 31)](docs/screenshot.png)
+![Super Xevious in Hatari (a still of tools/hatari.ps1's AVI, the picture area)](docs/screenshot.png)
 
 The MAME set **`sxevious`** (Super Xevious, a clone of `xevious`; driver `namco/galaga.cpp` (`xevious_state`), video
 `namco/xevious.cpp`, machine `namco/xevious_m.cpp`).  `assets/roms/` has `sxevious.zip` and the device sets
@@ -11,8 +11,8 @@ for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (e
 (background with a pattern ROM logic, foreground characters) and 3-bit sprites.  All three Z80 programs are translated to
 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
 the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
-three voices as the YM2149's square waves (as in Galaga), the 54XX's explosions are not done.  Status: **Experimental** (root README): the logic is exact in lock-step and the picture is exact against the
-reference renderer, which equals MAME's picture, but the explosions are silent, the picture is drawn by the CPU, and the speed is
+three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental** (root README): the logic is exact in lock-step and the picture is exact against the
+reference renderer, which equals MAME's picture, but only one explosion sound exists, the picture is drawn by the CPU, and the speed is
 low.  Latest speed (Hatari, 4 MB STE, `tools/bench.ps1 3000`, attract mode, 2026-11-07): about 21.5 arcade frames a second
 (35% of the arcade's 60.6) and 5.4 pictures a second.
 
@@ -61,15 +61,16 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
 * The picture (`tools/render_test.py`): 0 of 64,512 pixels differ against `machine.render_raw()` through the colour map at
   every sampled picture (frames 150-3600 of seeds 1, 3 and 31, six consecutive pictures at 400-405), the pixels outside
   the picture area stay black.
-* Hatari (F030Arcade's build, 4 MB STE, cycle-exact): the program runs 3,000 VBLs of the attract mode without a
-  `CRASH.TXT`.  **The picture was not looked at in Hatari** (this session could not capture its window); the screenshot
-  above is the STE renderer's own output in the simulator.
+* Hatari (F030Arcade's build, 4 MB STE, cycle-exact; `tools/hatari.ps1`: hidden, AUTOPLAY coin / start / pattern, AVI, stills):
+  2,500 VBLs, no `CRASH.TXT`; stills show the title, the ready screen, scrolling forest and the area edge, the sprites and
+  the foreground text in the right colours.  The autoplay's crude pattern keeps losing Solvalou (the game then reads PLAYER
+  ONE / TWO READY), so a long Hatari play with the ship alive and shooting was not looked at.
 * Coverage (`ref/cover.py`): CPU1 7,187 translated instructions, CPU2 762, CPU3 555; no unsupported, no missing target.
 * Sound (`tools/logic_test.py`): every frame the sound CPU's WSG registers equal the reference's and the YM2149's registers
   equal `tools/sound.py`'s image of them (the model of Galaga's port with Xevious's waveform PROM); not listened to in Hatari
   (`--sound off`), the pitch not compared with MAME's audio.
-* Missing, most important first: the 54XX's **explosions** (the commands are only counted; MAME plays samples / a discrete
-  circuit); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
+* Missing, most important first: the 54XX's other noises (only the player's explosion, commands $1x / $2x, is a noise burst, as in Galaga's port; MAME's
+  discrete circuit and the ground-target explosions are not modelled); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
   `AGENTS.md` (sprites and the foreground are merged by the CPU: `render.s`, `blit_row`); the cocktail flip, a foreground
   scroll and a vertical background scroll other than 0 (the game uses none: `ref/pens.py` saw one value of registers 1-3);
   per-area palettes (one 16-colour fit for all areas); the 54XX's program; the 50XX's own program (translating it needs
@@ -131,13 +132,22 @@ clipped at the picture's edges), the foreground from a list of cells with pixels
 
 ## Speed
 
-Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1 3000`, attract mode, 2026-11-07, sound included): 21.5 arcade
-frames a second, 5.4 pictures a second (`MAX_SKIP` 3: a picture is skipped while a VBL waits).  Musashi: the logic about 175,000 cycles a
-frame (lock-step test average), a steady picture about 800,000 (the ring update, the 129,000 bus cycles of the picture
-copy, the CPU sprites, the foreground); a first picture 12 million (it builds the ring).  Where it goes: the CPU sprite
-rows (about 500 cycles a row) and the picture copy; `docs/speed.md` lists the techniques not used yet: the Blitter's
-masked passes with baked, cached sprites, the hardware scroll of the ring (no copy), the foreground as sprites.
-Measured and not kept: drawing every picture (9 pictures a second but 9 arcade frames a second).
+Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1`, 2026-11-07; attract mode `MAX_SKIP` 3: 21.5 arcade frames a
+second, 5.4 pictures a second).  In the autoplay (play, 2,000 VBLs): `MAX_SKIP` 1: 14 arcade frames, 7 pictures a second; 3:
+about 22 and 5.4; 7: 27 and 3.5 (a picture is skipped while a VBL waits, up to `MAX_SKIP` in a row).  The arcade runs 60.6.
+Musashi (`render_test.py --entry`): the logic about 175,000 cycles a frame; a picture 0.85-1.1 million: the sprites 480,000
+in a busy scene (about 54 tiles, 16 rows each, `blit_row` about 560 cycles a row: the colour conversion is not the cost,
+the shifting and merging of five words into two groups of four planes is), the background ring's changed cells 100,000-340,000
+(a scroll step rewrites a row of tiles, a new area all of them; 12 million for the first picture), the picture copy 37,000 CPU
+cycles plus about 130,000 Blitter bus cycles, the foreground about 50,000.  A cache of converted sprite tiles (tag, mask and
+four planes a row) was tried and not kept: no change.
+Proposals (nothing was dropped silently): (1) the Blitter's masked sprite passes with shared rows (`AGENTS.md`,
+`docs/sprite-preparation.md`) would replace `blit_row` and are the main gain, maybe 2x on the sprites; (2) hardware scrolling
+of the ring (no copy, the background shown from the ring itself, sprites drawn into it and restored from a clean ring) saves
+the 130,000 bus cycles and most of the ring work but is a redesign; (3) a lower picture rate (`MAX_SKIP` 7: 27 arcade frames a
+second, 3.5 pictures) is the cheapest trade and is the user's call; (4) drawing the ground-target sprites and the foreground
+every second picture would save about a third of the CPU drawing at some flicker.  The logic (175,000: the translated code,
+the copies of the shared RAM windows, the 51XX) leaves 45 arcade frames a second without any picture.
 
 ## Tests and tools
 

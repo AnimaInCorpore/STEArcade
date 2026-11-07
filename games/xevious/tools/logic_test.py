@@ -86,6 +86,20 @@ def main():
     def where(pc):
         i = bisect.bisect_right(addrs, pc - s.base) - 1
         return '%s+%d' % (by_addr[i][1], pc - s.base - by_addr[i][0])
+    expl = sound.Explosion()
+    n54 = {'skip': 0}
+    n54_write0 = m.n54.write
+
+    def n54_write(v):
+        n54_write0(v)
+        if n54['skip']:
+            n54['skip'] -= 1
+        elif (v & 0xf0) in (0x30, 0x40):
+            n54['skip'] = 4
+        elif (v & 0xf0) in (0x10, 0x20) and m.cpus[2].pc >= 0x80:
+            expl.trigger()
+            n54['n'] = n54.get('n', 0) + 1
+    m.n54.write = n54_write
     cycles = [0]
 
     def run_to(targets):
@@ -108,6 +122,7 @@ def main():
         cpu.w_reg(R.A7, sp + 4)
 
     last = [None]
+    level = [0]
 
     def compare(f):
         if args.verbose:
@@ -138,8 +153,8 @@ def main():
         if wsg != [v & 15 for v in m.sound]:
             raise RuntimeError('frame %d: the sound registers %s, reference %s' % (f, wsg, [v & 15 for v in m.sound]))
         ym = [mem.r8(sym['snd_ym'] + i) for i in range(11)]
-        if ym != sound.ym_image(list(m.sound), 0):
-            raise RuntimeError('frame %d: the YM registers %s, the model %s' % (f, ym, sound.ym_image(list(m.sound), 0)))
+        if ym != sound.ym_image(list(m.sound), level[0]):
+            raise RuntimeError('frame %d: the YM registers %s, the model %s' % (f, ym, sound.ym_image(list(m.sound), level[0])))
         st = sym['N51_state']
         ram51 = [mem.r8(st + i) & 15 for i in range(64)]
         if not m.n51.held and ram51 != list(m.n51.mcu.ram):
@@ -199,6 +214,7 @@ def main():
     for f in range(args.frames):
         inputs(f)
         m.run_frame_port()
+        level[0] = expl.step()
         if run_to({done, sym['sim_render_start']}) != done:
             resume()
             run_to({done})
@@ -211,6 +227,7 @@ def main():
             print('%d frames exact' % (f + 1), flush=True)
     print('PASS: %d frames (seed %d), work RAM, latches, scroll registers and the 51XX exact; every tile RAM change marked'
           % (args.frames, args.seed))
+    print('explosions started: %d' % n54.get('n', 0))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

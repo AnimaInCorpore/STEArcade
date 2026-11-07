@@ -390,6 +390,10 @@ rate_name:
 hbl:
 	rte
 
+	ifd AUTOPLAY
+ap_dirs:	dc.b	$02,$03,$01,$09,$08,$0c,$04,$06	; right, up-right, up, up-left, left, down-left, down, down-right
+	endc
+
 ; The VBL: switches the screen when a picture is complete, counts the arcade frames that may run (vbl_pending) and polls
 ; the pads.  The game's interrupts are not delivered here: the frame is the foreground's stop (frame_stop).
 
@@ -414,6 +418,37 @@ vbl:
 	addq.l	#4,sp
 .no_swap:
 
+	ifd AUTOPLAY				; (benchmark build: coin, start and a pattern of moves and fire)
+	move.l	frame_counter,d0
+	clr.b	in1_kbd
+	clr.b	in0_kbd
+	clr.b	in2_kbd
+	cmp.l	#300,d0
+	blo.s	.ap_done
+	cmp.l	#304,d0
+	bhs.s	.ap1
+	move.b	#$10,in1_kbd		; coin 1
+.ap1:	cmp.l	#400,d0
+	blo.s	.ap_done
+	cmp.l	#404,d0
+	bhs.s	.ap2
+	move.b	#$04,in1_kbd		; start 1
+	bra.s	.ap_done
+.ap2:	cmp.l	#460,d0
+	blo.s	.ap_done
+	move.l	d0,d1
+	lsr.l	#4,d1
+	and.w	#7,d1
+	lea	ap_dirs(pc),a0
+	move.b	(a0,d1.w),in0_kbd
+	btst	#1,d0
+	beq.s	.ap_done
+	move.b	#$01,in1_kbd		; fire every other frame
+	btst	#5,d0
+	beq.s	.ap_done
+	move.b	#$01,in2_kbd		; and a bomb now and then
+.ap_done:
+	endc
 	addq.l	#1,frame_counter
 	ifd RATE
 	addq	#1,rate_count		; every RATE VBLs: the VBL, picture and logic frame counters
@@ -1267,7 +1302,24 @@ n50_b:	dc.w	10,20,30,40,50,60,80,100,120,140,160,180,200,400,600,1000
 n50_e:	dc.w	15,30,45,60,75,90,120,150,180,210,240,270,300,600,900,1500
 
 n54_write:
-	addq.w	#1,n54_count
+	tst.b	n54_skip
+	beq.s	.cmd
+	subq.b	#1,n54_skip
+	rts
+.cmd:	and.b	#$F0,d7
+	cmp.b	#$30,d7
+	beq.s	.par
+	cmp.b	#$40,d7
+	beq.s	.par
+	cmp.b	#$10,d7
+	beq.s	.trig
+	cmp.b	#$20,d7
+	bne.s	.x
+.trig:	tst.b	booted3
+	beq.s	.x
+	clr.b	snd_expl_t		; the explosion (as Galaga's: commands $1x / $2x start it while the sound runs)
+.x:	rts
+.par:	move.b	#4,n54_skip		; $3x / $4x take four parameter bytes
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -1659,7 +1711,8 @@ n50_out:	ds.b	1		; the 50XX's output latch
 n50_idx:	ds.b	1
 n50_buf:	ds.b	4
 	even
-n54_count:	ds.w	1
+n54_skip:	ds.b	1		; parameter bytes of a 54XX command still to come
+	even
 scroll:		ds.w	4		; the scroll latches: background x, foreground x, background y, foreground y
 flip:		ds.w	1
 vblock_de:	ds.w	1
