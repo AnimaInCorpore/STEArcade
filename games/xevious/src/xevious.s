@@ -1119,6 +1119,8 @@ sim_render_start:			; (render_test.py measures from here)
 	bra.s	sim_render_start
 sim_frame_done:				; the harness compares here (the frame's work is done), returns with rts
 	bra.s	sim_frame_done
+sim_render_ret:				; render_test.py calls render_frame with this as the return address
+	bra.s	sim_render_ret
 	endc
 
 ; ------------------------------------------------------------------------------

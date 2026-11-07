@@ -3,7 +3,7 @@ sites of the I/O accesses and the 50XX's commands, in the STE schedule (run_fram
     python ref/cover.py <seed> <frames>  ->  build/xevious/xevious_cover_<seed>.pkl
 
 Seeds: 1-3 random play (1 player); 4-5 two players; 6 no coin (the whole attract mode); 7-9 more play with lives
-(DIP) variants; the 11-14 infinite lives (MAME's cheat), 60000 frames: the later areas.
+(DIP) variants; the 11-14 infinite lives (MAME's cheat), 60000 frames; 31-34 invincible (the cheat's `ret` at $1492 in the reference's ROM image), 60000 frames: the later areas.
 """
 import os, pickle, random, sys
 sys.path[:0] = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"), os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "engine")]
@@ -13,10 +13,11 @@ from machine import Xevious
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
 rnd = random.Random(seed)
-m = Xevious(skip_tests=True)
+INVINCIBLE = seed >= 31                  # MAME's invincibility cheat (a ROM patch of the reference: the translation is not patched)
+m = Xevious(skip_tests=True, invincible=INVINCIBLE)
 PLAYERS = 2 if seed in (4, 5) else 1
 NOCOIN = seed == 6
-INFINITE = seed >= 11                    # infinite lives: the later areas (random play dies in the first ones)
+INFINITE = 11 <= seed < 31                    # infinite lives: the later areas (random play dies in the first ones)
 if seed in (7, 8):
     m.dswa = 0xff & ~0x60 | (0x40 if seed == 7 else 0x00)      # 1 life / 5 lives
 if seed == 9:

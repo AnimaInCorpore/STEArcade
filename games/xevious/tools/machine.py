@@ -266,13 +266,19 @@ class Gfx:
 
 
 class Xevious:
-    def __init__(self, skip_tests=False, frame_line=None):
+    def __init__(self, skip_tests=False, frame_line=None, invincible=False):
         """frame_line: the screen line a frame starts at; the default 224 (the start of the vertical blank) is MAME's
         phase for its frame_done callbacks (ref/mame_cmp_xevious.py)."""
         self.roms = [load("cpu_3p.rom") + load("cpu_3m.rom") + load("xv3_3.2m") + load("xv3_4.2l"),
                      load("xv3_5.3f") + load("xv3_6.3j"), load("xvi_7.2c")]
         if skip_tests:
             self.roms[0] = skip_ram_test(self.roms[0])
+        if invincible:                        # MAME's cheat (sxevious): the collision routine's `ret nc` ($1492) always returns
+            rom = bytearray(self.roms[0])
+            assert rom[0x1492] == 0xD0
+            rom[0x1492] = 0xC9
+            rom[0x1FFF] = (rom[0x1FFF] + 0xD0 - 0xC9) & 0xFF        # (block 1's checksum at $0240 stays 0)
+            self.roms[0] = bytes(rom)
         self.mem = bytearray(0x10000)         # 7800-CFFF are the RAM, the rest unused
         self.sound = bytearray(0x20)
         self.latch = [0] * 8                  # 6820-6827
@@ -702,6 +708,17 @@ class Xevious:
     # ---- rendering -----------------------------------------------------
     def render_raw(self):
         """288 x 224 (x, y) bitmap of palette indices (128 = black), MAME's screen_update_xevious."""
+        bg, spr, fg = self.render_layers()
+        bmp = bg.copy()
+        sel = spr != 0x80
+        bmp[sel] = spr[sel]
+        sel = fg != 0x80
+        bmp[sel] = fg[sel]
+        return bmp
+
+    def render_layers(self):
+        """the three layers of the picture, each 224 x 288 palette indices [y][x] (0x80: transparent in the sprite and
+        the foreground layer): the background, the sprites (in list order, later ones on top), the foreground."""
         if self.gfx is None:
             self.gfx = Gfx()
         g = self.gfx
@@ -739,7 +756,8 @@ class Xevious:
             tx = 511 - (sx_ - ex) % 512
             ty = 255 - (sy_ - ey) % 256
             return m[ty][:, tx]
-        bmp = layer(bgmap, self.scroll[0], self.scroll[2], -20, -16, 288 + 27, -16).copy()
+        bg = layer(bgmap, self.scroll[0], self.scroll[2], -20, -16, 288 + 27, -16).copy()
+        bmp = np.full((224, 288), 0x80, np.uint8)             # the sprites' layer
         sr1, sr2, sr3 = mem[0x8780:0x8800], mem[0x9780:0x9800], mem[0xa780:0xa800]
         lut = g.sprite_lut
         for offs in range(0, 0x80, 2):
@@ -783,9 +801,7 @@ class Xevious:
             else:
                 put(code, sx, sy)
         fg = layer(fgmap, self.scroll[1], self.scroll[3], -32, -18, 288 + 32, -10)
-        sel = fg != 0x80
-        bmp[sel] = fg[sel]
-        return bmp
+        return bg, bmp, fg
 
     def render_rgb(self):
         bmp = self.render_raw()
