@@ -383,6 +383,45 @@ vbl:
 ; the CWAI).  Without the IRQ the frame passes and the loop goes round once (back here).
 ; ------------------------------------------------------------------------------
 
+; mk_sort: the native at $9933, the sprite list's bubble sort ($9933-$995E: records of 3 bytes at $2890, n = $2951 = $2952 of
+; them, $2950 = n - 1; a pass swaps neighbours where the first byte is smaller (unsigned), n - 1 passes of n - 1, n - 2, .. 1
+; compares), which is the stable sort by that byte, descending: done by insertion.  The counters it leaves: $2950 = $2951 = 0,
+; $2952 = 2 (the last pass starts with 2).  n < 2 (the pass count wraps: 255 passes over what follows the list): the original code.
+; The registers and flags it leaves are dead ($9962 loads Y, U and X first).
+mk_sort:
+	moveq	#0,d7
+	move.b	$2951(a3),d7
+	cmp.b	#2,d7
+	blo.s	.orig
+	subq.b	#1,d7			; n - 1 records to insert
+	lea	$2890(a3),a0
+	moveq	#3,d6			; the offset of the record to insert
+.outer:	move.b	(a0,d6.w),d0
+	move.b	1(a0,d6.w),d1
+	move.b	2(a0,d6.w),d2
+	move.w	d6,d3			; its place
+.inner:	tst.w	d3
+	beq.s	.place
+	cmp.b	-3(a0,d3.w),d0		; (while the record before is smaller)
+	bls.s	.place
+	move.b	-3(a0,d3.w),(a0,d3.w)
+	move.b	-2(a0,d3.w),1(a0,d3.w)
+	move.b	-1(a0,d3.w),2(a0,d3.w)
+	subq.w	#3,d3
+	bra.s	.inner
+.place:	move.b	d0,(a0,d3.w)
+	move.b	d1,1(a0,d3.w)
+	move.b	d2,2(a0,d3.w)
+	addq.w	#3,d6
+	subq.b	#1,d7
+	bne.s	.outer
+	clr.b	$2950(a3)
+	clr.b	$2951(a3)
+	move.b	#2,$2952(a3)
+	jmp	M009962
+.orig:	move.w	#$2890,d4
+	jmp	M009936
+
 mk_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7

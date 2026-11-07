@@ -6,23 +6,27 @@ MAME set `mikie` (Konami GX469; `konami/mikie.cpp`).  The main CPU, a plain MC68
 encrypted), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
 lock-step.  The picture is MAME's ROT270 picture (**the monitor is turned: 224 x 256, portrait**), centred in the
 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
-against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  Status:
-**Experimental**: the picture and the logic are verified (below), **there is no sound** (the Z80 sound board with its two
-SN76489As is not run, the main CPU's commands are only logged), and no full-game play has been verified.
+against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat; the sound board's Z80
+driver translated too, its two SN76489As on the YM2149 (three of the eight voices at a time).  Status: **Experimental**: the
+picture, the logic and the sound driver are verified (below), the YM mix-down (three voices of eight) is a reduction by
+design, and no full-game play has been verified.
 
 ## Build and run
 
 ```sh
-python port.py cover mikie                  # coverage: ref/cover.py seeds 1-9 (30000 frames each, ~10 min in parallel)
-python port.py build mikie                  # -> run/mikie/MIKIE.PRG (NOSOUND: no sound yet)
-python port.py test mikie                   # lock-step (seeds 1, 4, 7), render (seed 4), sprite edges
+python port.py cover mikie                  # coverage: ref/cover.py seeds 1-9 (30000 frames each, ~10 min in parallel), ref/cover_sound.py
+python port.py build mikie                  # -> run/mikie/MIKIE.PRG (-D NOSOUND=1: without the sound)
+python port.py test mikie                   # lock-step (seeds 1, 4, 7), render (seed 4), sprite edges, sound (game and random commands)
 python port.py mame mikie                   # the reference against MAME (ref/mame_cmp_mikie.py)
 python games/mikie/tools/prepare.py         # verify assets/roms/mikie.zip, unpack to assets/roms/extracted/mikie/
 python games/mikie/tools/build.py           # -> run/mikie/MIKIE.PRG (--sim: run/mikie_sim; --assets: colours again)
 python games/mikie/tools/logic_test.py 20000 --seed 4     # the translation in lock-step with the reference
 python games/mikie/tools/render_test.py 3000 --seed 4 --start 500   # the STE picture against the reference
 python games/mikie/tools/sprite_test.py                   # edges, all 16 shifts, holes, guards, 64 KB crossings
-powershell -File games/mikie/tools/hatari.ps1 -Frames 3000   # hidden Hatari (F030Arcade build), AVI stills in run/mikie_hatari
+python games/mikie/tools/sound_test.py 6000 --seed 4 [--random]   # the STE's sound player (Musashi) against tools/sound.py, every frame
+python games/mikie/ref/sound_cmp.py 1 4000                # the STE's tick schedule against the timed Z80 board (SN voices' states)
+python games/mikie/ref/mame_sound_cmp.py 1500             # the timed Z80 board against MAME's SN writes (attract, 100.00%)
+powershell -ExecutionPolicy Bypass -File games/mikie/tools/hatari.ps1 -Frames 3000 [-Sound 1]   # hidden Hatari (F030Arcade build), AVI stills (and its audio: mikie.wav) in run/mikie_hatari
 ```
 
 Supply `assets/roms/mikie.zip` (MAME's parent set; `docs/rom_manifest.json` has the files' sizes, CRCs and SHA-1s).
@@ -66,15 +70,42 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   100-1500) and 656 each of seeds 2, 4 and 6 (frames 100-6000); `tools/sprite_test.py`: 154 made-up pictures exact (both
   side edges at every shift, holes, flips, overlaps, the guard lines above the picture, 64 KB crossings, 60 pictures in
   sequence).
-* **Hatari** (F030Arcade build, hidden, `tools/hatari.ps1 -Frames 3000`, AUTOPLAY build: a coin, start, walking and
+* **Sound** (`tools/sound.py`, `tools/sndgen.py`, `src/sound.s`, after Track & Field's; the board: a Z80 at 3.58 MHz, ROM `n10.6e`,
+  two SN76489As, the main CPU's command latch, a timer read; no speech, DAC or tune loops).  The Z80 driver is translated to
+  68000 code (`engine/z80x.py`; coverage `ref/cover_sound.py`: the game's commands of seeds 1-9 and random commands, 1049
+  instructions, none unsupported) and runs in the schedule of a tick (the driver's main loop waits for the timer's bit 2:
+  every 4096 Z80 cycles, 14.4 a frame): each arcade frame the commands the game wrote since the last frame run the IRQ
+  handler, then the frame's ticks.  Its writes fill two SN76489A register files; each frame their eight voices go to the
+  YM2149's three channels (the three loudest, a voice keeping its channel; the noise as the YM's; one noise period).
+  Verified: (1) `ref/mame_sound_cmp.py`: MAME's two SN chips' writes in 1500 attract frames (1467 and 1461 bytes, 21
+  commands) equal the timed Z80 reference's, **100.00%, in order**; (2) `ref/sound_cmp.py`: the tick schedule's SN voice
+  states against the timed reference, 99.2% of 10028 states equal in order (an effect starts up to a frame late); (3)
+  `tools/sound_test.py`: the STE's player (Musashi) against its model every frame (sound RAM, both chips' registers, the
+  YM's registers and channel choice, the schedule's time): seeds 1, 4 and 7 (4000-8000 frames) and random commands (seeds
+  1-3, 6000 frames, added to the game's own): PASS; (4) Hatari (`-Sound 1`, the AVI's audio): music-like tones at the pitches
+  MAME's audio shows in the attract (about 782, 590, 528, 132 Hz), silence between; **not heard by a person, and no
+  waveform comparison with MAME was made**.  Reductions by design: three of the eight voices at a time (the YM has three
+  channels: the loudest win; a tone's pitch is on the YM's period grid), the YM's
+  levels by a coarse table (3 dB steps); the SN's noise on one YM noise generator at the chip's nearest period (periods
+  above 31 are clamped); the main loop's `ei` windows are not interrupt points (a command waits for the next tick: up to
+  a frame later than the arcade).  The driver's own self-test and boot RAM test are skipped (it starts at `$0156`).
+  Speed: the sound adds about 6000 68000 cycles an arcade frame (the schedule's idle ticks and each channel's counting
+  ticks are natives: a quiet tick is free, a counting-only run of ticks is skipped in one step).
+* **Sprite list sort** (`mk_sort`, a native at `$9933`: the game's bubble sort of its 3-byte sprite records, the largest single
+  cost in a profile of the logic, replaced by an equal stable insertion sort; lock-step equal, seeds 1-9 x 20000 frames, below).
+* **Hatari** (F030Arcade build, hidden, `tools/hatari.ps1 -Frames 3000 -Sound 1`, AUTOPLAY build: a coin, start, walking and
   hitting): the title, the attract picture and the first classroom run and look right in the AVI stills (colours,
-  turned picture, sprites, the heart and flag HUD); 3001 VBLs: 3347 arcade frames (55.8 a second, 93% of 60), 2054 pictures
-  (34.2 a second), 2 border fallbacks, no late border events.  Not measured: sustained play, later rooms.
-* **Not done / not verified**: the sound; the cocktail cabinet and the flip screen (`render_raw` raises `NotImplementedError`
-  for the flip latch; the STE renderer ignores it); the service mode; a full game; the other sets (`mikiej`, `mikiek`,
-  `mikiehs` share the main program: the graphics ROMs differ); sprite preparation measurements against the other
-  methods (`docs/sprite-preparation.md`: this port uses the shared generated code as Track & Field does, not measured
-  separately); the Mega STE.
+  turned picture, sprites, the heart and flag HUD); 3001 VBLs with the sound on: 3290 arcade frames (54.8 a second, 91% of
+  60), 2090 pictures (34.8 a second), 2 border fallbacks, no late border events (before the sound and the sort native:
+  55.8 a second without sound; the cost of the sound is about 2 points of rate, the sort gained back about 1).  The game
+  does not reach the full arcade rate: **it runs at 91% in Hatari's attract and first room**.  Not measured: sustained
+  play, later rooms.
+* **Not done / not verified**: the cocktail cabinet and the flip screen (`render_raw` raises `NotImplementedError` for the flip
+  latch; the STE renderer ignores it); the service mode; a full game; the other sets (`mikiej`, `mikiek`, `mikiehs` share the
+  main program: the graphics ROMs differ); the driver's paths no seed's commands reached (random commands 0-$7F reach most
+  of the effect range; a jump through a table entry nothing used would stop at `snd_badpc`); sprite preparation
+  measurements against the other methods (`docs/sprite-preparation.md`: this port uses the shared generated code as Track
+  & Field does, not measured separately); the Mega STE; hearing the result on real hardware or an emulator by a person.
 
 ## How it works
 
@@ -93,4 +124,5 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
 * **Assets** (`tools/assets.py`): the tiles and sprites are turned (the picture's frame; MAME's flip x is the picture's row
   flip, flip y its column flip), the 4096 pens fitted to 16 colours (`engine/palette_native.py`).
 * **Shared code changed**: `engine/m6809x.py` only (the `no_follow` set, above).  Everything else is this folder, the
-  registration lines in `port.py` / `tools/release.py` and the README's table.
+  registration lines in `port.py` / `tools/release.py` (fixed here: the first commit's Mikie entry had real line breaks inside
+  its strings) and the README's table.

@@ -23,7 +23,8 @@ from paths import build_dir, require_coverage
 RESET, IRQ = MikiePort.START, MikiePort.IRQ
 SEEDS = [int(x) for x in os.environ.get("MK_SEEDS", "").split(",") if x] or range(1, 10)
 DEAD = {0x6E80: "main_dead"}               # LBRA $D791 into zero padding, never run: a crash if it is
-NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai"}
+SORT_PC = 0x9933                           # the sprite list's bubble sort (LDU #$2890 ...): mk_sort, a stable insertion sort
+NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai", SORT_PC: "mk_sort"}
 CWAI_RET = MikiePort.CWAI_PC + 2           # the IRQ's return point from the CWAI native (its RTI dispatches here)
 ROM_FILES = ("n14.11c", "o13.12a", "o17.12d")
 

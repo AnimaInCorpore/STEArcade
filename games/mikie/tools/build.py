@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
-The sound is not built yet (NOSOUND is always defined: README).
+-D NOSOUND=1: without the sound (tools/sndgen.py, src/sound.s; it needs ref/cover_sound.py's coverage).
 """
 from pathlib import Path
 import argparse
@@ -41,7 +41,13 @@ def main():
                                                        indent=1, default=str) + '\n')
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
-    defs.append('NOSOUND=1')                  # (the sound: not done yet)
+    if not any(d.startswith('NOSOUND') for d in defs):
+        for m in ('sndgen', 'sound'):
+            sys.modules.pop(m, None)
+        import sndgen                         # (the sound: games/mikie/ref/cover_sound.py's coverage)
+        srep = sndgen.build()
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']))
     tag = args.tag or ('mikie_sim' if args.sim else 'mikie')
     out = ROOT / 'run' / tag / 'MIKIE.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)
