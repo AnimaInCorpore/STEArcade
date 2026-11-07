@@ -540,7 +540,7 @@ class RthunderPort(Rthunder):
 
       1. the vertical blank: the sprite list latched, the MCU run for the frame on the board's scheduler (cpu1 and cpu2
          held), as MAME runs it (`run_others`);
-      2. both 6809 take their IRQ at their idle point (the main loop's head with its queues empty), then run
+      2. both 6809 take their IRQ at their idle point (the main loop's BRA, $81BC / $80A6, with its queues empty), then run
          cooperatively, cpu1 first: a CPU runs until it is idle again, until it *writes a semaphore byte* (shared RAM
          $5606 / $5607 = cpu2's $1606 / $1607) or until a spin wait would go round again (`SPIN`: the backward branch
          of a loop that reads and waits); then the other CPU runs, and so on.
@@ -549,11 +549,19 @@ class RthunderPort(Rthunder):
     cpu2: spin until $1606 = 0, clear $1607, spin until $1606 = 1, work, set $1607 to 1; the many variants of it).  On the
     board the spins last a few cycles; the yield at every write of the bytes and at every spin keeps the order in which
     the two CPUs see each other's writes that the hardware's timing gives them, and is the same in the translation.
+
+    STATE (2026-11-07): NOT sufficient.  In attract mode it runs 1972 (ORDER (0, 1)) or 2168 (ORDER (1, 0)) frames from
+    the start (frame 200) and then deadlocks: the programs also assume the *timing* of the board, which a cooperative
+    schedule does not give them.  Examples: cpu1's sub-step completion (`STA <$04; STA <$05`, $92A0) advances cpu2's
+    counter on the assumption that cpu2 dispatched its own step ~7000 cycles earlier; cpu2 samples cpu1's flag $18 at
+    ~100 cycles into its IRQ, long before cpu1 changes it.  Whichever CPU runs first breaks one of the two kinds.
     """
     START = 200
-    IDLE = {0: 0x81B6, 1: 0x80A3}
-    SPIN = {0: {0x903A, 0x918A}, 1: {0x858F, 0x8597}}      # backward branches of spin waits (ref/cover.py finds them)
-    SEM = ({0x5606, 0x5607}, {0x1606, 0x1607})
+    IDLE = {0: 0x81BC, 1: 0x80A6}              # the main loops' BRA (the translation's hooks replace them)
+    SPIN = ({0x903A, 0x918A, 0xAA6F}, {0x858F, 0x8597})            # backward branches of spin waits; more are learned (`learned`)
+    SEMO = {0x1606, 0x1607}                                  # the shared RAM offsets (cpu2's address) of the semaphore bytes
+    ORDER = (1, 0)                                         # cpu2's IRQ handler reaches its dispatch long before cpu1's: it runs first
+    LEARN = True                                           # (ref/cover.py: learn more spin waits and semaphore bytes)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -562,6 +570,12 @@ class RthunderPort(Rthunder):
         self.instructions = [0, 0]
         self.yield_req = False
         self.writes = 0
+        self.last = ({}, {})
+        self.learned = set()
+        self.SEMO = set(self.SEMO)
+        self.learned_sem = set()
+        self.readlog = ([], [])
+        self.SPIN = tuple(set(x) for x in (self.SPIN[0], self.SPIN[1]))   # (instance copy: learns)
 
     # the IRQ acknowledges are no-ops in the port: the line is only high while the CPU takes the interrupt
     def wr1(self, a, v):
@@ -569,7 +583,7 @@ class RthunderPort(Rthunder):
             return
         self.writes += 1
         super().wr1(a, v)
-        if a in self.SEM[0]:
+        if 0x4400 <= a < 0x5800 and a - 0x4000 in self.SEMO:
             self.yield_req = True
 
     def wr2(self, a, v):
@@ -577,15 +591,31 @@ class RthunderPort(Rthunder):
             return
         self.writes += 1
         super().wr2(a, v)
-        if a in self.SEM[1]:
+        if a < 0x1800 and a in self.SEMO:
             self.yield_req = True
+
+    def rd1(self, a):
+        if self.LEARN and 0x4400 <= a < 0x5800:
+            self.readlog[0].append(a - 0x4000)
+        return super().rd1(a)
+
+    def rd2(self, a):
+        if self.LEARN and a < 0x1800:
+            self.readlog[1].append(a)
+        return super().rd2(a)
+
+    def virt(self, i, pc):
+        """the virtual address (engine/m6809x.py pages, ref/cover.py): the banked window's page is 8 + bank"""
+        if pc >> 13 == 3:
+            return ((8 + (self.bank1 if i == 0 else self.bank2)) << 13) | (pc & 0x1FFF)
+        return pc
 
     def idle(self, i):
         c = self.cpus[i]
         s = self.shared
         if i == 0:
-            return c.pc == 0x81B6 and s[0x16B4] == s[0x16B3] and s[0x166F] == s[0x166E]
-        return c.pc == 0x80A3 and s[0x1668] == s[0x1667]
+            return c.pc == 0x81BC and s[0x16B4] == s[0x16B3] and s[0x166F] == s[0x166E]
+        return c.pc == 0x80A6 and s[0x1668] == s[0x1667]
 
     def boot(self, frames=None):
         """MAME's schedule up to the port's start, then both CPUs to their idle points"""
@@ -611,6 +641,7 @@ class RthunderPort(Rthunder):
         """-> 'idle' (at the idle point), 'yield' (wrote a semaphore byte), 'blocked' (a spin wait goes round again)"""
         c = self.cpus[i]
         spin = self.SPIN[i]
+        last = self.last[i]
         self.yield_req = False
         n = 0
         while n < limit:
@@ -624,16 +655,29 @@ class RthunderPort(Rthunder):
                 self.yield_req = False
                 self.instructions[i] += n
                 return "yield"
-            if pc in spin and c.pc < pc:
-                self.instructions[i] += n
-                return "blocked"
+            if c.pc < pc:                                  # a backward jump: a spin wait?
+                pc = self.virt(i, pc)
+                if pc in spin:
+                    self.instructions[i] += n
+                    return "blocked"
+                st = (c.a, c.b, c.x, c.y, c.u, c.s, c.dp, c.cc, self.writes)
+                if last.get(pc) == st and self.LEARN:    # the same registers, nothing written since its last pass
+                    spin.add(pc)
+                    self.learned.add((i, pc))
+                    new = set(self.readlog[i]) - self.SEMO     # what the loop reads: the other CPU's counters
+                    self.SEMO |= new
+                    self.learned_sem |= new
+                    self.instructions[i] += n
+                    return "blocked"
+                last[pc] = st
+                self.readlog[i].clear()
         raise RuntimeError("cpu %d runs on (pc %04X) after %d instructions" % (i + 1, c.pc, limit))
 
     def cooperate(self):
         stuck = 0
         while "run" in self.state:
             before = (self.writes, tuple(c.pc for c in self.cpus))
-            for i in (0, 1):
+            for i in self.ORDER:
                 if self.state[i] != "run":
                     continue
                 r = self.run_cpu(i)

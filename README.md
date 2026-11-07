@@ -58,7 +58,7 @@ what an automated player can attempt and what evidence establishes completion.
 `python port.py list` lists the ports supported by the common build, test, run and release commands. The table
 also includes work in progress: Splatterhouse and Galaga '88 have standalone build and renderer tests; Mr. HELI
 and Dragon Spirit have STE programs (their own build, lock-step and bench scripts) but are not registered yet; Pac-Mania
-provides board/reference work only. Use their local scripts;
+provides board/reference work only, as does Rolling Thunder (reference board equal to MAME, no STE program: its README). Use their local scripts;
 their presence in the table does not put them in the release. Input and release instructions below refer to
 registered ports. Current source capabilities and measurements may be newer than release 0.7.
 

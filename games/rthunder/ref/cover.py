@@ -20,6 +20,7 @@ start again later); 11-19 the same with a DIP switch setting that gives the stag
   targets  {(virtual pc, slot): set of virtual targets} of computed jumps, returns and calls
   dp       {(virtual pc, slot): set of DP values}
   wrap     set of (virtual pc, slot) whose indexed operand (register + constant offset) crossed $FFFF / $0000
+  semw     {cpu: set of the virtual pcs that wrote a semaphore byte (RthunderPort.SEM)}
   spin     {cpu: set of virtual pcs of the backward branches that closed a spin wait: the same registers and no write
            between two taken passes}
 """
@@ -90,6 +91,7 @@ def run(seed, frames, port=False, out=None):
     dps = {0: collections.defaultdict(set), 1: collections.defaultdict(set)}
     wraps = {0: set(), 1: set()}
     spin = {0: set(), 1: set()}
+    semw = {0: set(), 1: set()}
     idx = {0: {}, 1: {}}
     accs = [[], []]
     writes = [0, 0]
@@ -154,6 +156,9 @@ def run(seed, frames, port=False, out=None):
                         (i == 1 and 0x1600 <= a < 0x1700) or (rw == "r" and a >= 0x4000 and a < 0x4400 and i == 0):
                     if len(ioacc[i][key]) < 64:
                         ioacc[i][key].add((rw, a))
+                if rw == "w" and (i == 0 and 0x4400 <= a < 0x5800 and a - 0x4000 in m.SEMO or
+                                  i == 1 and a < 0x1800 and a in m.SEMO):
+                    semw[i].add(v)
                 prev = (rw, a)
             nxt = c.pc
             if not (pc < nxt <= pc + 5):
@@ -188,8 +193,15 @@ def run(seed, frames, port=False, out=None):
             m.run_frame_port()
         else:
             m.run_frame()
-    data = dict(exec=exec_, acc={i: dict(v) for i, v in acc.items()}, ioacc={i: dict(v) for i, v in ioacc.items()},
-                targets={i: dict(v) for i, v in targets.items()},
+    if port:
+        for i, pc in m.learned:
+            spin[i].add(pc)
+        for i in (0, 1):
+            spin[i] |= m.SPIN[i]
+        print("learned spin waits %s, semaphore bytes %s" % (sorted((i, "%X" % v) for i, v in m.learned),
+                                                           sorted("%X" % a for a in m.learned_sem)))
+    data = dict(exec=exec_, semw=semw, acc={i: dict(v) for i, v in acc.items()}, ioacc={i: dict(v) for i, v in ioacc.items()},
+                targets={i: dict(v) for i, v in targets.items()}, semo=set(m.SEMO) if port else set(),
                 dp={i: {k: s for k, s in v.items() if s != {0}} for i, v in dps.items()}, wrap=wraps, spin=spin,
                 frames=frames, seed=seed, port=port)
     out = out or build_dir("rthunder") / ("cover_%s%d.pkl" % ("p_" if port else "", seed))
