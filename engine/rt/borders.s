@@ -93,6 +93,15 @@ BD_TA_THR = BD_TA_P2-8			; the top border's HBL: the reload at or below this
 BD_TA_LOOP = 9				; the sync's cycles after the HBL in nops (move.b, cmp.b, dbls: 36 cycles, the MFP's
 					; read 4 more: Hatari put the 60 Hz write 4 cycles after stefastbobs2's with 8)
 
+; Cached 16 MHz uses compact, explicitly warmed loops, not linear NOP runs.
+; Counts are DBF initial values (count+1 iterations). Video trace units: 8MHz.
+BD_FAST_BOOT_EARLY = 4
+BD_FAST_BOOT_AGE = 8
+BD_FAST_PRE_TOP = BD_TA_THR+3
+BD_FAST_TOP_DELAY = 78
+BD_FAST_TOP_PULSE = 8
+BD_FAST_LOW_PULSE = 17
+
 borders_vbl	macro
 	clr.b	$fffffa1b.w		; Timer B: counts this frame's lines from the first
 	move.b	#BD_FIRST-BD_K,$fffffa21.w
@@ -107,12 +116,19 @@ borders_vbl	macro
 	tst.b	bd_ta_state		; Timer A is counting to the top border already (the bottom border started it)
 	bne.s	.c\@
 	clr.b	$fffffa19.w
-	move.b	#TA_DATA,$fffffa1f.w
-	move.b	#4,$fffffa19.w
+	tst.b bd_fast
+	beq.s .slow_ta\@
+	move.b #TA_DATA-BD_FAST_BOOT_EARLY,$fffffa1f.w
+	bra.s .arm_ta\@
+.slow_ta\@:
+	move.b #TA_DATA,$fffffa1f.w
+.arm_ta\@:
+	move.b #4,$fffffa19.w
 	ifd DEBUG
 	addq.w	#1,bd_fallbacks
 	endc
 .c\@:
+	bsr bd_speed_poll
 	endm
 
 ; The 60 Hz pulse's margins (2026-11-02, real STE report: one-word plane slips): the 50 Hz write must come after the
@@ -130,15 +146,32 @@ BD_TOP_PULSE = 14			; nops between the 60 Hz and the 50 Hz write (9 before)
 ; 60 Hz write must not come before line 262's 376 (its display end at 60 Hz: 2 bytes less).  2 nops shorter than
 ; before 2026-11-02 (the 50 Hz write came at 12-28, 8 cycles from the STE's limit).
 bd_low_open	macro
+	tst.b bd_fast
+	beq.s .slow\@
+	move.l .pulse\@(pc),d2
+	move.l .pulse\@+4(pc),d2
+	move.l .pulse\@+8(pc),d2
+	move.l .pulse\@+12(pc),d2
+	move.l .pulse\@+16(pc),d2
 	bd_poll
-	clr.b	$ffff820a.w		; 60 Hz
-	moveq	#2,d2
+.pulse\@:
+	clr.b $ffff820a.w
+	moveq #BD_FAST_LOW_PULSE,d2
+.delay\@:
+	dbf d2,.delay\@
+	move.b #2,$ffff820a.w
+	bra.s .done\@
+.slow\@:
+	bd_poll
+	clr.b $ffff820a.w
+	moveq #2,d2
 .w\@:	nop
-	dbf	d2,.w\@
+	dbf d2,.w\@
 	nop
 	nop
 	nop
-	move.b	#2,$ffff820a.w		; 50 Hz
+	move.b #2,$ffff820a.w
+.done\@:
 	endm
 
 bd_top_open	macro
@@ -179,6 +212,8 @@ borders_handlers	macro
 ; Top border (Timer A).  bd_ta_state: 0 the VBL armed it (old timing), 2 the first period of the bottom border's
 ; start, 1 the early event.
 timer_a:
+	tst.b bd_fast
+	bne bd_ta_fast
 	tst.b	bd_ta_state
 	bne	bd_ta_chain
 	move	#$2100,sr		; Enable HBL
@@ -214,6 +249,117 @@ bd_ta_chain:
 	endc
 	movem.l	(sp)+,d0-d1
 .pre:	rte
+
+; Mega STE cache-on path: approach the HBL BEFORE the opening line, warm
+; a compact delay kernel, mask MFP sources during the bounded HBL approach,
+; then open the border. STOP must not be released by ACIA/Timer C instead
+; of HBL. Only masks are cleared (pending events are retained), for <1 ms
+; even at the loop bound: less than one IKBD serial byte. The 32-byte pulse
+; kernel is read into the unified external cache after any HOG invalidation.
+; HBL's vector/stack can evict only a few words; the measured pulse margins
+; cover those misses. No CPU/cache register writes.
+bd_ta_fast:
+	movem.l d0-d3/a0,-(sp)
+	move #$2700,sr
+	moveq #0,d1
+	move.b $fffffa13.w,d1
+	lsl.w #8,d1
+	move.b $fffffa15.w,d1
+	clr.b $fffffa13.w
+	clr.b $fffffa15.w
+	moveq #TA_DATA-BD_FAST_BOOT_AGE,d2
+	tst.b bd_ta_state
+	beq.s .phase
+	subq.b #1,bd_ta_state
+	bne.s .return
+	moveq #BD_FAST_PRE_TOP,d2
+.phase:
+	moveq #8,d3
+	move #$2100,sr
+.line:
+	stop #$2100
+	move.b $fffffa1f.w,d0
+	cmp.b d2,d0
+	dbls d3,.line
+	move #$2700,sr
+	tst.w d3
+	bmi.s .missed
+	ifd DEBUG
+	move.w d2,d3
+	subq.w #3,d3
+	cmp.b d3,d0
+	bhi.s .on_time
+	addq.w #1,bd_late_top
+.on_time:
+	endc
+	bsr bd_fast_top
+	bra.s .return
+.missed:
+	clr.b $fffffa19.w
+	ifd DEBUG
+	addq.w #1,bd_late_top
+	endc
+.return:
+	ror.w #8,d1
+	move.b d1,$fffffa13.w
+	ror.w #8,d1
+	move.b d1,$fffffa15.w
+	movem.l (sp)+,d0-d3/a0
+	rte
+
+bd_fast_top:
+	lea .wait(pc),a0
+	move.l (a0),d0
+	move.l 4(a0),d0
+	move.l 8(a0),d0
+	move.l 12(a0),d0
+	move.l 16(a0),d0
+	move.l 20(a0),d0
+	move.l 24(a0),d0
+	move.l 28(a0),d0
+	moveq #BD_FAST_TOP_DELAY,d2
+.wait:
+	stop #$2100
+	move #$2700,sr
+	clr.b $fffffa19.w
+.delay:
+	dbf d2,.delay
+	clr.b $ffff820a.w
+	moveq #BD_FAST_TOP_PULSE,d2
+.pulse:
+	dbf d2,.pulse
+	move.b #2,$ffff820a.w
+	rts
+
+bd_speed_poll:
+	movem.l d0/a0,-(sp)
+	tst.b bd_speed_known
+	bne.s .known
+	st bd_speed_known
+	move.l $5a0.w,d0
+	beq.s .done
+	move.l d0,a0
+.cookie:
+	move.l (a0)+,d0
+	beq.s .done
+	cmp.l #'_MCH',d0
+	beq.s .machine
+	addq.l #4,a0
+	bra.s .cookie
+.machine:
+	cmp.l #$00010010,(a0)
+	bne.s .done
+	st bd_is_mste
+.known:
+	tst.b bd_is_mste
+	beq.s .done
+	move.b $ffff8e21.w,d0
+	and.b #3,d0
+	cmp.b #3,d0
+	seq bd_fast
+.done:
+	movem.l (sp)+,d0/a0
+	rts
 
 	if BD_HUD
 ; Timer B with the HUD palette: the events bd_hud_plan laid out (bd_evs: the counter's value at the event's line end,
@@ -726,6 +872,10 @@ bd_rname:
 	endm
 
 borders_vars	macro
+bd_speed_known: ds.b 1
+bd_is_mste: ds.b 1
+bd_fast: ds.b 1
+	even
 bd_ta_state:	ds.b	1
 bd_tb_state:	ds.b	1
 	even

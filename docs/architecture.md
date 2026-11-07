@@ -349,6 +349,13 @@ strips, allowing interrupts between pieces. The former `wait_borders` policy is 
 and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
 record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
+Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.
+It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
+during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
+the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz
+path remains available. [Mega STE timing verification](megaste-border-timing.md) records the
+pulse windows, mixed-HOG load test, cache-placement sweeps and the physical-hardware limit.
+
 Known full-mask, unskewed copies/fills use `blit_go_copy`; HOP 0 fills with arbitrary masks use
 `blit_go_fill`. Both can budget 32 words per piece because there are at most two bus accesses per word.
 The generic dispatcher accounts for masked destination reads and FXSR fetches. Strip line counts come from
