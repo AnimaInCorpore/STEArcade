@@ -22,8 +22,8 @@
 ; lines below the picture for whole sprites.  Every picture the buffer is composed again from the playfield: the 48 fixed
 ; lines unshifted, the 208 scrolled lines shifted by the scroll (one HOG pass per plane and line: 14 words, FXSR and the
 ; skew; the addresses run on to the next plane), so the last sprites' damage is gone, the guard lines cleared where the
-; sprites reached them.  Then the sprites: the 64 entries of the shown bank ($3800 or $3900 by latch Q5) from the last to
-; the first (the first on top).
+; sprites reached them.  Then the sprites: the 64 entries of the shown bank ($3800 or $3900 by latch Q5) from the first to
+; the last (the last on top: MAME's draw_sprites order).
 ;
 ; Sprites (x $3802 + 4 i = picture Y, y $3803 + 4 i, attr $3801 + 4 i, code $3800 + 4 i; none where x and y are both 0):
 ; the 16 x 16 square at picture X = 224 - y, Y = x; code the byte + bit 5 of the attribute * 8, colour attr & 15 + 16 *
@@ -334,23 +334,23 @@ tile_draw:
 	bhs.s	.one			; (the first 224 pixels again at 256: cell columns 0-27 + 32)
 	movem.l	(a0),d0-d5/a2		; (rows 0-6; row 7 below)
 	movep.l	d0,0(a1)
-	movep.l	d0,256(a1)
+	movep.l	d0,128(a1)
 	movep.l	d1,PF_LB(a1)
-	movep.l	d1,PF_LB+256(a1)
+	movep.l	d1,PF_LB+128(a1)
 	movep.l	d2,2*PF_LB(a1)
-	movep.l	d2,2*PF_LB+256(a1)
+	movep.l	d2,2*PF_LB+128(a1)
 	movep.l	d3,3*PF_LB(a1)
-	movep.l	d3,3*PF_LB+256(a1)
+	movep.l	d3,3*PF_LB+128(a1)
 	movep.l	d4,4*PF_LB(a1)
-	movep.l	d4,4*PF_LB+256(a1)
+	movep.l	d4,4*PF_LB+128(a1)
 	movep.l	d5,5*PF_LB(a1)
-	movep.l	d5,5*PF_LB+256(a1)
+	movep.l	d5,5*PF_LB+128(a1)
 	move.l	a2,d0
 	movep.l	d0,6*PF_LB(a1)
-	movep.l	d0,6*PF_LB+256(a1)
+	movep.l	d0,6*PF_LB+128(a1)
 	move.l	28(a0),d0
 	movep.l	d0,7*PF_LB(a1)
-	movep.l	d0,7*PF_LB+256(a1)
+	movep.l	d0,7*PF_LB+128(a1)
 .none:	rts
 .one:	movem.l	(a0),d0-d5/a2
 	movep.l	d0,0(a1)
@@ -544,7 +544,7 @@ compose:
 	rts
 
 ; ======================================================================================================================
-; draw_sprites: the 64 entries of the shown bank, the last first (the first on top); the guard lines they reach noted
+; draw_sprites: the 64 entries of the shown bank, the first first (the last on top); the guard lines they reach noted
 ; for the buffer's next picture
 ; ======================================================================================================================
 draw_sprites:
@@ -555,9 +555,9 @@ draw_sprites:
 	tst.b	sb_latch+5		; the sprite RAM bank (OBJ CHE): $3800 or $3900
 	beq.s	.b
 	lea	$100(a0),a0
-.b:	lea	$100(a0),a0		; (the entry after the last)
+.b:	lea	-4(a0),a0		; (the entry before the first)
 	moveq	#63,d0
-.e:	lea	-4(a0),a0
+.e:	lea	4(a0),a0
 	moveq	#0,d5
 	moveq	#0,d3
 	move.b	2(a0),d5		; x: picture Y

@@ -97,7 +97,7 @@ class Video:
             if sx or sy:
                 at = mem[o + 1]
                 code = mem[o] | ((at & 0x20) << 3)
-                color = (at & 15) + 16 * pb
+                color = ((at & 15) + 16 * pb) & 255          # (MAME: modulo the 256 colour sets)
                 G.draw_gfx(bm, VISIBLE, self.sprites, code, 0x100 + color * 16, at & 0x40, at & 0x80, sx, sy,
                            lambda s: s == 0)
         return bm
