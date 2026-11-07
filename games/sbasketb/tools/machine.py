@@ -183,3 +183,63 @@ if __name__ == "__main__":
     for _ in range(300):
         m.run_frame()
     print("300 frames in %.1f s, pc %04X, sound commands %d" % (time.time() - t, m.cpu.pc, len(m.sound_log)))
+
+
+class SBasketPort(SBasket):
+    """The STE runtime's schedule (src/sbasketb.s), one call of run_frame_port an arcade frame.
+
+    The foreground is a task loop: $60F9 TST <$22 ...; $611E LDX <$1A; LDD ,X; ASLA; LBCS $60F9 (the queue at $2100-$213F,
+    its read pointer at $201A; an entry with bit 7 set is empty); the IRQ handler ($62D9, at the VBLANK while latch Q1
+    is 1) plays the game and queues the tasks.  The port's idle point is the loop head $60F9: there the IRQ is delivered
+    (while Q1 is 1), with $60F9 as its return address, when the queue is empty or the loop has come back PASSES times since
+    the last IRQ.  (Not only with an empty queue: in the two-player menu the loop queues a blinking text every pass
+    while the frame counter $2014 has not moved, one entry a pass with one entry always waiting, so the queue never
+    empties; the arcade's IRQ, coming by time, ends that.)  After its RTI the foreground runs on.
+
+    The boot skips the self-test (D582: delay loops of ~60 frames each, a RAM test; D640 reads SYSTEM): the port starts at
+    $6000 with $2FF0 set as D640 sets it (3 when start 1 and start 2 are held: the service mode, else 0).
+    """
+    IDLE = 0x60F9
+    IRQ = 0x62D9
+    QPTR = 0x201A
+    PASSES = 8
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.booted = False
+        self.irqs = 0
+        self.passes = 0
+
+    def waits(self):
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until the loop head with an empty queue, or its PASSES-th visit"""
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE:
+                self.passes += 1
+                if self.passes >= self.PASSES or self.waits():
+                    return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def boot(self):
+        self.cpu.pc = 0x6000
+        self.mem[0x2FF0] = 3 if not self.system & 0x18 else 0
+        self.run_to_idle()
+        self.booted = True
+
+    def run_frame_port(self):
+        c = self.cpu
+        if not self.booted:
+            self.boot()
+        if self.latch[1] and not c.cc & 0x10:
+            c.set_irq(True)
+            c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.passes = 0
+            self.run_to_idle()
+        self.frame += 1
