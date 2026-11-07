@@ -8,7 +8,8 @@ sprites: Counter of (code, colour, flip x, flip y) entries.
 
 Seeds: 1-3 attract, coin, start, random play to the game over and again (the game ends after 3 lives); 4-9 infinite
 lives ($50C0 kept at 2) with random play (4-6) and the same with the stage poked (7-9, STAGE_POKES: see below);
-10 two players; 11 the DIP switches' other settings (5 lives, difficulty 1 / 16 alternating, bonus 80000, no repeated
+10 two players; 12-15 MAME's cheats (infinite lives $50C0 = 10, invincibility $51C0 = 2 / $51DE = 0, infinite bonus
+$509B = $99) with random play for 60000 frames; 11 the DIP switches' other settings (5 lives, difficulty 1 / 16 alternating, bonus 80000, no repeated
 bonus, no demo sounds).
 """
 import collections
@@ -70,6 +71,11 @@ def inputs(frame, rnd, state):
 
 def cheats(seed, frame, m, state):
     mem = m.mem
+    if seed >= 12 and state.get('phase') == 'play':          # MAME's cheats: infinite lives, invincibility, infinite bonus
+        mem[LIVES1] = 0x0A
+        mem[0x51C0] = 0x02
+        mem[0x51DE] = 0x00
+        mem[0x509B] = 0x99
     if 4 <= seed <= 9 and state.get('phase') == 'play':
         if mem[LIVES1] < 2:
             mem[LIVES1] = 2

@@ -4,27 +4,31 @@
 
 MAME set `rocnrope` (`konami/rocnrope.cpp`, MAME 0.286 source).  The main CPU (KONAMI-1, a 6809 with encrypted opcodes,
 40 KB at $6000) is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
-lock-step.  The sound board (a Z80 with two AY-3-8910s, Time Pilot's) is **not** implemented: the sound commands are
-only logged.  The picture is MAME's ROT270 picture, 224 x 256, centred in the 320-pixel screen with the top and bottom
+lock-step.  The sound board (a Z80 with two AY-3-8910s, Time Pilot's) is translated too (Pooyan's method: the driver runs
+on the STE, its two AYs are register files, their six channels go to the YM2149 each arcade frame).  The picture is MAME's ROT270 picture, 224 x 256, centred in the 320-pixel screen with the top and bottom
 borders open, drawn by `src/render.s` (tile cache, sprite cache, generated Blitter code from `engine/sprite_programs.py`);
 one flat 16-colour palette (the arcade's lookup PROMs use palette entries 0-15 only, so the fit is near exact: mean
-error 0.9 a channel).  Status: **Incomplete** (no sound; no full-game verification).
-Speed (Hatari, STE, 4 MB, TOS 2.06, DEBUG build with `AUTOPLAY=1`, 3000 VBLs, 2026-11-07): after the boot test, 60
-arcade frames and about 48 pictures a second (120 frames and 96 pictures per 100 VBLs), no late border events.
+error 0.9 a channel).  Status: **Incomplete** (sound checked only as register streams in the simulator, never heard; no
+full-game verification: the later stages are not reached).
+Speed (Hatari, STE, 4 MB, TOS 2.06, DEBUG build with `AUTOPLAY=1` and the sound, 3000 VBLs, 2026-11-08): after the
+boot test, 54 arcade frames (90% of the arcade's speed) and 28 pictures a second (108 frames and 56 pictures per 100
+VBLs), no late border events; without the sound (`-D NOSOUND=1`, 2026-11-07) 60 frames and 48 pictures a second.
 Started 2026-11-07 from Track & Field's runtime and logic tests and Time Pilot's vertical renderer.
 
 ## Build and run
 
 ```sh
-python port.py cover rocnrope               # coverage: ref/cover.py seeds 1-11 (~4 min in parallel)
+python port.py cover rocnrope               # coverage: ref/cover.py seeds 1-15 (60000 frames for 12-15), ref/cover_sound.py
 python port.py build rocnrope               # -> run/rocnrope/ROCNROPE.PRG
-python port.py test rocnrope                # lock-step (seeds 1, 4, 10), render (seed 4), sprite edges
+python port.py test rocnrope                # lock-step (seeds 1, 4, 10), render (seed 4), sprite edges, sound
 python port.py mame rocnrope                # the reference against MAME (set MAME to a binary that knows rocnrope)
 python games/rocnrope/tools/prepare.py      # verify assets/roms/rocnrope.zip, unpack to assets/roms/extracted/rocnrope/
 python games/rocnrope/tools/build.py --sim  # -> run/rocnrope_sim (Musashi, for the tests); --debug, --frames N, -D AUTOPLAY=1
 python games/rocnrope/tools/logic_test.py 3000 --seed 4        # the translation in lock-step with the reference
 python games/rocnrope/tools/render_test.py 3000 --seed 4 --start 900   # the STE picture against the reference
 python games/rocnrope/tools/sprite_test.py                      # edges, 16 shifts, holes, guards, 64 KB crossings
+python games/rocnrope/tools/build.py --sim --tag rocnrope_snd && python games/rocnrope/tools/sound_test.py 3000 --seed 4 --tag rocnrope_snd
+python games/rocnrope/ref/sound_cmp.py 1 4000                   # the STE's sound schedule against the reference board
 powershell -ExecutionPolicy Bypass -File games/rocnrope/tools/hatari.ps1 -Frames 3000 -Every 250   # hidden Hatari + stills
 ```
 
@@ -54,7 +58,20 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
   ([AGENTS.md](../../AGENTS.md)).
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot, attract (title, ranking, demo), play, the bird's scene; no
   crash.  Looked at 14 stills of one run only, with the AUTOPLAY input.
-* **Not done / not verified**: the sound; the cocktail flip; the Mega STE; the full game (random play and the poked stage
+* **Sound** (2026-11-08): the driver's translation runs the driver's own commands in the simulator and equals its
+  model (`tools/sound.py` STEBoard) every arcade frame: sound RAM, both AYs' registers, the YM's registers and channel
+  choice (`tools/sound_test.py`, seeds 1, 4 and 10, 3000 frames each: 220 / 225 / 142 commands).  The STE's tick schedule
+  against the reference board (the sound CPU at its clock, commands at the main CPU's instants):
+  99.25% of the audible channel states equal over 4000 frames (`ref/sound_cmp.py`; the rest: an effect that starts up
+  to a frame later, or in another free slot).  Never heard: Hatari ran with its sound off, and the AY mix-down onto
+  three YM voices is lossy by design (loudest three of six).  The model is not compared with MAME's audio.
+* **Later stages** (2026-11-08): MAME's cheat pack has infinite lives ($50C0), invincibility ($51C0 = 2, $51DE = 0) and
+  infinite bonus ($509B); no stage select.  Coverage seeds 12-15 play 60000 frames with them (312 more pcs than seeds
+  1-11, among them the XNC at $B610, now translated); the lock-step runs of seeds 12 and 13 (12000 frames each) and
+  the render test of seed 12 (frames 3000-9000, every 3rd) are exact.  But random play never completes stage 1
+  (the screens stay on STAGE 1 at 60000 frames), so the later stages' code and tiles are not covered; the stage
+  variable was not found (`$50C3` is not it; pokes of $5000-$51FF changed no HUD digit).
+* **Not done / not verified**: the cocktail flip; the Mega STE; the full game (random play and the poked stage
   byte reach the first stages only; the later screens' code is covered only as far as the seeds got); a real controller
   run; `docs/sprite-preparation.md`'s reordered-source measurements (the sprite code is the shared generator's
   output, not measured against alternatives here); the speed in busy scenes; release packing (`tools/release.py` lists it).
@@ -82,8 +99,12 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
   buffer; sprites by the generated Blitter code (HOP 2 / OP 3, one end mask per row, no AND + OR pairs), damage rectangles
   restored from the clean screen.  The turn is in the assets (`tools/assets.py`: tiles and sprites as `np.rot90(raw, 1)`;
   raw flip x is the picture's flip of the rows, raw flip y of the columns).  No layer is drawn over the sprites.
-* **Sound**: none yet.  The sound CPU is Time Pilot's board; `games/timeplt` and `games/pooyan` have the same board's
-  Z80 + 2 AY approach; its ROMs are in the manifest (`rnr_7a.snd`, `rnr_8a.snd`).
+* **Sound** (`tools/sound.py`, `tools/sndgen.py`, `src/sound.s`, all after Pooyan's: the same driver family): a Z80 at
+  1.789772 MHz with ROM `rnr_7a.snd` + `rnr_8a.snd` at $0000-$1FFF, RAM $3000-$33FF, two AY-3-8910 at $4000-$7FFF.  The
+  driver's loop head is $00C2 (`ei`), the timer waits end at $00D1; the command handler is $0038.  Each arcade frame the
+  commands the main CPU wrote (latch Q1's rising edges, the byte at $8100: `snd_ring`) run the handler, then 5.83 ticks
+  run the loop once each; `snd_ym` picks the three loudest of the six AY channels for the YM2149.  The RC filters
+  ($8000-$FFFF stores) are not modelled.
 
 ## Speed
 
@@ -109,6 +130,11 @@ gone through for this port.
   queue is not empty, and lets the round run once when it is, as the reference's order (IRQ, tasks, one round) says.
 * 2026-11-07: **A routine that sets DP** ($70CC: `LDA #$40; TFR A,DP` for the sprite copy) breaks the translation's DP
   assumption silently: the coverage records the DP of every pc (`dps`) and gen.py turns it into `dp_sites`.
+* 2026-11-08: **Odd word accesses** only fault in Hatari: a `ds.w` after an odd number of bytes (`wait_pc`, after the
+  sound moved `snd_latch` out of this file) crashed the first Hatari run with the sound (CRASH.TXT: address error,
+  PC in `rr_idle`).  The simulator never sees it; `even` before every word after byte variables.
+* 2026-11-08: **Invincible random play finds code that plain play does not** (312 pcs in 60000 frames), among it an
+  undocumented-opcode routine; the translator got XNC (`m6809x.py`, memory forms).
 * The boot's RAM test takes about 360 arcade frames of CPU time (9.3 M cycles of the 6809 in the reference).
 
 ## Verification

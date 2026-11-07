@@ -39,7 +39,9 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
-    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000)],    # 1-3 play, 4-6 infinite lives, 7-9 + $50C3 poked, 10 two players, 11 DIPs
+    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives, 10 two players, 11 DIPs
+                 ("ref/cover.py", list(range(12, 16)), 60000),    # 12-15 MAME's cheats: lives, invincibility, bonus
+                 ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
@@ -91,6 +93,7 @@ TESTS = {
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/logic_test.py", ["3000", "--seed", "4"], None),    # infinite lives
                  ("tools/logic_test.py", ["3000", "--seed", "10"], None),   # two players
+                 ("tools/logic_test.py", ["6000", "--seed", "12"], None),   # MAME's cheats: invincible, deeper play
                  ("tools/render_test.py", ["3000", "--seed", "4", "--start", "900", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, guards, 64 KB crossings
     "mario": [("tools/prepare.py", [], None),

@@ -997,6 +997,7 @@ io_dsw2:	ds.b	1
 io_dsw3:	ds.b	1
 idle_round:	ds.b	1		; the idle point's first arrival (the round) has run
 wait_cwai:	ds.b	1
+	even
 wait_pc:	ds.w	1		; the return address of the IRQ in a wait
 	even
 snd_ring:	ds.b	256		; the sound commands (the last 256)

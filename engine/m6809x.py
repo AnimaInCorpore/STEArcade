@@ -1281,7 +1281,7 @@ class Emitter:
     def emit(self, v, ins):
         self.cur_v = v
         mn = ins.mn
-        if mn.startswith("x") and mn not in ("xdec",):
+        if mn.startswith("x") and mn not in ("xdec", "xnc"):
             raise Unsupported("undocumented " + mn)
         bm = base_mn(mn)
         fl = ins.flow
@@ -2059,7 +2059,7 @@ class Emitter:
                   "lsla", "lslb", "lsra", "lsrb", "asra", "asrb", "rola", "rolb", "rora", "rorb"):
             self.unary(v, ins, mn[:-1], REG8[mn[-1]])
             return
-        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror"):
+        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror", "xnc"):
             if self.io_site(v, ins):
                 raise Unsupported("read-modify-write of I/O: " + ins.text)
             self.unary(v, ins, mn, None)
@@ -2189,7 +2189,22 @@ class Emitter:
         runs inside the flag wrapper (it may spoil the CCR: increments, slot lookups); ROL / ROR take C first."""
         def opnd():
             return r if r else self.ea(v, ins)
-        if op == "neg":
+        if op == "xnc":
+            # KONAMI-1 / 6809 $x2 (undocumented): COM when C is set, else NEG (memory forms; Roc'n Rope's $B610).  C is
+            # saved around the operand's address code, which may spoil the CCR.
+            lc, ld = self.new_label(), self.new_label()
+            self.e("move.w sr,-(sp)")
+            ea = opnd()
+            self.e("move.w (sp)+,d6")
+            self.e("btst #0,d6")
+            self.e("bne.s %s" % lc)
+            self.e("neg.b %s" % ea)
+            self.e("bra.s %s" % ld)
+            self.lines.append(lc + ":")
+            self.e("not.b %s" % ea)
+            self.e("or.b #1,ccr")
+            self.lines.append(ld + ":")
+        elif op == "neg":
             self.e("neg.b %s" % opnd())
         elif op == "com":
             self.wrap(v, N | Z | V, lambda: self.e("not.b %s" % opnd()), const_set=C)

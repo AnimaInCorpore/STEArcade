@@ -24,7 +24,7 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ = 0x6000, RocnRopePort.IRQ
 DP = 0x50                           # the direct page register after the boot ($60CC TFR A,DP); other sites: dp_sites
-SEEDS = [int(x) for x in os.environ.get("RR_SEEDS", "").split(",") if x] or range(1, 12)
+SEEDS = [int(x) for x in os.environ.get("RR_SEEDS", "").split(",") if x] or range(1, 16)
 NATIVES = {RocnRopePort.IDLE: "rr_idle"}
 TASKS = 0x6074                      # the foreground's task table ($6065 JSR [A,X]): 16 handlers; $67FE no seed ran
 TASK_COUNT = 16
