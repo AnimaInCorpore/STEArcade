@@ -63,7 +63,9 @@ Verified (what each check ran, see Tests and tools):
 * **The service / test mode** (service switch): the test mode runs inside the main CPU's IRQ handler and does not return in
   the reference; no key reaches it on the STE.  The cocktail cabinet (flip screen, DIP) is not drawn.
 * **Sound**: the WSG's three voices become the YM2149's square waves through Galaga's mapping (`tools/sound.py`, the
-  waveform PROM 136007.110); nothing compares them with MAME's audio, and there is no `sound_test.py`.  Not listened to.
+  waveform PROM 136007.110); `tools/sound_test.py`: the 68000's YM registers equal the Python model's in all 2600 frames of
+  the scripted game (1643 with a voice sounding).  Nothing compares them with MAME's audio, and nobody has listened to
+  the Hatari run (it ran with `--sound off`).  The sound CPU's commands are the arcade's (translated); only the chip is mapped.
 * **Speed**: not measured in Hatari; the boot's test screen (the main thread's clears) takes several times longer than on
   the arcade (about 1000 VBLs before the attract mode, in the simulator).
 * **Memory**: the program asks for ~4.2 MB (the sprite data 1.1 MB and masks 0.5 MB: 17 colour quads x 512 shapes);
@@ -110,6 +112,7 @@ Verified (what each check ran, see Tests and tools):
 | `tools/schedule_test.py` | the STE's tile / sprite RAM against the reference's schedule |
 | `tools/render_test.py` | the shown screen against the reference renderer at frozen moments |
 | `tools/sprite_test.py` | the sprites at the edges, 16 shifts, flips, sizes, holes, 64 KB crossings |
+| `tools/sound_test.py` | snd_ym (the 68000) against `sound.py` (the model) every frame |
 
 ## Lessons
 
