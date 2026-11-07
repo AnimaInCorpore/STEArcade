@@ -113,11 +113,9 @@ GAMES = [
      "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
      "  Up, Space, Control, X, joystick up / fire, pad B."),
     ("sbasketb", "SBASKETB.PRG", "Super Basketball (Konami 1984)",
-     "work in progress: about 60% of the arcade's speed, ~11 pictures a second (Hatari); exact logic and picture,
-"
+     "work in progress: about 69% of the arcade's speed, ~14 pictures a second (Hatari); exact logic and picture,\n"
      "  the turned 224 x 256 picture in 16 fitted colours; no sound yet",
-     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):
-"
+     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):\n"
      "  X, pad B.  button 3: C, pad C.  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
     ("pooyan", "POOYAN.PRG", "Pooyan (Konami 1982)",
      "the arcade's full speed, 40-50 pictures a second in play (Hatari); exact logic and picture, the turned\n"
