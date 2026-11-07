@@ -102,7 +102,7 @@ immediate can remain absent from discovery even when its scheduling instruction
 was translated. Check the failing dispatch target against ROM code and the
 generated dispatch table; preserve the original failing inputs and require a
 fresh replay before attributing a timeout to a game bug. The
-[1942 Dreamer late-game failure](../games/1942/README.md#dreamer-hatari-playtest-late-game-failure-2026-10-20)
+[1942 Dreamer late-game failure](../games/1942/README.md#verification)
 is a reproduced example.
 
 Headless Hatari debugger screenshots may be black while the guest framebuffer

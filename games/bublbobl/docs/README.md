@@ -1,6 +1,9 @@
 # games/bublbobl/docs — reference captures, palette, ROM manifest
 
-Everything here was produced from the original ROMs / MAME, not from the STE port. The captures show Bubble
+Status: current (2026-11-07); `palette16.json` is superseded by `palette_static.json`, `performance-plan.md` is a
+dated plan, `hardware-notes.md` dated bring-up notes.  The port itself: [its README](../README.md).
+
+The captures, palettes and the manifest were produced from the original ROMs / MAME, not from the STE port. The captures show Bubble
 Bobble's graphics, © 1986 Taito; Bubble Bobble is a trademark of Taito.
 
 | file | what | reproduce |
@@ -11,6 +14,9 @@ Bobble's graphics, © 1986 Taito; Bubble Bobble is a trademark of Taito.
 | `quant/` | quantized collage (default + colorDecay 1), compare sheet, per-colour mapping and error | `ref/quantize_collage.py` (runs `ref/oklab_quantize.mjs` -> `C:\Arbeit\jsoklabquantizer`, commit 066f401) |
 | `rom_manifest.md` | CRC32/SHA1 of both sets (Japan `bublbobl`, US `bublboblr`) | `ref/rom_manifest.py` |
 | `hardware-notes.md` | hardware findings with evidence grades (see its header) | — |
+| `performance-plan.md` | the investigation of 2026-10-11 and its implementation status | — |
+| `window-sites.json` | the banked-window read sites the translation guards (coverage + `tools/window_audit.py`) | `tools/gen.py` |
+| `screenshot.png` | the STE port in Hatari | — |
 
 Facts worth knowing: the capture saw 68 distinct colours; the last new one appeared at 12.3 min and none in the
 following 8 min, so coverage looks saturated but is not proven. A stray coin registered at 20:27 of the recording

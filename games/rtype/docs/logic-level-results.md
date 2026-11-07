@@ -1,5 +1,8 @@
 # Higher-level logic audit, 2026-11-04
 
+Status: dated report (2026-11-04); measured experiments, not integrated. Current figures: [the
+README](../README.md#speed).
+
 **No 2x logic speedup demonstrated.** Three executed algorithmic experiments
 together save **2.13%** of logic cycles over the stage-3 warship replay and
 **3.47%** in the stage-7 sample: about **1.022x / 1.036x**, against the requested

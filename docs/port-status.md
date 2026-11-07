@@ -10,7 +10,7 @@ exploration goal, not a guarantee that its learned policy can finish the game.
 Check that the game's RAM/input adapter and native Hatari replay transport work
 before starting; support for one port does not establish support for every port.
 Galaga's hold for its real 51xx/54xx MCU ROMs ended on 2026-10-22: the port runs the real 51XX
-(see [its README](../games/galaga/README.md#the-real-51xx-on-the-ste-2026-10-21)); it has no PPO adapter yet.
+(see [its README](../games/galaga/README.md#mcu)); it has no PPO adapter yet.
 
 A green **Complete** status requires graphics and sound to be implemented and
 complete playability to be verified in Hatari. Record a successful natural
@@ -31,4 +31,4 @@ As of 2026-10-20, dkong's documented Dreamer natural run did not clear barrels.
 Its assisted run visited all four stage types by changing RAM; it did not naturally
 clear them. A full playthrough can be attempted, but success remains unverified,
 so dkong is yellow (**Verification pending**). See the
-[dated report](../games/dkong/README.md#dreamer-hatari-playtest-2026-10-20).
+[dated report](../games/dkong/docs/dkong-loop-regression-2026-10-20.md) (its README, "Verification").

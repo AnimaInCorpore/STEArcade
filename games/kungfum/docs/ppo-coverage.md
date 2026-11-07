@@ -1,5 +1,7 @@
 # PPO RAM exploration in MAME and native Hatari replay
 
+Status: dated report (2026-10-17); setup and commands in the [game README](../README.md#ppo-ram-policy-trained-in-mame).
+
 The controller trains in native MAME and produces the existing frame-indexed count/SYSTEM/P1 replay format.
 The Hatari audit compares completed arcade frames with both native MAME and the independent port reference.
 Normal rendering remains enabled; audit file I/O means the run is not a speed benchmark.

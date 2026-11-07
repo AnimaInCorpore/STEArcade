@@ -504,6 +504,19 @@ F030Arcade's spare-time renderer (`PORTING.md` there).
   interrupt handlers (`architecture.md`, "Runtime schedule"); the ports whose foreground does work (Galaga's main CPU
   draws text before it idles; 1942's kernel) are the open cases.
 
+## The port's README (2026-11-07)
+
+Every `games/<game>/README.md` has the same sections in this order (one left out when it has nothing): the title
+`<Game> (<maker>, <year>) on the Atari STE`, the screenshot, a summary of the current state (the MAME set; each CPU
+and how it is handled; the status as in the root README's table; the latest speed with its date and setup), **Build
+and run**, **Controls**, **State** (what is verified, what is missing), **How it works** (the board and the
+reference, translation, schedule, picture, sound), **Speed** (the current figures first, then what made it fast,
+then what was measured and not kept), **Tests and tools**, **Lessons** (dated findings, pitfalls and experiments
+worth knowing), **Verification** (the port's own playtest evidence, the PPO command if it has a profile, a link to
+the [status policy](port-status.md)).  The current state comes first; history stays only where there is something
+to learn from it (the user, 2026-11-07): superseded figures and states without a lesson are removed.  Terms:
+"arcade frames a second" for the logic, "pictures a second" for the frames drawn, dates as YYYY-MM-DD.
+
 ## Port completion claims
 
 Automated exploration can attempt full progression once a port's adapter and native replay transport are verified;

@@ -1,5 +1,7 @@
 # Kung-Fu Master gameplay-policy benchmark
 
+Status: dated report (2026-10-17), superseded: the Kev experiment was retired for PPO.
+
 Historical Kev experiment, retired after the PPO rollout. Its optional engine/scripts and downloaded weights
 were removed to recover SSD space. These measurements describe the implementation at the time of the test.
 

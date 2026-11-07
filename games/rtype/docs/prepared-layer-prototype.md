@@ -1,5 +1,7 @@
 # Prepared secondary-layer prototype, 2026-11-02
 
+Status: dated report (2026-11-02); a measured dead end, not integrated.
+
 **Result: exact, but no consistent speedup. Production `src/stage.s` is unchanged.**
 The prototype loses 0.68% when drawing every second arcade frame and gains 0.67%
 when drawing every arcade frame. This does not justify enabling it or claiming an

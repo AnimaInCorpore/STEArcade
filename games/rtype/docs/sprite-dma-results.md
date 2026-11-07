@@ -1,5 +1,8 @@
 # Sprite DMA capture and picture deadlines — 2026-11-03
 
+Status: dated report (2026-11-03); the fix is in production and its corrected timing is the baseline of [the README's
+Speed table](../README.md#speed).
+
 Fixed a production-only scheduling mismatch in `src/core.s`. The DMA-copy skip
 assumed a picture could follow only when the logic backlog was empty or
 `PIC_EVERY` was reached. With `PIC_VBLS=3`, `pic_due` can subsequently request a
@@ -71,7 +74,7 @@ of copy cost alone. The old stale-list workload concealed a substantial cost in
 heavy scenes. Do not retain the old speed figures as correct-picture throughput.
 
 Every corrected timing replay completes with its expected logic count and no
-crash. Stage 3 still had **22 late palette-on events** (fixed the same day: short `st_sync` passes, README); its report was
+crash. Stage 3 still had **22 late palette-on events** (fixed the same day: short `st_sync` passes, [README](../README.md#2026-11-03-long-blitter-passes-made-late-palette-events)); its report was
 `(1,0,22,0,0)`. Other measured windows have `(1,0,0,0,0)`: one startup fallback,
 zero late top/palette/bottom/off events. This fix does not resolve that separate
 stage-3 border-timing issue.

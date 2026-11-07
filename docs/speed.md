@@ -357,7 +357,6 @@ port's tests, faster in CPU plus Blitter cycles, then in Hatari.  Ordered roughl
 * **1943, Gun.Smoke and the other banked ports: guard every block copy** (Black Tiger's MARP finding: `block_win` at
   coverage sites only misses copies like `$AC71`).
 * **Mr. HELI's foreground: OP 3 copy passes** instead of AND + OR (mandatory, `AGENTS.md`).
-* **Double Dragon: re-measure the load size**: its 3,665,354 bytes predate the colour tables (+68 KB) of 2026-11-05.
 
 **Logic**
 * **Drop the flags at idle hooks** (Black Tiger -2.5%): 1942, 1943, Commando (`8001`), Gun.Smoke (`00CE`), Pac-Man,

@@ -1,5 +1,8 @@
 # Later-stage native experiments, 2026-11-03
 
+Status: dated report (2026-11-03); the prototypes stay isolated, not integrated. Current figures: [the
+README](../README.md#speed).
+
 **Small logic gains, essentially unchanged picture rates.** Against the production
 code with the earlier native/cache fixes already enabled, the combined prototype
 saves 0.49–2.54% of logic cycles in the six stage-3–8 windows. Pinned Hatari improves

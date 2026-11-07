@@ -1,5 +1,7 @@
 # Donkey Kong assisted board and difficulty-loop regression, 2026-10-20
 
+Status: dated report (2026-10-20), referenced from [the README](../README.md#verification).
+
 **Passed:** all four board types cleared with assistance; the ROM advanced into
 the following difficulty levels and wrapped its repeating sequence into level 6.
 A fresh Hatari process replayed all **38,200 inputs** with **318 exact 3 KB RAM

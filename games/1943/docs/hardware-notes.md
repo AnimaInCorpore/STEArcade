@@ -1,5 +1,7 @@
 # Hardware requirements
 
+Status: current (the board's facts from MAME 0.286's source; the port's state is in [the README](../README.md)).
+
 Source: `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/capcom/1943.cpp`,
 `1943_v.cpp` and `1943.h`. ROM sets: `1943` (Euro, available) and `1943u` (US Rev C), display rotation ROT270.
 
@@ -37,7 +39,7 @@ Source: `F030Arcade/third_party/jsm68kdisassembler/third_party/mame/src/mame/cap
   building the STE graphics.
 
 Reference boot, MCU command checks, and MAME pixel comparison are implemented.
-The former next steps are all done (see `../README.md`): bank-aware code
+The former next steps are all done (see [the README](../README.md#state)): bank-aware code
 coverage and whole-program translation; lock-step logic verification; the STE
 runtime and renderer (since 2026-10-12 sprites and front tiles are clipped at
 the window's edges instead of drawn whole); simulator pixel tests and Hatari

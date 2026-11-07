@@ -1,5 +1,8 @@
 # Retained native structural changes, 2026-11-04
 
+Status: dated report (2026-11-04); the changes are retained in production. Current figures: [the
+README](../README.md#speed).
+
 **Measured improvements retained in `src/natives.s` and `src/core.s`.** The
 selected changes reduce logic cycles by 1.06–2.97% across the eight existing
 stage windows and by 1.77% over the complete 1,800-frame warship window. These

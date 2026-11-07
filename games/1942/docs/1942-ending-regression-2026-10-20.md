@@ -1,5 +1,7 @@
 # 1942 assisted ending and following game, 2026-10-20
 
+Status: dated report (2026-10-20); the fixes are current, see [the README](../README.md#verification).
+
 **Passed:** ending reached, both further missing translations fixed, explicit
 start/continue returned to stage byte 0 and progressed to 6. A fresh process
 replayed all **51,176 inputs** with **426 exact RAM checkpoints**, identical

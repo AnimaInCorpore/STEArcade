@@ -1,5 +1,8 @@
 # Hardware notes from F030Arcade's MAME sources
 
+Status: current for the board (memory map, I/O, firmware, video) and the stedaimakaimura reference; "Validation so
+far" is the dated first-port summary of 2026-10-09 (the current state is in the [README](../README.md#state)).
+
 ## Main Z80
 
 | Address | Function |
@@ -85,7 +88,7 @@ at ring wrap, and whole sprites across hidden edges. Timer B currently also
 serves border opening in this repository, so its wrap scheduling needs to be
 integrated with the existing STE runtime rather than copied independently.
 
-## Validation so far
+## Validation so far (2026-10-09)
 
 MAME 0.289 verifies all 20 ROMs. The reference renderer matches its own-state
 snapshots at frames 700, 1500 and 2500 with zero differing pixels (2500 uses the

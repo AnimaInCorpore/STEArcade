@@ -1,9 +1,10 @@
 # Bubble Bobble: the performance plan of 2026-10-11
 
-> Dated plan (investigation 2026-10-11, implemented 2026-10-12).  Its results and what was not done are in the
-> port's README, "Performance plan, implemented (2026-10-12)", and "Implementation status" at the end of this file;
-> the current speed is in the README, "Speed, measured right (2026-10-12)".  The figures here are Musashi estimates of
-> 2026-10-11; "the current" below means the tree of that day.
+> Status: dated plan (investigation 2026-10-11, implemented 2026-10-12).  Its results, the current speed and what was
+> measured and not kept are in the port's README, [Speed](../README.md#speed); "Implementation status" at the end of
+> this file lists what was done.  The figures here are Musashi estimates of 2026-10-11; "the current" below means the
+> tree of that day.  The Hatari result at the end (11.7 -> 14.7) was counted before the late-VBL fix (b89956a) and is
+> too high where the game overran ([README, Lessons](../README.md#2026-10-12-count-every-vbl)).
 
 Investigation: 2026-10-11, against the current working tree, including its existing
 whole-sprite and reordered-source changes. The recommendation is to keep the
@@ -206,7 +207,8 @@ a hardware result; every measurement in this investigation is a simulator estima
 
 ## Implementation status (2026-10-12)
 
-Implemented in this order; details, measurements and the validation in the README ("Performance plan, implemented").
+Implemented in this order; details and measurements in the README ([Speed](../README.md#speed)), the validation in
+[State](../README.md#state).
 
 * Counters first: `profile.py` reports renders started / completed / shown, the fast path's cells, composite hits,
   palette-marked cells, pens invalidated, sprite lookups / bakes, closure growth (visible vs drawn), blocks copied /

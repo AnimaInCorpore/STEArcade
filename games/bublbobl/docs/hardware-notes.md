@@ -1,5 +1,7 @@
 # Bubble Bobble (Taito 1986) — hardware notes with evidence grades
 
+> Status: dated notes of the first bring-up (2026-10-08); the open items at the end are current (2026-11-07).
+>
 > Written during a first independent bring-up of a reference machine, *before* `games/bublbobl/tools/`
 > (the port's own reference machine, translation and tests) was known to me. Where this file and
 > `games/bublbobl/README.md` disagree, the README and the code win. It stays because it records evidence grades and a
@@ -9,8 +11,8 @@
 > Z80 instructions per frame for both CPUs, up to 25 colours per frame) agrees with the README: the STE port runs
 > but is too slow to play on a plain 8 MHz STE.
 
-Sets: `bublbobl` (Japan, MAME "Ver 0.1") and `bublboblr` (US, Romstar licence, MAME "Ver 5.1") — see `rom_manifest.md`.
-Only the two main-CPU ROMs differ (sub CPU, sound CPU, MCU, graphics and PROM are byte-identical).
+Sets: `bublbobl` (Japan, MAME "Ver 0.1") and `bublboblr` (US, Romstar licence, MAME "Ver 5.1") — see
+`rom_manifest.md`.  Only the two main-CPU ROMs differ (sub CPU, sound CPU, MCU, graphics and PROM are byte-identical).
 
 Evidence grades: **Code** = read in the ROM disassembly; **Run** = reproduced by running the
 original ROMs in the host model (frames compared by eye against the known game);
@@ -82,7 +84,8 @@ No tilemap. A frame is a list of up to 192 *strips* in objectram: Y, `num`, X, `
 
 ## Open items (updated 2026-11-07)
 
-* Sound: done (2026-10-11): the driver's output recorded per command and played on the YM2149 (README "Sound").
+* Sound: done (2026-10-11): the driver's output recorded per command and played on the YM2149 ([README,
+  Sound](../README.md#sound)).
 * DIP defaults and inputs: done; the port runs the Japan set with DSW0 `$FE`, DSW1 `$FF` (`src/bublbobl.s`,
   `tools/machine.py`) and maps the keys, joysticks and pads (README, controls).  The US set's DIP meanings were not
   read.

@@ -1,5 +1,8 @@
 # Native logic optimization, 2026-11-03
 
+Status: dated report (2026-11-03); the changes are integrated in `src/natives.s` / `tools/gen.py`. Current figures:
+[the README](../README.md#speed).
+
 **Result: larger gains in early play and restarts, small gains in later steady
 play.** The integrated changes reduce logic cycles by 16–23% in three early
 play/restart windows. Eight later-game windows improve by 0.3–3.0%. The pinned

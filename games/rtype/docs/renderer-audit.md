@@ -1,5 +1,7 @@
 # Renderer experiments, 2026-11-01
 
+Status: dated report (2026-11-01); measured dead ends, no runtime change kept.
+
 Investigation of overlapping/sparse damage restoration and prepared secondary-layer
 drawing. Base renderer: `138cd90`, `src/stage.s`. Gameplay and scheduling code
 were not changed. These are renderer measurements,

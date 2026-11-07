@@ -1,5 +1,7 @@
 # Avoiding redraws and buffer copies, 2026-11-03
 
+Status: dated report (2026-11-03); a measured prototype, not integrated.
+
 **Result: a small measured saving, no 2x renderer path found.** An isolated
 window-refresh prototype saves 2.50% in the stage-3 window, 1.58% in stage 4,
 and 0.81% in stage 6. It reduces large refresh spikes, while normal pictures

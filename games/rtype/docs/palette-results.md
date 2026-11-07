@@ -1,5 +1,7 @@
 # Default colour quantization — 2026-11-05
 
+Status: current (2026-11-05): the stage renderer's default colours ([the README](../README.md#colours)).
+
 The approved bounded Alien/Zombies-style quantization is now the ordinary R-Type
 build's default. `build.py` selects the stage renderer, fits its scene palettes
 and regenerates tile tables and precoloured sprites when the inputs change.

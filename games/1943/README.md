@@ -1,337 +1,353 @@
-# 1943: The Battle of Midway
-
-2026-10-19: scrolling damage restores use the shared full-word copy path. See the
-[cross-port measurements](../../docs/virtual-scroll-performance.md#implementation-results).
+# 1943: The Battle of Midway (Capcom, 1987) on the Atari STE
 
 ![1943 on the STE (Hatari)](docs/screenshot.png)
 
-Atari STE port (4 MB) of the `1943` set (Euro), registered as `1943`: the main Z80 translated to 68000 code, the
-i8751 protection MCU's dumped firmware interpreted, a hardware scrolled Blitter renderer, the sound driver's effects
-and music on the YM2149 (see "Sound").
+The `1943` set (Euro), MAME's `capcom/1943.cpp`, registered as `1943`.  The main Z80 is translated to 68000 code
+(14,314 instructions from the fixed ROM and banks 0, 1, 4, 6), the task kernel's scan for a ready task is a native
+routine.  The i8751 protection MCU runs its dumped firmware, translated (`tools/mcux.py`), with its VBL interrupt
+(INT1) as a native routine.  The sound Z80 is not run: the output of its driver is recorded per command (effects on
+the SSG, the music from FM as square waves) and played on the YM2149.  The picture is a hardware scrolled Blitter
+renderer with twin-line virtual screens and one 16-colour palette.  Status: **Incomplete** (busy scenes are slow; the
+arcade's clipping of sprites at the raw 256-pixel edges is not done).  Speed (Hatari, `bench.sh`: DEBUG + AUTOPLAY,
+6000 VBLs, 4 MB, 2026-10-12): 51.2 arcade frames a second (85%) and 7.9 pictures a second; the logic has since become
+~20% cheaper in Musashi (the MCU's INT1 native, the kernel's scan native, inline leaves), not measured in Hatari.
+
+## Build and run
 
 ```sh
-python port.py prepare 1943                 # auto: US archive if present, otherwise Euro
-python port.py prepare 1943 --set 1943       # explicitly choose the available Euro set
+python port.py prepare 1943                  # auto: the US archive if present, otherwise Euro
+python port.py prepare 1943 --set 1943       # explicitly the available Euro set
 python port.py prepare 1943 --set 1943u      # requires the US Rev C program ROMs
-python port.py cover 1943                   # 40 coverage runs (seeds 6-20: MAME's cheats, one stage each; 21-40: play that dies)
-python port.py build 1943                   # assets + translation -> run/1943/1943.PRG (--sim: the Musashi build)
-python port.py test 1943                    # ROMs, graphics, reference, lock-step logic and pictures
-python port.py run 1943                     # Hatari (tools/hatari.sh)
-python port.py mame 1943                    # pixel checks at frames 100, 700 and 1500
-games/1943/tools/sprite_test.py             # sprites at the window edges: clipped, all shifts, 64 KB
-games/1943/tools/front_test.py              # front tiles at the window edges: clipped, all shifts, 64 KB
-games/1943/tools/bench.sh                   # Hatari speed: ticks and frames a second (DEBUG + AUTOPLAY, 6000 VBLs)
+python port.py cover 1943                    # 40 runs (6-20: MAME's cheats, a stage each; 21-40: play that dies)
+python port.py build 1943                    # assets + translation -> run/1943/1943.PRG (--sim: the Musashi build)
+python port.py test 1943                     # ROMs, graphics, reference, lock-step logic and pictures, sound
+python port.py run 1943                      # Hatari (tools/hatari.sh)
+python port.py mame 1943                     # pixel checks against MAME at frames 100, 700 and 1500
+games/1943/tools/bench.sh                    # Hatari speed (DEBUG + AUTOPLAY, 6000 VBLs), see "Speed"
 ```
 
-Controls: **5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2),
-**Escape** quits.  Joystick port 1 plays player 1, port 0 player 2.
-Jaguar pad / PowerPad (STE enhanced ports, [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** + **#** quit.
+Both sets have 38 ROMs; the manifests (`docs/rom_manifest.json`, `docs/rom_manifest_euro.json`) come from the local
+MAME driver.  The supplied `1943.zip` plus `assets/roms/bm.7k` (the MCU) verifies completely as the Euro set.  MAME
+marks Euro's `bme01.12d` as `BAD_DUMP`: a historically modified dump, used unchanged.  The US Rev C manifest remains,
+but its three program ROMs are not supplied.  The set's identity is recorded in `build/1943/set.txt`; the generator
+rejects coverage from another set.  The archive swaps `bm05.4k` and `bm04.5h`: preparation resolves files by size,
+CRC32 and SHA1, verifies the complete set, then writes canonical names (archives unchanged) to
+`assets/roms/extracted/1943` and nine MAME-layout regions to `build/1943`; loose ROMs and the parent archive can
+supply shared contents.  Paths are relative to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are
+the repository's.
 
-Both sets have 38 ROMs. Manifests come from the local MAME driver. The supplied
-`1943.zip` plus `assets/roms/bm.7k` verifies completely as the Euro set.
-MAME marks Euro's `bme01.12d` as `BAD_DUMP`: it is a historically modified dump,
-used here unchanged. The US Rev C manifest remains available, but its three
-program ROMs are not currently supplied. Set identity is recorded in
-`build/1943/set.txt`; coverage from another set is rejected by the generator.
+## Controls
 
-The archive swaps `bm05.4k` and `bm04.5h`. Preparation resolves files by size,
-CRC32 and SHA1, then writes canonical filenames without changing the archives.
-It verifies the complete set before writing extracted files or regions.
-Extracted files go to `assets/roms/extracted/1943`; nine MAME-layout regions go
-to `build/1943`. Loose ROMs and the parent archive can supply shared contents.
+**5/6** coins, **1/2** start, **arrows** move, **Space/Ctrl** fire, **Alt** the loop (button 2), **Escape** quits.
+Joystick port 1 plays player 1, port 0 player 2.  Jaguar pad / PowerPad (STE enhanced ports,
+[architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad
+moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/2** start, **5/6** coin, **\*** +
+**#** quit.
 
-## Reference machine
+## State
 
-`tools/machine.py` emulates the main Z80, eight ROM banks, mapped inputs and
-latches, sprite buffering on c806, and IRQs at scanlines 144 and 240. The SYSTEM
-VBL input follows the scanline. `tools/mcu.py` executes the actual i8751 firmware
-at reset and each VBL INT1, including its table search and P3 falling-edge reply
-strobe. Unknown MCU instructions fail explicitly. MCU execution is synchronous,
-not cycle accurate; the sound CPU is not part of it (its driver is recorded alone: "Sound").
+* Logic exact (2026-10-09 and since): every stage 0-14 with MAME's cheats (4000 ticks each), the default schedule,
+  random seeds 1-3; the recorded play (`logic_test.py 4000 --play`, 2026-11-02) all 4000 ticks.  Compared every tick:
+  RAM, video latches, sprite buffer, latches, MCU reply and MCU RAM.
+* Pictures exact through the palette map (margins black) but for the sprite order case below: `port.py test` runs
+  `--render` over 3000 frames, 4000 of stage 13 (the front layer scrolls sideways) and 4000 of seed 1.
+* The reference renderer equals MAME's picture at frames 100, 700 and 1500 (zero differing pixels): video equivalence
+  at those states, not cycle-by-cycle CPU / MCU equivalence.
+* Edges: `sprite_test.py` 376 cases (232 clipped), `front_test.py` 768 cases (496 across an edge), both edges, all 16
+  shifts, plain and across 64 KB; the side bands black in every compared picture.  `--render` runs printed the clipped
+  sprites: default 1600 frames (12), `--cheat 3` 2000 (62), `--seed 1` 1600 (15), `--cheat 9 --twins --every 2` 3000
+  (975), all pictures equal.
+* MCU: `reference_test.py` checks all 256 command values against the dumped firmware's tables; `mcu_native_test.py`
+  the native INT1 against the translated firmware.
+* Sound: `sound_test.py` 0 of 20,000 ticks differ from the model; Hatari plays sound in attract mode and play.
+* Hatari: 0 late border events (4000 and 6000 VBLs).
+* Not exact: where a sprite of colour 10/11 comes earlier in the list than an overlapping sprite of another colour,
+  the arcade shows the first (or the front layer over it), the port the second (stage 3: 127 of 2000 pictures, a few
+  pixels each); the test recognises such pictures by rendering the reference in the port's order.
+* Missing: full speed in the busiest scenes; the arcade's clipping of sprites at the raw 256-pixel edges; the flip
+  screen (cocktail).
+* Open: a natural full playthrough; real hardware (only Hatari was used); a Hatari bench of the recorded play
+  (`bench.sh PLAY=1` exists, no figure yet); whether any window read goes through IY and whether every block copy is
+  guarded (see [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07)); the shared
+  default colour fitter has not been tried.
 
-`tools/reference_test.py` checks all 256 MCU command values against the dumped
-firmware tables (including retained replies for unknown commands), then runs
-unpatched frames and saves `build/1943/reference.png`. Graphics tests check
-4,000 decoded pixels against independent scalar ROM bit reads and exercise
-layer enables, flips, maximum scroll, sprite ownership, priority and whole sprites at borders.
+## How it works
 
-## MAME validation
+Hardware facts from the MAME source: [docs/hardware-notes.md](docs/hardware-notes.md).  The shared pieces:
+[architecture.md](../../docs/architecture.md), the method: [porting-guide.md](../../docs/porting-guide.md).
 
-`ref/mame_cmp_1943.py` constructs a temporary canonical ROM directory so MAME
-sees correct audio/character names and the loose MCU firmware. It reads MAME's
-RAM, video latches and actual buffered sprite RAM, renders the same state with
-the reference, and compares the portrait screenshot pixel by pixel. The Euro
-set matches at frames 100, 700 and 1500 with **zero differing pixels**.
-This establishes video equivalence at those states; it does not establish
-cycle-by-cycle CPU/MCU equivalence or STE performance.
+### The board and the reference
 
-See [hardware notes](docs/hardware-notes.md).
+`tools/machine.py` emulates the main Z80, eight ROM banks, mapped inputs and latches, sprite buffering on `C806`, and
+IRQs at scanlines 144 and 240; the SYSTEM VBL input follows the scanline.  `tools/mcu.py` executes the actual i8751
+firmware at reset and each VBL INT1, including its table search and the P3 falling-edge reply strobe; unknown MCU
+instructions fail explicitly.  MCU execution is synchronous, not cycle accurate; the sound CPU is not part of it.
+`tools/video.py` is the reference renderer (raw arcade coordinates, from the verified graphics ROMs);
+`tools/video_test.py` checks 4,000 decoded pixels against independent scalar ROM bit reads and exercises layer
+enables, flips, maximum scroll, sprite ownership, priority and whole sprites at borders.  `ref/mame_cmp_1943.py`
+builds a temporary canonical ROM directory (so MAME sees the right audio / character names and the loose MCU
+firmware), reads MAME's RAM, video latches and actual buffered sprite RAM, renders the same state with the reference
+and compares the portrait screenshot pixel by pixel.
 
-## Translation and schedule
+### Translation
 
-`tools/gen.py` (`translate.compile_code`, `z80x.FAST`, the banked window rules of Black Tiger): 14,314 instructions
-from the fixed ROM and banks 0, 1, 4, 6, none unsupported.  Besides the coverage roots, discovery adds the
-continuations of the object allocators (`06EC` and relatives: `pop hl; inc hl` x3; `jp (hl)` returns to the call + 6
-on success, and the compare `03C0` to + 3 / + 6: `discover.skip_returns`); random play reached one (bank 0 `A000`) that no coverage run had seen.  It also adds every
-entry of the fixed ROM's jump tables (`JUMP_TABLES`: `59BC`, an object's type, and `5C18`): random play reached
-`5AE2` after 6 minutes (2026-10-10, a quit to the desktop for a player: `z80_badpc`), 11 entries were untranslated.
+`tools/gen.py` (`translate.compile_code`, `z80x.FAST`, the banked window rules of Black Tiger).  Besides the coverage
+roots, discovery adds the continuations of the object allocators (`06EC` and relatives: `pop hl; inc hl` x3; `jp (hl)`
+returns to the call + 6 on success, and the compare `03C0` to + 3 / + 6: `discover.skip_returns`) and every entry of
+the fixed ROM's jump tables (`JUMP_TABLES`: `59BC`, an object's type, and `5C18`).
+
+* **Window guards**: only at the sites the coverage saw reading the banked window (and sites it never ran), block
+  instructions on the same terms: 883 of 3,784 indirect accesses, kept in `docs/window-sites.json` so a build takes
+  them from there when the coverage files have none.  `W_GUARD_ALL=1` guards every access (69.8k instead of 61.0k
+  cycles a tick); `logic_test.py --audit` traces a run for accesses to the image of the window, which only an
+  unguarded site makes (none in 3000 random and 4000 stage-13 frames).  A signed one-compare guard, a table bank
+  switch.
+* **Dispatch tables** (`gen.py dispatch_tables`): an entry is (the label - the table) / 2, unsigned, each table in the
+  text section right before its region's code, so `g_dispatch` jumps relative to it
+  (`move.w (a4,d7.l),d7; add.l d7,d7; jmp (a4,d7.l)`: 80 cycles for the fixed code).  A bank's table is a directory
+  long per 64 window addresses and pages of words relative to the page, pages without an entry shared ($C000 and up
+  rejected, a bank without code points to `g_wd_none`, every page bad).  Addresses without an entry go to the region's
+  `g_bad_<region>` stub (`z80_badpc`).  vasm rejects an entry beyond 128 KB; `gen.py` checks that the regions are in
+  address order and that the line before each table ends its flow.  `logic_test.py` first checks every table word and
+  span as loaded against the map (`build/1943/dispatch.json`).
+* **Natives** (`gen.py` `NATIVES`): `src/1943.s` `nat_scan` walks the kernel's scan (`$00B6`-`$00D4`: 16 records of 8
+  bytes from `$EF80`, the first with a state of 4 or more) in a register loop.  The port delivers the interrupts at
+  the hook only, so `$EF86` stays 0 during the scan; it leaves A, BC, DE, HL and the translation's F as the Z80 code
+  does.
+* **Inline leaves**: calls of leaf functions of up to 32 instructions in the fixed ROM are emitted in place (`gen.py`
+  `INLINE`, z80x `inline_leaves` with `inline_rst` / `inline_jumps`, Commando's setting; 61 sites); `logic_test.py`
+  leaves out the return address such a call writes below SP in the reference (dead, as for the merged push/pop).
+
+### MCU
+
+`tools/mcux.py` translates the i8751 firmware to 68000 code (`build/1943/mcu_code.s`, included by `src/mcu.s`), run at
+reset and at each VBL INT1; a0 = the internal RAM and SFRs (256 bytes), a1 = the ROM.  The P3 bit 6 falling edge
+latches the reply; PSW's parity is made exact where PSW is read.  The INT1 handler (`$0013` -> `$0200`-`$023B`) looks
+the Z80's command up in 32 (key, value) pairs at ROM `$0800` and replies with the value of the last matching pair (R4
+as it was when none matches); the firmware walks all 32 pairs, and each pass pays the 8051 flag bookkeeping of its
+`subb`.  `src/mcu.s` `mcu_int1` searches the pairs from the end and sets what the walk leaves at once (R2 = R7 = the
+command, R3 = 0, DPTR = `$0840`, ACC and PSW's CY / AC / OV of the last pair's `subb`, P0, the reply through P3 bit 6,
+IE1, EA).  `-D MCU_XLATE` builds the translated INT1 instead.
+
+### Schedule
 
 The program is Capcom's task kernel (as Black Tiger): the scheduler at `00B6` runs the ready tasks of the table at
 `EF80` and loops at `00D4` when none is ready.  `src/1943.s` hooks `00D4`: it draws the frame, then delivers a tick:
-the line 144 IRQ (SYSTEM bit 3, the VBL, clear), the MCU's INT1, the line 240 IRQ (bit 3 set), each run to its
-return to `00D4` with a token on the Z80 stack, then the tasks they woke.  `tools/machine.py run_frame_port` is the
-same schedule.  Six ticks per five VBLs (59.6 Hz arcade), at most `MAX_SKIPS` frames skipped in a row.  The latches
-`C804` (bank, flip, characters on), `C806` (the sprite list buffered: 128 entries of 4 bytes), `C807` (MCU command)
-and `D806` (layer enables) are write hooks that keep every register and the CCR.
+the line 144 IRQ (SYSTEM bit 3, the VBL, clear), the MCU's INT1, the line 240 IRQ (bit 3 set), each run to its return
+to `00D4` with a token on the Z80 stack, then the tasks they woke.  `tools/machine.py run_frame_port` is the same
+schedule.  Six ticks per five VBLs (59.6 Hz arcade), at most `MAX_SKIPS` 8 frames skipped in a row (the game first).
+The latches `C804` (bank, flip, characters on), `C806` (the sprite list buffered: 128 entries of 4 bytes), `C807` (MCU
+command) and `D806` (layer enables) are write hooks that keep every register and the CCR.
 
-`src/mcu.s` interprets the i8751 firmware with exactly the instructions of `tools/mcu.py` (a jump table per opcode,
-anything else stops at `z80_unsupported`); the P3 bit 6 falling edge latches the reply, PSW's parity is made exact
-where PSW is read.
+### Picture
 
-## Renderer (`src/render.s`)
+`src/render.s`.  The screen is the raw 256 x 224 picture rotated: 224 x 256, screen x = raw y - 16, y = 255 - raw x.
+The back layer (the sea, 32 x 32 tiles from the ROM map) scrolls vertically at half the speed of the front layer
+(clouds, islands, ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
 
-The screen is the raw 256 x 224 picture rotated: 224 x 256, screen x = raw y - 16, y = 255 - raw x.  The back layer
-(the sea, 32 x 32 tiles from the ROM map) scrolls vertically at half the speed of the front layer (clouds, islands,
-ships), which also scrolls sideways (`D802`) in stages 3, 9 and 14.
-
-* **Three display rings, virtual screens with twin lines** (the Commando port's scheme): ring line l and l + 320 hold
-  the same picture of the back layer, so the 256 window lines and 32 guard lines above and below are contiguous
-  wherever the window is.  Back layer lines are drawn once, as they scroll into the band (each a line of 8 baked
-  tiles into all its copies; `back_line`); a change of the layer's enable or a jump draws the band whole.
+* **Three display rings, virtual screens with twin lines** (Commando's scheme): ring lines l and l + 320 hold the same
+  picture of the back layer, so the 256 window lines and 32 guard lines above and below are contiguous wherever the
+  window is.  Back layer lines are drawn once, as they scroll into the band (each a line of 8 baked tiles into all its
+  copies; `back_line`); a change of the layer's enable or a jump draws the band whole.
 * **Everything else is drawn every frame and listed as damage**, copied back from the twin lines at the ring's next
-  visit: the sprites of colours 10 and 11 (behind the front layer), the front layer (whole 32 x 32 baked tiles, blank
-  ones skipped; runs of lines with equal opaque masks: 4 lines and more one Blitter call per plane, shorter ones one
-  call per line with the 4 planes as Y count, masks shifted to the horizontal scroll; an unshifted tile at the window's
-  edge draws only its inner chunk), the other sprites (two lists sorted once a frame; the generated routines and
-  endmask streams of `games/1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (each baked as a
-  small `movep.l` routine; the list is rebuilt when the character RAM changes, compared only in the 32-cell blocks
-  its 55 translated writers mark).  A fully opaque front tile's damage is left where the next frame's opaque tiles
-  cover it.  Sprites and front tiles across the window's left or right edge draw only their words inside the window
-  (since 2026-10-12, see the two sections of that date); the 48 pixel side bands stay black, nothing is cleared after
-  drawing.
+  visit (scrolling damage restores use the shared full-word copy path since 2026-10-19,
+  [the measurements](../../docs/virtual-scroll-performance.md#implementation-results)): the sprites of colours 10 and
+  11 (behind the front layer), the front layer (whole 32 x 32 baked tiles, blank ones skipped; runs of lines with
+  equal opaque masks: 4 lines and more one Blitter call per plane, shorter ones one call per line with the 4 planes as
+  Y count, masks shifted to the horizontal scroll), the other sprites (two lists sorted once a frame; the generated
+  routines and end-mask streams of `../1942/tools/spritegen.py`, 3000 routines, a packed table), the characters (each
+  baked as a small `movep.l` routine; the list is rebuilt when the character RAM changes, compared only in the 32-cell
+  blocks its 55 translated writers mark).  A fully opaque front tile's damage is left where the next frame's opaque
+  tiles cover it.
 * **Front-follow rings through cloud banks**: when the window's fully opaque front cells outnumber the blank ones (by
   16 of the 72, back again the other way; both layers on, no horizontal front scroll), a ring follows the front layer
-  instead: its twin lines hold the front layer, drawn as its lines scroll in, and a sea pass draws the back layer where
-  the front is transparent (blank cells two plain copies, the back tiles being in the same columns; mixed cells the
-  tile's sea runs, inverted masks, one call per chunk and run).  Sprites of colours 10/11 get the front cells they
+  instead: its twin lines hold the front layer, drawn as its lines scroll in, and a sea pass draws the back layer
+  where the front is transparent (blank cells two plain copies, the back tiles being in the same columns; mixed cells
+  the tile's sea runs, inverted masks, one call per chunk and run).  Sprites of colours 10/11 get the front cells they
   overlap drawn over them again.  When such a ring's window wraps at the ring's end, the old band's lines are copied
-  back from their twins (the sea is not damage).  A cloud bank frame went from 506k to 246k Musashi cycles.
-* **Colours**: one 16 colour palette, Oklab k-means over the colours of every stage weighted by how often they show
-  (`ref/palette_stats.py` -> `docs/palette_stats.json`, `docs/palette.json`).  Tiles of both layers are baked at
-  build time (`tools/assets.py`: 396 back, 583 front tiles); sprites and characters are baked on first use into a
-  pool with hashed caches.
-* **Borders**: the shared `engine/rt/borders.s` and short HOG passes (`blit_go`), see
+  back from their twins (the sea is not damage).
+* **Edges**: the window's edges lie on 16-pixel chunks (3 chunks of side band each side), so a sprite or front tile
+  across one has its words inside drawn only.  Sprites: `sprite_part` sends sprites left of window x 0 or right of 208
+  (one unsigned compare) to `sprite_edge`, which culls those wholly in the right band and draws the others with
+  `clip_part`: one word a line, the right edge's first word with the skewed source under END1, the left edge's second
+  word with FXSR and source Y increment 0 under the stream's END3 mask; only that word is listed as damage.  Front
+  tiles (their rows start at window x -16 when `D802` is 0): an unshifted tile at chunk -1 or 13 draws one word (the
+  general path's one-word mode: the right word at chunk 0, the left at chunk 13), a shifted one at chunks -2/-1/12/13
+  its three words with the band words' end masks 0 (`ft_m12`, `ft_m3`, ANDed into the run's shifted masks), damage
+  only for the chunks inside; the common path pays one unsigned compare.  The 48-pixel side bands stay black, nothing
+  is cleared after drawing; top and bottom are whole objects in the guard lines.
+* **Borders**: the shared `engine/rt/borders.s` and short HOG passes (`blit_go`; the 56-word copies of
+  `restore_damage` and `ff_clean` run in two halves), see
   [architecture.md "Border removal"](../../docs/architecture.md#border-removal); Timer B also switches the palette on
-  and off around the picture.  Hatari, 4000 VBLs: 0 late events.
-* **Not exact**: where a sprite of colour 10/11 comes earlier in the list than an overlapping sprite of another
-  colour, the arcade shows the first (or the front layer over it), the port the second.  The test recognises such
-  pictures by rendering the reference in the port's order.
+  and off around the picture.
 
-## Tests
+### Colours
 
-`port.py test 1943` builds the simulator version and runs `tools/logic_test.py`: the dispatch tables as loaded (see "Memory"), then the translated program on Musashi
-against the reference's port schedule, RAM, video latches, sprite buffer, latches, MCU reply and MCU RAM compared at
-every tick, and that every change of the character RAM came with its block's mark; with `--render` each picture the
-renderer finished is compared with the reference renderer through the palette map (the margins must be black),
-`--twins` also checks the ring's twin lines (the back layer, or the front layer in front-follow).  `--cheat n` plays
-stage n with MAME's cheats, `--seed n` random inputs.  Results (2026-10-09): every stage 0-14 with cheats (4000 ticks),
-the default schedule, random seeds 1-3: logic exact, pictures exact but for the sprite order case above (stage 3: 127
-of 2000 pictures, a few pixels each).
+One 16-colour palette: Oklab k-means over the colours of every stage weighted by how often they show (weight =
+count^0.6 + a floor; `ref/palette_stats.py` -> `docs/palette_stats.json`, `docs/palette.json`).  The tiles of both layers
+are baked at build time (`tools/assets.py`: 396 back, 583 front tiles); sprites and characters are baked on first use
+into a 96 KB pool with hashed caches (4096 slots, 32 KB each).  The shared default fitter of 2026-11-05 is not used
+here ([colours.md](../../docs/colours.md#what-each-port-uses)).
 
-## Speed (2026-10-09)
+### Sound
 
-Superseded figures: the table is the state of 2026-10-09.  The sound, the short passes and the window guards
-(2026-10-11) brought the bench to 51.4 ticks (86%) and 7.9 frames a second (below); the MCU's INT1 in 68000 code
-(2026-10-12) and the native scan with inline leaves (2026-11-02) cut the logic further, not measured in Hatari since.
+The sound board (MAME `capcom/1943.cpp`): a Z80 at 3 MHz, two YM2203 at 1.5 MHz, four IRQs a frame (lines 32, 96, 160,
+224).  The driver is Capcom's of Commando and Gun.Smoke (the same code at other addresses), recorded and played with
+`engine/capsnd.py` / `engine/rt/capsnd.s` (the method: [Gun.Smoke's README](../gunsmoke/README.md) and
+[porting-guide.md "Sound"](../../docs/porting-guide.md#sound)).  `tools/sound.py`: RAM C000, latch C800, the command
+table at 009F, five effect slots a chip (C500-C580, C600-C680) that end the lower ones unless their byte 31 is $FF,
+four music slots C100-C400; command 00 stops everything, 33-39 and 3B-3F the music.  31 effects (the SSG) and 19 tunes
+(FM) are recorded: 122 KB in `build/1943/cs_data.s`.  Effect $0A (64 seconds of notes) would take 68 KB with its four
+phases; its phases 1-3 differ from phase 0 only in which IRQ a volume step falls on (up to 3 IRQs, 12 ms), so it plays
+phase 0 in every phase (`capsnd.EXC_LIMIT`: an effect whose phase exceptions exceed 8 KB), 50 KB less.  The player
+costs ~7,900 cycles a tick.
 
-| | first runtime | 2026-10-09 |
-|---|---|---|
-| a tick's logic, Musashi (`tools/perf_test.py 1400 1300`, play) | 110k (MCU interpreter 62k) | 46k (translated MCU 8k) |
-| a frame, open sea and a carrier | 340k | 222k |
-| a frame, a cloud bank (`--cheat 9`, ticks 2600-2650) | 562k | 246k |
-| Hatari, DEBUG + AUTOPLAY, 4000 VBLs (`tools/bench.sh`) | 31.9 ticks/s (53%), 6.4 frames/s | 55.7 ticks/s (93%), 11.4 frames/s |
+`sound.py check 6000`: the music streams through the decoder 0 of 445,113 channel ticks differ; the effects with
+random commands 70 of 48,000 chip IRQs differ audibly (the noise period an effect's first IRQs inherit), with the
+game's commands (`logic_test.py`'s play) 0.
 
-The logic gains: the i8751 firmware translated (`tools/mcux.py`), the window guard only at the sites the
-coverage saw reading the banked window (and sites it never ran; since 2026-10-11 block instructions on the same
-terms: 883 of 3,784 indirect accesses, kept in `docs/window-sites.json` so a build takes them from there when the
-coverage files have none; `W_GUARD_ALL=1` guards every access: 69.8k instead of 61.0k cycles a tick; `logic_test.py
---audit` traces a run for accesses to the image of the window, which only an unguarded site makes: none in 3000
-random and 4000 stage-13 frames), a signed one-compare guard, a table bank switch.  `MAX_SKIPS` 8 (4 gave 87% speed and 15.5 frames/s).  `-D STAGE=n` makes the AUTOPLAY
-build play stage n with the cheats; `engine/xprof.py 1943` profiles the translated code (`X1943_STAGE=n`).
+### Memory
 
-Short Blitter passes (2026-10-11): no HOG pass is longer than ~256 bus cycles (`engine/rt/borders.s` `blit_go`; the
-56-word copies of `restore_damage` and `ff_clean` run in two halves), so the top border interrupt is never held back
-long.  It cost ~1% of a frame in Musashi (`perf_test.py 1600 1200`: 227k -> 230k) and in Hatari (DEBUG + AUTOPLAY, 6000
-VBLs) 8.4 -> 7.9 drawn frames a second, the ticks unchanged (51.3); no border event started late in that run.
-`tools/bench.sh` runs that benchmark (a DEBUG + AUTOPLAY build of 6000 VBLs in `run/1943_bench`, the counters
-reported; `EXTRA="-D STAGE=n"` for a stage with the cheats): 2026-10-11, with the sound, the short passes and
-the window guards at the coverage's sites, 51.4 ticks (86%) and 7.9 frames a second.
-
-## Sound (2026-10-11)
-
-The sound board (MAME `capcom/1943.cpp`): a Z80 at 3 MHz, two YM2203 at 1.5 MHz, four IRQs a frame (lines 32, 96,
-160, 224).  The driver is Capcom's of Commando and Gun.Smoke (the same code at other addresses), recorded and played
-with the engine's `engine/capsnd.py` / `engine/rt/capsnd.s` (see `games/gunsmoke/README.md` "Sound" for the method).
-`tools/sound.py`: RAM C000, latch C800, the command table at 009F, five effect slots a chip (C500-C580, C600-C680)
-that end the lower ones unless their byte 31 is $FF, four music slots C100-C400; command 00 stops everything, 33-39
-and 3B-3F the music.  31 effects (the SSG) and 19 tunes (FM) are recorded: 122 KB in `build/1943/cs_data.s`.
-
-Effect $0A (64 seconds of notes) would take 68 KB with its four phases: its phases 1-3 differ from phase 0 only in
-which IRQ a volume step falls on (up to 3 IRQs, 12 ms), so it plays phase 0 in every phase (`capsnd.EXC_LIMIT`: an
-effect whose phase exceptions exceed 8 KB), 50 KB less.
-
-Checks: `sound.py check 6000`: the music streams through the decoder 0 of 445,113 channel ticks differ; the effects
-with random commands 70 of 48,000 chip-IRQs differ audibly (the noise period an effect's first IRQs inherit), with the
-game's commands (`logic_test.py`'s play) 0.  `sound_test.py` (in `port.py test`): the 68000 player against the model,
-0 of 20,000 ticks differ; ~7,900 cycles a tick.  Hatari (DEBUG + AUTOPLAY, 4000 VBLs): 53.6 game ticks (90%) and 9.4 drawn
-frames a second; without the sound (`-D NOSOUND=1`) 55.7 and 11.3 (the frames get what the ticks leave).  Hatari: sound in the attract mode and play.
-
-## Memory (2026-10-15)
-
-The program needs 3,668,442 bytes and leaves 384 KB from the desktop (`tools/memfree.sh`); the 4,051,070 bytes of 0.3
-did not start on a tester's Mega STE (the load budget:
-[porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).  Most of it is the memory work of 2026-10-10 below, whose branch was only
-merged on 2026-10-15 (0.3 was built without it).  A bank's dispatch table, flat over its code's span (104 KB for
-banks 0, 1, 4, 6), became a directory long per 64 window addresses and pages of words, (the entry - the page) / 2,
-pages without an entry shared (50 KB): ~3 window dispatches a tick, ~50 cycles more each.  The fixed code's table stays
-flat (80 cycles a dispatch).  Musashi (`perf_test.py 1600 1200`): logic 48,133 -> 48,062 cycles a tick, frames
-unchanged (236.8k): a tick and a frame together cost ~285k cycles, so 8 MHz would allow 28.1 ticks a second with a
-frame drawn after each (an estimate from the simulator's cycles, not a Hatari rate).  The tests' fixed buffers (`front_test.py`, `sprite_test.py`)
-moved above the program, which now reached them.
-
-## Memory (2026-10-10)
-
-text + data + BSS from `build/1943/1943.map`: **3,587,774 bytes** (was 4,003,336: more than GEMDOS leaves on a real
-4 MB STE with a hard disk driver and accessories, Pexec failed; see the load budget above).  The program allocates nothing at run time (no
-`Malloc`).  Nothing changed in the logic or the pictures, and nothing got slower:
+3,668,442 bytes (text + data + BSS, `build/1943/1943.map`), 384 KB left from the desktop (`tools/memfree.sh`,
+2026-10-15); the 4,051,070 bytes of 0.3 did not start on a tester's Mega STE (the load budget:
+[porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).  The program allocates
+nothing at run time (no `Malloc`).  What made it fit (2026-10-10, merged 2026-10-15; nothing slower):
 
 | what | before | after |
 |---|---|---|
-| natural-PC dispatch tables | 448 KB BSS (a long per Z80 address: fixed 128 KB, banks 0, 1, 4, 6 and an "invalid bank" 64 KB each) + 85 KB of entry lists to fill them at start | 168 KB of data built by `gen.py dispatch_tables`: a word per Z80 address, the fixed code 64 KB, a bank only its code's span (15-31 KB) |
-| fixed ROM | 32 KB data, copied into the 64 KB BSS Z80 image at start | assembled in place in the image (`g_block` in the data section) |
+| natural-PC dispatch tables | 448 KB BSS (a long per Z80 address: fixed 128 KB, banks 0, 1, 4, 6 and an "invalid bank" 64 KB each) + 85 KB of entry lists to fill them at the start | word tables as data: the fixed code 64 KB (80 cycles a dispatch, was 92), the banks 50 KB as directories and shared pages (104 KB flat over their code's span) |
+| fixed ROM | 32 KB data, copied into the 64 KB BSS Z80 image at the start | assembled in place in the image (`g_block` in the data section) |
 | 68000 stack | 16 KB | 8 KB (under 200 bytes used in the simulator; the rest for the TOS calls at the exit and on a crash) |
 
-* **Dispatch tables**: an entry is (the label - the table) / 2, unsigned, and each table stands in the text section
-  right before its region's code (the fixed code, each bank's code), so `g_dispatch` jumps relative to the table
-  (`move.w (a4,d7.l),d7; add.l d7,d7; jmp (a4,d7.l)`: 80 cycles for the fixed code, was 92).  (2026-10-15: a bank's table is
-  a directory long per 64 window addresses and pages of words relative to the page, see "Memory (2026-10-15)";
-  $C000 and up is rejected, a bank without code points to `g_wd_none`, every page bad.)  vasm rejects an entry beyond
-  128 KB; gen.py checks that the regions are in address order and that the line before each table ends its flow.
-  Addresses without an entry (no code, merged labels) go to the region's `g_bad_<region>` stub (z80_badpc).
-  `logic_test.py` first checks every table word and span as loaded against the map (`build/1943/dispatch.json`: each
-  Z80 entry on its label, everything else on the stub).
-* **Measured and kept**: the sprite / character caches (4096 slots, 32 KB each) are not larger than their working set:
-  with 2048 slots the conflict misses use up the 96 KB pool faster, it rolls over once more in 6000-10000 ticks and
-  the bakes rise 10-30% (`--cheat 9`: 1245 -> 1639 sprite bakes in 6000 ticks).  The damage lists (700 rectangles a
-  ring, at most 172 used a frame in 6000 ticks of the default schedule, random inputs and stages 3, 9, 13, 14) have no
-  overflow check and stay.  `front_map` as words (the tile's number, a table of the tiles' addresses: 30 KB less)
-  was as fast in Musashi but drew 1.5-3% fewer frames in Hatari's cloud bank bench: dropped.
-* **Speed**, 28fe0cb -> now, the same inputs.  Musashi `perf_test.py` (400 ticks): play (1700 1300) logic 47,991 ->
-  47,719 cycles a tick, frame 206,404 -> 206,465; a cloud bank (3000 2600 --cheat 9) logic 82,141 -> 81,613, frame
-  365,990 -> 365,888.  Hatari (`tools/bench.sh`, DEBUG + AUTOPLAY, ticks / frames
-  drawn; the frames move by a few % with the screen's place in memory alone, so each case was run with the rings at
-  more than one place, `-D PAD=n` before `screen_area` in a scratch copy):
+A bank's pages cost ~50 cycles more for each of the ~3 window dispatches a tick: Musashi (`perf_test.py 1600 1200`)
+logic 48,133 -> 48,062 cycles a tick, frames unchanged (236.8k).  The damage lists (700 rectangles a ring, at most 172
+used a frame in 6000 ticks of the default schedule, random inputs and stages 3, 9, 13, 14) have no overflow check.
 
-  | | 28fe0cb | now |
-  |---|---|---|
-  | 4000 VBLs | 4460 / 924, 4446 / 910 | 4458 / 911 (55.7 ticks/s, 93%) |
-  | 8000 VBLs | 8782 / 1899, 8768 / 1940 | 8787 / 1934 |
-  | `EXTRA="-D STAGE=3"`, 6000 VBLs | 6631 / 4017, 6566 / 3873 | 6637 / 4105, 6626 / 3963 |
-  | `EXTRA="-D STAGE=9"` (cloud banks), 8000 VBLs | 8469-8473 / 8625-8726 (6 places) | 8481 / 8591-8742 (3 places) |
+## Speed
 
-  The STAGE=9 rows count more frames than VBLs: the counter is `cnt_renders` (renders finished, `src/1943.s`), not
-  pictures shown, and more than one new picture a VBL cannot be shown, so these rows are not a picture rate (why the
-  renders exceed the VBLs there was not explained).  [virtual-scroll-performance.md](../../docs/virtual-scroll-performance.md#ports-and-first-experiments)
-  flags them; validate the counters before using cloud bank results.
+| date | setup | logic | pictures |
+|---|---|---|---|
+| 2026-10-12 | Hatari, `bench.sh` (DEBUG + AUTOPLAY, 6000 VBLs, 4 MB, sound on) | 51.2 arcade frames a second (85%) | 7.9 a second |
+| 2026-11-02 | Musashi, `logic_test.py 4000 --play` (the recorded play, `-D PLAYBACK=1`) | 65,534 cycles a tick | |
+| 2026-10-19 | Musashi, `perf_test.py 1700 1300` (play) | ~49.2k cycles a tick | 213,988 cycles a picture |
+| 2026-10-12 | Musashi, `perf_test.py` CPU + Blitter a frame: `--cheat 3`; `--cheat 9` (cloud banks, ticks 2600-2900) | | 341,561; 353,716 cycles |
 
-## Not done
+A tick and a frame together cost ~285k Musashi cycles in play (2026-10-15), so 8 MHz would allow about 28 ticks a
+second with a frame drawn after each (an estimate from the simulator's cycles, not a Hatari rate): the schedule gives
+the game its ticks and the pictures what is left.  In cloud banks the logic took 82-86k cycles a tick before the MCU's
+INT1 went native.  The sound costs about 2 arcade frames and 2 pictures a second in Hatari (2026-10-11, 4000 VBLs:
+53.6 (90%) / 9.4 with it, 55.7 / 11.3 with `-D NOSOUND=1`).  The cross-port rates and costs:
+[speed.md "Which port uses what"](../../docs/speed.md#which-port-uses-what-2026-11-07); its checklist names 1943's sea
+and its full-band redraws when the scroll alternates every tick (15% of the picture cycles) as the largest picture
+costs.
 
-The flip screen (cocktail); the arcade's clipping of sprites at the raw 256 pixel edges; full speed in the
-busiest scenes (the game's own logic is 86k cycles a tick there).
+What made it fast, newest first:
 
-## Whole objects at borders (2026-10-11)
+* **The kernel's scan native, inline leaves** (2026-11-02): the scan was 24% of the translated code
+  (`engine/xprof.py --pcs`, the flags of `inc c` through the stack).  Recorded play: 69,145 -> 65,534 cycles a tick
+  (-5.2%; the scan alone 66,503, inline leaves alone 68,165).
+* **Shared full-word restore path** (2026-10-19): a picture 215,736 -> 213,988 (-0.81%), the logic unchanged.
+* **The MCU's INT1 native** (2026-10-12): the logic 57.1k -> 48.0k cycles a tick (`perf_test.py 1400 1300`; the MCU
+  1.2k; the translated walk paid ~10k a tick for the `subb` flags).
+* **Edge clipping** (2026-10-12): sprites +0.02-0.04% (play 237,010 -> 237,061, stage 3 346,033 -> 346,166, the
+  compare); front tiles cheaper: play 237,061 -> 236,816 (-0.10%), `--cheat 3` 346,166 -> 341,561 (-1.33%),
+  `--cheat 9` 354,525 -> 353,716 (-0.23%).  Hatari 51.2 / 7.9.
+* **Short Blitter passes** (2026-10-11): no HOG pass longer than ~256 bus cycles, so the top border interrupt is never
+  held back long; it cost ~1% (Musashi `perf_test.py 1600 1200` 227k -> 230k a frame; Hatari 8.4 -> 7.9 pictures a
+  second, the ticks unchanged at 51.3).
+* **2026-10-09**, from the first runtime: the i8751 firmware translated instead of interpreted (`tools/mcux.py`: the
+  MCU 62k -> 8k cycles a tick), the window guard only at the coverage's sites, the signed one-compare guard, a table
+  bank switch, front-follow rings (a cloud bank frame 506k -> 246k), the character RAM compared per marked block,
+  fully opaque front tiles leaving their damage, faster front cells.  A tick's logic 110k -> 46k, a frame of open sea
+  and a carrier 340k -> 222k, a cloud bank frame (`--cheat 9`, ticks 2600-2650) 562k -> 246k; Hatari (4000 VBLs) 31.9
+  ticks (53%) and 6.4 frames a second -> 55.7 (93%) and 11.4, before the sound and the short passes.
+* **`MAX_SKIPS` 8**: 4 gave 87% speed and 15.5 pictures a second (2026-10-09, before the sound): the game first.
 
-Superseded (2026-10-12): sprites and front tiles are clipped at the window's left and right edges now, see the two
-sections below; the side bands stay black.  What was done on 2026-10-11:
+Measured, not kept:
 
-Partially visible sprites and front tiles now draw whole into the virtual ring. Removed the post-draw
-`clear_outside` eraser and the one-word front-tile edge path. Their complete damage rectangles are restored
-before the next picture. The 48-pixel side bands inside the hardware window may therefore contain overhang.
-The existing sprite source rows already use the reordered mask-group method. Validation: 1,600 translated
-logic/render frames match, with 160 game pictures and the twin background compared against the reference.
-The comparisons cover the arcade picture; the side bands intentionally show whole objects.
-The rebuilt 4 MB STE Hatari debug run completed 2,500 VBLs without a crash file and with zero late
-border or palette events (two startup fallbacks).
+* **Smaller sprite / character caches** (2048 slots): the conflict misses use up the 96 KB pool faster, it rolls over
+  once more in 6000-10000 ticks and the bakes rise 10-30% (`--cheat 9`: 1245 -> 1639 sprite bakes in 6000 ticks).
+* **`front_map` as words** (the tile's number and a table of the tiles' addresses: 30 KB less): as fast in Musashi,
+  1.5-3% fewer pictures in Hatari's cloud bank bench: dropped.
+* **An exact native timer loop** (`$00A1`-`$00AD`, in the interrupt): not built; its F goes to F' (`ex af,af'`), so a
+  native would have to rebuild it.
 
-## Sprites clipped at the window's left and right edges (2026-10-12)
+Techniques other ports use that may apply:
+[speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07) (among them skipping the `C806`
+sprite latch copy of skipped pictures, dropping the flags at the idle hook, opaque-row damage).
 
-The window's edges lie on 16-pixel chunks (3 chunks of side band each side), so a sprite across one has exactly one
-word inside: `sprite_part` sends sprites left of window x 0 or right of 208 (one unsigned compare) to `sprite_edge`,
-which culls those wholly in the right band and draws the others with `clip_part`: one word a line, the right edge's
-first word with the skewed source under END1, the left edge's second word with FXSR and source Y increment 0 under
-the stream's END3 mask; only that word is listed as damage.  The 48-pixel side bands no longer show sprites (front
-tiles still spilled there until the next section, the same day).  Cost (Musashi, CPU + Blitter a frame): play 237,010 -> 237,061, stage 3 346,033 ->
-346,166 (+0.02-0.04%, the compare); Hatari (bench.sh, 6000 VBLs) 51.2 ticks/s, 7.9 frames/s, no late border event.
-`tools/sprite_test.py`: 4 sprites with holes, all 16 shifts, both edges and the culled band, plain and across 64 KB
-(376 cases, 232 clipped) against the same sprite drawn whole by its generated routine, the bands untouched (the old
-whole drawing fails it).  `logic_test.py --render` prints the clipped sprites: default 1600 frames (12), `--cheat 3`
-2000 (62), `--seed 1` 1600 (15), `--cheat 9 --twins --every 2` 3000 (975): all pictures equal.
-## Front tiles clipped at the window's left and right edges (2026-10-12)
+## Tests and tools
+
+```sh
+python port.py test 1943                     # prepare, video_test, reference_test 700, build --sim, sprite_test,
+                                             #   front_test, mcu_native_test, logic_test 3000 (+ three --render runs),
+                                             #   sound_test 20000
+python games/1943/tools/logic_test.py 3000 --render --every 3   # pictures vs the reference (--twins: twin lines)
+python games/1943/tools/logic_test.py 4000 --cheat 13           # stage n with MAME's cheats; --seed n random inputs
+python games/1943/tools/logic_test.py 4000 --play               # the recorded play (a -D PLAYBACK=1 sim build)
+python games/1943/tools/logic_test.py 3000 --audit              # accesses to the window's image (an unguarded site)
+python games/1943/tools/sprite_test.py       # sprites at the window edges: clipped, all shifts, 64 KB
+python games/1943/tools/front_test.py        # front tiles at the window edges: clipped, all shifts, 64 KB
+python games/1943/tools/mcu_native_test.py   # the native INT1 against the translated firmware
+python games/1943/tools/reference_test.py 700   # 256 MCU commands against the firmware tables, unpatched frames
+                                                #   (-> build/1943/reference.png)
+python games/1943/tools/sound.py check 6000  # the recorded streams against the driver
+python games/1943/tools/perf_test.py 1600 1200  # Musashi cycles of a tick's logic and a frame (--cheat n, --profile)
+python games/1943/tools/play_search.py       # the recorded play -> build/1943/play_inputs.bin (engine/playbot.py)
+python engine/xprof.py 1943                  # the translated code by Z80 instruction (X1943_STAGE=n)
+games/1943/tools/bench.sh [frames]           # Hatari; EXTRA="-D STAGE=n" a stage, PLAY=1 the recorded play
+```
+
+`logic_test.py` first checks the dispatch tables as loaded, then runs the translated program on Musashi against the
+reference's port schedule and checks that every change of the character RAM came with its block's mark; `--render`
+compares each picture the renderer finished with the reference renderer through the palette map (the margins must be
+black), counts the pictures whose side bands are not black and prints the clipped sprites and front tiles
+(`ft_uclips`, `ft_sclips`); `--twins` also checks the ring's twin lines (the back layer, or the front layer in
+front-follow).  `sprite_test.py` (4 sprites with holes) and `front_test.py` (4 tiles with holes) draw every case
+against the same object drawn whole in the middle, check that the bands stay untouched, that every change is inside
+the listed damage and the damage inside the window; the old whole drawing fails both.  `bench.sh` builds a DEBUG build
+of 6000 VBLs into `run/1943_bench`, starts its own Hatari (not `tools/hatari.sh`, which stops every running Hatari)
+and reports ticks, frames drawn and late border events; `-D STAGE=n` makes the AUTOPLAY build play stage n with the
+cheats.
+
+## Lessons
+
+### 2026-10-15: the program reached the tests' buffers
+
+With the dispatch pages the program grew into the fixed buffers of `front_test.py` and `sprite_test.py`; they moved
+above the program.
+
+### 2026-10-12: front tiles in the side bands
 
 The front layer's 32-pixel tiles spilled into the 16 pixels beside the window in nearly every picture (its rows start
-at window x -16 when the front scroll D802 is 0): `logic_test.py --render` now counts the pictures whose side bands
-are not black, and before this change found 941 of 1600 (default), 1341 of 2000 (stage 3) and 1170 of 1500 (stage 9),
-~3,500 pixels each.  `front_tile` now draws only the words inside the window: an unshifted tile at chunk -1 or 13
-draws one word (the general path's one-word mode: the right word at chunk 0, the left at chunk 13), a shifted one at
-chunks -2/-1/12/13 its three words with the band words' end masks 0 (`ft_m12`, `ft_m3`, ANDed into the run's
-shifted masks) and lists damage only for the chunks inside.  The common path pays one unsigned compare, as before
-two.  Musashi (`perf_test.py`, CPU + Blitter a frame): play 237,061 -> 236,816 (-0.10%), `--cheat 3` 346,166 ->
-341,561 (-1.33%), `--cheat 9` (ticks 2600-2900) 354,525 -> 353,716 (-0.23%); the logic unchanged.
-`tools/front_test.py`: 4 tiles with holes, all 16 shifts, both edges and wholly outside, plain and across 64 KB
-(768 cases, 496 across an edge) against the same tile drawn whole in the middle, bands untouched, every change inside
-the listed damage, the damage inside the window (the old code fails it).  The side bands are now black in every
-compared picture; `logic_test.py --render` also prints the front tiles clipped (`ft_uclips`, `ft_sclips`).
+at window x -16 when `D802` is 0): before the clipping `logic_test.py --render` found 941 of 1600 (default), 1341 of
+2000 (stage 3) and 1170 of 1500 (stage 9) pictures with ~3,500 band pixels each.  Count the band pixels in the picture
+test, not only the window.
 
-## The MCU's INT1 in 68000 code (2026-10-12)
+### 2026-10-10: Hatari rates move with the screens' place in memory
 
-The i8751's VBL interrupt (`$0013` -> `$0200`-`$023B`) looks the Z80's command up in 32 (key, value) pairs at ROM
-`$0800` and replies with the value of the last matching pair (R4 as it was when none matches).  The firmware walks all
-32 pairs every time; translated, each pass pays the 8051 flag bookkeeping of its `subb` (~10k cycles a tick).
-`src/mcu.s` `mcu_int1` searches the pairs from the end and sets what the walk leaves at once (R2 = R7 = the command,
-R3 = 0, DPTR = `$0840`, ACC and PSW's CY / AC / OV of the last pair's `subb`, P0, the reply through P3 bit 6, IE1, EA).
-`-D MCU_XLATE` builds the translation.  `tools/mcu_native_test.py` (in `port.py test`): every command from 8 random
-MCU states each against the translated firmware (the 256 bytes of RAM and SFRs, the reply, the transaction count, the
-pc), identical; `logic_test.py` 4000 frames matched.  `tools/perf_test.py 1400 1300`: the logic 57.1k -> 48.0k cycles a
-tick (the MCU 1.2k).
+Musashi showed the memory work neutral (play logic 47,991 -> 47,719, frame 206,404 -> 206,465; a cloud bank 82,141 ->
+81,613 and 365,990 -> 365,888), but Hatari's frames moved by a few % with the rings' address alone, so each case was
+run with the rings at more than one place (`-D PAD=n` before `screen_area` in a scratch copy).  Ticks / frames drawn,
+28fe0cb -> after: 4000 VBLs 4460 / 924 and 4446 / 910 -> 4458 / 911; 8000 VBLs 8782 / 1899 and 8768 / 1940 -> 8787 /
+1934; `-D STAGE=3`, 6000 VBLs, 6631 / 4017 and 6566 / 3873 -> 6637 / 4105 and 6626 / 3963.  The `-D STAGE=9` (cloud
+bank) runs counted more frames than VBLs (8469-8473 / 8625-8726 at 6 places, 8481 / 8591-8742 at 3): the counter is
+`cnt_renders` (renders finished, `src/1943.s`), not pictures shown, so those rows are not a picture rate (why the
+renders exceed the VBLs there was not explained;
+[the scrolling audit](../../docs/virtual-scroll-performance.md#ports-and-first-experiments) flags them).  Validate the
+counters before using cloud bank results.
 
-## The task kernel's scan natively, inline leaves (2026-11-02)
+### 2026-10-10: jump tables reached late
 
-The kernel's scan for a ready task (`$00B6`-`$00D4`: 16 records of 8 bytes from `$EF80`, the first with a state of 4
-or more) was 24% of the translated code (`engine/xprof.py --pcs`, the flags of `inc c` through the stack).
-`src/1943.s` `nat_scan` (`gen.py` `NATIVES`) walks it in a register loop: the port delivers the interrupts at the hook
-only, so `$EF86` stays 0 during the scan; it leaves A, BC, DE, HL and the translation's F as the Z80 code does.  The
-timer loop before it (`$00A1`-`$00AD`, in the interrupt) stays translated: its F goes to F' (`ex af,af'`), so an
-exact native would have to rebuild it.  Calls of leaf functions of up to 32 instructions in the fixed ROM are emitted
-in place (`gen.py` `INLINE`, z80x `inline_leaves` with `inline_rst` / `inline_jumps`, Commando's setting; 61 sites);
-`logic_test.py` leaves out the return address such a call writes below SP in the reference (dead, as for the merged
-push/pop) and prints the logic's cycles.  Musashi, `logic_test.py 4000 --play` (the recorded play, `-D PLAYBACK=1`):
-69,145 -> 65,534 cycles a tick (-5.2%), all 4000 ticks exact (the scan alone 66,503, inline leaves alone 68,165).
-`port.py test 1943`'s logic and picture tests pass: `logic_test.py` 3000, `3000 --render --every 3`, `4000 --render
---every 4 --cheat 13`, `4000 --render --every 8 --seed 1` (all pictures equal), `sprite_test.py`, `front_test.py`,
-`mcu_native_test.py`.
-Not measured in Hatari.
+Random play reached `5AE2` after 6 minutes (a tester's quit to the desktop: `z80_badpc`): 11 entries of the fixed
+ROM's jump tables were untranslated, now all of them are (`JUMP_TABLES`).  An allocator continuation (bank 0 `A000`)
+was likewise reached by random play and no coverage run; play that dies (seeds 21-40) runs what invincible play never
+does.
 
+## Verification
 
-## Standard PPO exploration
+No playtest beyond the lock-step tests, the MAME pixel checks and Hatari runs of attract mode and AUTOPLAY play (sound
+in attract mode and play; 2,500 VBLs of a 4 MB debug run without a crash file, 2026-10-11).
 
-Use `venv/bin/python port.py ppo 1943 test --steps 256 --frames 2100` to check the shared training/recording/replay workflow. See [the common PPO guide](../../docs/ppo.md). PPO supplements the existing scripted coverage; canonical replay fixtures are preserved.
-
-## Full-game verification status
-
-Automated players such as Dreamer can attempt a full playthrough once this port's
-adapter and native Hatari replay transport are verified. An attempt or assisted
-stage visit does not establish completion; a successful natural Hatari playthrough
-and graphics, sound and control checks are required for green **Complete** status.
-See the shared [status and verification policy](../../docs/port-status.md) and
-[current port status](../../README.md). Existing test results above retain their
-stated scope; this note does not claim a new successful run or Dreamer integration.
+PPO exploration: `venv/bin/python port.py ppo 1943 test --steps 256 --frames 2100` ([the PPO guide](../../docs/ppo.md)).
+Full-game verification follows the [status policy](../../docs/port-status.md); nothing here claims a complete playthrough.

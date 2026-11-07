@@ -1,5 +1,8 @@
 # Mr. HELI: the i8751 MCU and the main CPU (2026-11-02)
 
+Status: current reference (2026-11-02; the 68000 costs measured again 2026-11-07). The port's state and results are in
+[the README](../README.md).
+
 What the translated V30 program (games/mrheli/tools/gen.py, src/core.s) does with the MCU, for the STE MCU model.
 Measured on the reference board (engine/m72board.py, MAME 0.286 m72.cpp `m72_mcu_state`) with one-off scripts that
 are not in the repository: 1500 attract frames and 6000 frames of invulnerable play (seed 8) from power-on.  The MCU
