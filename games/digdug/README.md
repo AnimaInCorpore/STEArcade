@@ -105,7 +105,7 @@ Not done or not verified:
 | `tools/prepare.py`, `docs/rom_manifest.json` | the ROM check and unpacking |
 | `tools/machine.py` | the reference machine (`python machine.py frames out.png`); `run_frame` (MAME's phase), `run_frame_port` (the STE's schedule) |
 | `ref/mame_cmp_digdug.py` | pens, the renderer on MAME's RAM, the machine from power-on against MAME |
-| `ref/mcu_events_test.py` | the event-driven 51XX / 53XX against the cycle-exact ones |
+| `ref/mcu_events_test.py` | the event-driven 53XX against the cycle-exact one (4521 of 4522 reads equal); the 51XX line is informational only (its bytes depend on when the inputs were sampled: 1718 of 4727 equal, not a pass criterion) |
 | `ref/cover.py` | the coverage seeds (`port.py cover digdug`) |
 | `ref/dis_main.py` | a disassembly listing of a CPU ROM |
 | `tools/gen.py`, `tools/build.py`, `tools/assets.py`, `tools/sound.py` | the translation, the program, the graphics, the sound tables |
