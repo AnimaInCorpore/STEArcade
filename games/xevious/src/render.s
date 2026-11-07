@@ -101,6 +101,7 @@ render_frame:
 	bsr	compose_bg
 	bsr	draw_sprites
 	bsr	draw_fg
+	addq	#1,cnt_render
 	st	frame_ready
 	movem.l	(sp)+,d0-d7/a0-a6
 	rts
@@ -113,6 +114,18 @@ render_frame:
 
 update_bg:
 	lea	vblocks,a0
+	moveq	#0,d2
+	moveq	#15,d0
+.f1:	or.l	(a0)+,d2		; the foreground's marks: the codes $00-$3F
+	dbf	d0,.f1
+	lea	vblocks+$80,a0
+	moveq	#15,d0
+.f2:	or.l	(a0)+,d2		; and the attributes $80-$BF
+	dbf	d0,.f2
+	tst.l	d2
+	beq.s	.nofg
+	st	fg_rebuild
+.nofg:	lea	vblocks,a0
 	lea	cell_dirty,a1
 	moveq	#63,d1
 	tst.b	force_all
@@ -129,7 +142,8 @@ update_bg:
 	cmp.w	#64,d0
 	blo.s	.mk
 	bra.s	.clear
-.all:	moveq	#63,d0
+.all:	st	fg_rebuild
+	moveq	#63,d0
 .alld:	st	(a1,d0.w)
 	dbf	d0,.alld
 .clear:	moveq	#63,d0			; the marks are taken (the foreground's too: it is drawn from the RAM every frame)
@@ -137,6 +151,7 @@ update_bg:
 .c1:	clr.l	(a0)+
 	dbf	d0,.c1			; (256 bytes)
 	clr.b	vblock_all
+	move.b	force_all,draw_all	; (the first picture: every cell is drawn, whatever its shadow says)
 	clr.b	force_all
 
 	moveq	#0,d7			; the cell block
@@ -151,6 +166,8 @@ update_bg:
 	lea	shadow_bg+2048,a5
 	move.b	(a2,d6.w),d0
 	move.b	(a3,d6.w),d1
+	tst.b	draw_all
+	bne.s	.chg
 	cmp.b	(a4,d6.w),d0
 	bne.s	.chg
 	cmp.b	(a5,d6.w),d1
@@ -166,6 +183,7 @@ update_bg:
 .next:	addq.w	#1,d7
 	cmp.w	#64,d7
 	blo.s	.blk
+	clr.b	draw_all
 	rts
 
 ; plane P of a background row: the pens' masks (d4: pen 0, d3: pen 1, d5: pen 2, d2: pen 3) of the pens whose STE colour has
@@ -665,17 +683,24 @@ tile_draw:
 ; ------------------------------------------------------------------------------
 
 draw_fg:
-	move.w	#2,fg_ty
-.ty:	move.w	#4,fg_tx
-.tx:	move.w	fg_ty,d0
+	tst.b	fg_rebuild
+	beq.s	.have
+	clr.b	fg_rebuild
+	bsr	fg_scan
+.have:	lea	fg_list,a5
+.cell:	move.w	(a5)+,d0
+	bmi	.done
+	move.w	d0,d1
+	and.w	#63,d1
+	move.w	d1,fg_tx
+	lsr.w	#6,d0
+	move.w	d0,fg_ty
+	move.w	fg_ty,d0
 	lsl.w	#6,d0
 	add.w	fg_tx,d0
 	lea	R_FGCODE,a1
 	moveq	#0,d1
 	move.b	(a1,d0.w),d1
-	lea	fg_any,a2
-	tst.b	(a2,d1.w)
-	beq	.nocell
 	lea	R_FGATTR,a1
 	moveq	#0,d2
 	move.b	(a1,d0.w),d2		; the attribute
@@ -707,9 +732,9 @@ draw_fg:
 	add.w	#234,d0
 	move.w	d0,t_x			; the leftmost pixel's x
 	cmp.w	#224,d0			; (a cell outside)
-	bge	.nocell
+	bge	.cell
 	cmp.w	#-8,d0
-	ble	.nocell
+	ble	.cell
 	move.l	draw_screen_address,a0
 	lea	PIC_Y0*STRIDE+GAME_X(a0),a0
 	move.w	t_y,d5
@@ -750,13 +775,32 @@ draw_fg:
 	addq.w	#1,t_y
 	subq.w	#1,t_row
 	bpl	.row
-.nocell:
-	addq.w	#1,fg_tx
-	cmp.w	#40,fg_tx
-	blo	.tx
-	addq.w	#1,fg_ty
-	cmp.w	#31,fg_ty
-	blo	.ty
+	bra	.cell
+.done:	rts
+
+; The cells of the foreground that have pixels (tx 4-39, ty 2-30 show): their numbers, ended by -1.
+
+fg_scan:
+	lea	fg_list,a0
+	lea	R_FGCODE,a1
+	lea	fg_any,a2
+	moveq	#2,d1			; ty
+.ty:	moveq	#4,d2			; tx
+.tx:	move.w	d1,d0
+	lsl.w	#6,d0
+	add.w	d2,d0
+	moveq	#0,d3
+	move.b	(a1,d0.w),d3
+	tst.b	(a2,d3.w)
+	beq.s	.no
+	move.w	d0,(a0)+
+.no:	addq.w	#1,d2
+	cmp.w	#40,d2
+	blo.s	.tx
+	addq.w	#1,d1
+	cmp.w	#31,d1
+	blo.s	.ty
+	move.w	#-1,(a0)+
 	rts
 
 ; ------------------------------------------------------------------------------
@@ -780,6 +824,10 @@ fg_ty:		ds.w	1
 fg_ste:		ds.w	1
 cell_dirty:	ds.b	64
 force_all:	ds.b	1
+draw_all:	ds.b	1
+fg_rebuild:	ds.b	1
+	even
+fg_list:	ds.w	1100
 	even
 shadow_bg:	ds.b	4096		; the codes, then the attributes, of the background cells as drawn into the ring
 	cnop	0,4

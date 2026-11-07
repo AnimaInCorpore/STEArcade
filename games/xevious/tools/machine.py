@@ -206,7 +206,7 @@ def skip_ram_test(rom):
     return bytes(rom)
 
 
-def ste_rom(rom, skip_tests=True):
+def ste_rom(rom, skip_tests=True, invincible=False):
     """The main CPU's ROM as the STE runs it: the self-test skipped (skip_ram_test) and the boot's clear of the sound
     registers ($6800-$681F: `ld (hl),b` at $0152) a no-op, because the STE keeps the DIP switch cells at $6800-$6807 (the
     arcade's reads of the switches) and the sound registers (writes) in different places (the sound CPU's block).  Block
@@ -216,6 +216,10 @@ def ste_rom(rom, skip_tests=True):
     before = sum(rom[0:0x1000])
     rom[0x152] = 0x40                           # ld b,b
     rom[0x0FFF] = (rom[0x0FFF] + before - sum(rom[0:0x1000])) & 0xFF
+    if invincible:                              # the cheat of Xevious(invincible=True): the same patch and checksum byte
+        assert rom[0x1492] == 0xD0
+        rom[0x1492] = 0xC9
+        rom[0x1FFF] = (rom[0x1FFF] + 0xD0 - 0xC9) & 0xFF
     return bytes(rom)
 
 

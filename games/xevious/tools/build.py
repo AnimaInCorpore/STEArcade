@@ -19,11 +19,12 @@ def main():
     ap.add_argument("-D", dest="defines", action="append", default=[])
     ap.add_argument("--out", default=None, help="default: run/xevious/XEVIOUS.PRG, run/xevious_sim/XEVIOUS.PRG with --sim")
     ap.add_argument("--tag", default=None)
+    ap.add_argument("--invincible", action="store_true", help="MAME's invincibility cheat (a ROM patch; the test builds of seeds 31+)")
     a = ap.parse_args()
     tag = a.tag or ("xevious_sim" if a.sim else "xevious")
     if a.out is None:
         a.out = str(run_dir(tag) / "XEVIOUS.PRG")
-    text, reps, ems = gen.generate(skip_tests=not a.full_selftest)
+    text, reps, ems = gen.generate(skip_tests=not a.full_selftest, invincible=a.invincible)
     (build_dir("xevious") / "xevious_code.s").write_text(text)
     for n, rep in enumerate(reps):
         print("CPU%d: %d instructions, unsupported %d" % (n + 1, rep["instructions"], len(rep["unsupported"])))
@@ -34,7 +35,7 @@ def main():
     (build_dir("xevious") / "n51_bss.s").write_text(mb88x.bss("N51"))
     assets.build()
     roms = [b"".join(load(f) for f in files) for files in ROMS]
-    roms[0] = ste_rom(roms[0], not a.full_selftest)
+    roms[0] = ste_rom(roms[0], not a.full_selftest, a.invincible)
     for n, rom in enumerate(roms):
         (build_dir("xevious") / ("rom_cpu%d.rom" % (n + 1))).write_bytes(rom)
     bb = bytearray(0x4000)

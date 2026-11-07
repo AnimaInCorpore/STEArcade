@@ -43,12 +43,12 @@ def main():
     g_ram, g_block, g3_block = sym['g_block'] + 0x8000, sym['g_block'], sym['g3_block']
     g_rom1 = g_block + 0x10000
 
-    m = Xevious(skip_tests=True)
+    m = Xevious(skip_tests=True, invincible=args.seed >= 31)
     rnd = random.Random(args.seed)
     seed = args.seed
     players = 2 if seed in (4, 5) else 1
     nocoin = seed == 6
-    infinite = seed >= 11
+    infinite = 11 <= seed < 31
     if seed in (7, 8):
         m.dswa = 0xff & ~0x60 | (0x40 if seed == 7 else 0x00)
     if seed == 9:

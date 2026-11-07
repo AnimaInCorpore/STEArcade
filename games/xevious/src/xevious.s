@@ -34,7 +34,10 @@ NFSR = %01000000
 FRAMES = 0
 	endc
 	ifnd MAX_PENDING
-MAX_PENDING = 2				; arcade frames that may be waiting for their turn
+MAX_PENDING = 3				; arcade frames that may be waiting for their turn
+	endc
+	ifnd MAX_SKIP
+MAX_SKIP = 3				; pictures in a row that may be skipped while the game is behind
 	endc
 KEY_ESC = $01
 
@@ -215,8 +218,14 @@ init_cells:
 	blt.s	.dsw
 	rts
 
-dswa:	dc.b	$ff			; MAME's defaults: 1C/1C, 20K 60K 60K, 3 lives, upright
-dswb:	dc.b	$7f			; Super Xevious: freeze off, normal difficulty, 1C/1C
+	ifnd DSWA
+DSWA = $ff				; MAME's defaults: 1C/1C, 20K 60K 60K, 3 lives, upright
+	endc
+	ifnd DSWB
+DSWB = $7f				; Super Xevious: freeze off, normal difficulty, 1C/1C
+	endc
+dswa:	dc.b	DSWA
+dswb:	dc.b	DSWB
 	even
 
 ; ------------------------------------------------------------------------------
@@ -334,6 +343,9 @@ restore_hardware:
 	rts
 
 quit:
+	ifd RATE
+	bsr	dump_rate
+	endc
 	bsr	restore_hardware
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
@@ -341,6 +353,35 @@ quit:
 	addq	#6,sp
 	clr	-(sp)
 	trap	#1
+
+	ifd RATE
+dump_rate:
+	move.l	rate_ptr,d0
+	bne.s	.some
+	rts
+.some:	sub.l	#rate_buf,d0
+	move.l	d0,d7
+	clr	-(sp)			; Fcreate
+	pea	rate_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	rate_buf		; Fwrite
+	move.l	d7,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)		; Fclose
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
+rate_name:
+	dc.b	"RATE.BIN",0
+	even
+	endc
 
 ; ------------------------------------------------------------------------------
 ; Interrupts
@@ -374,6 +415,25 @@ vbl:
 .no_swap:
 
 	addq.l	#1,frame_counter
+	ifd RATE
+	addq	#1,rate_count		; every RATE VBLs: the VBL, picture and logic frame counters
+	cmp	#RATE,rate_count
+	blo.s	.no_rate
+	clr	rate_count
+	move.l	rate_ptr,a0
+	move.l	a0,d0
+	bne.s	.rate_on
+	lea	rate_buf,a0
+.rate_on:
+	cmp.l	#rate_end,a0
+	bhs.s	.no_rate
+	move.l	frame_counter,d0
+	move	d0,(a0)+
+	move	cnt_render,(a0)+
+	move	cnt_logic,(a0)+
+	move.l	a0,rate_ptr
+.no_rate:
+	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL
 	cmp.b	#MAX_PENDING,vbl_pending
 	bls.s	.cap
@@ -432,6 +492,7 @@ hook3:	bra	turn_end		; the sound CPU: $0098, its idle loop
 
 frame_stop:
 	movem.l	d0-d7/a0-a6,-(sp)
+	addq	#1,cnt_logic
 	chk_sp	10
 	bsr	turn2			; the sub CPU's foreground
 	bsr	turn3			; the sound CPU's boot
@@ -1096,10 +1157,17 @@ z80_rnd:
 ; ------------------------------------------------------------------------------
 
 picture:
+	tst.b	vbl_pending		; behind (a VBL already waits): the picture is skipped, up to MAX_SKIP in a row
+	beq.s	.draw
+	addq.b	#1,render_skips
+	cmp.b	#MAX_SKIP,render_skips
+	bls.s	.nodraw
+.draw:	clr.b	render_skips
 	ifd SIM
 	bsr	sim_render_start
 	endc
 	bsr	render_frame
+.nodraw:
 	ifd SIM
 	bsr	sim_frame_done
 	endc
@@ -1422,6 +1490,7 @@ quit_flag:	ds.b	1
 	jagpad_vars
 frame_ready:	ds.b	1		; the draw screen is complete, to be shown at the VBL
 vbl_pending:	ds.b	1		; arcade frames that may run
+render_skips:	ds.b	1
 	borders_vars
 in0_kbd:	ds.b	1
 in0_joy:	ds.b	1
@@ -1462,6 +1531,14 @@ n50_score:	ds.l	1
 	even
 
 frame_counter:	ds.l	1
+cnt_render:	ds.w	1
+cnt_logic:	ds.w	1
+	ifd RATE
+rate_count:	ds.w	1
+rate_ptr:	ds.l	1
+rate_buf:	ds.l	1024
+rate_end:
+	endc
 vbl_sp:		ds.l	1
 cnt_acia:	ds.w	1
 crash_vector:	ds.w	1

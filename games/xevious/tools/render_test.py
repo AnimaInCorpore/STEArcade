@@ -29,6 +29,7 @@ def main():
     ap.add_argument('--start', type=int, default=300)
     ap.add_argument('--every', type=int, default=100)
     ap.add_argument('--png', default=None)
+    ap.add_argument('--shots', default=None, help='a folder for the own pictures of the build (shot<frame>.png, 2x)')
     ap.add_argument('--tag', default='xevious_sim')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--entry', default='render_frame', help='(debugging) a routine to call instead')
@@ -69,7 +70,7 @@ def main():
     g = Gfx()
     palette, pmap = assets.build_palette(g)
     pmap = np.array(pmap, np.uint8)
-    m = Xevious(skip_tests=True)
+    m = Xevious(skip_tests=True, invincible=args.seed >= 31)
     rnd = random.Random(args.seed)
     state = {'mode': 'attract', 't0': 0, 'joy': 0, 'coin_at': 300 + rnd.randrange(300)}
     worst = 0
@@ -156,6 +157,9 @@ def main():
         for k in range(4):
             for bit in range(16):
                 idx[:, bit::16] |= (((words[:, :, k] >> (15 - bit)) & 1) << k).astype(np.uint8)
+        if args.shots:
+            from PIL import Image
+            Image.fromarray(np.array(palette, np.uint8)[idx]).resize((448, 576), Image.NEAREST).save(str(Path(args.shots) / ('shot%d.png' % f)))
         raw = m.render_raw()
         want = pmap[raw[::-1, :].T]                                                       # [display line][display x]
         diff = int((idx != want).sum())
