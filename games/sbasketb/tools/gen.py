@@ -24,7 +24,49 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ = 0x6000, SBasketPort.IRQ
 DP = 0x20
-SEEDS = [int(x) for x in os.environ.get("SB_SEEDS", "").split(",") if x] or range(1, 13)
+SEEDS = [int(x) for x in os.environ.get("SB_SEEDS", "").split(",") if x] or range(1, 22)
+# the tables behind the computed jumps (JMP / JSR [A,X], [A,U], [B,X] with the table's base loaded just before, 22 sites):
+# each entry is a root, so a handler that no coverage run reached (an object type the game meets later) is translated too
+TABLES = [0xD6A3, 0xFE98, 0xDBCE, 0xDBF0, 0xDCA4, 0xDCB0, 0xDCCA, 0xDCDE, 0xF405, 0xF5C4, 0xF6BE, 0xFA7F, 0xFAEC, 0xFC43,
+          0xFCA7, 0xFD7D, 0xFE94, 0xFEC1, 0xFF9C, 0xFFA2, 0xFFAE, 0xFF01]
+
+
+def plausible(rd, ops, v, limit=24):
+    """ordinary instructions (no undocumented opcode) from v up to a jump or return, at most `limit` of them"""
+    pc = v
+    for _ in range(limit):
+        try:
+            i = decode(rd, pc, DP, rd_op=ops)
+        except Exception:
+            return False
+        if i.mn.upper().startswith("X") or i.mn.upper() in ("NOP2",) or i.flow == "halt":
+            return False
+        if i.flow in ("ret", "jmp", "ijmp", "rti"):
+            return True
+        pc += i.length
+    return True
+
+
+def table_roots(mem):
+    """the entries of TABLES: words from the base while they are plausible code addresses and before the next table"""
+    rd = lambda a: mem[a & 0xFFFF]
+    ops = konami1_opcode(rd)
+    bases = sorted(TABLES)
+    roots = set()
+    for k, b in enumerate(bases):
+        end = bases[k + 1] if k + 1 < len(bases) else 0xFFE0
+        a = b
+        while a + 1 < end:
+            v = rd(a) << 8 | rd(a + 1)
+            if not 0x6000 <= v < 0xFFE0:
+                break
+            if not plausible(rd, ops, v):
+                break
+            roots.add(v)
+            a += 2
+    return roots
+
+
 NATIVES = {SBasketPort.IDLE: "sb_idle"}
 
 
@@ -80,7 +122,7 @@ def program(cover):
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 0, 0, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(3, 8)},
-                          roots=[RESET, IRQ] + sorted(NATIVES), exec_cover=set(exec_), acc_cover=flat, targets=tg,
+                          roots=[RESET, IRQ] + sorted(NATIVES) + sorted(table_roots(mem)), exec_cover=set(exec_), acc_cover=flat, targets=tg,
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x20, a3_slot=1, a4_slot=0, dp_sites=dp_sites,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('SB_NO_NATIVES', '')},

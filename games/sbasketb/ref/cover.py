@@ -8,7 +8,8 @@ sprites: Counter of (code, colour set, flip x, flip y) entries; scrolls: Counter
 
 Seeds: 1-3 attract, coin, start, random play (the game's clock runs out, the name entry, again); 4-5 two players
 (coin, coin, start 2); 6-9 the game time 30 / 40 / 50 s and other DIP switches; 10-11 more random play with faster
-input changes; 12 the service mode (start 1 + start 2 held through the boot's input read).
+input changes; 12 the service mode (start 1 + start 2 held through the boot's input read); 13 no coin (the whole attract
+cycle: title, the demo game, the high scores); 14 the coin after 6000 frames; 15-20 fixed stick and button patterns; 21 the runtime's AUTOPLAY script itself.
 """
 import collections
 import pickle
@@ -46,7 +47,7 @@ def inputs(frame, rnd, state):
     system, p1, p2 = 0xFF, 0xFF, 0xFF
     two = state.get('two', False)
     fast = state.get('fast', False)
-    if state.setdefault('phase', 'attract') == 'attract' and frame >= state.setdefault('coin_at', 300 + rnd.randrange(1200)):
+    if state.setdefault('phase', 'attract') == 'attract' and frame >= state.setdefault('coin_at', state.get('late', 300 + rnd.randrange(1200))):
         state['phase'], state['t0'] = 'coin', frame
     if state['phase'] == 'coin':
         t = frame - state['t0']
@@ -56,7 +57,24 @@ def inputs(frame, rnd, state):
             system &= ~(START2 if two else START1)
         elif t >= 64:
             state['phase'], state['t0'] = 'play', frame
-    if state['phase'] == 'play':
+    if state['phase'] == 'play' and state.get('pattern'):
+        # a fixed pattern (the runtime's AUTOPLAY, more of its kind): a direction for 2^k frames in turn, button 1 for 3 of
+        # every `period` frames, the other buttons now and then
+        t = frame - state['t0']
+        k, period = state['pattern']
+        dirs = (L, U, R, D, L | U, R | D)[(t >> k) % (6 if k > 3 else 4)]
+        bits = dirs
+        if t % period < 3:
+            bits |= B1
+        if t % (period * 5) < 2:
+            bits |= B2
+        if t % (period * 9) < 2:
+            bits |= B3
+        p1 ^= bits
+        p2 ^= bits if two else 0
+        if t > 3600 and frame % 3600 == 0:
+            state['phase'], state['t0'] = 'coin', frame
+    elif state['phase'] == 'play':
         if frame >= state.get('next', 0):
             state['next'] = frame + rnd.choice((4, 8, 16, 30, 60) if fast else (8, 16, 30, 60, 120, 240))
             state['mode'] = rnd.choice(('dir', 'dir', 'dir', 'tap', 'hold', 'idle', 'dirshoot', 'pass'))
@@ -90,6 +108,22 @@ def inputs(frame, rnd, state):
     return system, p1, p2
 
 
+def autoplay(frame):
+    """the runtime's AUTOPLAY script (src/sbasketb.s; period 4000): coin 1 at 700-703, start 1 at 760-763, then a direction
+    for 32 frames (left, up, right, down) and button 1 for 3 of every 16 frames -> (SYSTEM, P1, P2)"""
+    t = frame % 4000
+    system, p1 = 0xFF, 0xFF
+    if 700 <= t < 704:
+        system = 0xFE
+    if 760 <= t < 764:
+        system = 0xF7
+    if t >= 840:
+        p1 = (0xFE, 0xFB, 0xFD, 0xF7)[(t >> 5) & 3]
+        if t & 15 < 3:
+            p1 &= 0xEF
+    return system, p1, 0xFF
+
+
 def io(a, rw):
     """the accesses the translation sends through the runtime: the I/O, the unmapped space, stores to the ROM, and the
     stores to the video and colour RAM ($3000-$37FF: the renderer's changed cells)"""
@@ -114,11 +148,17 @@ def main():
     pens = collections.Counter()
     sprites = collections.Counter()
     scrolls = collections.Counter()
-    state = {'two': seed in (4, 5), 'fast': seed in (10, 11), 'service': seed == 12}
+    state = {'two': seed in (4, 5), 'fast': seed in (10, 11), 'service': seed == 12,
+             'late': 10 ** 9 if seed == 13 else 6000 if seed == 14 else None}
+    if 15 <= seed <= 21:
+        state['pattern'] = {15: (5, 16), 16: (4, 12), 17: (6, 20), 18: (3, 10), 19: (5, 24), 20: (4, 16), 21: None}[seed]
+        state['coin_at'] = 400 + 50 * seed
+    if state['late'] is None:
+        del state['late']
     mem = m.mem
     for frame in range(frames):
         m.frame = frame
-        m.system, m.p1, m.p2 = inputs(frame, rnd, state)
+        m.system, m.p1, m.p2 = autoplay(frame) if seed == 21 else inputs(frame, rnd, state)
         m.run_frame_port()
         base = 0x3900 if m.latch[5] else 0x3800
         for o in range(0, 0x100, 4):

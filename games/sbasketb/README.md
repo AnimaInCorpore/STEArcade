@@ -5,27 +5,32 @@
 MAME set `sbasketb` (Konami GX405, version I, encrypted; `konami/sbasketb.cpp`).  The main CPU, a KONAMI-1 (an MC6809
 with encrypted opcodes, 40 KB of ROM), is statically translated to 68000 code (`engine/m6809x.py`) and checked
 against a reference board in lock-step; its foreground loop's head is a native that delivers the IRQ.  The sound board
-(a Z80 with an SN76489A, a VLM5030 and a DAC: the Track & Field / Hyper Sports board with its own driver ROM) is **not
-ported yet**: the build has no sound (`NOSOUND=1`), the sound commands are logged by the reference only.  The picture
+(a Z80 with an SN76489A, a VLM5030 and a DAC: the Track & Field / Hyper Sports board with its own driver ROM) is not
+run: MAME plays each sound command alone and the recording is played on the STE's DMA channel (`src/sound.s`, as Mario
+Bros. does).  The picture
 is MAME's ROT90 picture, 224 x 256 (portrait, not the 256 x 224 of the other Konami sports games), centred in the
 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
 against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  Status:
-**Incomplete** (no sound; ~69% of the arcade's speed and ~14 pictures a second in Hatari; no full-game verification).
-Speed: 41.2 arcade frames a second (69%), 13.9 pictures a second over 4,000 VBLs of the AUTOPLAY script (Hatari,
-`tools/hatari.ps1 -Frames 4000`, DEBUG build, 4 MB, 2026-11-07).
+**Incomplete** (sound by recordings, one clip at a time, checked in the simulator only; ~73% of the arcade's speed
+and ~16 pictures a second in Hatari; no full-game verification).
+Speed: 44.1 arcade frames a second (73%), 16.2 pictures a second over 5,000 VBLs of the AUTOPLAY script, with the sound
+build (Hatari, `tools/hatari.ps1 -Frames 5000`, the AVI recorded, DEBUG build, 4 MB, 2026-11-07).
 
 ## Build and run
 
 ```sh
-python port.py cover sbasketb               # coverage: ref/cover.py seeds 1-12 (~6 min in parallel)
+python port.py cover sbasketb               # coverage: ref/cover.py seeds 1-21 (~8 min in parallel)
 python port.py build sbasketb               # -> run/sbasketb/SBASKETB.PRG
-python port.py test sbasketb                # lock-step (seeds 1, 4, 6), render (seed 1), sprite edges
+python port.py test sbasketb                # lock-step (seeds 1, 4, 6, AUTOPLAY), render (seed 1), sprite edges, sound
 python port.py mame sbasketb                # the reference against MAME (ref/mame_cmp_sbasketb.py)
 python games/sbasketb/tools/prepare.py      # verify assets/roms/sbasketb.zip, unpack to assets/roms/extracted/sbasketb/
 python games/sbasketb/tools/build.py        # -> run/sbasketb/SBASKETB.PRG (--sim: run/sbasketb_sim; --assets: colours again)
 python games/sbasketb/tools/logic_test.py 20000 --seed 1   # the translation in lock-step with the reference
 python games/sbasketb/tools/render_test.py 3000 --seed 1 --start 300 --every 3   # the STE picture against the reference
 python games/sbasketb/tools/sprite_test.py                 # edges, 16 shifts, holes, banks, guards, 64 KB crossings
+python games/sbasketb/tools/sound_capture.py --all         # MAME records each sound command (build/sbasketb/sound/)
+python games/sbasketb/tools/sound_convert.py               # -> build/sbasketb/sb_sound.s / .bin (the DMA clips, 12,517 Hz)
+python games/sbasketb/tools/sound_test.py 3000 --seed 1    # the DMA driver against the game's sound commands
 powershell -File games/sbasketb/tools/hatari.ps1 -Frames 4000 -Every 250   # Hatari hidden, AVI stills, counters
 python games/sbasketb/ref/mame_cmp_sbasketb.py [frame ...]  # the reference against MAME
 ```
@@ -47,9 +52,14 @@ kept, easy, demo sounds on).
 
 * **Logic**: exact against the reference's port schedule.  `tools/logic_test.py`: RAM $2000-$3BFF (video, colour and
   sprite RAM too), the sprite palette bank $3C20, the scroll $3F80, the latch (Q0, Q1, Q5), the sound commands (each
-  write of $3D80).  Seed 1 20,000 frames, seeds 2-12 8,000 frames each (attract; coin, start, random play with the stick
-  and three buttons; two players; 30 / 40 / 50 s games, other DIP switches; the service mode with its test screens).
-  The reference's self-test is skipped (below), so those are the game's own paths from `$6000` on.
+  write of $3D80).  Seed 1 20,000 frames, seeds 2-20 8,000 frames each (attract; coin, start, random play with the stick
+  and three buttons; two players; 30 / 40 / 50 s games, other DIP switches; the service mode with its test screens; no
+  coin at all: the whole attract cycle; fixed stick and button patterns) and seed 21, the runtime's AUTOPLAY script, 16,000
+  frames.  The reference's self-test is skipped (below), so those are the game's own paths from `$6000` on.
+  **The translation covers what the coverage ran** (21 seeds, 12,787 instructions) plus the entries of 22 jump tables:
+  object scripts hold handler pointers in their data records ($E4xx-$E5xx: `B015` etc.), which no static pass here
+  finds, so a play pattern no seed resembles can still reach an untranslated handler and stop at `z80_badpc`
+  (the AUTOPLAY script did, twice, until its own seed and the tables were added).
 * **Picture**: exact in the shown colours.  `tools/render_test.py`: 0 differences in 700 sampled pictures of seed 1's play
   (frames 1000-2400, every 2nd), 740 each of seeds 1, 4 and 6 (frames 300-4000, every 5th) and 675 of seed 5 (two players,
   frames 300-3000, every 4th), and in 400 consecutive pictures (frames 1000-1400) with the generated sprite code and
@@ -57,10 +67,14 @@ kept, easy, demo sounds on).
   side edges at every shift, holes, flips, overlaps, both sprite banks, palette banks 0-255, the guard lines, 64 KB
   crossings, 60 pictures in a row with moving sprites, scrolls and tiles).  `BLIT_STATS=256`: every pass HOG, the longest
   116 bus cycles.  The reference equals MAME (How it works).
-* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot, attract, coin, start, the AUTOPLAY player's game; no
-  crash, 3 border fallbacks and no late border event in 4,000 VBLs.
-* Not done, most important first: the sound (Sound); a full-game playthrough and any playtest beyond the AUTOPLAY script;
-  speed (Speed); the cocktail flip (`flip_screen` raises `NotImplementedError` in the reference renderer, the runtime
+* **Sound**: `tools/sound_test.py`: the DMA frame start and control registers of the simulator name the clip the game's
+  commands call for after every frame (seeds 1, 4, 6 6,000 frames, seed 21 5,000: 84-195 clip starts each, 0 mismatches).
+  The clips are MAME's own output, but nothing here has been heard on an STE or in Hatari with its audio on (a hidden
+  Hatari with `--sound 44100 --wav` did not start in this session), and the clips were not compared to MAME's in a mix.
+* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, sound off): boot, attract, coin, start, the AUTOPLAY player's games
+  (two starts); no crash, 3 border fallbacks and no late border event in 5,000 VBLs.
+* Not done, most important first: a full-game playthrough and any playtest beyond the AUTOPLAY script; the sound's
+  fidelity (Sound); speed (Speed); the cocktail flip (`flip_screen` raises `NotImplementedError` in the reference renderer, the runtime
   ignores latch Q0); the arcade's self-test is not run.
 
 ## How it works
@@ -131,18 +145,35 @@ reference and the runtime start at `$6000` with $2FF0 set that way.
 
 ### Sound
 
-Not done.  The board is the Hyper Sports one (`hyperspt_sh_timer_r`, `hyperspt_sound_w`, SN76489A through the $E001 latch
-and the $E002 strobe, the DAC at $E000, the VLM5030 with 8 KB of speech ROM) with its own driver (405e13.7a, 8 KB at
-$0000, RAM $4000-$43FF); the main CPU's write of $3D00 is the command and a write of $3D80 raises the Z80's IRQ (HOLD_LINE,
-vector $FF).  `tools/sound.py` / `sndgen.py` / `src/sound.s` of Track & Field are shared with Hyper Sports through a
-table of the driver's loop, tick, tune and wait addresses; this ROM's have to be found first (`ref/cover_sound.py`'s
-command ranges too), then the schedule model and player checked as in those ports.
+The board is the Hyper Sports one (`hyperspt_sh_timer_r`, `hyperspt_sound_w`, SN76489A through the $E001 latch and the $E002
+strobe, the DAC at $E000, the VLM5030 with 8 KB of speech ROM) with its own driver (405e13.7a, 8 KB, RAM $4000-$43FF).
+The main CPU writes a command to $3D00 and then the trigger $3D80 (each write raises the Z80's IRQ, HOLD_LINE, vector
+$FF).  The commands the game sends (coverage): 0, effects $01-$40 (17 values), phrases $80-$AD, $FE, $FF.
+
+* **Recording** (`tools/sound_capture.py`): MAME (WolfMAME 0.248, `-video none -wavwrite`) with the main CPU parked in
+  the first delay loop of its boot (`$D585` patched to `BRA *` in the ROM region; the KONAMI-1 opcode byte is
+  encrypted) and a Lua frame callback that writes the latch and the trigger and kicks the watchdog.  One capture a
+  command: 17 effects alone, the 47 phrases as the game sends them (`$FE, phrase, $FF`), a silent baseline.  The
+  recordings have a DC offset (the DAC at rest) that the converter removes.
+* **Clips** (`tools/sound_convert.py`): 8 bit signed mono at 12,517 Hz for the DMA, low-passed, one scale for all: 58
+  clips (14 effects, 44 phrases; the board makes no sound for $0A, $1F, $FE, $FF and a few phrases), 579 KB.  The two
+  looping effects ($09, $20, sounding until the next command) are cut at a period of their own and replayed repeating.
+* **Player** (`src/sound.s`, `snd_frame` once per arcade frame before the IRQ that follows the commands): command 0
+  stops the clip, $01-$7F start that effect's clip (the newest wins), $80-$FE with a clip are queued (the last one waits)
+  and $FF speaks it.  One DMA stream plays at a time: overlapping effects are not mixed (the board's are), and a queue of
+  several phrases is spoken as its last.
+* **Limits**: the board's music and effects that outlast their command by the driver's own state (a tune that a later
+  effect interrupts, a speech that stops on a reset) are only as the single-command recordings have them; the commands
+  the coverage never saw have no clip ($41-$7F, the phrases above $AD and $B0-$FD were not recorded).  The Z80 is not
+  translated (the sibling ports' tools take the driver's loop, tick, tune and wait addresses per ROM, which this one's
+  still lack).
 
 ## Speed
 
 | Date | Setup | Logic | Pictures | Musashi cycles |
 |---|---|---|---|---|
-| 2026-11-07 | Hatari, `tools/hatari.ps1 -Frames 4000` (the AUTOPLAY script: coin, start, moving and shooting), DEBUG build, 4 MB, no sound | 69%, 41.2 arcade frames a second | 13.9 a second | |
+| 2026-11-07 | Hatari, `tools/hatari.ps1 -Frames 5000` (the AUTOPLAY script: coin, start, moving and shooting; the AVI recorded), DEBUG build, 4 MB, sound build (Hatari's audio off) | 73%, 44.1 arcade frames a second (4,413 in 5,001 VBLs) | 16.2 a second (1,619) | |
+| 2026-11-07 | the same without the sound, 4,000 VBLs | 69%, 41.2 | 13.9 | |
 | 2026-11-07 | Musashi, seed 1's play (`render_test.py 1400 --seed 1 --start 1000`, 400 pictures) | | | logic 99.5k an arcade frame; a picture CPU 98.9k + Blitter 103.8k bus cycles |
 
 Where a picture's time goes (`render_test.py 1500 --seed 1 --start 1000 --prof`): `compose` 24%, `draw_cell` 24% (the
@@ -183,6 +214,14 @@ Measured, not kept: nothing yet.  Techniques other ports use that may apply:
 * **The idle point of a task loop must also fire when the loop never empties** (above, the two-player menu).
 * **Sprite order is the driver's**: Track & Field's loop draws the last entry first; this one draws the first first (the
   render test found it in 67 pixels around the ball).
+* **A recording needs the board alone** (2026-11-07): parking the main CPU by writing PC (as Mario Bros.' capture does)
+  did not take here and the game's attract sounds played on in every capture (the same sounds in a capture with no
+  command at all showed it); patching the boot's first delay loop in the ROM region parks it for good.
+* **Random play does not cover a game** (2026-11-07): twelve seeds of random stick and buttons ran 20,000 frames each and
+  missed a handler that the AUTOPLAY script reached at frame 3,584 and another at 3,662 (`JMP ,U` through a pointer in
+  an object's script record).  Fixed patterns, the AUTOPLAY script as a seed and the no-coin attract cycle are seeds
+  now; a harness that stops at the bad pc found it (a stop address range that included a helper's entry gave two false
+  alarms first: the stop addresses must be the exact loop).
 * **A sprite's colour set wraps modulo 256** (`color = attr & 15 + 16 * palette bank`): the reference masks it.
 
 ## Verification

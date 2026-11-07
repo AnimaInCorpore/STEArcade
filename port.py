@@ -54,7 +54,7 @@ COVER = {
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
     "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
-    "sbasketb": [("ref/cover.py", list(range(1, 13)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode
+    "sbasketb": [("ref/cover.py", list(range(1, 22)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script
     "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
@@ -146,7 +146,9 @@ TESTS = {
                  ("tools/logic_test.py", ["8000", "--seed", "4"], None),    # two players
                  ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # a 30 s game: game over, the name entry
                  ("tools/render_test.py", ["3000", "--seed", "1", "--start", "300", "--every", "5"], None),
-                 ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, banks, guards, 64 KB crossings
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, banks, guards, 64 KB crossings
+                 ("tools/logic_test.py", ["16000", "--autoplay", "--quiet"], None),   # the runtime's AUTOPLAY script
+                 ("tools/sound_test.py", ["3000"], None)],        # the DMA clips against the game's sound commands
     "timeplt": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),

@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
-The sound is not part of the build yet (NOSOUND=1).
+-D NOSOUND=1: without the sound (tools/sound_capture.py + sound_convert.py make src/sound.s's clips).
 """
 from pathlib import Path
 import argparse
@@ -42,7 +42,8 @@ def main():
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')            # (the sound is not translated yet: README, State)
+        import sound_convert                  # (the sound: MAME's recordings per command, tools/sound_capture.py)
+        sound_convert.ensure()
     tag = args.tag or ('sbasketb_sim' if args.sim else 'sbasketb')
     out = ROOT / 'run' / tag / 'SBASKETB.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -24,11 +24,15 @@ BUILD = build_dir('sbasketb')
 AREAS = ((0x2000, 0x3C00), (0x3C20, 0x3C21), (0x3F80, 0x3F81))
 
 
+autoplay = cover.autoplay
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--autoplay', action='store_true', help='the inputs of the runtime AUTOPLAY script (src/sbasketb.s)')
     ap.add_argument('--tag', default='sbasketb_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -38,7 +42,7 @@ def main():
     mem, cpu = s.mem, s.cpu
     mem.w16(sym['render_frame'], 0x4e75)
     wait, done = sym['sim_wait'], sym['sim_frame_done']
-    bad = {sym['main_badpc'], sym['main_badpc'] + 4}
+    bad = {sym['main_badpc'] + k for k in (0, 4, 10)}      # (the entry, after the SR, the SIM loop)
     base = sym['sb_mem']
 
     m = SBasketPort(*cover.dsw(args.seed))
@@ -52,17 +56,40 @@ def main():
     rnd = random.Random(args.seed)
     cycles = [0]
 
+    import bisect, os
+    trace = [] if os.environ.get('TRACE') else None
+    trace_from = int(os.environ.get('TRACE') or 0)
+    cur = [0]
+    if trace is not None:
+        names = sorted((v, k) for k, v in sym.items())
+        nv = [v for v, _ in names]
+
     def run_to(targets):
         total = 0
         while total < 400_000_000:
-            total += cpu.execute(2000).cycles
+            total += cpu.execute(1 if trace is not None and cur[0] >= trace_from else 2000).cycles
             pc = cpu.r_pc()
+            if trace is not None and cur[0] >= trace_from:
+                trace.append(pc)
+                del trace[:-3000]
             if pc in targets:
                 cycles[0] += total
                 return pc
             if pc in bad or s.terminated:
-                raise RuntimeError('CPU stopped at %06x, d7=%08x (badpc %04x), log=%s' % (
-                    pc - s.base, cpu.r_reg(R.D7), mem.r16(sym['badpc']), s.log[-3:]))
+                if trace is not None:
+                    last = []
+                    for t in trace[-3000:]:
+                        k = names[bisect.bisect_right(nv, t) - 1][1]
+                        if not last or last[-1] != k:
+                            last.append(k)
+                    print('68000 path:', ' '.join(last[-40:]))
+                rom = bytes(m.rom[0x6000:])
+                got = bytes(mem.r_block(base + 0x6000, 0xA000))
+                print('ROM bytes changed in the image:', [hex(0x6000 + i) for i in range(len(rom)) if rom[i] != got[i]][:16])
+                sp6 = cpu.r_reg(R.A5) - base
+                raise RuntimeError('CPU stopped at %06x, d7=%08x (badpc %04x), 6809 S %04x stack %s A %02x B %02x X %04x U %04x' % (
+                    pc - s.base, cpu.r_reg(R.D7), mem.r16(sym['badpc']), sp6 & 0xFFFF, bytes(mem.r_block(base + (sp6 & 0xFFFF), 24)).hex(),
+                    cpu.r_reg(R.D0) & 255, cpu.r_reg(R.D1) & 255, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D4) & 0xFFFF))
             if pc == TRAP1:
                 s.gemdos()
         raise RuntimeError('CPU timeout at %06x' % (cpu.r_pc() - s.base))
@@ -100,17 +127,21 @@ def main():
     state = {'two': args.seed in (10, 11)}
     cycles[0] = 0
     for f in range(args.frames):
+        cur[0] = f
         m.frame = f
-        m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
+        m.system, m.p1, m.p2 = autoplay(f) if args.autoplay else cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_p1', m.p1), ('io_p2', m.p2)):
             mem.w8(sym[n], v)
         mem.w8(sym['vbl_pending'], 1)
         m.run_frame_port()
         m.frame = f
         resume()
-        if run_to({done, sym['sim_render_start']}) != done:
-            resume()
-            run_to({done})
+        try:
+            if run_to({done, sym['sim_render_start']}) != done:
+                resume()
+                run_to({done})
+        except RuntimeError as e:
+            raise RuntimeError('frame %d (the reference at %04x, S %04x, DP %02x): %s' % (f, m.cpu.pc, m.cpu.s, m.cpu.dp, e))
         compare(f)
         resume()
         run_to({wait})
