@@ -184,9 +184,10 @@ class RocnRopePort(RocnRope):
     $5100-$513F, its read pointer at $501A; an entry with bit 7 set is empty); with the queue empty `BSR $6094` (it
     blinks the coin text from the frame counter $504F: idempotent, so once a frame is as good as the arcade's
     thousands) and round again.  The IRQ handler ($70A0, at the VBLANK while latch Q7 is 1) plays the game and queues
-    the tasks.  The port's idle point is $6070 (the BSR) with an empty queue: the foreground runs one empty round
-    from there, then the IRQ is delivered (while Q7 is 1) with $6070 as its return address; after its RTI the
-    foreground runs the queued tasks until the queue is empty again.  The boot: from the reset to the first idle.
+    the tasks.  The port's idle point is $6070 (the BSR) with an empty queue: the IRQ is delivered (while Q7 is 1) with
+    $6070 as its return address; after its RTI the foreground runs the queued tasks until the queue is empty again, and
+    one empty round (the runtime's rr_idle lets it run at the first arrival).  A CWAI (the intro's screen clears) is a
+    wait of its own: the IRQ is delivered there, no round.  The boot: from the reset to the first idle (and its round).
     """
     IDLE = 0x6070
     IRQ = 0x70A0
@@ -211,17 +212,24 @@ class RocnRopePort(RocnRope):
                 return
         raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
 
+    def round(self):
+        """one round of the foreground's loop with the queue empty (BSR $6094 ...) from the idle point to the same"""
+        self.cpu.step()
+        self.run_to_idle()
+
     def run_frame_port(self):
         c = self.cpu
         if not self.booted:
             self.run_to_idle()
+            if not c.wait:
+                self.round()
             self.booted = True
         if self.latch[7] and (c.wait or not c.cc & 0x10):
-            if not c.wait:
-                self.run_to_idle()                    # (the empty round: BSR $6094)
             c.set_irq(True)
             c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
             assert c.pc == self.IRQ, hex(c.pc)
             self.irqs += 1
             self.run_to_idle()
+            if not c.wait:
+                self.round()                          # (the runtime's first arrival at the idle point)
         self.frame += 1

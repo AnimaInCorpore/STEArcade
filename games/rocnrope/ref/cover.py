@@ -3,7 +3,7 @@
     python ref/cover.py <seed> [frames]  ->  build/rocnrope/cover<seed>.pkl
 
 The pickle: the 6809 coverage (engine/m6809cover.py: exec, acc, targets, wraps, io: the accesses outside the RAM and the
-ROM's reads, the video RAM's stores); pens: the pens' pixel counts of the reference pictures (every 8th frame);
+ROM's reads, the video RAM's stores), dps: the DP values each pc ran with; pens: the pens' pixel counts of the reference pictures (every 8th frame);
 sprites: Counter of (code, colour, flip x, flip y) entries.
 
 Seeds: 1-3 attract, coin, start, random play to the game over and again (the game ends after 3 lives); 4-9 infinite
@@ -94,6 +94,13 @@ def main():
     rnd = random.Random(seed)
     m = RocnRopePort(*dsw(seed))
     cov = Cover6809(m.cpu, io=io)
+    dps = collections.defaultdict(set)              # pc -> the DP values it ran with (gen.py dp_sites)
+    step0 = m.cpu.step
+
+    def step():
+        dps[m.cpu.pc].add(m.cpu.dp)
+        return step0()
+    m.cpu.step = step
     video = Video()
     pens = collections.Counter()
     sprites = collections.Counter()
@@ -116,7 +123,7 @@ def main():
             print(f'seed {seed} frame {frame}: {len(cov.exec)} pcs, lives {mem[LIVES1]}', flush=True)
     out = build_dir('rocnrope') / f'cover{seed}.pkl'
     d = cov.data()
-    d.update({'pens': pens, 'sprites': sprites, 'seed': seed, 'frames': frames})
+    d.update({'pens': pens, 'sprites': sprites, 'seed': seed, 'frames': frames, 'dps': dict(dps)})
     out.write_bytes(pickle.dumps(d))
     print(out, len(cov.exec), 'pcs')
 

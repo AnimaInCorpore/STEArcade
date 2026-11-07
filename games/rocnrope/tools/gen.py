@@ -23,6 +23,7 @@ from machine import RocnRopePort, rom_image
 from paths import build_dir, require_coverage
 
 RESET, IRQ = 0x6000, RocnRopePort.IRQ
+DP = 0x50                           # the direct page register after the boot ($60CC TFR A,DP); other sites: dp_sites
 SEEDS = [int(x) for x in os.environ.get("RR_SEEDS", "").split(",") if x] or range(1, 12)
 NATIVES = {RocnRopePort.IDLE: "rr_idle"}
 TASKS = 0x6074                      # the foreground's task table ($6065 JSR [A,X]): 16 handlers; $67FE no seed ran
@@ -47,6 +48,7 @@ def load_cover():
     tg = collections.defaultdict(set)
     wraps, io = set(), set()
     returns = collections.Counter()
+    dps = collections.defaultdict(set)
     for s in SEEDS:
         d = pickle.loads((build_dir("rocnrope") / ("cover%d.pkl" % s)).read_bytes())
         exec_.update(d["exec"])
@@ -57,7 +59,9 @@ def load_cover():
         wraps |= d["wraps"]
         io |= {pc for pc, a, rw in d["io"]}
         returns.update(d.get("returns", {}))
-    return exec_, acc, tg, wraps, io, returns
+        for v, x in d["dps"].items():
+            dps[v] |= x
+    return exec_, acc, tg, wraps, io, returns, dps
 
 
 def task_roots(mem):
@@ -65,7 +69,13 @@ def task_roots(mem):
 
 
 def program(cover):
-    exec_, acc, tg, wraps, io, returns = cover
+    exec_, acc, tg, wraps, io, returns, dps = cover
+    dp_sites = {}
+    for v, x in dps.items():
+        if len(x) > 1:
+            raise RuntimeError("the instruction at %04X runs with DP %s" % (v, sorted(x)))
+        if x != {DP}:
+            dp_sites[v] = next(iter(x))
     mem = image()
     op = konami1_opcode(lambda a: mem[a])
     for pc in CWAI_SITES:
@@ -74,7 +84,7 @@ def program(cover):
     flat = {v: {(rw, 0, 0, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(3, 8)},
                           roots=[RESET, IRQ] + sorted(NATIVES) + task_roots(mem) + [pc + 2 for pc in CWAI_SITES], hooks=HOOKS, exec_cover=set(exec_), acc_cover=flat, targets=tg,
-                          page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x50, a3_slot=2, a4_slot=0,
+                          page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=DP, dp_sites=dp_sites, a3_slot=2, a4_slot=0,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('RR_NO_NATIVES', '')},
                           opcode_reader=lambda rd: konami1_opcode(rd))
