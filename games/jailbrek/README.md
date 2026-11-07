@@ -6,12 +6,12 @@ MAME set `jailbrek` (Konami GX507; `konami/jailbrek.cpp`, `k005849.cpp`; the clo
 used).  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 32 KB of ROM), is statically translated to 68000
 code (`engine/m6809x.py`, 6,052 instructions) and checked against a reference board in lock-step; its idle point is a
 native that delivers the Konami 005849's interrupts (eight NMIs and the IRQ a frame).  The VLM5030's BSY pin, which
-the game polls, is modelled (in the reference and in the runtime); **the SN76489A and the speech are not played yet**
-(no sound).  The picture is MAME's, 240 x 224, at screen x 48-287 with the top and bottom borders open, sprites by
+the game polls, is modelled (in the reference and in the runtime); the SN76489A plays on the YM2149 and the
+VLM5030's 24 phrases on the DMA sound (sound is new: Hatari-checked, not heard by a person).  The picture is MAME's, 240 x 224, at screen x 48-287 with the top and bottom borders open, sprites by
 generated code (`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette
-by the shared default fitter.  Status: **Incomplete** (no sound; no full-game verification).
+by the shared default fitter.  Status: **Incomplete** (no full-game verification; sound judged by measurement only).
 Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, the AUTOPLAY script, DEBUG build, 2026-11-07): in play about 50 arcade
-frames a second (83% of 60.6) and 12 pictures a second; no tuning done yet.
+frames a second (83% of 60.6) and 12 pictures a second with the sound on; the picture is untuned (Speed).
 
 ## Build and run
 
@@ -32,7 +32,7 @@ python games/jailbrek/ref/mame_cmp_jailbrek.py [frame ...]  # the reference agai
 
 Supply `assets/roms/jailbrek.zip` (MAME's parent set; `docs/rom_manifest.json` has the files' sizes, CRCs and
 SHA-1s).  Nothing ROM-derived is in git: the graphics, colours and ROM image are made into `build/jailbrek/` and
-assembled into the program.  The program is 3,317,500 bytes (text + data + BSS + 256) to load (`tools/release.py` MAX_LOAD 3,700,000).  Paths
+assembled into the program.  The program is 3,583,298 bytes (with the 262 KB of speech) (text + data + BSS + 256) to load (`tools/release.py` MAX_LOAD 3,700,000).  Paths
 are relative to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the repository's.
 
 ## Controls
@@ -57,8 +57,12 @@ demo sounds on, no flip, single controls).
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot (the RAM test), attract, coin, start, play (the scripted walk and fire: score 0 -> 400 in
   the stills, the 1UP, the lives, the weapon box, the car, enemies and shots), the score ranking; no crash, no late border event in 3,001 VBLs (2 border
   fallbacks).  Colours as the arcade's (a 16-colour fit).
-* Not done, most important first: **the sound** (SN76489A, speech; the VLM5030's BSY pin is modelled, so the
-  game's speech state machine runs); a full-game playthrough (the coverage is random play with lives and weapons
+* **Sound** (2026-11-07, Hatari with `hatari.ps1 -Sound 1`, audio extracted from the AVI): silent through the boot, then
+  the attract mode's tones (peaks in the spectrum at the SN's periods, e.g. 1,508 / 2,980 Hz for periods 32 / 16 at
+  1.536 MHz, held for seconds as in the reference's register log); a phrase asked at the start (`-D SPEECHTEST=144`)
+  correlates 0.79 with its rendered samples in the recording at the expected time.  Not heard by a person: the
+  YM mapping (the three loudest of four voices) is Track & Field's and loses the fourth voice.
+* Not done, most important first: a full-game playthrough (the coverage is random play with lives and weapons
   cheats: the stages beyond the first were seen only as far as that play got); the cocktail flip (ctrl 4 bit 3: the
   reference renderer stops there); the 005849's column-scroll mode (ctrl 2 bit 2: in the reference renderer, never
   set by the game, not in `render.s`); the service mode; speed (below).
@@ -85,11 +89,23 @@ game's speech state never ends and the frame sequence of MAME is not reproduced.
 `ref/mame_cmp_jailbrek.py` (MAME 0.248's `wolfmame-0248` from F030Arcade; the 0.286 source is the truth): **0 of 512
 pens and 0 pixels differ** at frames 60, 300, 600, 1200, 1500, 1548, 2000, 3000, 4000, 6000 (the renderer draws MAME's
 own memory).  The reference machine's RAM equals MAME's at frames 100 and 200 exactly and to frame 1548 but for the
-stack bytes below the stack pointer and the NMI handler's scratch ($1706-$1721, $16C0-$16C5), then drifts by about one
-arcade frame (the sprites move 1-3 pixels differently at 1550; its picture is equal to MAME's again at 4000 and
-6000): the Lua `frame_done` callback does not fall exactly at line 240, where the interrupts come, so MAME's dump is
-taken at an interrupt phase the model does not know (a test of the dump point 0-1500 cycles after line 240 made
-it no better), and an IRQ at that moment is seen as taken or not.  The picture check does not depend on it.
+stack bytes below the stack pointer and the NMI handler's scratch ($1706-$1721, $16C0-$16C5), then drifts by one and then two
+arcade frames: MAME's frame 1555 equals the reference's 1554, its 1600 the reference's 1598 and 1700 its 1698 (the first
+speech comes at frame 1570 in MAME, 1568 in the reference); its picture is equal to MAME's again at 4000 and 6000.  The
+picture check does not depend on it.  **Not explained** (2026-11-07 investigation; what is known):
+* The first difference is at 1549 ($1521, the control register 4's shadow, caught with the IRQ handler running at the
+  dump) and at 1550 a game tick (text cleared, sprites moved 1-3 pixels) the other way: a tick more or fewer, i.e. an
+  IRQ taken or skipped (the 005849 raises it only while ctrl 4 bit 1 is set, which the handler clears for its duration:
+  a tick that overruns a frame skips the next IRQ, as the reference does too).
+* It starts where the game has no time to spare: the reference's main loop idles 2,000-3,400 cycles a frame before 1548
+  and 83 cycles at 1550, so a few tens of cycles decide whether a tick overruns.
+* Neither a phase of the timer against the CPU (-240 .. +240 cycles, in 20-cycle steps), nor extra interrupt entry
+  cycles (-4 .. +12), nor a dump point 0-1500 cycles after line 240 changes the first differing frame (1549).  The
+  reference's CPU timing is checked against MAME for this encryption (`engine/konami1_test.py`).  What is left: a
+  difference in MAME's scheduling at the dump (the frame_done callback's instant is not line 240: the last
+  control-register write of each frame is at line 211-237 of the beam and the first at 240.4, the Lua beam position
+  unit being 256 / 264 of a line), or a chip behaviour in this scene (MAME's tap shows nothing at $4000-$6000 before
+  frame 1570).  A cycle trace of MAME's main CPU over frames 1546-1551 (the debugger) would settle it.
 
 ### Translation
 
@@ -123,25 +139,50 @@ pixels), the 9-bit sprite x, the first-to-last order (the last on top), 512 spri
 
 ### Sound
 
-Not done.  The SN76489A ($3100 writes) and the VLM5030 ($4000 pins, $5000 data) writes are in the reference's
-`sound_log`; Track & Field's and Hyper Sports' `sndgen.py` / `sound.s` (the sound CPU translated, tones on the YM,
-speech offline on the DMA) are the model, but their sound CPU is a Z80 board and this game's chips sit on the main
-CPU's bus: the speech would be recorded offline per phrase (the table at the start of `507l01.8c`), the SN76489A
-mapped on the YM directly from the writes.
+`src/sound.s` (no sound CPU: the main CPU drives both chips; `NOSOUND=1` keeps the register writes and plays nothing).
+* **SN76489A** ($3100): the register file `jb_sn` (MAME's `sn76496_base_device::write`) is kept by `nat_sn_AF96` (the
+  game's write routine at $AF96, a native: N Z from A, V clear, C kept as the translation leaves them; checked against
+  the 6809 for every byte, random register files, latches and entry flags by `tools/native_test.py`) and by
+  `main_io_w` for any other site; once an arcade frame `snd_ym` (Track & Field's player: a voice's key by its
+  attenuation, the three loudest on the YM2149's channels, a voice keeping its channel, tone periods x 4e6 / 1.536e6,
+  the noise on its channel, the attenuation to the YM's level) writes the YM registers that changed.  The fourth voice
+  is lost when all four sound.  `logic_test.py` compares `jb_sn` with the reference's register file every frame.
+* **VLM5030**: the pins and the data latch are in `main_io_w` (the BSY count); ST's falling edge asks the DMA sound for
+  the phrase of (data latch, the parameter RST's falling edge latched): the 24 pairs the game can ask for (sound commands
+  $80-$98: `ref/speech_combos.py`) were rendered by `engine/vlm5030.py` at build time (`tools/assets.py`: 12,517 Hz, 8
+  bits, scaled together; 262 KB), start at the end of the arcade frame (the last request of a frame wins) and stop when
+  RST rises on a busy chip.  `logic_test.py` checks the requests against the reference's log.
+* Not done: the speech's loudness against the SN's (both unmixed: DMA and YM at the STE's fixed levels), the SN's noise
+  shapes beyond the YM's one noise generator, a mix of the DMA with a fourth voice.
 
 ## Speed
 
-Hatari, 3,001 VBLs of the AUTOPLAY build (a coin, start, then walking and firing): 2,353 arcade frames (39.2 a second
-over everything, the boot's RAM test and the attract mode included), 832 pictures; in play (RATE.BIN, the last 400
-VBLs) about 50 arcade frames and 12 pictures a second.  Musashi (`tools/render_test.py 1600 --seed 3 --start 1000`,
-600 pictures): the logic ~108,000 cycles an arcade frame, a picture 80,000 CPU cycles + 85,000 Blitter bus cycles
+Hatari, 3,001 VBLs of the AUTOPLAY build (a coin, start, then walking and firing), sound on (2026-11-07): 2,362 arcade
+frames (39.4 a second over everything, the boot's RAM test and the attract mode included), 825 pictures; in play
+(RATE.BIN, windows of 100 VBLs) 91-109 arcade frames and 22-27 pictures per 100 VBLs: about 46-54 arcade frames
+(76-90%) and 11-13 pictures a second.  Musashi (`tools/render_test.py 1400 --seed 3 --start 1000`): the logic ~104,000
+cycles an arcade frame (108,000 before the SN native), a picture 78,000 CPU cycles + 75,000 Blitter bus cycles
 (`--prof`: `draw_rows` 38%, `draw_cell` 23%, `draw_sprites` 12%, `bake_sprite` 6%, `tile_draw` 5%).
 
-* What is not tuned yet (`docs/speed.md`, "Where a picture's time goes"): the picture's biggest cost is the row
-  recomposition (`draw_rows`: every row whose scroll changed is copied again, 8 lines x 4 planes x 15 words; the
-  street scrolls row by row), then the sprite draws.  Candidates to propose to the user, gameplay kept: the NMI
-  handler's random generators (three calls an NMI, eight NMIs a frame) as natives, the idle loop, rows whose scroll
-  moves by whole 16-pixel groups as plain copies.  Not measured.
+* **Logic profile** (`render_test.py --prof logic`, `PROF_M=1` splits by arcade address, `PROF_N` lines): the SN76489A
+  write routine ($AF96, 65 writes a frame: the NMI handler's three sound updates eight times a frame and the silencing
+  loop) cost a quarter of the logic through the inline range check and `main_io_w` (13k + 13k cycles); as a native it
+  is ~9k (134 cycles a call, 54 of them keeping C).  The rest is flat: the NMI handler and its sound routines ~40%
+  (~5k an NMI), the IRQ handler's tick ~25%, `main_dispatch` 8.6k (returns not among the six compared first, RTI,
+  jump tables), `jb_idle` 6.7k (9 interrupt deliveries), `main_io_w` 4.4k, `snd_ym` 2.3k.
+* **The picture's biggest cost is one scroll value**: rows 2-25 (the playfield) always share one scroll value
+  (measured over 1,000 frames of play: 744 frames change it, then all 24 rows; rows 0, 1, 26, 27 stay at 0).
+  `draw_rows` recopies all 24 rows (8 lines x 4 planes x 15 words each: 4 HOG passes a line, ~158 CPU cycles a line, ~75k
+  Blitter bus cycles) whenever it moves.  The real saving is the virtual-screen scheme of `docs/speed.md` ("Hardware
+  scroll over virtual screens"): the band shown at its scroll by the video address and fine scroll, a Blitter copy only
+  when the scroll crosses a 16-pixel group, the four static rows drawn each picture at the fine offset (they would move
+  with the Shifter's fine scroll), sprites at their screen position plus the fine offset.  Not done: it changes the
+  sprite geometry and the playfield cache; to propose to the user.  Merging equal-scroll rows in `draw_rows` would save
+  only the per-row setup (~250 cycles x 24, 7% of a picture's CPU).  Two-line HOG passes (~240 bus cycles) would save
+  ~30% of the CPU time of the row copies.
+* Candidates not done: the NMI handler's random generators and sound sequencing as natives (the handler is ~5k cycles an NMI
+  and eight NMIs come a frame: all writes the game repeats unchanged), a cheaper return for the 42 return points of
+  $AF96's RTS (six compared, the rest through `main_dispatch`).
 * The generated sprite code against the row path (`-D REN_GEN=0`, `render_test.py 1600 --seed 3 --start 1000`, 600
   pictures, Musashi, exact both): 91.6k CPU + 86.5k Blitter bus cycles -> 79.7k + 84.7k (kept).
 * The code for all of the coverage's 544 shapes: 7,457 routines, 477 k lines; the order table is computed where a
@@ -150,7 +191,7 @@ VBLs) about 50 arcade frames and 12 pictures a second.  Musashi (`tools/render_t
 ## Tests and tools
 
 `ref/cover.py` (coverage and pens), `ref/mame_cmp_jailbrek.py` (reference against MAME), `tools/prepare.py`,
-`tools/gen.py`, `tools/assets.py` (palette fit and the speech chip's BSY table), `tools/build.py` (`--sim`, `--debug`,
+`tools/gen.py`, `tools/assets.py` (palette fit, the speech chip's BSY table, the YM tables and the rendered phrases), `tools/native_test.py` (`nat_sn_AF96`), `ref/speech_combos.py`, `tools/build.py` (`--sim`, `--debug`,
 `-D AUTOPLAY=1`), `tools/logic_test.py`, `tools/render_test.py`, `tools/sprite_test.py`, `tools/hatari.ps1`.
 `python port.py test jailbrek` runs them.
 
@@ -172,4 +213,4 @@ VBLs) about 50 arcade frames and 12 pictures a second.  Musashi (`tools/render_t
 
 Playtest evidence: the Musashi tests above; the hidden Hatari run (`tools/hatari.ps1`: `tools/hatari.ps1`: coin, start and play to a score of 400 and beyond, in 3,001 VBLs, no crash, no late border event; the
 stills are in `run/jailbrek_hatari/` (not in git)).  The full-game
-status stays **Incomplete** (no sound, no playthrough); see the [status policy](../../docs/port-status.md).
+status stays **Incomplete** (no playthrough; sound by measurement only); see the [status policy](../../docs/port-status.md).

@@ -201,7 +201,7 @@ def main():
     if args.prof:
         n = max(1, args.frames - args.start)
         tot = sum(h.prof.values())
-        for k, c in h.prof.most_common(30):
+        for k, c in h.prof.most_common(int(os.environ.get('PROF_N', 30))):
             print('%-24s %8d cycles a picture %5.1f%%' % (k, c // n, 100 * c / tot))
         for off, c in sorted(h.pcs.items()):
             print('%s+%04x %7d' % (PCS, off, c // n))

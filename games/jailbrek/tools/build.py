@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
-The sound is not built yet (NOSOUND=1 always).
+The sound is built (-D NOSOUND=1: the chips' register writes are kept, nothing plays).
 """
 from pathlib import Path
 import argparse
