@@ -48,10 +48,10 @@ def configs():
 
 
 ROOTS = [[0, 0x38, 0x66], [0, 0x38, 0x1DDC], [0, 0x66]]
-# the sound CPU's command handlers: its sound ids index a table of routine pointers at $0700 (dispatched by `rst $20`
-# from $0391) and the 21 bytes at $07E7 it copies to $9B0A; coverage only sees the sounds a play brings, a rare one
-# would end at z80_badpc (the STE's first Hatari run did, ~5000 frames in): every word of the table is a root
-SOUND_TABLE = range(0x0700, 0x07FC, 2)
+# the sound CPU's sound routines: $0391 looks the id in $9B34 up in a table of 21 routine pointers at $040D (rst $08,
+# jp (hl) at $0390); coverage only sees the sounds a play brings, the id 6 of the scripted game (frame ~4930) ended at
+# z80_badpc in the simulator and Hatari: every word of the table is a root
+SOUND_TABLE = range(0x040D, 0x040D + 2 * 21, 2)     # (21 routines: the sound ids 0-20; the words at $0700 are sequence data)
 # the boot handshake's spin loops (CPU1 waits for the self-test results of CPU2 and CPU3 at $3973 / $3980, they wait for
 # CPU1 to clear the flags: CPU2 at $1F25), CPU2's main loop ($0078: the boot is done): the runtime's scheduler (z80_hook)
 YIELDS = [{0x3973, 0x3980}, {0x1F25, 0x0078}, set()]

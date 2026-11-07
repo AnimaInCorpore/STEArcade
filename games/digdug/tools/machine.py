@@ -255,7 +255,8 @@ def patch_tests(roms):
     """The boot self-tests patched out (~700 frames of the main CPU's RAM tests and the sub CPUs' ROM checksums, which
     would flood the translation's tests): the main CPU's inline video RAM test ($3897) jumps to the clear that follows
     it and its test routine ($3DE3, called for the other four RAM blocks) to its clear; CPU2's checksum ($1F07) and
-    CPU3's ($067F) report their pass ($FF) at once.  The main CPU's own ROM checksum stays: a dead byte of the replaced routine ($3DE6) keeps the
+    CPU3's ($067F) report their pass ($FF) at once; the delay loop of the EAROM commands ($1EA0, tens of VBLs of the
+    STE's time every command, the model needs no waiting) returns at once.  The main CPU's own ROM checksum stays: a dead byte of the replaced routine ($3DE6) keeps the
     sum of its last 4 KB block (which holds its own check byte, $3FFF)."""
     main, sub, snd = (bytearray(r) for r in roms)
     orig = sum(main[0x3000:0x4000])
@@ -264,6 +265,7 @@ def patch_tests(roms):
     main[0x3DE6] = (main[0x3DE6] + orig - sum(main[0x3000:0x4000])) & 0xFF         # (dead now: the block's sum is kept)
     sub[0x1F07:0x1F0A] = bytes([0xC3, 0x20, 0x1F])                         # jp $1F20
     snd[0x067F:0x0684] = bytes([0x3E, 0xFF, 0xC3, 0x92, 0x06])             # ld a,$FF / jp $0692
+    sub[0x1EA0] = 0xC9                                                     # the EAROM's delay loop ($24DB x 256 counts, ~10 s of the STE's time a command) is a ret
     return bytes(main), bytes(sub), bytes(snd)
 
 

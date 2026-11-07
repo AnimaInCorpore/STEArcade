@@ -10,8 +10,9 @@ programs (`namco51.zip`, `namco53.zip`; never blank stand-ins): the 51XX as in G
 Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles and the 1-bit characters of the tile RAM
 (the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
 
-Status: **Experimental / deferred** (root README): the game boots, runs its attract mode and plays in the simulator and
-in Hatari (see State for what was and was not checked); no full natural playthrough, no speed measurement, the program
+Status: **Experimental / deferred** (root README): the game boots, runs its attract mode and plays in the simulator (a
+scripted game of 8000 frames); **in Hatari it still crashes** (`z80_badpc`, CRASH.TXT, the sub CPU's EAROM command at
+boot: see State, Hatari); there is no Hatari screenshot yet (the image above does not exist); no full natural playthrough, no speed measurement, the program
 is too large for a 4 MB machine (14 MB in Hatari while it is developed).
 
 ## Build and run
@@ -54,7 +55,12 @@ Verified (what each check ran, see Tests and tools):
   reference renderer through the colour map: 0 differing pixels at several moments of play (see below), the sprites'
   wrap-around copies (MAME draws a sprite 256 pixels to the right too) left out of both.  `tools/sprite_test.py`: 2664
   cases at both side edges, all 16 shifts, flips, double sizes, transparent holes and a 64 KB crossing, exact.
-* **Hatari**: see Verification.
+* **Hatari (14 MB): NOT working yet.**  The program starts and then ends in `z80_badpc` (CRASH.TXT) while the sub CPU
+  runs the EAROM command the main CPU leaves in `$9B3D` at boot (`g_earom_ctl`, `$1DDC`; the Z80 stack of the dump shows
+  the EAROM routine's return addresses `$1E24` / `$1E8B`).  The same program does not crash on Musashi (8000 frames of the
+  scripted game).  Not found: the stall, the nested stack or an odd access Hatari takes and Musashi does not.  Patching
+  the EAROM delay loop (`$1EA0`) out changed the dump but not the crash.  Next: run the sub CPU's task under the
+  reference's schedule in Hatari with `-D DEBUG` and `CHKSP`, and look at `ctx2`.
 
 Not done or not verified:
 
@@ -115,12 +121,15 @@ Not done or not verified:
 
 ## Lessons
 
+* **Sound CPU table** (found by the crash's Z80 stack in the simulator, fixed): `$0391` looks the sound id up in 21 code
+  pointers at `$040D` (`jp (hl)` at `$0390`); an id the coverage never played (6, frame ~4930 of the scripted game) ended at
+  `z80_badpc`.  The words at `$0700` that I first took for it are sequence data (a data root gave an unsupported `add hl,bc`):
+  roots are `gen.py SOUND_TABLE`.  With the 16 coverage seeds `schedule_test` (6500 frames) and `render_test` (VBL 1500, 5000,
+  6500, 8000) are exact / equal.
 * **2026-11-07, the 53XX** (mode 7): `K1-K3` = latch bits Q5-Q7; its main loop is an input loop that never waits on a
   value, so its wait point stops whenever no interrupt is pending (`mb88x` kind `("idle",)`); the interrupt is an edge, the
   chip select may still be high when the loop is reached again.
-* **A coverage run is not the game**: the first Hatari run ended at `z80_badpc` after ~5000 frames: the sound CPU's
-  command table (`$0700`, `rst $20` from `$0391`) holds routines only a rare sound brings.  All its entries are roots
-  now (`gen.py SOUND_TABLE`), and the scripted game of the tests is a coverage seed (12).
+* **A coverage run is not the game**: the scripted game of the tests is a coverage seed (12), the long random runs 13-16.
 * **The map file belongs to the last build**: a debugging script that reads `build/digdug/digdug.map` after another variant
   was built reads the wrong symbols (a `-D IOLOG` build overwrote it and showed a "stuck" flag that was not).  Rebuild
   before reading symbols.
