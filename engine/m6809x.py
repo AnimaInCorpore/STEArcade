@@ -128,6 +128,8 @@ def defs_uses(ins):
     if stem in ("neg", "com", "asl", "lsl", "clr") or mn in ("nega", "negb", "coma", "comb", "asla", "aslb", "lsla",
                                                              "lslb", "clra", "clrb"):
         return NZVC, 0
+    if mn == "nc":                        # (KONAMI-1 / 6809 $x2: COM when C is set, else NEG; only liveness: not emitted)
+        return NZVC, C
     if stem in ("rol",) or mn in ("rola", "rolb"):
         return NZVC, C
     if stem in ("inc", "dec") or mn in ("inca", "incb", "deca", "decb"):
