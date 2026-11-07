@@ -9,7 +9,7 @@ import sys
 
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / "engine")]
 import gen
-from paths import ROOT
+from paths import ROOT, build_dir
 from toolchain import assemble_link
 
 
@@ -21,6 +21,15 @@ def main():
     if not (ROOT / "assets" / "roms" / "extracted" / "mrheli").is_dir():
         subprocess.run([sys.executable, str(Path(__file__).with_name("prepare.py"))], check=True)
     r = gen.generate()
+    if not args.sim:
+        import snapshot
+        import assets
+        import mcu
+        snapshot.write()
+        assets.build()
+        from m72board import load_regions
+        rg = load_regions("mrheli")
+        mcu.write_tables(build_dir("mrheli") / "mcu_tables.s", rg["mcu"], rg["samples"])
     print("main: %d instructions, %d entries, %d unsupported, %d missing targets, %s" % (
         r["instructions"], r["entries"], len(r["unsupported"]), len(r["missing"]), r["stats"]))
     for u in r["unsupported"]:

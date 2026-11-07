@@ -33,6 +33,10 @@ init_image:
 port_frame:
 	addq.l	#1,port_frames
 	movem.l	d0-d7/a0-a6,-(sp)
+    ifnd SIM
+	lea	v30_image+$B0000,a0	; (src/mcu.s: the MCU model's frame boundary, before the VBL interrupt; the SIM
+	bsr	mcu_frame		; build takes the MCU's side from the reference: tools/logic_test.py)
+    endc
 	lea	ctx_main,a6
 	movem.l	R_D0(a6),d0-d6
 	movem.l	R_A2(a6),a2-a5
@@ -53,8 +57,12 @@ port_frame:
 	cmp.w	#4,m72_rasters
 	bhs.s	.done
 	move.w	d7,(sp)
+	lea	m72_rlines,a0		; (the lines, for the picture's bands: video.s)
+	adda.w	m72_rasters,a0
+	adda.w	m72_rasters,a0
+	move.w	d7,(a0)
 	addq.w	#1,m72_rasters
-	cmp.w	#1,m72_rasters
+	cmp.w	#2,m72_rasters
 	bne.s	.r2
 	move.l	m72_scroll,m72_scroll_r1	; (before the second raster interrupt: the band after the first)
 	move.l	m72_scroll+4,m72_scroll_r1+4
@@ -253,6 +261,13 @@ m72_sound_latch:
 
 ; port $C0: the second sound latch (AL; the sound CPU's NMI on the board): its own ring (sound2_cmds, sound2_head)
 m72_sound_latch2:
+    ifnd SIM
+	movem.l	d1/a0,-(sp)		; (src/mcu.s: the MCU's latch through the Z80, in the VBL handler: 128 units)
+	move.w	#128,d1
+	lea	v30_image+$B0000,a0
+	bsr	mcu_cmd
+	movem.l	(sp)+,d1/a0
+    endc
 	move.l	a0,-(sp)
 	move.w	sound2_head,d7
 	lea	sound2_cmds,a0
@@ -282,10 +297,11 @@ in_ports:	dc.w	$FFFF,$FFFF,$FDFF	; IN0 IN1 DSW (active low; IN1 bit 7: the VBLAN
 ctx_main:	ds.b	CTXSIZE
 m72_scroll:	ds.w	4		; the ports $80-$86: FG y, FG x, BG y, BG x (the last written)
 m72_scroll_vbl:	ds.w	4		; (the values before the first raster interrupt: the top panel's)
-m72_scroll_r1:	ds.w	4		; (the values before the second raster interrupt, if any)
+m72_scroll_r1:	ds.w	4		; (the values after the first raster interrupt, before the second, if any)
 m72_raster:	ds.w	1		; port $06: the raster interrupt's line + 128
 m72_raster_vbl:	ds.w	1		; (its value after the VBL handler: the first split)
 m72_rasters:	ds.w	1		; (raster interrupts run in the last arcade frame)
+m72_rlines:	ds.w	4		; (their lines)
 m72_port02:	ds.w	1		; port $02: bit 3 display off, bit 2 flip
 m72_dma_done:	ds.b	1		; (a sprite DMA since the last picture)
 	even

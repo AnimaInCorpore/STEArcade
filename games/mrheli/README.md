@@ -15,8 +15,8 @@ stated scope; this note does not claim a new successful run or Dreamer integrati
 ## The main CPU's translation (agent A, 2026-11-02)
 
 Mr. HELI's V30 program translated R-Type's way (engine/v30x.py; see games/rtype/README.md and docs/architecture.md
-"The V30 translator"). Only the simulator build exists. There is no STE program yet: `src/mrheli.s` without `SIM`
-just returns to the desktop.
+"The V30 translator"). The simulator build is exact in long lock-step runs; the STE program (below) runs on the
+shared m72render as the exact baseline.
 
 * **The port's schedule** (`tools/machine.py` `MrHeli`): the board runs MAME's schedule up to `START` = frame 500,
   after the boot and the MCU's code in the dual-port RAM (the main CPU runs MCU-supplied code at B000:xxxx until
@@ -37,7 +37,7 @@ just returns to the desktop.
   lock-step tests play: the VBL handler always runs to its end. Seeds 1-3 are attract, 4-7 play, 8+ play with the
   Invulnerability DIP (SW2:7 = $4000). Coverage so far:
   * board: seeds 1 (6000), 4 (10000), 8, 9 (15000), 10 (20000);
-  * port: seeds 1, 4, 5 (20000), 6 (1000), 9, 10 (40000), 8 (40000, running).
+  * port: seeds 1, 4, 5 (20000), 6 (1000), 8, 9, 10 (40000).
 * **gen.py**: R-Type's gen with Mr. HELI's map:
   * ROM $00000-$7FFFF, RAM $A0000, the dual-port RAM $B0000;
   * jump tables from ROM, stored handlers, store marks for the video RAM and palettes, leaf calls and inlining on,
@@ -70,8 +70,20 @@ just returns to the desktop.
 |---|---|---|---|
 | 1 (attract) | 0-20000 | identical | 124.5k / 134.3k / 204.7k / 1.81M |
 | 4 (play) | 0-20000 | identical | 85.7k / 94.3k / 138.3k / 1.76M |
+| 5 (play) | 0-20000 | identical | 89.8k / 100.3k / 148.4k / 1.76M |
+| 8 (invulnerable) | 0-40000 | identical | 160.3k / 162.3k / 194.5k / 1.66M |
+| 9 (invulnerable) | 0-40000 | identical | 153.0k / 144.4k / 202.6k / 1.66M |
+| 10 (invulnerable) | 0-40000 | identical | 155.1k / 148.5k / 196.7k / 1.66M |
 
   The maximum (~1.8M) is a scene build, at most a frame or two.
+
+  The invulnerable runs reach the game's own MCU check: object task 0040:1ECA sends $10, and 0040:1ED9 calls
+  B000:0000 a frame later. Seeds 8, 9 and 10 first get there at frames 8931, 12504 and 14519. Since 716644a,
+  logic_test compares the dual-port RAM as the V30 left it, then copies the reference i8751's writes into the image:
+  the code at B0000, and its wipe three ticks later. The simulator itself runs no MCU.
+
+  Invulnerable play costs ~150-160k cycles an arcade frame. That is more than the 160k an STE field has, so the logic
+  alone cannot hold 50 Hz there.
 * **Profile** (`tools/profile.py --seed 1 --start 2000 --frames 60 --snap`, the attract demo's play: 177k a frame):
 
   | where | share |
@@ -102,8 +114,48 @@ just returns to the desktop.
   These are the candidates for natives: the object loop, 0040:84E5, the handler at 0040:6000-60F3, and the text
   writer 0040:27B5-27C6 (store marks at 126 cycles a store on title screens).
 
-Open: the STE program and its bench, natives, and covering the later stages (invulnerable seeds to 40000 frames are
-running). There is no RAM poke for a stage select yet.
+### The STE program (2026-11-07)
+
+`src/mrheli.s` without `SIM` is R-Type's m72render program of 138cd90, adapted:
+
+* It starts from the snapshot (`tools/snapshot.py`, `build/mrheli/snapshot.bin`): the reference at START = 500, or
+  at a replay point (`REPLAY=seed:frame`). The snapshot carries the dual-port RAM and the MCU model's 14-byte state.
+* The MCU is agent B's `src/mcu.s`:
+  * `mcu_init` runs after the snapshot;
+  * `mcu_frame` runs at the start of each `port_frame`, before the VBL interrupt;
+  * `mcu_cmd` runs at each port C0 write, with 128 units;
+  * `MCU_HB_POLL` is set: the heartbeat B0FFE is polled, not hooked.
+* The schedule is R-Type's: PIC_EVERY 8, MAX_BEHIND 12, one arcade frame per VBL.
+* The display is the shared renderer (`render.s`, the centred 320-pixel window). The top panel is its own screen
+  (BD_HUD, BD_VSWITCH, M72_HUD_TOP 32).
+* `src/video.s` is R-Type's, with up to three raster bands. core.s keeps the raster lines in `m72_rlines` and the
+  scroll after the first raster handler in `m72_scroll_r1`.
+* Input is the keyboard, both joysticks and the Jaguar pads.
+* `PLAYBACK` / `INVULN` builds replay a lock-step seed's inputs (`tools/play_inputs.py`).
+* `tools/bench.sh` runs its own Hatari, stopped by its PID. `NOBUILD=1` runs the PRG as it is; a failed build stops
+  it.
+
+The colours: `tools/assets.py` builds `m72_pal.bin` (7 scenes) from `render_test.py`'s recorded attract and play
+states (`build/mrheli/render_states.pkl`, ~20 minutes once).
+
+Hatari (STE, 14 MB, `-D DEBUG`):
+
+| run | arcade frames | pictures | time |
+|---|---|---|---|
+| attract from START, 54 s | 28.8 /s (58%) | 1.9 /s | logic 34%, drawing 58% |
+| `REPLAY=8:3000:5000 FAST=true NOESC=1 EXTRA="-D INVULN -D PLAYBACK -D DEBUG"` (invulnerable play, 2000 arcade frames, no crash) | 22.5 /s (45%) | 2.0 /s | logic 57%, drawing 38% |
+
+A coin and a start reach the game (`bench.sh tap:06@32 tap:02@35`: the screenshot shows the helicopter in the hangar under the top panel; not checked against the reference pixel by pixel).
+
+This is the baseline, not the goal. The picture costs ~0.8M cycles in the shared renderer. That renderer also still
+draws FG over BG with AND + OR passes, which AGENTS.md forbids; R-Type's stage renderer has none.
+
+Open:
+
+* the stage renderer's port, scene by scene;
+* natives for the logic, from the profile above;
+* sound: the Z80 / YM2151 music, and the MCU's samples by DMA;
+* a stage select or RAM poke.
 
 ## The i8751 MCU on the STE (agent B, 2026-11-02)
 
