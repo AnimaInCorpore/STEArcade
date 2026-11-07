@@ -200,7 +200,13 @@ The method and every port's measurements: `sprite-preparation.md`.  In short:
 * **Restore by contour** (stefastbobs2's contour clear as a copy, prepared per sprite and shift; R-Type 2026-11-07):
   -0.3..-5% a picture, the saving almost all Blitter words from the corners of composed sprites.  Clear instead of copy
   over black where the test is cheap (R-Type's title, `st_clrtest`: -10% on the attract recording).
-* **Skip the work of pictures that will be skipped** (the sprite list copies: Commando, Gun.Smoke).
+* **Skip the work of pictures that will be skipped** (the sprite list copies: Commando, Gun.Smoke).  Not where the list
+  copied holds earlier frames' entries (Double Dragon: the sprite RAM copy takes all 76 MCU entries, those beyond the
+  count are left from earlier frames in the arcade too).
+* **Clean twins pay only when pictures are close together** (Double Dragon, 2026-11-07, exact, not kept): restoring
+  sprite rectangles from a clean copy of each ring instead of redrawing their cells saved 6% of a picture drawn every
+  2nd frame, nothing at the port's real rate (a picture every ~9 frames), where the cells scrolling in, written twice,
+  and the text drawn again after each scroll dominate.
 * **Dead ends**: merging overlapping restores (Black Tiger 32.8% duplicate words, exact but +0.8%; R-Type's damage
   coalescing; Commando's damage-bitmap union); keeping unchanged sprites (Splatterhouse: 2.6 a picture kept for 160k);
   reordering rows where masks rarely repeat (Gauntlet, Kung-Fu Master, Gyruss: natural order stays); aligned rows
@@ -249,7 +255,9 @@ The schedules are in `architecture.md`, "The schedules in use".
 
 * **Decouple the ticks from the pictures**: the arcade ticks at 55-61 Hz, the STE shows 50; count arcade frames per
   VBL and skip pictures, not ticks, when the CPU is short.  The game then runs at the arcade's speed (1942, 2026-10-08).
-* **The skip limits change the game's speed, not the picture rate**: Commando's MAX_SKIP 2 -> 3: 99% / 26.6 -> 100% /
+* **The skip limits trade pictures for game speed where the logic is the limit**: Double Dragon's MAX_SKIPS 4 -> 8
+  (the user's choice, 2026-11-07): 28.1 -> 32.3 arcade frames/s, 8.6 -> 7.1 pictures/s (in play ~4.5 -> ~3).
+* **Where the picture is cheap they change the game's speed, not the picture rate**: Commando's MAX_SKIP 2 -> 3: 99% / 26.6 -> 100% /
   26.5 pictures/s (scheduling alone ~3%, noise level); Bubble Bobble's TICK60 0.532 -> 0.668 rounds a VBL but 12.2 ->
   5.2 pictures/s; Dragon Spirit with R-Type's PIC_EVERY 8 / MAX_BEHIND 12: 7.97 -> 11.2 arcade frames/s but 3.02 -> 1.40
   pictures/s.  Choose per port with the user.
@@ -304,7 +312,7 @@ not been re-measured in Hatari since).
 | Gyruss | 55% / 12.7 autoplay | n/a | yes (main, sound) | sub: summaries | sub: copies, scans, projections | cells | kept |
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
-| Double Dragon | ~38% / 8.2 play | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
+| Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |

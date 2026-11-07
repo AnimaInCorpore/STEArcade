@@ -17,7 +17,8 @@ BD_PALETTE = 1
 FRAMES = 0
 	endc
 	ifnd MAX_SKIPS
-MAX_SKIPS = 4				; arcade frames not drawn in a row while frames are pending (the game first)
+MAX_SKIPS = 8				; arcade frames not drawn in a row while frames are pending (the game first; 4 until
+					; 2026-11-07: 28.0 -> 34.0 arcade frames a second, pictures in play ~4.5 -> ~3)
 	endc
 	ifnd MAX_PENDING
 MAX_PENDING = 3				; arcade frames that may wait (a game behind by more runs slower)

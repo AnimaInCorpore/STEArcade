@@ -10,7 +10,8 @@
 STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`): the main CPU's 6809
 program translated whole (bank-aware), the sprite MCU's job as a native routine, the background, the sprites and the
 text on the STE's 16 colours, the YM2151's music and effects on the YM2149, the ADPCM voices and hits on the DMA
-sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: 20-24 frames a second in play (about 38% of the arcade).
+sound.  4 MB STE, the borders open: all 240 lines.  Playable, but slow: 25-31 frames a second in play (about 50% of the
+arcade, 56% over the recorded play), ~3 pictures a second (2026-11-07; 20-24 frames, ~4.5 pictures before).
 
 ```sh
 python games/ddragon/tools/prepare.py       # verify assets/roms/ddragon.zip, unpack to assets/roms/extracted/ddragon/
@@ -169,6 +170,34 @@ flag is set (`spr_written` is set but not read).
   cost 98k / 163k).
 * `tools/sound_test.py`: both players against their models, every byte / register equal.
 
+## R-Type's speed lessons applied (2026-11-07)
+
+Measured first (`docs/speed.md`, "Where a picture's time goes"): the logic is 174k Musashi cycles an arcade frame
+(`profile.py 3000 3200 --seed -1`) and flat - the calls and returns of the translated code ~30k (`--mnemonics`), but
+57% of the 344 calls a frame go to leaves and most of those are the bank selectors already inline or collision code
+already native (the rest ~3%), the MCU job 15k, the bank writes 10k at ~50 cycles each; a picture is 471k mean / 400k
+median in mission 1 (`render_test.py 3400 --seed -1 --first 3000 --every 2 --profile`, now without the cold first
+picture: `--warm`), 608k / 604k with a picture every 10th frame (`4000 --first 1000 --every 10`): there the cells that
+scroll in (~130k), the whole text drawn again after a scroll (~150k) and the sprites (~130k) dominate.
+
+* **Taken: the game first** (`MAX_SKIPS` 4 -> 8, the user's choice, R-Type's schedule lesson).  Hatari, the recorded
+  play (`PLAY=1 bench.sh 8000`), from the first arcade frame: 4 MB (the release's): 28.1 -> 32.3 arcade frames a
+  second (49% -> 56%), 8.6 -> 7.1 pictures a second (in play ~4.5 -> ~3); 14 MB: 34.0 frames, 7.3 pictures.  12 gave
+  35.2 / 6.4 (in play ~2 pictures a second).
+* **Measured, not kept: sprite damage restored from clean twins of the rings** (R-Type's contour lesson; the 14 MB
+  build): a clean copy of each ring with the bg cells only (cell_draw, the band masks written to both); a sprite
+  records the rectangle it drew (its opaque lines and columns from a per-sprite table, the picture's lines only, the
+  inner word when clipped) instead of invalidating its cells, the next picture into that ring copies the rectangles
+  back with HOG passes (4 lines of two columns, 8 of one: 32 words) and marks the text over them.  Exact (render_test
+  700 pictures in three runs, sprite_test).  Mission 1 every 2nd frame 471k -> 442k mean, 400k -> 341k median, but
+  with pictures 5 and 10 frames apart 549k -> 563k and 608k -> 613k (the cells written twice cost what the restores
+  save: they are few when pictures are far apart); Hatari with `MAX_SKIPS` 8 (a picture every ~9 frames in play):
+  34.0 -> 34.1 arcade frames, 7.3 pictures a second.  Not kept (+260 KB, no gain at the port's picture rate).
+* **Measured, not taken**: larger caches (2048 tiles, 4096 sprites: the bakes are first uses, ~2 a picture);
+  skipping the MCU's sprite expansion for frames not drawn (Commando's and Gun.Smoke's lesson: not exact here - the
+  sprite RAM copy takes all 76 entries, and the entries beyond the count hold earlier frames' entries in the arcade
+  too); leaf calls in the 6809 translator (~3%).
+
 ## Speed (Hatari, pinned F030Arcade build, 8 MHz STE, 8000 VBLs; 2026-10-16)
 
 | | arcade frames a second | pictures a second |
@@ -177,7 +206,7 @@ flag is set (`spr_written` is set but not read).
 | AUTOPLAY (coin, start, walk and punch) | mostly 17-22 (22.7 overall) | mostly 3-4 (7.6 overall) |
 | the recorded play (`PLAY=1`, missions 1-2) | 15-48, mostly 20-24 (26.0 overall) | 3-11, mostly 4 (8.2 overall) |
 
-The logic comes first (a picture after at most 4 frames not drawn).  Musashi, mission 1 in play (`profile.py 3000
+The logic comes first (a picture after at most 4 frames not drawn; 8 since 2026-11-07, above).  Musashi, mission 1 in play (`profile.py 3000
 3200 --seed -1`), 2026-10-16 (the logic since 2026-10-26 181k, the picture since 2026-11-02 400k median / 490k mean:
 the tables below): the logic 193k cycles a frame (the MCU job 15k, the bank switches 10k, the collision natives 15k,
 the sprite copy 6k, the translated code ~127k: a third of it calls and returns, ~300 a frame; 217k on average over
@@ -221,7 +250,7 @@ still has to fit the load budget.
 
 ## What is missing
 
-* Speed: about 38% of the arcade in play; the logic would have to get 2 times cheaper (spread over the game's
+* Speed: about 50% of the arcade in play since 2026-11-07 (38% before), ~3 pictures a second; the logic would have to get 2 times cheaper (spread over the game's
   routines now), and a picture costs as much as 3 frames of logic.
 * The flip screen (cocktail) is not modelled; play against MAME itself (not the reference board) not compared.
 * The music is the YM2151 reduced to three square-wave voices.

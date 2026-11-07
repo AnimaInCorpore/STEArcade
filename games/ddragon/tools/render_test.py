@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--every", type=int, default=5)
     ap.add_argument("--save", default=None)
     ap.add_argument("--profile", action="store_true", help="68000 + Blitter cycles per renderer routine (the pictures drawn)")
+    ap.add_argument("--warm", type=int, default=1, help="pictures left out of the profile and the cycle figures (the cold start)")
     args = ap.parse_args()
     run = ROOT / "run" / "ddragon_sim"
     sim = Sim(str(run / "DDRAGON.PRG"), ram_kib=16384, run_dir=run)     # (the trace on: the Blitter's registers)
@@ -66,7 +67,10 @@ def main():
     import bisect
     import collections
     prof = collections.Counter()
-    plabs = sorted((v, k) for k, v in sym.items() if not k.startswith((".", "M0", "M1", "M2")) and "$" not in k)
+    absolute = {ln.split()[1].rstrip(":") for ln in (build_dir("ddragon") / "ddragon_sim.map").read_text().splitlines()
+                if " abs," in ln and len(ln.split()) > 1}     # (equates: not code, though their values may look like it)
+    plabs = sorted((v, k) for k, v in sym.items() if not k.startswith((".", "M0", "M1", "M2")) and "$" not in k
+                   and k not in absolute)
     paddr = [a for a, k in plabs]
     profiling = [False]
 
@@ -116,12 +120,14 @@ def main():
             raise RuntimeError("frame %d: stopped at %s" % (f, stop))
         resume()
         if draw:
-            profiling[0] = args.profile
+            warm = checked >= args.warm
+            profiling[0] = args.profile and warm
             stop, used = run_to_stop()
             profiling[0] = False
             if stop != "sim_render_ret":
                 raise RuntimeError("frame %d: the picture stopped at %s" % (f, stop))
-            cyc.append(used)
+            if warm:
+                cyc.append(used)
             if args.profile:
                 ep = bytes(mem.r_block(sym["pal_epoch"], 24))
                 if getattr(main, "_ep", None) is not None:
@@ -148,12 +154,14 @@ def main():
             resume()
         if run_to_stop()[0] != "sim_wait":
             raise RuntimeError("frame %d: not back at sim_wait" % f)
-    if args.profile and checked:
+    if args.profile and cyc:
         tot = sum(prof.values())
         for k, c in prof.most_common(25):
-            print("  %-24s %8.0f a picture %5.1f%%" % (k, c / checked, 100 * c / tot))
-    print("%d pictures compared, %d differ; 68000 + Blitter cycles a picture (Musashi): mean %.0f, max %d" % (
-        checked, bad, np.mean(cyc) if cyc else 0, max(cyc) if cyc else 0))
+            print("  %-24s %8.0f a picture %5.1f%%" % (k, c / len(cyc), 100 * c / tot))
+    print("%d pictures compared, %d differ; 68000 + Blitter cycles a picture (Musashi, without the first %d): "
+          "mean %.0f, median %.0f, p90 %.0f, max %d" % (
+        checked, bad, args.warm, np.mean(cyc) if cyc else 0, np.median(cyc) if cyc else 0,
+        np.percentile(cyc, 90) if cyc else 0, max(cyc) if cyc else 0))
     return int(bad != 0)
 
 
