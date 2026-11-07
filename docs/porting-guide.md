@@ -873,6 +873,49 @@ strips, load-size measures, the fixed-workload rule) are not repeated.
 * Move sound work to build time: Double Dragon's ADPCM decoded on the STE cost 98k of 163k a frame (now streams made
   at build time); Commando's effects as tables -1.7k..-4.2k a tick.  Dead end: Commando's music mix cache (no hits).
 
+### Every port checked against R-Type's lessons (2026-11-02)
+
+All ports were audited against the checklist above (Musashi figures on recorded play or the ports' seeds; reports
+outside the repository).  What was exact and faster was landed, one commit per port; Hatari confirmation of most
+figures is still open.
+
+**A simulator fix breaks renderers that relied on the old behaviour.**  ddcec89 made `engine/sim.py`'s Blitter step
+the source by SYI (not SXI) before a read that NFSR skips, as Hatari's `blitter.c` does.  Galaga '88's 3-word sprite
+passes (SYI 0: 623 of 750 play pictures wrong) and Splatterhouse's opaque fast rows (SXI 8, SYI 2) were wrong on the
+STE until 769c6fb.  After any change to the simulator's Blitter, run every port's render test.
+
+**Landed (Musashi):**
+* Video RAM stores inline at the translated writer sites (range check, cell mark; the I/O handler only outside the
+  range; `engine/m6809x.py` `Program.video_inline`, opt-in): Hyper Sports logic -15.7% (the I/O handler was 37% of it),
+  Track & Field -6%.  Look for a port's I/O write handler in the profile first.
+* Rows dirtied only by sprites restore only the sprites' 16-pixel groups: Track & Field pictures -12.5% (p90 +1.5%),
+  Hyper Sports -7.6%.
+* Redraw text only over the cells redrawn or drawn over (a text entry drawn twice gives the same result): Double
+  Dragon mission 1 picture median 500k -> 400k.
+* Bank maps instead of recolouring every cell (Galaga '88, now the default): BENCH -11.5%, p90 -36%.
+* Plot stars in the window scan that finds them (no list round trip): Galaga pictures -6.5..-8.4%.
+* Gyruss's sound driver: per-channel countdowns done in place and an rst table jump as a direct table: logic -8%.
+* Inline leaves / rst / jumps in the Z80 ports that had none (1942, 1943, Gun.Smoke, Kung-Fu Master, Gyruss) and
+  larger leaves in Bubble Bobble: logic -1.4..-3.5%; `fast_forms` + `call_summaries` in Galaga '88 (-3.4%) and
+  Splatterhouse (-7.1%).  Logic tests then skip the 64 bytes below SP (inlined calls write no return address).
+* No flags kept at an idle hook whose flags the interrupt handler never reads (Black Tiger 00D4): logic -2.5%.
+* Natives where the profile is concentrated: 1943's task kernel scan (24% of the translated code): logic -5.2%.
+
+**Measured dead ends:** merging overlapping sprite restores (Black Tiger 32.8% duplicate words, exact but +0.8%; as
+R-Type); halftone restores where backgrounds have no one-colour or 16 x 4 periodic areas (1943, Gun.Smoke, Commando,
+Trojan: 0-2.6% of the words).  Interrupt-time loops whose flags reach the interrupted code (1943's timer loop through
+`ex af,af'`) are no easy natives.
+
+**Biggest remaining costs found** (for later work or the user's choices): parallax recompositions (Trojan's far
+background 22% of play pictures, Moon Patrol's mountains, 1943's sea, Splatterhouse stage 2's wall, Dragon Spirit's
+four layers), star layers (Galaga '88, Galaga), Gauntlet's shadows (23% of a heavy picture), 1943's full-band redraws
+when the scroll alternates every tick (15% of its picture cycles), sound drivers (Gyruss 39% of its logic).
+
+**Mr. HELI (M72, 2026-11-02..07):** the i8751 after the boot is a native model (`games/mrheli/src/mcu.s`), exact
+at every V30 read; the boot is not (the MCU places code at an address set by the cycle it saw the V30's write), so the
+port starts from a snapshot after frame 484.  The game's protection command and the call into the code it copies
+need a frame between them.
+
 ## Port completion claims
 
 For every port, automated exploration can attempt full progression after its

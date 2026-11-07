@@ -28,7 +28,7 @@ variables select the tools).
 ## Renderers of the ports
 
 The table covers the registered ports in `port.py list`. Splatterhouse and Galaga '88 have standalone runtimes
-and renderer tests; Mr. HELI uses the shared M72 renderer in a harness. Their READMEs and local tools describe
+and renderer tests; Mr. HELI has an STE program on the shared M72 renderer (not registered yet). Their READMEs and local tools describe
 current limitations; the other game folders contain reference/board work. See `docs/sprite-preparation.md` for
 which preparation experiments have actually been measured.
 
