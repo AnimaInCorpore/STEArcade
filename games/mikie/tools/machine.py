@@ -179,3 +179,58 @@ if __name__ == "__main__":
     for _ in range(300):
         m.run_frame()
     print("300 frames in %.1f s, pc %04X, sound commands %d" % (time.time() - t, m.cpu.pc, len(m.sound_log)))
+
+
+class MikiePort(Mikie):
+    """The STE runtime's schedule (src/mikie.s), one call of run_frame_port an arcade frame.
+
+    The boot self-tests (RAM and ROM checks, the test grid: 692 frames) are skipped: the program starts at $6093 (the game's
+    own initialisation, DP $29, S $37FE) with a cleared RAM.  The foreground is a task loop ($61BC: LDX <$14; LDD ,X; ASLA;
+    BCC task; BSR $61C7; BRA $61BC: the queue at $2A40-$2A7F, an entry with bit 7 set is empty; $61C7 draws the
+    blinking cursor cells); some tasks wait for the next frame with CWAI #$EF ($6FFF).  The IRQ handler ($620A: at the
+    VBLANK while latch Q7 is 1) plays the game and queues the tasks.  The port's idle points: $61C5 (the BRA, reached
+    after $61C7, with the queue empty: an RTI can return there with tasks queued), where the IRQ is delivered with $61C5 as its return address, and the CWAI,
+    where the state is pushed already and the IRQ is taken.  The boot: from $6093 to the first idle point.
+    """
+    START = 0x6093
+    IDLE = 0x61C5
+    CWAI_PC = 0x6FFF
+    IRQ = 0x620A
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        c = self.cpu
+        c.pc, c.s, c.dp, c.cc = self.START, 0x3000, 0x30, 0x50
+        self.booted = False
+        self.irqs = 0
+
+    QPTR = 0x2914               # <$14 with DP $29
+
+    def waits(self):
+        """the task queue's entry at [<$14] has bit 7: empty"""
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until it waits: at the idle point or in a CWAI"""
+        from m6809 import CWAI
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE and self.waits() or c.wait == CWAI:
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def run_frame_port(self):
+        from m6809 import CWAI
+        c = self.cpu
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        if self.latch[7] and (c.wait == CWAI or not c.cc & 0x10):
+            c.set_irq(True)
+            c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.run_to_idle()
+        self.frame += 1
