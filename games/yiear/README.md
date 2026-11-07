@@ -11,7 +11,8 @@ the 320-pixel screen with the top and bottom borders open, sprites by generated 
 exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.
 Status: **Incomplete** (logic and picture exact in lock-step with the reference; short Hatari checks only; no
 full-game verification, cocktail flip not done).
-Speed: __SPEED__
+Speed: 96% of the arcade's rate (58.2 arcade frames a second), 34.2 pictures a second, with the sound (Hatari,
+`tools/hatari.ps1 -Sound 1`, 3,000 VBLs of the AUTOPLAY script, DEBUG build, 4 MB, 2026-11-07).
 
 ## Build and run
 
@@ -48,14 +49,21 @@ the third button, **Option** coin, **Pause** start.  DIP switches: MAME's defaul
 * **Logic**: exact against the reference's port schedule.  `tools/logic_test.py`: RAM $5000-$5FFF (sprite RAM and
   video RAM in it; the 64 bytes below the stack pointer are dead and left out), the control latch's NMI and IRQ
   enables, every sound write (SN76489A data, VLM5030 control and data) of the frame, the SN's register file and the
-  YM's registers against `tools/sound.py`.  __LOGIC__
-* **Picture**: exact in the shown colours.  `tools/render_test.py`: __RENDER__  `tools/sprite_test.py`: 148 made-up
+  YM's registers against `tools/sound.py`.  Seeds 1 (3,000 and 8,000 frames), 3 (8,000 and 20,000) and 9 (two players, 6,000) pass, and seed 5 (five lives, easy: its
+  own build) 12,000: attract, coin, start, random play to game overs and again.  The coverage's DIP seeds 10 and 11
+  (dual controls, service mode) were run in the reference only.
+* **Picture**: exact in the shown colours.  `tools/render_test.py`: 0 differences in 967 sampled pictures of seed 1's play and of seed 2's (frames 100-3000
+  every third) and in 1,425 of seed 2 (frames 300-6000 every fourth); `BLIT_STATS=256`: every pass HOG, the longest 128
+  bus cycles, none over 256.  `tools/sprite_test.py`: 148 made-up
   pictures exact (the right edge at every shift, the left edge, holes, flips, overlaps, the guard lines, 64 KB
   crossings, 60 pictures in a row with moving sprites and changing tiles).  The reference equals MAME (How it works).
 * **Sound**: the SN's registers and the YM's follow the model every frame; the VLM phrases start on the DMA sound at
-  ST's fall and stop at RST's rise (Hatari, __SOUND__).
-* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, 2,500 VBLs of the AUTOPLAY script: coin, start, moves and kicks):
-  attract, the "next opponent" screen, the fight with Buchu, game over; no crash, no late border event.
+  ST's fall and stop at RST's rise (Hatari with sound, `hatari.ps1 -Sound 1`: the AVI's audio track is silent for the 11 s of attract mode before the coin
+  and then has tones, noise and speech, the dominant frequencies of its half-second windows 100-1,700 Hz; no listening
+  comparison with the arcade was made).
+* **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, 2,500 and 3,000 VBLs of the AUTOPLAY script: coin, start, moves and
+  kicks): attract, the "next opponent" screen, the fight with Buchu, game over; no crash, late border events 0,
+  border fallbacks 2.
 * Not done, most important first: a full-game playthrough (the coverage's random play reaches the first opponents
   only: the later ones, the high-score entry and the bonus stages are translated from the program but not exercised);
   the cocktail flip (control bit 0: the reference stops at it); the VLM's real time (below); the service mode's screens
@@ -135,13 +143,27 @@ three loudest, a voice keeping its YM channel while chosen (Mr. Do!'s method as 
 becomes N x 4,000,000 / 1,536,000, the noise the YM noise period for the SN's shift rate, the attenuation (2 dB steps)
 the YM level.  The VLM5030's phrases the coverage started (`ref/cover.py` `phrases`) are rendered by `engine/vlm5030.py`
 (8,135 Hz), resampled to 12,517 Hz, 8 bits, mono, and start on the DMA sound when ST falls; RST rising while busy
-stops it.  Not done: the real VLM timing (the arcade's NMI handler spins at $C8C5 until BSY falls before it starts
-another phrase; in the arcade RST's reset cuts the old speech first, as here, so the game does not wait for it), the
-YM / DMA balance is a guess, the SN's periodic noise plays as white noise.
+stops it (the NMI handler's speech start, $C8BE, sets RST first, which resets the chip: the old phrase is cut as on the
+board).  Not done: the YM / DMA balance is a guess, the SN's periodic noise plays as white noise, a phrase's BSY is its
+length in arcade frames, not the chip's cycle-exact time.
 
 ## Speed
 
-__SPEEDTABLE__
+| Date | Setup | Logic | Pictures | Musashi cycles |
+|---|---|---|---|---|
+| 2026-11-07 | Hatari, `tools/hatari.ps1 -Frames 3000 -Sound 1` (AUTOPLAY: coin, start, moves and kicks), DEBUG build, 4 MB | 96%, 58.2 arcade frames a second | 34.2 a second (2,052 of 3,001 VBLs) | |
+| 2026-11-07 | the same without sound (2,500 VBLs, an earlier build) | 96%, 57.8 | 32.6 | |
+| 2026-11-07 | Musashi, `render_test.py 3000 --seed 1 --start 100 --every 3` (and seed 2) | | | logic with the sound 48.6k an arcade frame (seed 2: 48.2k; `logic_test.py`: 52-60k over 3,000-8,000 frames); a picture 78.9k CPU + 24.5k Blitter bus cycles (seed 2: 76.5k + 21.2k) |
+
+The logic is cheap (the whole IRQ handler plus eight NMIs is ~4,100 + 8 x 240 6809 cycles of 25,344); a picture is the
+cost.  What went into it: the playfield compare scans the 2 KB of video RAM every picture (512 longs); a screen change
+converts and draws its changed tiles once (first use per tile and flips).  Nothing was optimized beyond what Mario Bros.' and
+Track & Field's renderer already do; the pictures a second are the 50 Hz VBLs' share left after the logic.
+
+Measured, not kept: nothing.
+
+Techniques other ports use that may apply:
+[speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).
 
 ## Tests and tools
 

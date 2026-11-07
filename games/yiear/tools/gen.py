@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / "engine")]
 import m6809x
+import m6809dis
 from machine import YieArPort, load
 from paths import build_dir, require_coverage
 
@@ -125,10 +126,32 @@ def page_bases(lines, prog, code):
     return out
 
 
+def static_io_sites(code, io):
+    """the translated instructions with a static address in the I/O ($0000-$4FFF) or the unmapped space ($6000-$7FFF)
+    that the coverage's io sites lack (a path no run took: $8A47's coin counter store): they must go through main_io_r
+    / main_io_w too"""
+    mem = image()[0]
+    out = set()
+    for pc in code:
+        ins = m6809dis.decode(lambda a: mem[a], pc, 0x51)
+        if ins.mode in ("ext", "dir") and ins.arg is not None:
+            a = ins.arg if ins.mode == "ext" else 0x5100 | ins.arg
+            if (a < 0x5000 or 0x6000 <= a < 0x8000) and pc not in io:
+                out.add(pc)
+    return out
+
+
 def generate():
     build = build_dir("yiear")
-    prog = program(load_cover())
+    cover = load_cover()
+    prog = program(cover)
     lines, rep, em, code = m6809x.translate(prog)
+    extra = static_io_sites(code, cover[4])
+    if extra:
+        print("static I/O sites the coverage did not take: %s" % " ".join("%04X" % pc for pc in sorted(extra)))
+        cover[4].update(extra)
+        prog = program(cover)
+        lines, rep, em, code = m6809x.translate(prog)
     seen = [u for u in rep["unsupported"] if int(u.split()[0], 16) in prog.exec_cover]
     if seen:
         raise RuntimeError("observed instructions cannot be translated: %s" % seen)
