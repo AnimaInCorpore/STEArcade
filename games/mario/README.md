@@ -7,8 +7,10 @@ sound MCU (M58715, internal ROM not dumped) with discrete sound.  256 x 224, hor
 
 State (2026-11-07): the picture runs on the STE (Hatari: title, attract, play; 1800 VBLs with `-D AUTOPLAY=1`: 56 arcade
 frames a second of 59, 29 pictures a second) and equals the reference through the fitted 16-colour palette in the
-simulator (`tools/render_test.py`: seeds 1, 2, 5, 3000 frames each, 0 differing pixels).  **No sound** (the build defines
-NOSOUND), no `tools/sprite_test.py` yet, no full-game verification, no speed work (a picture is ~113k CPU cycles + ~45k
+simulator (`tools/render_test.py`: seeds 1, 2, 5, 3000 frames each, 0 differing pixels).  Sound: the board's output recorded in MAME and played on the DMA
+channel (`src/sound.s`: the tunes and effects the game commands; one clip at a time, the newest wins; the walk pulses are silent
+in MAME's netlist and not played); checked in the simulator only (`tools/sound_test.py`: the DMA registers name the
+clip each command starts), not listened to in Hatari.  No `tools/sprite_test.py` yet, no full-game verification, no speed work (a picture is ~113k CPU cycles + ~45k
 Blitter bus cycles).
 
 ```sh
@@ -17,6 +19,7 @@ python games/mario/ref/cover_pens.py <seed> 12000   # (seeds 1-6) the colour fit
 python games/mario/tools/build.py           # -> run/mario/MARIO.PRG   (--sim: run/mario_sim for the tests; -D AUTOPLAY=1)
 python games/mario/tools/logic_test.py 3000 # lock-step translation vs reference
 python games/mario/tools/render_test.py 3000 --seed 1 --start 100 --every 3   # the STE picture vs the reference
+python games/mario/tools/sound_test.py 3000 --seed 5       # the sound driver vs the game's commands (clips: tools/sound_capture.py --all, MAME)
 powershell -ExecutionPolicy Bypass -File games/mario/tools/hatari.ps1 -Frames 1800   # Hatari, hidden: AVI, stills, counters
 ```
 
@@ -48,6 +51,6 @@ port 0 player 2; Jaguar pads as the other ports.
 
 ## Next
 
-Sound (recorded from MAME: the M58715 sound MCU and discrete effects), `tools/sprite_test.py` (edges, 16 shifts, holes,
+`tools/sprite_test.py` (edges, 16 shifts, holes,
 64 KB crossings), speed (the picture's 113k cycles), a coverage that reaches the later phases, the `tools/release.py` list
 and the main README's rows, full-game checks (`docs/port-status.md`).
