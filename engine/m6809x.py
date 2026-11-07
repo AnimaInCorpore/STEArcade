@@ -201,7 +201,7 @@ class Program:
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
         self.a3_slot, self.a4_slot = a3_slot, a4_slot     # the slots whose VB a3 / a4 hold (a3: DP's and the stack's)
-        assert a3_slot <= 3 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot
+        assert a3_slot <= 7 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot   # (a3 in slot 4: Juno First, flat bases)
         self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
         self.pid_checks = pid_checks              # page checks compare the slot's page number (PID) instead of PB
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None

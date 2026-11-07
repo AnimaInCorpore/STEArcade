@@ -213,3 +213,49 @@ if __name__ == "__main__":
     for _ in range(300):
         m.run_frame()
     print("300 frames in %.1f s, pc %04X, sound commands %d" % (time.time() - t, m.cpu.pc, len(m.sound_log)))
+
+
+class JunoPort(Juno):
+    """The STE runtime's schedule (src/junofrst.s), one call of run_frame_port an arcade frame.
+
+    The foreground is a task loop: $A010 LDX <$72; LDD ,X; ASLA; BCS $A010 (the queue at $8900-$893F, its read
+    pointer at $8872; an entry with bit 7 set is empty); the IRQ handler ($A00A: JMP $A5D0, every other frame while
+    latch Q0 is 1) plays the game and queues the tasks.  The port's idle point is $A010 with an empty queue: there the
+    IRQ is delivered with $A010 as its return address; after its RTI the foreground runs the queued tasks until the
+    queue is empty again.  A frame without IRQ runs nothing.  The boot: from the reset to the first idle.
+    """
+    IDLE = 0xA010
+    IRQ = 0xA00A
+    QPTR = 0x8872
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.booted = False
+        self.irqs = 0
+
+    def waits(self):
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until the task queue is empty at the idle point"""
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE and self.waits():
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def run_frame_port(self):
+        c = self.cpu
+        if not self.booted:
+            self.run_to_idle()
+            self.booted = True
+        self.toggle ^= 1
+        if self.toggle and self.latch[0] and not c.cc & 0x10:
+            c.set_irq(True)
+            c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.run_to_idle()
+        self.frame += 1
