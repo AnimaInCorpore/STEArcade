@@ -32,7 +32,7 @@ python games/jailbrek/ref/mame_cmp_jailbrek.py [frame ...]  # the reference agai
 
 Supply `assets/roms/jailbrek.zip` (MAME's parent set; `docs/rom_manifest.json` has the files' sizes, CRCs and
 SHA-1s).  Nothing ROM-derived is in git: the graphics, colours and ROM image are made into `build/jailbrek/` and
-assembled into the program.  The program is about 2.7 million bytes (the program 2,440,329 bytes, plus its BSS) to load (`tools/release.py` MAX_LOAD 3,700,000).  Paths
+assembled into the program.  The program is 3,317,500 bytes (text + data + BSS + 256) to load (`tools/release.py` MAX_LOAD 3,700,000).  Paths
 are relative to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the repository's.
 
 ## Controls
