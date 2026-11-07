@@ -26,6 +26,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "engine"))
 from paths import EXTRACTED
 from m6809 import M6809
+from vlm5030 import VLM5030
 import mamegfx as G
 
 CPU_HZ = 1536000
@@ -112,7 +113,9 @@ class YieAr:
         self.sound_log = []                        # (frame, kind, value): SN76489A data, VLM control, VLM data
         self.watchdog = 0
         self.frame = 0
-        self.vlm_busy = 0
+        self.vlm = VLM5030(load('407_c09.8b'))      # (only BSY matters here; tools/sound.py renders the speech)
+        self.vlm_data = 0
+        self.vlm_done = 0                         # samples rendered
         self.cpu = M6809(self.rd, self.wr)
         self.video = None
         self.cpu.reset()
@@ -136,7 +139,8 @@ class YieAr:
         if a == 0x4D00:
             return self.dsw3
         if a == 0:
-            return self.vlm_busy
+            self.vlm_update()
+            return self.vlm.bsy_r()
         return 0
 
     def wr(self, a, v):
@@ -154,10 +158,27 @@ class YieAr:
             self.sound_log.append((self.frame, 'sn', self.sn_latch))
         elif a == 0x4A00:
             self.sound_log.append((self.frame, 'vc', v))
+            self.vlm_update()
+            self.vlm.data_w(self.vlm_data)
+            self.vlm.st_w(v >> 1 & 1)
+            self.vlm.rst_w(v >> 2 & 1)
         elif a == 0x4B00:
             self.sound_log.append((self.frame, 'vd', v))
+            self.vlm_data = v
         elif a == 0x4F00:
             self.watchdog += 1
+
+    def vlm_time(self):
+        """the time of a VLM access in CPU cycles"""
+        return self.cpu.cycles
+
+    def vlm_update(self):
+        """the VLM5030 rendered up to now (one sample per 440 chip clocks of 3.579545 MHz); an idle chip is skipped"""
+        n = self.vlm_time() * 3579545 // (CPU_HZ * 440)
+        if n > self.vlm_done:
+            if self.vlm.phase != 1:                  # (PH_IDLE)
+                self.vlm.render(n - self.vlm_done)
+            self.vlm_done = n
 
     def run_frame(self):
         """Runs to the next VBLANK and starts it (IRQ when enabled): the state MAME's frame_done callback sees."""
@@ -189,3 +210,88 @@ if __name__ == "__main__":
     for _ in range(300):
         m.run_frame()
     print("300 frames in %.1f s, pc %04X, sound writes %d" % (time.time() - t, m.cpu.pc, len(m.sound_log)))
+
+
+class YieArPort(YieAr):
+    """The STE runtime's schedule (src/yiear.s), one call of run_frame_port an arcade frame.
+
+    The boot self-tests (RAM, ROM checksum: about 50 frames, interrupts off) are run once without the interrupts, up to
+    the jump to $8000 (ENTRY); the port starts there.  The foreground is a task loop: $807C LDX <$DA; LDD ,X; ASLA;
+    BCS $807C (the queue at $52C0-$52FF, its read pointer at $51DA; an entry with bit 7 set is empty); the IRQ
+    handler ($897D) plays the game and queues the tasks, the NMI handler ($C78E, eight a frame in the arcade: the
+    music tempo) plays the sound channels.  The port's idle point is $807C with an empty queue: there the eight NMIs
+    are delivered one after the other (while the control latch's bit 1 is 1), then the IRQ (bit 2, with I clear) with
+    $807C as the return address; after the IRQ's RTI the foreground runs the queued tasks until the queue is empty.
+    """
+    ENTRY = 0x8000
+    IDLE = 0x807C
+    IRQ = 0x897D
+    NMI = 0xC78E
+    QPTR = 0x51DA
+    NMIS = 8
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.booted = False
+        self.irqs = self.nmis = 0
+        self.c0 = 0
+        self.nmi_cycles = self.irq_cycles = 0
+
+    def vlm_time(self):
+        # the port has no time between its frames: a frame is FRAME cycles, plus what the frame's work has run so far
+        return self.frame * FRAME + self.cpu.cycles - self.c0
+
+    def waits(self):
+        m = self.mem
+        return m[(m[self.QPTR] << 8) | m[self.QPTR + 1]] & 0x80 != 0
+
+    def boot(self):
+        c = self.cpu
+        n = 0
+        while c.pc != self.ENTRY:
+            c.step()
+            n += 1
+            if n > 40000000:
+                raise RuntimeError('the self-test did not end (pc %04X)' % c.pc)
+
+    def run_to_idle(self, limit=20000000):
+        """the foreground (at least one instruction) until the task queue is empty at the idle point"""
+        c = self.cpu
+        for _ in range(limit):
+            c.step()
+            if c.pc == self.IDLE and self.waits():
+                return
+        raise RuntimeError('the foreground did not wait (pc %04X, frame %d)' % (c.pc, self.frame))
+
+    def run_frame_port(self):
+        c = self.cpu
+        self.c0 = c.cycles
+        if not self.booted:
+            self.boot()
+            self.c0 = c.cycles                        # (the boot's time is not the game's)
+            self.run_to_idle()
+            self.booted = True
+        if self.control & 4 and not c.cc & 0x10:
+            t = c.cycles
+            c.set_irq(True)
+            c.step()                                  # (the entry: the state pushed, I set, PC = the vector)
+            assert c.pc == self.IRQ, hex(c.pc)
+            self.irqs += 1
+            self.run_to_idle()
+            self.irq_cycles += c.cycles - t
+        for _ in range(self.NMIS):
+            if not self.control & 2:
+                break
+            t, s = c.cycles, c.s
+            c.set_nmi(True)
+            c.step()
+            assert c.pc == self.NMI, hex(c.pc)
+            self.nmis += 1
+            for _ in range(2000000):
+                c.step()
+                if c.pc == self.IDLE and c.s == s:
+                    break
+            else:
+                raise RuntimeError('the NMI handler did not return (pc %04X, frame %d)' % (c.pc, self.frame))
+            self.nmi_cycles += c.cycles - t
+        self.frame += 1
