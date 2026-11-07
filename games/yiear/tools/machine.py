@@ -199,6 +199,11 @@ class YieAr:
                 break
         self.frame += 1
 
+    def video_raw(self):
+        if self.video is None:
+            self.video = Video()
+        return self.video.render_raw(self.mem, bool(self.control & 1))
+
     def render_rgb(self):
         if self.video is None:
             self.video = Video()
@@ -241,7 +246,12 @@ class YieArPort(YieAr):
 
     def rd(self, a):
         if a == 0:
-            return int(self.vbusy and (self.vend is None or self.frame < self.vend))
+            if self.vbusy and self.vend is not None:
+                # the game waits for BSY to fall ($C8C5, in an NMI) before it starts the next phrase: a loop that
+                # would never end here (no time passes between frames), so the phrase ends at this read
+                if self.frame >= self.vend or 0xC8C5 <= self.cpu.pc <= 0xC8C8:
+                    self.vbusy = False
+            return int(self.vbusy)
         return super().rd(a)
 
     def wr(self, a, v):
@@ -273,6 +283,7 @@ class YieArPort(YieAr):
             n += 1
             if n > 40000000:
                 raise RuntimeError('the self-test did not end (pc %04X)' % c.pc)
+        del self.sound_log[:]                       # (the self-test's SN76489A silencing is not the port's)
 
     def run_to_idle(self, limit=20000000):
         """the foreground (at least one instruction) until the task queue is empty at the idle point"""

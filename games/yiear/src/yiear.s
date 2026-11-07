@@ -89,6 +89,8 @@ start:
 .mark:	move.l	#$A5A5A5A5,(a0)+
 	dbf	d0,.mark
 
+	bsr	init_hardware
+	bsr	init_render
 
 	bsr	init_main
 	lea	main_ctx,a6
@@ -100,6 +102,7 @@ start:
 	move.b	#$FF,io_dsw3		; DSW3: no flip, single controls, no service
 	ifd DSW2
 	move.b	#DSW2,io_dsw2
+	move.b	#DSW3,io_dsw3
 	endc
 	move.b	#$FF,io_sys
 	move.b	#$FF,io_in1
@@ -319,6 +322,33 @@ vbl:
 	jp_merge	in_in1,io_in1,1
 	jp_merge	in_in2,io_in2,2
 	endc
+	ifd AUTOPLAY				; (benchmark build: coin, start, then moves and kicks; period 4000 arcade frames)
+	move.l	d2,-(sp)			; (d2 is the 6809's X: kept)
+	moveq	#0,d0
+	move.w	isr_count,d0
+	divu	#4000,d0
+	swap	d0
+	cmp.w	#300,d0
+	blo.s	.ap1
+	cmp.w	#304,d0
+	bhs.s	.ap1
+	move.b	#$FE,io_sys			; coin 1
+.ap1:	cmp.w	#360,d0
+	blo.s	.ap2
+	cmp.w	#364,d0
+	bhs.s	.ap2
+	move.b	#$F7,io_sys			; start 1
+.ap2:	cmp.w	#420,d0
+	blo.s	.ap3
+	move.w	d0,d2
+	lsr.w	#4,d2
+	and.w	#7,d2
+	move.b	.ap_tab(pc,d2.w),io_in1
+	bra.s	.ap3
+.ap_tab:
+	dc.b	$FD,$ED,$DD,$FE,$FB,$E7,$EF,$DF	; right, right+kick, right+punch, left, up, down+kick, kick, punch
+.ap3:	move.l	(sp)+,d2
+	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
 	bpl.s	.ph
@@ -527,8 +557,15 @@ main_io_r:
 	rts
 .low:	tst.w	d7
 	bne.s	.zero
-	moveq	#0,d7			; $0000: the VLM5030's BSY
-	move.b	vlm_busy,d7
+	moveq	#0,d7			; $0000: the VLM5030's BSY.  A read with ST low while it is up ends the phrase there: the
+	tst.b	vlm_busy		; game waits for BSY to fall ($C8C5, in an NMI) before the next phrase, and no time
+	beq.s	.zero			; passes here between frames (machine.YieArPort.rd)
+	tst.b	vlm_st
+	bne.s	.busy
+	clr.b	vlm_busy
+	clr.b	vlm_left
+	rts
+.busy:	moveq	#1,d7
 	rts
 .zero:	moveq	#0,d7
 	rts

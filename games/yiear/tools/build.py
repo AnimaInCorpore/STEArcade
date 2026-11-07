@@ -21,9 +21,16 @@ def main():
     ap.add_argument('--assets', action='store_true', help='make the graphics and colours again')
     ap.add_argument('--frames', type=int, default=0)
     ap.add_argument('-D', dest='defines', action='append', default=[])
+    ap.add_argument('--dsw2', type=lambda x: int(x, 0), help='the DIP switches SW2 (default $5B)')
+    ap.add_argument('--dsw3', type=lambda x: int(x, 0), help='the DIP switches SW3 (default $FF)')
     ap.add_argument('--tag', help='another run/<tag> folder (default yiear / yiear_sim)')
     args = ap.parse_args()
     build = build_dir('yiear')
+    if args.dsw2 is not None or args.dsw3 is not None:
+        d2 = 0x5B if args.dsw2 is None else args.dsw2
+        d3 = 0xFF if args.dsw3 is None else args.dsw3
+        gen.DIPS = (0xFF, d2, d3)
+        args.defines += ['DSW2=$%02X' % d2, 'DSW3=$%02X' % d3]
     if not (EXTRACTED / 'yiear' / gen.ROM_FILES[0]).exists():
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'prepare.py')], check=True)
     (build / 'yiear.img').write_bytes(gen.image()[0])

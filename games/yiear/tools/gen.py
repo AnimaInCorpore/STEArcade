@@ -27,16 +27,20 @@ NATIVES = {YieArPort.IDLE: "ya_idle"}
 ROM_FILES = ("407_i08.10d", "407_i07.8d")
 
 
+DIPS = ()                       # (DSW1, DSW2, DSW3) of a build with other DIP switches (build.py --dsw2 / --dsw3): the
+                                # self-test leaves RAM that depends on them
+
+
 def image():
     """the 64 KB at the entry: the reference's memory after the self-test (the RAM as it leaves it, the ROM); the
     registers are in start_regs()"""
-    m = YieArPort()
+    m = YieArPort(*DIPS)
     m.boot()
     return bytes(m.mem), m.cpu
 
 
 def start_regs():
-    m = YieArPort()
+    m = YieArPort(*DIPS)
     m.boot()
     c = m.cpu
     return dict(a=c.a, b=c.b, x=c.x, y=c.y, u=c.u, s=c.s, cc=c.cc, dp=c.dp)

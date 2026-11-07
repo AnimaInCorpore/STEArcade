@@ -97,10 +97,9 @@ def main():
     rnd = random.Random(seed)
     m = YieArPort(*dsws(seed))
     m.boot()                                         # (the self-test is not covered)
-    m.c0 = m.cpu.cycles
-    m.run_to_idle()
-    m.booted = True
     cov = Cover6809(m.cpu, io=io)
+    m.run_to_idle()                                  # (the init from $8000 is)
+    m.booted = True
     video = Video()
     pens = collections.Counter()
     sprites = collections.Counter()
