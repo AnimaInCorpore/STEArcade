@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
-No sound yet (src/rocnrope.s defines NOSOUND).
+-D NOSOUND=1: without the sound driver (tools/sndgen.py, src/sound.s; it needs ref/cover_sound.py's coverage).
 """
 from pathlib import Path
 import argparse
@@ -41,6 +41,16 @@ def main():
                                                        indent=1, default=str) + '\n')
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
+    if not any(d.startswith('NOSOUND') for d in defs):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))     # (assets put Gyruss' tools first)
+        for m in ('sndgen', 'sound'):
+            sys.modules.pop(m, None)
+        import sndgen                         # (the sound: games/rocnrope/ref/cover_sound.py's coverage)
+        (build / 'snd.rom').write_bytes(sndgen.image()[:0x2000])
+        stext, srep = sndgen.generate()
+        (build / 'snd_code.s').write_text(stext)
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']), 'helpers', srep['helpers'])
     tag = args.tag or ('rocnrope_sim' if args.sim else 'rocnrope')
     out = ROOT / 'run' / tag / 'ROCNROPE.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

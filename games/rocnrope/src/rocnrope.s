@@ -24,9 +24,6 @@ FRAMES = 0
 
 KEY_ESC = $01
 
-	ifnd NOSOUND
-NOSOUND = 1				; (no sound yet: the commands are logged in snd_ring only)
-	endc
 
 ; Border removal and the palette: engine/rt/borders.s (the picture's 224 lines, black above and below).
 	ifnd TA_DATA
@@ -988,7 +985,9 @@ vbl_phase:	ds.b	1
 render_skips:	ds.b	1
 frame_dirty:	ds.b	1		; an arcade frame ran since the last picture
 snd_head:	ds.b	1
+	ifd NOSOUND
 snd_latch:	ds.b	1		; the sound latch ($8100)
+	endc
 rr_latch:	ds.b	8		; the LS259's Q0-Q7 ($8080-$8087: Q0 flip, Q1 the sound trigger, Q7 the IRQ enable)
 io_sys:		ds.b	1		; what the program reads: SYSTEM, IN0, IN1, DSW1 ($1280-$1283), DSW2 ($1200)
 io_in0:		ds.b	1
