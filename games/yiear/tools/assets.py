@@ -29,7 +29,7 @@ import sprite_programs as sp
 BUILD = build_dir('yiear')
 CODES = 512                                 # sprite codes (the key: code << 8 | colour << 2 | flip x << 1 | flip y)
 PREFIX = 'ya'
-SHARE = 1.0                                 # code for the most drawn shapes up to this share of the coverage's draws
+SHARE = 0.99                                 # code for the most drawn shapes up to this share of the coverage's draws
 
 
 def coverage():

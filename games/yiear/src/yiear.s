@@ -350,7 +350,25 @@ vbl:
 	bra.s	.ap3
 .ap_tab:
 	dc.b	$FD,$ED,$DD,$FE,$FB,$E7,$EF,$DF	; right, right+kick, right+punch, left, up, down+kick, kick, punch
-.ap3:	move.l	(sp)+,d2
+.ap3:	ifd STAGE				; (MAME's cheats, as ref/cover.py seeds 12-24: the stage chosen at the start, lives 9, the opponent's
+						; energy cleared every 512th frame: -D STAGE=n -D STAGEBCD=$nn -D FINISH=1)
+	tst.b	ya_mem+$5431
+	bne.s	.st1
+	cmp.b	#1,ya_mem+$5432
+	bne.s	.st1
+	move.b	#STAGE-1,ya_mem+$5431
+	move.b	#STAGEBCD,ya_mem+$5432
+.st1:	move.b	#9,ya_mem+$5430
+	ifd FINISH
+	move.w	isr_count,d0
+	and.w	#511,d0
+	cmp.w	#300,d0
+	bne.s	.st2
+	clr.b	ya_mem+$508A
+.st2:
+	endc
+	endc
+	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase

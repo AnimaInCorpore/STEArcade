@@ -95,6 +95,12 @@ class Harness:
         m.system, m.in1, m.in2 = cover.inputs(f, self.rnd, self.state)
         for n, v in (('io_sys', m.system), ('io_in1', m.in1), ('io_in2', m.in2)):
             mem.w8(sym[n], v)
+        before = bytes(m.mem[0x5000:0x6000])
+        cover.cheats(self.seed, f, m, self.state)
+        after = bytes(m.mem[0x5000:0x6000])
+        for i in range(0x1000):
+            if before[i] != after[i]:
+                mem.w8(sym['ya_mem'] + 0x5000 + i, after[i])
         mem.w8(sym['vbl_pending'], 1)
         m.run_frame_port()
         m.frame = f

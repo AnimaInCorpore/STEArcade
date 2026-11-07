@@ -22,6 +22,8 @@ from paths import ROOT, build_dir
 import cover
 
 BUILD = build_dir('yiear')
+import os
+TRACE = int(os.environ.get('TRACE', '-2'))
 AREAS = ((0x5000, 0x6000),)
 
 
@@ -74,8 +76,10 @@ def main():
     snd = [0]
     sn, ym = S.SN(), S.YM()
     has_sound = 'snd_sn' in sym
+    vst, vdata, phrases = 0, 0, [0]
 
     def compare(f):
+        nonlocal vst, vdata
         sp = m.cpu.s
         for lo, hi in AREAS:
             want = bytes(m.mem[lo:hi])
@@ -83,7 +87,7 @@ def main():
             diff = [lo + i for i in range(hi - lo) if want[i] != got[i] and not (sp - 64 <= lo + i < sp)]
             if diff:
                 raise RuntimeError('frame %d: %d RAM differences, ref pc %04x %s' % (
-                    f, len(diff), m.cpu.pc, [(hex(a), hex(got[a - lo]), hex(want[a - lo])) for a in diff[:12]]))
+                    f, len(diff), m.cpu.pc, [(hex(a), hex(got[a - lo]), hex(want[a - lo])) for a in diff[:60]]))
         ctl = mem.r8(sym['ya_ctl']) & 6
         if ctl != m.control & 6:
             raise RuntimeError('frame %d: control %02x, reference %02x' % (f, ctl, m.control))
@@ -102,12 +106,85 @@ def main():
             for fr, k, v in m.sound_log:
                 if fr == f and k == 'sn':
                     sn.write(v)
+            # the DMA's phrase: the one started last in this frame (ST falling), unless RST stopped it after
+            last = None
+            for fr, k, v in m.sound_log:
+                if fr != f:
+                    continue
+                if k == 'vd':
+                    vdata = v
+                elif k == 'vc':
+                    st = v >> 1 & 1
+                    if vst and not st:
+                        last = vdata
+                    elif v & 4 and last is not None:
+                        last = -1
+                    vst = st
+            if last is not None and last >= 0 and mem.r16(sym['snd_dma_last']) != last:
+                raise RuntimeError('frame %d: DMA phrase %d, reference %d' % (f, mem.r16(sym['snd_dma_last']), last))
+            phrases[0] += last is not None and last >= 0
             regs = [mem.r16(sym['snd_sn'] + 2 * i) for i in range(8)]
             if regs != sn.reg:
                 raise RuntimeError('frame %d: SN registers %s, model %s' % (f, regs, sn.reg))
             cache = list(mem.r_block(sym['snd_ym_cache'], 11))
             if cache != ym.cache[:11]:
                 raise RuntimeError('frame %d: YM registers %s, model %s' % (f, cache, ym.cache[:11]))
+
+    labels = {}
+    alias = {}                               # (instructions without code, NOP: labels at one address)
+    for k, v in sym.items():
+        if len(k) == 7 and k[0] == 'M' and all(c in '0123456789ABCDEF' for c in k[1:]):
+            labels.setdefault(v, []).append(int(k[1:], 16))
+
+    def trace_frame():
+        """TRACE=<frame>: that frame instruction by instruction, the reference's registers against the translation's at
+        each instruction label (the first difference is printed with the reference's last instructions)"""
+        log = []
+        step0 = m.cpu.step
+        c = m.cpu
+
+        def step():
+            log.append((c.pc, c.a, c.b, c.x, c.y, c.u, c.s))
+            return step0()
+        c.step = step
+        m.run_frame_port()
+        c.step = step0
+        resume()
+        i = 0
+        n = 0
+        hits = []
+        while n < 60_000_000:
+            cpu.execute(1)
+            n += 1
+            pc = cpu.r_pc()
+            if pc == done:
+                break
+            ps = labels.get(pc)
+            if ps is None or i >= len(log):
+                continue
+            while len(ps) > 1 and log[i][0] in ps and m.mem[log[i][0]] == 0x12 and i + 1 < len(log):
+                i += 1                       # (the NOPs before the label's instruction: no code, one address)
+            p6 = log[i][0] if log[i][0] in ps else ps[-1]
+            want = log[i]
+            hits.append((pc - s.base, i, p6))
+            got = (p6, cpu.r_reg(R.D0) & 255, cpu.r_reg(R.D1) & 255, cpu.r_reg(R.D2) & 0xFFFF, cpu.r_reg(R.D3) & 0xFFFF,
+                   cpu.r_reg(R.D4) & 0xFFFF, (cpu.r_reg(R.A5) - base) & 0xFFFF)
+            if p6 != want[0]:
+                if p6 in (w[0] for w in log[i:i + 4]):
+                    while log[i][0] != p6:
+                        i += 1
+                    continue
+                print('instruction %d: pc %04x, reference %04x' % (i, p6, want[0]))
+                print('STE label hits (address, index, pc):', [(hex(a), j, hex(q)) for a, j, q in hits[-8:]])
+                print('reference before:', ['%04x %02x %02x x%04x y%04x u%04x s%04x' % w for w in log[max(0, i - 6):i + 1]])
+                raise RuntimeError('trace: control flow differs')
+            if got != want:
+                print('instruction %d at %04x: got A %02x B %02x X %04x Y %04x U %04x S %04x, reference %02x %02x %04x %04x %04x %04x' % (
+                    (i, p6) + got[1:] + want[1:]))
+                print('previous reference:', ['%04x %02x %02x x%04x y%04x u%04x s%04x' % w for w in log[max(0, i - 6):i]])
+                raise RuntimeError('trace: registers differ')
+            i += 1
+        print('trace: %d instructions equal' % i)
 
     run_to({wait})
     m.frame = -1
@@ -124,7 +201,20 @@ def main():
         m.system, m.in1, m.in2 = cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_in1', m.in1), ('io_in2', m.in2)):
             mem.w8(sym[n], v)
+        before = bytes(m.mem[0x5000:0x6000])
+        cover.cheats(args.seed, f, m, state)
+        after = bytes(m.mem[0x5000:0x6000])
+        for i in range(0x1000):
+            if before[i] != after[i]:
+                mem.w8(base + 0x5000 + i, after[i])
         mem.w8(sym['vbl_pending'], 1)
+        if f == TRACE:
+            trace_frame()
+            m.frame = f
+            compare(f)
+            resume()
+            run_to({wait})
+            continue
         m.run_frame_port()
         m.frame = f
         resume()
@@ -136,6 +226,7 @@ def main():
         run_to({wait})
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact' % (f + 1), flush=True)
+    print('%d VLM phrases started and followed on the DMA' % phrases[0])
     print('PASS: %d frames (seed %d), RAM, video RAM, control latch and sound writes exact' % (args.frames, args.seed))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 

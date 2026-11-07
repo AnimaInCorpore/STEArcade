@@ -7,6 +7,11 @@ ROM's reads; the boot self-test is not covered: the port starts at $8000);
 pens: the pens' pixel counts of the reference pictures (every 8th frame); sprites: Counter of (code, flip x, flip y)
 entries; phrases: Counter of the VLM5030 phrases started (data bytes); frames, seed.
 
+Seeds 12-22 start stage 1-11 by MAME's cheat (yiear.xml: $5431/$5432 = the stage word 0x0001 -> n-1, n in BCD; lives $5430
+= 9; the player's energy $508C = 8 every 300 frames; the opponent's $508A = 0 finishes the stage) with infinite lives and energy and a
+stage finished every 900 frames (the stages after it too, to round 99 and over); 23-24 stage 1 with the finishing every
+500 frames (all stages in one run); 25-26 stage 4 / 9 only (no lives or energy cheat: deaths and game overs inside later stages).
+
 Seeds: 1-4 attract, coin, start, random play (moves and kicks / punches in changing modes) to the game over and
 again; 5-8 the same with 5 lives and the easy setting (further opponents); 9 two players; 10 the other DIP switches
 (2 lives, bonus 40000 90000, very difficult, demo sounds off, dual controls: player 2's inputs are read);
@@ -84,6 +89,28 @@ def inputs(frame, rnd, state):
     return system, in1, (in1 if two else 0xFF)
 
 
+def cheats(seed, frame, m, state):
+    mem = m.mem
+    if seed < 12:
+        return
+    if seed not in (25, 26):
+        mem[0x5430] = 9                              # infinite lives
+    if mem[0x5431] == 0 and mem[0x5432] == 1 and seed <= 22:
+        n = seed - 11 if seed <= 21 else 1
+        n = {22: 11}.get(seed, n)
+        mem[0x5431], mem[0x5432] = n - 1, (n // 10) << 4 | n % 10
+    if seed in (25, 26):
+        if mem[0x5431] == 0 and mem[0x5432] == 1:
+            n = 4 if seed == 25 else 9
+            mem[0x5431], mem[0x5432] = n - 1, (n // 10) << 4 | n % 10
+        return
+    if frame % 300 == 0:
+        mem[0x508C] = 8                              # the player's energy (as MAME's cheat: now and then)
+    every = 500 if seed in (23, 24) else 900
+    if frame % every == every // 2 and state.get('phase') == 'play':
+        mem[0x508A] = 0                              # finish this stage now
+
+
 def io(a, rw):
     """the accesses the translation sends through the runtime: the I/O ($0000, $4000-$4FFF), the unmapped space and
     stores to the ROM; RAM ($5000-$5FFF, the video RAM too: render.s compares it with what it drew) and the ROM's
@@ -107,6 +134,7 @@ def main():
     mem = m.mem
     for frame in range(frames):
         m.system, m.in1, m.in2 = inputs(frame, rnd, state)
+        cheats(seed, frame, m, state)
         m.run_frame_port()
         for o in range(0, 0x30, 2):
             attr = mem[0x5000 + o]
