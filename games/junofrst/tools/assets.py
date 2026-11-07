@@ -13,8 +13,51 @@ from pathlib import Path
 import sys
 import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
+import glob
+import pickle
 from machine import pens, load, BLIT
 from paths import build_dir
+
+CH_T, CH_N = chr(9), chr(10)
+LINE_REC = 20                 # a prepared line: the two mask words, then the plane words (plane 0 w0 w1, plane 1 ...)
+SHIFT_REC = 16 * LINE_REC
+
+
+def image_sources(rom):
+    """the source nibble addresses with a prepared image: every 256-aligned image of the ROM that is not empty, and the
+    sources the coverage runs' blits used (ref/cover.py: `blits`)"""
+    nib = np.zeros(len(rom) * 2 + 4096, np.uint8)
+    nib[0:len(rom) * 2:2] = np.frombuffer(rom, np.uint8) >> 4
+    nib[1:len(rom) * 2:2] = np.frombuffer(rom, np.uint8) & 15
+    out = {a for a in range(0, len(rom) * 2, 256) if nib[a:a + 256].any()}
+    for f in glob.glob(str(build_dir('junofrst') / 'cover[0-9]*.pkl')):
+        out |= {src for (src, copy) in pickle.loads(open(f, 'rb').read())['blits']}
+    return sorted(out), nib
+
+
+def prepare_image(nib, src):
+    """16 shifts x 16 lines x (mask w0, mask w1, 4 planes x (w0, w1)).  Line k of the blit (a screen line: the blit's
+    pixel column k) holds the pixels of its 16 rows (the screen columns c0 .. c0 + 15) at bit 15 - (s + row) of the
+    32-pixel field of two groups; the shift s = c0 & 15."""
+    img = nib[src:src + 256].reshape(16, 16)            # [row, column k]
+    out = bytearray()
+    for s in range(16):
+        for k in range(16):
+            mask = [0, 0]
+            planes = [[0, 0] for _ in range(4)]
+            for row in range(16):
+                n = int(img[row, k])
+                if not n:
+                    continue
+                pos = s + row
+                w, bit = pos >> 4, 15 - (pos & 15)
+                mask[w] |= 1 << bit
+                for j in range(4):
+                    if n >> j & 1:
+                        planes[j][w] |= 1 << bit
+            words = mask + [x for pl in planes for x in pl]
+            out += b''.join(w.to_bytes(2, 'big') for w in words)
+    return bytes(out)
 
 
 def ste_word(c):
@@ -31,8 +74,25 @@ def build():
         lines.append('\tdc.w ' + ','.join('$%03X' % w for w in words[i:i + 16]))
     lines += ['jf_blitrom:\tincbin "blitrom.bin"', '\teven']
     (b / 'jf_assets.s').write_text('\n'.join(lines) + '\n')
-    (b / 'blitrom.bin').write_bytes(b''.join(load(n) for n in BLIT))
-    print('assets: 256 palette bytes, blitter ROM %d bytes' % (0x6000))
+    rom = b''.join(load(n) for n in BLIT)
+    (b / 'blitrom.bin').write_bytes(rom)
+    srcs, nib = image_sources(rom)
+    data = bytearray()
+    offs = {}
+    for src in srcs:
+        offs[src] = len(data)
+        data += prepare_image(nib, src)
+    (b / 'blitimg.bin').write_bytes(bytes(data))
+    tab = ['; the prepared blit images by source nibble address / 4 (0: none)', '	even', 'jf_blitimg:']
+    row = []
+    for i in range(0x4000):
+        row.append('jf_bimg+%d' % offs[i * 4] if i * 4 in offs else '0')
+        if len(row) == 16:
+            tab.append(CH_T + 'dc.l ' + ','.join(row))
+            row = []
+    tab += ['jf_bimg:' + CH_T + 'incbin "blitimg.bin"', CH_T + 'even']
+    (b / 'jf_blitimg.s').write_text(CH_N.join(tab) + CH_N)
+    print('assets: 256 palette bytes, blitter ROM %d bytes, %d prepared blit images (%d bytes)' % (len(rom), len(srcs), len(data)))
 
 
 if __name__ == '__main__':

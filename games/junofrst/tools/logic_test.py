@@ -51,15 +51,19 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--render', action='store_true', help='draw (render_frame) and compare the published buffer and palette too')
+    ap.add_argument('--profile', action='store_true', help='where the 68000 cycles go (a sample every 200 cycles)')
     ap.add_argument('--trace', type=int, default=-1, help='compare the executed instructions of this frame')
     ap.add_argument('--tag', default='junofrst_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
-    s = Sim(str(run / 'JUNOFRST.PRG'), run_dir=run, **({'ram_kib': 16384} if args.render else {}))   # (16 MB: the Blitter's registers read back)
-    if not args.render:
-        s.mem.set_trace_mode(False)      # (the hardware registers are not emulated: the drawing is off)
+    s = Sim(str(run / 'JUNOFRST.PRG'), run_dir=run, ram_kib=16384)   # (16 MB: the Blitter's registers read back)
+    # (the trace mode stays on: the blitter's registers are emulated, the blits draw through it)
     sym = {k: v + s.base for k, v in s.symbols(BUILD / (args.tag + '.map')).items()}
     mem, cpu = s.mem, s.cpu
+    import bisect, collections
+    prof = collections.Counter()
+    symlist = sorted((a, n) for n, a in sym.items() if not re.fullmatch('M[0-9A-F]{6}', n))
+    symaddrs = [a for a, n in symlist]
     if not args.render:
         mem.w16(sym['render_frame'], 0x4e75)
     wait, done = sym['sim_wait'], sym['sim_frame_done']
@@ -78,8 +82,11 @@ def main():
     def run_to(targets):
         total = 0
         while total < 400_000_000:
-            total += cpu.execute(2000).cycles
+            step = 200 if args.profile else 2000
+            total += cpu.execute(step).cycles
             pc = cpu.r_pc()
+            if args.profile:
+                prof[bisect.bisect_right(symaddrs, pc) - 1] += 1
             if pc in targets:
                 cycles[0] += total
                 return pc
@@ -159,6 +166,7 @@ def main():
     compare(-1)
     state = {'two': args.seed == 7, 'coin2': True if args.seed in (2, 6) else None}
     cycles[0] = 0
+    per_frame = []
     for f in range(args.frames):
         m.frame = f
         m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
@@ -206,11 +214,19 @@ def main():
         compare(f)
         resume()
         run_to({wait})
+        per_frame.append(cycles[0] - sum(per_frame))
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact' % (f + 1), flush=True)
     print('PASS: %d frames (seed %d), RAM, palette RAM, picture, latch, bank and sound commands exact' % (args.frames, args.seed))
     if args.render:
         print('%d published pictures and palettes exact' % pics[0])
+    if args.profile:
+        tot = sum(prof.values())
+        for i, n in prof.most_common(14):
+            print('  %5.1f%% %s' % (100 * n / tot, symlist[i][1]))
+    if per_frame:
+        pf = sorted(per_frame)
+        print('per arcade frame: median %d, 75%% %d, 90%% %d, 99%% %d, max %d cycles (the 50 Hz STE has 160,000 a VBL, the arcade 60.6 frames a second need <= 132,000 each)' % (pf[len(pf) // 2], pf[len(pf) * 3 // 4], pf[len(pf) * 9 // 10], pf[len(pf) * 99 // 100], pf[-1]))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

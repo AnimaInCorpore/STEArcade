@@ -26,7 +26,9 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ = 0xA000, JunoPort.IRQ
 SEEDS = [int(x) for x in os.environ.get("JF_SEEDS", "").split(",") if x] or range(1, 13)
-NATIVES = {JunoPort.IDLE: "jf_idle"}
+NATIVES = {JunoPort.IDLE: "jf_idle",
+           0xA0ED: "native_clear_A0ED",       # STD ,U++ x 4 to $7A00: the video RAM clear (src/render.s)
+           0xA055: "native_clear_A055"}       # CLR ,X+ to $8000: the boot's clear
 NBANKS = 16
 
 
