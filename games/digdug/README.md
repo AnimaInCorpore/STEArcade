@@ -12,8 +12,8 @@ Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles 
 
 Status: **Experimental / deferred** (root README): the game boots, runs its attract mode and plays in the simulator (a
 scripted game of 8000 frames) and in Hatari (14 MB, the screenshot above: a scripted game, `-D AUTOPLAY`, 3600 VBLs
-without a crash; the STE shows 277 of the 288 lines, so the lives and the round line at the bottom are cut); no full natural playthrough, no speed measurement, the program
-is too large for a 4 MB machine (14 MB in Hatari while it is developed).
+without a crash; the STE shows 277 of the 288 lines, so the lives and the round line at the bottom are cut); no full natural playthrough, speed see below, the program
+loads 3.66 MB and runs in Hatari with 4 MB.
 
 ## Build and run
 
@@ -64,12 +64,30 @@ Verified (what each check ran, see Tests and tools):
   the reference; no key reaches it on the STE.  The cocktail cabinet (flip screen, DIP) is not drawn.
 * **Sound**: the WSG's three voices become the YM2149's square waves through Galaga's mapping (`tools/sound.py`, the
   waveform PROM 136007.110); `tools/sound_test.py`: the 68000's YM registers equal the Python model's in all 2600 frames of
-  the scripted game (1643 with a voice sounding).  Nothing compares them with MAME's audio, and nobody has listened to
-  the Hatari run (it ran with `--sound off`).  The sound CPU's commands are the arcade's (translated); only the chip is mapped.
-* **Speed**: not measured in Hatari; the boot's test screen (the main thread's clears) takes several times longer than on
-  the arcade (about 1000 VBLs before the attract mode, in the simulator).
-* **Memory**: the program asks for ~4.2 MB (the sprite data 1.1 MB and masks 0.5 MB: 17 colour quads x 512 shapes);
-  `tools/release.py` lists Dig Dug under `NOT_RELEASED`.  Trimming (shapes and colours the game never shows) is open.
+  the scripted game (1643 with a voice sounding).  Pitches against MAME's audio (`tools/sound_mame.py`, WolfMAME 0.248,
+  `-wavwrite`; the sound CPU's command cells poked in MAME and in the reference machine, the model's YM registers
+  rendered as square waves; 2 s pieces, semitone-spectrum cosine): of the 19 sound ids 11 sound at all in a run; ids 11, 12,
+  14, 18 equal to 0.96-1.0, ids 9, 10, 13, 15, 19 0.71-0.94 (chords: the loudest peak differs, the set of peaks is the same;
+  fundamentals within 1-30 cents where one dominates); ids 2-8, 16, 17 are silent in both (they need a running game); id 1
+  and id 14 / 18 sound in some MAME runs and not in others (MAME's random power-on RAM changes the attract state).  The
+  waveforms are squares, not the PROM's shapes: the timbre is not checked and was not listened to.  **On the STE**
+  (`tools/sound_hatari.py`: `-D SNDTEST=1300` pokes the same cells, Hatari plays the YM, `--sound 44100`, its audio taken
+  from the AVI): ids 10, 11, 12, 13, 15 alike (cosine 0.79-0.99, ids 11 / 12 within 10 cents), id 19 not (the tunes run at
+  50/60.6 of the arcade's tempo, the 2 s windows catch other notes; not analysed further).  Nobody has listened to a
+  whole game.  The sound CPU's commands are the arcade's (translated); only the chip is mapped.
+* **Speed** (Hatari 14 MB and 4 MB give the same figures, `tools/bench.ps1`: `-D RATE=500 -D AUTOPLAY=1400`, fast forward,
+  6000 VBLs of the scripted game): the game's logic runs at every VBL (one arcade frame a VBL: 82% of the arcade's 60.6
+  Hz); **pictures a second per 500 VBLs 28.9 on average at the start (12-48; 12 in the busiest windows), now 32.6 (17.9-49)**.
+  The scripted moves follow the CPU budget, so windows are comparable as ranges only.  Where the time goes (simulator,
+  `tools/profile.py`, a frame of 160,000 cycles in play): the game's interrupts 92-100k (sound CPU 19.8k + copies 6k,
+  main CPU 25k, 51XX/53XX + the 06XX glue 19k, sub CPU 10k), a picture ~40k per frame (sprites 28k: draw_sprites, Blitter,
+  entry loop, draw_part; the tile scan 4k), the rest idle spin.  Still short of 25 pictures a second in the busiest
+  windows (17.9, 18.7).
+* **Memory**: the program loads 3.66 MB (text + data + BSS + 256 bytes; `tools/release.py` MAX_LOAD is 3.7 MB) and runs in
+  Hatari with `--memsize 4`, the bench's figures identical.  It was 4.27 MB: the three CPUs' 256 KB dispatch tables
+  (byte-swapped pc index, sparse) now share one in columns (the sub CPU at +$41, the sound CPU at +$82) and the sub / sound
+  CPU's compact tables hold their ROM only.  Sprite data 1.1 MB and masks 0.5 MB are untouched.  Dig Dug stays in
+  `NOT_RELEASED` until the user decides (no natural playthrough, speed below 25 pictures a second in busy windows).
 * **The sprite rules of `AGENTS.md`**: the sprites use Galaga's pipeline (a Blitter pass per line with the shape's end
   masks, HOP 2 / OP 3, no AND + OR pairs, edge clipping at the 16-pixel groups); the reordered-source method of
   `docs/sprite-preparation.md` was not tried here.  The background and characters are drawn by the CPU (movep).
@@ -141,3 +159,18 @@ Verified (what each check ran, see Tests and tools):
 
 See [the status policy](../../docs/port-status.md): the checks above are independent logic / render checks; no natural
 playthrough has been recorded and `port.py ppo` has no Dig Dug profile.
+
+## Speed audit (2026-11-08, partial)
+
+Simulator cycles in the game's interrupts, scripted play (`tools/profile.py`; Hatari figures above).
+
+| Technique | Result | Before -> after |
+|---|---|---|
+| Leaves, rst and jumps in place (`inline_leaves=32`, `inline_rst`, `inline_jumps`) | applied, all three CPUs; sizes 16 / 64 / 128 give the same | 102.4k -> 96.8k a frame (-5.5%; the sound CPU 24.1k -> 19.8k) |
+| Native at a profile hot spot (`nat_y0e4c`, the sub CPU's sprite position copy, checked by `native_test.py` against the Z80) | applied | 6.3k -> 2.0k |
+| Shared RAM copies of the sound CPU with `movem.l`, only what it uses (also fixed: `$8401`, `$8646` were not copied in) | applied | 6.0k -> 3.6k |
+| One dispatch table for three CPUs | applied (memory, not speed) | 4.27 -> 3.66 MB |
+| Register maps / flags_at at the idle hook / window guards at coverage sites | not tried (Galaga's maps `FAST` / `FAST_LONG` as is; the main loop `$0238` is a spin that costs nothing in the budget) | - |
+| 06XX/MCU glue (19k + 5k a frame, 16 chip-select events per frame) | not optimized; the 53XX's answer for fixed DIP switches could be cached (open) | - |
+| Sprites: `sprite_programs` reordered-source passes, per-slot cache, damage of drawn rows | not tried (the sprites are 28k of the ~40k a picture) | - |
+| Colour cycling, parallax, HUD, hardware scroll | not applicable / none in the game | - |

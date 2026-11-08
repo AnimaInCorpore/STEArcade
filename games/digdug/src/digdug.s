@@ -510,6 +510,9 @@ vbl:
 .no_swap:
 
 	addq.l	#1,frame_counter
+	ifd SNDTEST
+	bsr	sndtest			; (-D SNDTEST=<first VBL>: the command cells of the sound ids in sndtest_ids, one every 120 VBLs)
+	endc
 
 	ifd RATE
 	addq	#1,rate_count		; every RATE VBLs: the VBL and render counters
@@ -667,6 +670,37 @@ vbl_done:
 
 	movem.l	(sp)+,d0-d7/a0-a6
 	rte
+
+	ifd SNDTEST
+
+; tools/sound_mame.py's test in Hatari (tools/sound_hatari.py): from VBL SNDTEST on, every 120 VBLs one command cell of the
+; sound CPU is set (the main CPU's cell for the sound id, $9A80 + id), the VBL before bit 1 of $8657 is cleared as there.
+sndtest:
+	move.l	frame_counter,d0
+	sub.l	#SNDTEST,d0
+	bmi.s	.none
+	divu	#120,d0
+	swap	d0			; the VBL in the piece (high word of divu: the remainder)
+	cmp	#119,d0
+	bne.s	.cell
+	bclr	#1,g_ram+$0657
+	rts
+.cell:	tst	d0
+	bne.s	.none
+	swap	d0			; the piece
+	cmp	#sndtest_n,d0
+	bhs.s	.none
+	lea	sndtest_ids,a0
+	moveq	#0,d1
+	move.b	(a0,d0.w),d1
+	lea	g_ram+$1A00,a1
+	move.b	#1,(a1,d1.w)
+.none:	rts
+
+sndtest_ids:	dc.b	$89,$8A,$8B,$8C,$8D,$8E,$8F,$92,$93	; the ids 9-15, 18, 19
+sndtest_n = *-sndtest_ids
+	even
+	endc
 
 	ifd AUTOPLAY
 autoplay:
