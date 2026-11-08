@@ -1,0 +1,24 @@
+Hi Darklord,
+
+Thank you again for running the tests and sending the results. I've prepared
+a focused Gun.Smoke test for your Mega STE. It keeps the CPU at 16 MHz with
+the cache enabled, including while drawing and opening the screen borders.
+
+Would you please extract GUNMSTE.ZIP into a new, writable folder and run
+GUNSMOKE.TOS? It needs 4 MB RAM and a colour display that accepts 50 Hz,
+including on a US machine. Native 60 Hz border opening is not included yet.
+
+This is a playable test: press 5 for a coin, 1 to start, and use the arrow
+keys to move. Ctrl, Space and Alt shoot left, straight and right. A standard
+joystick in port 1 also works for movement and the straight shot; please use
+the keyboard for coin and start. The mouse is deliberately ignored.
+
+Please play for a few minutes, try all three shooting directions, and tap
+and release Esc to exit normally. Then please ZIP and return GUNTEST.TXT,
+COUNTERS.BIN, RATE.BIN and BUILD.JSN, plus LATEPC.BIN and CRASH.TXT if present.
+README.TXT has the full steps and explains what to expect.
+
+Please also let me know whether the controls, sound and full-height picture
+worked correctly. A photo would help if the picture is unstable or cropped.
+
+Many thanks for your help!

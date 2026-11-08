@@ -62,8 +62,12 @@ BD_EVSZ = 12				; (an event: count.b, next.b, kind.w, the counter's bytes.l, lin
 BD_EVSZ = 4
 	endc
 
+	ifnd BD_K
 BD_K = 2				; Timer B events fire this many lines early
-BD_POLL = 120				; poll limit (~4 lines; only a missing line would reach it)
+	endc
+	ifnd BD_POLL
+BD_POLL = 120				; default poll limit (~4 lines at 8 MHz)
+	endc
 BD_LOW = 229				; the line end after which the bottom border is opened
 	if BD_PALETTE
 BD_ON = PIC_TOP				; the line end after which the palette comes on
@@ -183,6 +187,13 @@ bd_top_open	macro
 	endm
 
 ; Timer B's poll: d0 = the counter value at the event's line end, d1 = BD_POLL, a0 = $fffffa21
+bd_poll_init	macro
+	ifle BD_POLL-127
+	moveq	#BD_POLL,d1
+	else
+	move.l	#BD_POLL,d1
+	endc
+	endm
 bd_poll	macro
 .p\@:	cmp.b	(a0),d0
 	dbcc	d1,.p\@
@@ -382,7 +393,7 @@ timer_b:
 	movem.l	d0-d7/a0-a3,-(sp)
 	endc
 	lea	$fffffa21.w,a0
-	moveq	#BD_POLL,d1
+	bd_poll_init
 	move.l	bd_ev_ptr,a3
 	if BD_VSWITCH
 	add.l	#BD_EVSZ,bd_ev_ptr
@@ -595,7 +606,7 @@ timer_b:
 	movem.l	d0-d2/a0,-(sp)
 	endc
 	lea	$fffffa21.w,a0
-	moveq	#BD_POLL,d1
+	bd_poll_init
 	if BD_PALETTE
 	move.b	bd_tb_state,d0
 	beq	.on

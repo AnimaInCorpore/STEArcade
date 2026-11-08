@@ -1,0 +1,70 @@
+GUN.SMOKE - MEGA STE TEST 1
+=========================
+
+Thank you for helping us test one playable game on the Mega STE.
+This build has normal controls: no autoplay, recorded inputs or lives cheat.
+
+1. PREPARE
+----------
+Use a Mega STE with 4 MB RAM and a colour display that accepts 50 Hz.
+Extract GUNMSTE.ZIP into a NEW, writable folder on the hard disk.
+Keep BUILD.JSN and GUNSMOKE.MAP with this exact executable.
+
+The game selects 16 MHz WITH CACHE ENABLED on a Mega STE and retains it
+through drawing and border opening. It restores your original CPU setting
+when you exit. An ordinary STE retains its original CPU configuration.
+The display switches to 50 Hz for the open-border screen, then is restored.
+US machines still need a display accepting 50 Hz; native 60 Hz open-border
+operation is not provided in this test build.
+
+2. START THE GAME
+-----------------
+Double-click GUNSMOKE.TOS. Wait for the title/attract screen to finish booting.
+The .TOS extension keeps the desktop mouse pointer out of the game.
+The screen shows a scrolling Western landscape, characters and projectiles.
+
+3. CHECK THE KEYBOARD
+--------------------
+Tap 5 once to insert a coin. Tap 1 to start player 1.
+Use the arrow keys to move in all four directions.
+Shoot LEFT with Ctrl or Z, STRAIGHT with Space or X, RIGHT with Alt or C.
+Please try all three shooting directions, then play for a few minutes.
+The mouse is not a game controller in this port; mouse movement is ignored.
+
+4. OPTIONAL STANDARD JOYSTICK
+----------------------------
+Use an Atari-compatible SINGLE-FIRE-BUTTON joystick in JOYSTICK PORT 1,
+on the detached keyboard. Port 0 is the shared mouse/joystick connection.
+Use keyboard 5 and 1 for coin and start; move with the joystick and use its
+fire button for the straight shot. The keyboard left/right shot keys remain
+available. A standard joystick has no native coin/start or three-shot buttons.
+
+The Mega STE has NO STE enhanced 15-pin joystick ports. Direct Jaguar-pad,
+PowerPad and analogue-paddle inputs through those ports are unavailable.
+The game must ignore the enhanced-pad registers on a Mega STE. Please do not
+use the STE Jaguar-pad instructions for this machine.
+
+5. EXIT AND RETURN RESULTS
+--------------------------
+Tap Esc and release it to return to the desktop. Please exit normally so
+the input and timing report can be completed.
+
+Please ZIP and return:
+  GUNTEST.TXT   - startup/exit CPU state and keys/joysticks actually observed
+  COUNTERS.BIN - game, picture and border counters
+  RATE.BIN     - the picture/logic timing samples
+  BUILD.JSN    - identifies this exact build
+  LATEPC.BIN   - interrupt locations, if the build produced it
+  CRASH.TXT    - only if a crash produced it
+
+GUNTEST.TXT phase 01 means normal exit; 00 means startup only; 02 means crash.
+On Mega STE, selected/final FF8E21 values must have low bits 3. Upper bits
+may vary. Enhanced pads enabled must be 00. Exception-vector restore
+mismatches should be 0000. Missing joystick events mean NOT EXERCISED if
+no joystick was used. The key list uses hexadecimal Atari scancodes.
+
+Please also tell us whether coin, start, movement, all three shots and sound
+worked. If the screen is unstable or cropped, a photo is helpful. The absence
+of sound or joystick input cannot be diagnosed from an unattended run alone.
+
+Use a new folder for another run so the old report is preserved.

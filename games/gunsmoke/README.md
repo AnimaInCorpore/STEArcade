@@ -9,9 +9,9 @@ the driver's effects and music are recorded per command and played on the YM2149
 scrolled in hardware on both axes (twin-line virtual screens, D802 by the Shifter's window), 128 sprites by generated
 Blitter code, the text as OP 3 copy passes, one 16-colour palette from the shared fitter with checker pairs.  Status
 **Verification pending**: full-game Hatari verification is pending; flip screen and service mode are not done.
-Speed (Hatari, recorded play, 4 MB, 2026-10-24): logic 92% of the arcade's 59.6 frames a second (about 54.8 arcade
-frames a second), 25.8 pictures a second; the Musashi gains of 2026-11-02 (pictures -3.4%, logic -1.4%) are not
-measured in Hatari yet.
+Mega STE testing (corrected F030Arcade Hatari, 4 MB, 2026-11-08): gameplay windows average 57.02 arcade ticks/s
+and 26.44 pictures/s at 8 MHz, versus 57.81 ticks/s and 31.25 pictures/s at 16 MHz with cache on. This is 18.2%
+more pictures from the same 9000-tick recording; full-game hardware verification is still pending.
 
 ## Build and run
 
@@ -27,6 +27,18 @@ python port.py mame gunsmoke         # the reference renderer against MAME's own
 All 32 ROM files are checked against the MAME CRC32/SHA1 manifest (`docs/rom_manifest.json`).  Paths are relative to
 this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the repository's.
 
+For Darklord's identified, human-playable Mega STE package:
+
+```sh
+venv/bin/python games/gunsmoke/tools/megaste_test.py --verify
+# -> build/gunsmoke-megaste/package/GUNMSTE.ZIP
+```
+
+This `.TOS` selects 16 MHz/cache on only on a Mega STE, records inputs and machine state, and restores the original
+CPU/video settings on exit. It uses normal controls, without replay or cheats. It requires 4 MB and a colour display
+accepting **50 Hz**, including on US machines; native 60 Hz open borders are not provided. See the
+[operator instructions](docs/megaste-instructions.txt) and [validation notes](docs/megaste-test.md).
+
 ## Controls
 
 **5/6** insert coins, **1/2** start, **arrow keys** move, **Ctrl** or **Z** shoots left, **Space** or **X** straight,
@@ -35,6 +47,10 @@ for the attract mode before inserting a coin.  Jaguar pad / PowerPad (STE enhanc
 [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad
 moves, **A / B / C** shoot left / straight / right, **Option** coin, **Pause** start, keypad **1/2** start, **5/6**
 coin, **\*** + **#** quit.
+
+**Mega STE:** use the keyboard or standard 9-pin joystick ports on the detached keyboard. It has no STE enhanced
+15-pin ports, so the Jaguar-pad controls above do not apply. Keyboard coin/start remain necessary with a standard
+one-button joystick. See the [Mega STE input contract](../../docs/megaste-input.md), including Atari's documentation.
 
 ## State
 
@@ -57,7 +73,10 @@ coin, **\*** + **#** quit.
 * Memory: a build of 2026-11-07 needs 3,310,662 bytes (text + data + BSS, `build/gunsmoke/gunsmoke.map`), under the
   load budget of [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release).
 * Missing: the flip screen (the DIP switch is upright), the service mode (its code in bank 3 is not translated).
-* Open: the 2026-11-02 changes are not measured in Hatari (by the budget about +1 picture a second).
+* 2026-11-08 focused test: keyboard coin/start, movement and all three shots reached the native input ports in
+  corrected Hatari on STE and Mega STE, including a simulated 60 Hz startup. All three runs had zero late border
+  events and restored the exception vectors. A physical joystick, US oscillator/TOS combination and audible output
+  still need hardware exercise; this is not full-game verification.
 
 ## How it works
 
@@ -156,6 +175,10 @@ runs to completion, returning to the scheduler's scan at 00B0, and the tasks it 
   and off around the picture; the palette off is line-exact.  64-word pieces still let a palette event start late now
   and then, so passes over 32 words run in pieces.  The DEBUG build counts late events (`-D BD_PCLOG=1` logs the
   interrupted PCs of late events).  The VBL writes the video counter too (see Lessons).
+  Gun.Smoke now requests a three-line Timer B lead (`BD_K=3`) and a 240-iteration poll bound: rare palette lateness
+  appeared under live keyboard stress with the two-line lead, and cached 16 MHz polls need the larger bound to wait
+  through three lines. The synchronized output lines and short HOG limit stay the same; other ports retain their
+  existing shared defaults. The [focused validation](docs/megaste-test.md) includes video-pulse traces.
 
 ### Colours
 
@@ -199,6 +222,13 @@ recording (`--sound 44100 --avirecord true`).  `build.py --sound` records again 
 |---|---|---|
 | 2026-10-24, Hatari, recorded play (`PLAY=1 tools/bench.sh`, 6000 VBLs, 4 MB; 2-second windows from the first tick) | 92% of 59.6 (about 54.8 arcade frames/s) | 25.8 (median 22.5, 10th percentile 16.5) |
 | 2026-11-02, Musashi CPU + Blitter, the whole recording after the boot (`PERF_NOBUILD=1 tools/perf_test.py 9000 1000`, 8000 ticks) | 38,806 cycles a tick | a picture 148,600 cycles (mean; median 136,718, p90 225,106) |
+| 2026-11-08, corrected Hatari, Mega STE 8 MHz/cache off, gameplay 100-VBL windows after tick 900 | 57.02 ticks/s | 26.44 |
+| Same recording, Mega STE 16 MHz/cache on | 57.81 ticks/s | 31.25 |
+
+The latest comparison consumes the unchanged 9000-tick input recording through its terminator, sound player enabled.
+The replay benchmark alone uses the existing lives cheat. Rates use nominal 50 Hz and separate logic from pictures;
+the complete runs including startup average 55.18/56.52 ticks/s and 25.48/30.24 pictures/s at 8/16 MHz respectively.
+Reproduce with `megaste_bench.py --mode 0` and `--mode 3` after a normal build (see the validation notes).
 
 Other costs (Musashi): a frame of a D802 slide 238k cycles, a band redraw about 1M (the scroll sweep, with tile
 offsets above D802 192, 1.5-1.8M); `render_test.py 300 seq --first 1500` seeds 1 / 6 / 12 a picture 131.4k / 266.0k

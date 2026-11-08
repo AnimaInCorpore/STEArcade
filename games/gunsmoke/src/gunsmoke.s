@@ -31,6 +31,12 @@ TA_NOPS = 84
 PIC_TOP = 10
 PIC_LINES = 256
 BD_PALETTE = 1
+	ifnd BD_K
+BD_K = 3				; one extra lead line for palette events under live IKBD load
+	endc
+	ifnd BD_POLL
+BD_POLL = 240				; cached 16 MHz polls faster: cover the full three-line lead
+	endc
 	include	"borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
@@ -95,6 +101,9 @@ start:
 	move	#1024-1,d0
 .mark:	move.l	#$A5A5A5A5,(a0)+
 	dbf	d0,.mark
+	ifd MSTE_TEST
+	bsr	mt_begin
+	endc
 
 	lea	fixed_rom,a0		; the fixed ROM at Z80 0000-7FFF
 	lea	G_Z80,a1
@@ -293,8 +302,10 @@ init_hardware:
 
 	lea	crash_stubs,a0		; exception vectors 2..11 -> crash dump
 	lea	$08.w,a1
+	lea	old_exceptions,a2
 	moveq	#9,d0
 .crash_vec:
+	move.l	(a1),(a2)+
 	move.l	a0,(a1)+
 	addq	#6,a0
 	dbf	d0,.crash_vec
@@ -353,6 +364,12 @@ restore_hardware:
 	move.l	old_acia,$118.w
 	move.l	old_timer_b,$120.w
 	move.l	old_timer_a,$134.w
+	lea	old_exceptions,a0
+	lea	$08.w,a1
+	moveq	#9,d0
+.exceptions:
+	move.l	(a0)+,(a1)+
+	dbf	d0,.exceptions
 	bsr	cs_off
 
 	ifnd SIM
@@ -371,6 +388,9 @@ quit:
 	bsr	dbg_counters
 	endc
 	bsr	restore_hardware
+	ifd MSTE_TEST
+	bsr	mt_finish
+	endc
 	move.l	old_ssp,-(sp)
 	move	#$20,-(sp)
 	trap	#1
@@ -588,6 +608,9 @@ acia_isr:
 	ikbd_byte
 
 .not_esc:
+	ifd MSTE_TEST
+	bsr	mt_key
+	endc
 	lea	key_table,a0
 
 .find:
@@ -625,6 +648,9 @@ acia_isr:
 	bra	.again
 
 .packet_byte:
+	ifd MSTE_TEST
+	bsr	mt_joy
+	endc
 	clr.b	ikbd_state
 	cmp.b	#1,d0
 	bne	.joy1
@@ -781,6 +807,9 @@ crash_common:
 	addq	#4,sp
 
 	bsr	restore_hardware
+	ifd MSTE_TEST
+	bsr	mt_finish
+	endc
 	bsr	crash_notice
 	clr	-(sp)
 	trap	#1
@@ -928,6 +957,9 @@ z80_unsupported:
 	moveq	#99,d0			; the dump: d7 = the address (an untranslated target: its pc), the stack
 	bra	crash_common
 
+	ifd MSTE_TEST
+	include "megaste_test.s"
+	endc
 	include "render.s"
 
 ; ------------------------------------------------------------------------------
@@ -962,6 +994,7 @@ bank_rom:	incbin "banks.rom"
 	section bss,bss
 ; ------------------------------------------------------------------------------
 
+old_exceptions: ds.l 10
 old_ssp:	ds.l	1
 old_screen:	ds.l	1
 old_palette:	ds.l	8
