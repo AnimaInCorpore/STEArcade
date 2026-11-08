@@ -128,6 +128,23 @@ init_render:
 .lo:	move.l	d0,(a0)+
 	add.l	#LB,d0
 	dbf	d1,.lo
+	lea	row_tab,a1		; the tile rows a sprite at line Y covers (bits past 31 fall out)
+	moveq	#0,d3
+.rt:	move.w	d3,d0
+	move.w	d0,d1
+	lsr.w	#3,d0
+	add.w	#15,d1
+	lsr.w	#3,d1
+	sub.w	d0,d1
+	addq.w	#1,d1
+	moveq	#1,d5
+	lsl.l	d1,d5
+	subq.l	#1,d5
+	lsl.l	d0,d5
+	move.l	d5,(a1)+
+	addq.w	#1,d3
+	cmp.w	#256,d3
+	bne.s	.rt
 	lea	key_attr,a1		; the cache key's part of the attributes: colour << 2 | flip x << 1 | flip y
 	moveq	#0,d0			; (the sprite attribute: colour bits 0-3, raw flip x bit 6 = the rows, raw flip y bit 7 = the columns)
 .ky:	moveq	#$0F,d1
@@ -238,7 +255,9 @@ render_frame:
 	move.l	(a0,d0.w),draw_base
 	bsr	guard_clear
 	bsr	compose
+	ifnd NOSPR
 	bsr	draw_sprites
+	endc
 	move.w	draw_idx,d0
 	addq.b	#1,d0
 	move.b	d0,frame_ready
@@ -524,14 +543,14 @@ compose:
 	move.w	#8,B_SXI.w
 	move.w	#8,B_DXI.w
 	move.w	#14,B_XC.w
-	move.w	#2-13*8,B_DYI.w
-	move.w	#2-13*8,B_SYI.w
+	move.w	#LB-13*8,B_DYI.w
+	move.w	#PF_LB-13*8,B_SYI.w
 	clr.b	B_SKEW.w
 	lea	B_SRC.w,a3
 	lea	B_DST.w,a4
 	lea	B_YC.w,a5
 	lea	B_CTRL.w,a6
-	moveq	#1,d3
+	moveq	#8,d3			; (the row's 8 lines a pass: 14 + 14 words a line, 232 bus cycles)
 	moveq	#-$40,d4		; ($C0: start, HOG)
 	move.l	pf_base,a2
 	move.l	draw_base,a0
@@ -539,22 +558,28 @@ compose:
 	moveq	#0,d7			; the row
 .fix:	btst	d7,d6
 	beq.s	.fnx
-	move.l	a2,a1
-	move.l	a0,d2
-	moveq	#8-1,d5
-.fl:	move.l	a1,(a3)
-	move.l	d2,(a4)
-	move.w	d3,(a5)			; four HOG passes of one plane (the addresses run on)
-	move.b	d4,(a6)
+	move.l	a2,(a3)			; four HOG passes, one plane each (8 lines)
+	move.l	a0,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	lea	2(a2),a1
+	move.l	a1,(a3)
+	lea	2(a0),a1
+	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	lea	4(a2),a1
+	move.l	a1,(a3)
+	lea	4(a0),a1
+	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
-	lea	PF_LB(a1),a1
-	add.l	#LB,d2
-	dbf	d5,.fl
+	lea	6(a2),a1
+	move.l	a1,(a3)
+	lea	6(a0),a1
+	move.l	a1,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 .fnx:	lea	8*PF_LB(a2),a2
 	lea	8*LB(a0),a0
 	addq.w	#1,d7
@@ -568,27 +593,36 @@ compose:
 	sub.w	d1,d5			; skew 16 - shift, FXSR: 15 source words a line
 	or.b	#FXSR,d5
 	move.b	d5,B_SKEW.w
-	move.w	#2-14*8,B_SYI.w
+	move.w	#PF_LB-14*8,B_SYI.w
 .k0:	lsr.w	#4,d0
 	lsl.w	#3,d0			; the window's first group
 .scr:	btst	d7,d6
 	beq.s	.snx
 	lea	(a2,d0.w),a1
-	move.l	a0,d2
-	moveq	#8-1,d5
-.sl:	move.l	a1,(a3)
-	move.l	d2,(a4)
+	move.l	a1,(a3)
+	move.l	a0,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	lea	2(a1),a1
+	move.l	a1,(a3)
+	lea	2(a0),a1
+	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	lea	(a2,d0.w),a1
+	lea	4(a1),a1
+	move.l	a1,(a3)
+	lea	4(a0),a1
+	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	lea	(a2,d0.w),a1
+	lea	6(a1),a1
+	move.l	a1,(a3)
+	lea	6(a0),a1
+	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
-	lea	PF_LB(a1),a1
-	add.l	#LB,d2
-	dbf	d5,.sl
 .snx:	lea	8*PF_LB(a2),a2
 	lea	8*LB(a0),a0
 	addq.w	#1,d7
@@ -609,23 +643,19 @@ draw_sprites:
 	tst.b	sb_latch+5		; the sprite RAM bank (OBJ CHE): $3800 or $3900
 	beq.s	.b
 	lea	$100(a0),a0
-.b:	lea	-4(a0),a0		; (the entry before the first)
-	moveq	#63,d0
-.e:	lea	4(a0),a0
-	moveq	#0,d5
-	moveq	#0,d3
-	move.b	2(a0),d5		; x: picture Y
-	move.b	3(a0),d3		; y
-	move.w	d5,d1
-	or.w	d3,d1
+.b:	moveq	#63,d0
+.e:	move.w	2(a0),d1		; x and y
 	beq	.n			; (none where both are 0)
-	moveq	#0,d4
+	moveq	#0,d3
+	move.b	d1,d3			; y
+	lsr.w	#8,d1
+	move.w	d1,d5			; x: picture Y
 	move.w	#224,d4
 	sub.w	d3,d4			; picture X
-	cmp.w	#-15,d4
-	blt.s	.n
-	cmp.w	#223,d4
-	bgt.s	.n
+	move.w	d4,d1
+	add.w	#15,d1
+	cmp.w	#238,d1			; (-15 .. 223)
+	bhi.s	.n
 	moveq	#0,d6
 	moveq	#0,d7
 	move.b	(a0),d6			; code
@@ -643,7 +673,8 @@ draw_sprites:
 	movem.l	d0/a0,-(sp)
 	bsr	draw_cell
 	movem.l	(sp)+,d0/a0
-.n:	dbf	d0,.e
+.n:	addq.l	#4,a0
+	dbf	d0,.e
 	move.w	draw_idx,d0		; the buffer's next picture draws the rows these covered again, and clears the guard lines
 	move.w	d0,d1			; they reached
 	add.w	d1,d1
@@ -664,17 +695,11 @@ draw_cell:
 	cmp.w	#256-15,d4
 	blt.s	.nog
 	st	spr_guard
-.nog:	move.w	d4,d0			; the tile rows it covers: Y / 8 .. (Y + 15) / 8 (bits past 31 fall out)
-	move.w	d0,d1
-	lsr.w	#3,d0
-	add.w	#15,d1
-	lsr.w	#3,d1
-	sub.w	d0,d1
-	addq.w	#1,d1			; rows
-	moveq	#1,d5
-	lsl.l	d1,d5
-	subq.l	#1,d5
-	lsl.l	d0,d5
+.nog:	move.w	d4,d0			; the tile rows it covers: Y / 8 .. (Y + 15) / 8 (bits past 31 fall out): row_tab
+	add.w	d0,d0
+	add.w	d0,d0
+	lea	row_tab,a1
+	move.l	(a1,d0.w),d5
 	or.l	d5,spr_rows
 	bsr	sprite_baked		; a0 = the slot
 	if REN_GEN
@@ -1128,6 +1153,7 @@ cell_list:	ds.w	2048			; the cells written since the renderer looked (main_io_w)
 cell_dirty:	ds.b	2048			; their flags
 tile_copy:	ds.b	2048			; the colours ($0-$3FF) and codes ($400-$7FF) the playfield has
 line_off:	ds.l	256+16			; the offset of picture line Y in a buffer
+row_tab:	ds.l	256			; per picture line Y: the tile rows a sprite there covers
 key_attr:	ds.w	256			; the cache key's part of the attributes (colour << 2, flips)
 bake_rows:	ds.w	16*5
 bake_ord:	ds.b	18			; bake_sprite: the opaque rows' order ($FF after the last; even: bake_seen is cleared by longs)
