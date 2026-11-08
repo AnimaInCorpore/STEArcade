@@ -571,22 +571,26 @@ main_io_r:
 ; colour RAM listed like main_io_w does (the bytes are in rr_mem already).  Every register kept.
 main_vlist:
 	movem.l	d5-d7/a0/a2,-(sp)
+	add.w	d7,d6			; (d6 = the last address)
+	cmp.w	#$4800,d7		; clipped to the video RAM once: first .. last
+	bhs.s	.lo
+	move.w	#$4800,d7
+.lo:	cmp.w	#$4FFF,d6
+	bls.s	.hi
+	move.w	#$4FFF,d6
+.hi:	sub.w	d7,d6
+	bmi.s	.out
+	and.w	#$7FF,d7		; (the cell)
 	lea	cell_dirty,a0
 	move.l	cell_ptr,a2
-.vl:	cmp.w	#$4800,d7
-	blo.s	.vn
-	cmp.w	#$5000,d7
-	bhs.s	.vn
-	move.w	d7,d5
-	and.w	#$7FF,d5
-	tst.b	(a0,d5.w)
+.vl:	tst.b	(a0,d7.w)
 	bne.s	.vn
-	st	(a0,d5.w)
-	move.w	d5,(a2)+
+	st	(a0,d7.w)
+	move.w	d7,(a2)+
 .vn:	addq.w	#1,d7
 	dbf	d6,.vl
 	move.l	a2,cell_ptr
-	movem.l	(sp)+,d5-d7/a0/a2
+.out:	movem.l	(sp)+,d5-d7/a0/a2
 	rts
 
 ; the video and colour RAM ($4800-$4FFF): the byte stored, the cell (address & $7FF) listed once for render.s (byte

@@ -20,6 +20,34 @@ costs are the logic and the changing cells.  Stage 1: logic ~58k cycles a frame,
 frame).  Hoisting the constant addresses out of render_tiles' loop saved 0.4%; nothing larger was tried (the logic's
 28% in one translated block `main_pb_05` is the next place to look: natives need a per-routine profile).  Hatari
 stage 1 play: 55 arcade frames and 29 pictures a second; stages 2-4 were not run in Hatari (it cannot poke the stage).
+**Speed audit** (2026-11-08; Musashi cycles, the tests' frames; Hatari: play window of an AUTOPLAY run with sound, 55.0 arcade frames = 92% of 60 and 29.3 pictures a second, before and after the same within the noise).
+Profile: logic 58-88k cycles a frame (stage 1 ~60k, stage 3 ~67k; the 6809 side is flat: the top 64-byte block, $6A00's
+table scan for a tile copy, is 12%, nothing else over 8%); a picture 55-64k CPU + 12-15k Blitter bus cycles: the cells
+the game changes (tile_changed 28%, copy_cells 21%, render_tiles 11%), sprites (draw_one 13%, restore_damage 6%,
+bake_sprite 4%).
+
+| Technique | Status | Result |
+|---|---|---|
+| fixed slots, fast forms, ret weights, call summaries (6809) | applied from the start | - |
+| video_inline (tile stores list their cells) | applied; PSHU fills added (`video_push`) | correctness: stage 3 |
+| writer marks instead of RAM comparison | applied (cell list + `cell_dirty`, one compare per listed cell) | - |
+| leaves in place, 6809 `inline_calls` | n/a (the option takes hand-written code, no automatic leaves); the sound Z80 uses `inline_leaves=6`, `inline_rst` | - |
+| window guards | n/a (flat 64 KB) | - |
+| flags_at at the idle hook | n/a (the idle point is a native, `rr_idle`) | - |
+| natives at hot routines | not done: flat profile (best candidate `$6A0B`, ~6% of the 6809 time, ~4% of the logic) | - |
+| sound work | sound Z80 translated with leaves/rst inline, tick schedule 5.8 a frame; build-time recordings rejected (the driver is the game's own and short) | sound ~12% of the logic |
+| sprite_programs reordered-source passes | applied (the generated code per shape) | - |
+| per-slot sprite cache, drawn-lines damage (restore_damage copies the last rectangles) | applied | - |
+| tile key from a 256-entry table (`tile_attr`) | applied | picture -3.0% (58.7k -> 56.9k, seed 17), tile_changed -3.6% |
+| `main_vlist` clipped once, no per-byte range checks | applied | PSHU list 4.5k -> 3.4k cycles in stage 3, logic -1.4% |
+| render_tiles' constant addresses hoisted | applied | -0.4% |
+| hardware scroll, palette epochs / DEDICATED, frozen colour cycling, second layer as pieces, contour restores, HUD as its own image | n/a (one tile layer, no scroll, one flat palette, no cycling) | - |
+| erase only what can be seen | not applied: sprites are clipped at the group-aligned edges and drawn whole into the guard rows, which are erased with the rest | - |
+| pictures-per-second schedule | the runtime's (3 buffers, one picture per two arcade frames when slow) | - |
+
+No effect has to go; the biggest remaining costs are the 6809 logic (flat) and the cell churn of the animated tiles
+(a blinking 3 x 4 block every frame in stage 1), which the arcade rewrites by design.
+
 Started 2026-11-07 from Track & Field's runtime and logic tests and Time Pilot's vertical renderer.
 
 ## Build and run

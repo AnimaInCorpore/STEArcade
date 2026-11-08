@@ -313,6 +313,7 @@ not been re-measured in Hatari since).
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
+| Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |

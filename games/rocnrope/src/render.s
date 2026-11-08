@@ -85,6 +85,23 @@ init_render:
 	move.l	#cell_list,cell_ptr
 	bsr	cache_flush
 	bsr	tcache_flush
+	lea	tile_attr,a0		; a tile's key part of its colour byte: colour | flip x << 4 | flip y << 5 | code bit 8 << 14
+	moveq	#0,d0			; (the picture's flips: x = raw bit 5, y = raw bit 6)
+.ta:	moveq	#15,d1
+	and.w	d0,d1
+	btst	#5,d0
+	beq.s	.ta1
+	or.w	#$10,d1
+.ta1:	btst	#6,d0
+	beq.s	.ta2
+	or.w	#$20,d1
+.ta2:	btst	#7,d0
+	beq.s	.ta3
+	or.w	#$4000,d1
+.ta3:	move.w	d1,(a0)+
+	addq.w	#1,d0
+	cmp.w	#256,d0
+	blo.s	.ta
 	lea	rr_pal,a0		; the palettes: the picture's, black around it
 	lea	shown_pal,a1
 	lea	black_pal,a2
@@ -313,21 +330,14 @@ tile_changed:
 	move.l	(a0,d2.w),d2
 	bmi	.out			; (not shown)
 	move.l	d2,t_off
-	moveq	#0,d3			; the key: code << 6 | flip y << 5 | flip x << 4 | colour (the picture's flips: x =
-	move.b	d0,d3			; the columns = raw flip y = colour bit 5, y = the rows = raw flip x = bit 6)
-	and.w	#$80,d3
-	add.w	d3,d3
-	move.b	d1,d3
-	lsl.w	#6,d3
-	moveq	#15,d4
-	and.b	d0,d4
-	or.w	d4,d3
-	btst	#5,d0
-	beq.s	.nx
-	or.w	#$10,d3
-.nx:	btst	#6,d0
-	beq.s	.ny
-	or.w	#$20,d3
+	moveq	#0,d3			; the key: code << 6 | flip y << 5 | flip x << 4 | colour (tile_attr: the colour byte's
+	move.b	d1,d3			; part: the picture's flips x = the columns = raw flip y = bit 5, y = the rows = raw
+	lsl.w	#6,d3			; flip x = bit 6, and code bit 8 = bit 7)
+	moveq	#0,d4
+	move.b	d0,d4
+	add.w	d4,d4
+	lea	tile_attr,a0
+	or.w	(a0,d4.w),d3
 .ny:	move.w	d3,d2
 	lea	tc_index,a0
 	moveq	#0,d3
@@ -1133,6 +1143,7 @@ cell_list:	ds.w	2048			; the cells written since the renderer looked (the video 
 cell_dirty:	ds.b	2048			; their flags
 line_off:	ds.l	256+16			; the offset of picture line Y in a buffer
 key_attr:	ds.w	256			; the cache key's part of the attributes (colour << 2, flips)
+tile_attr:	ds.w	256			; (init_render)
 cell_off:	ds.l	1024
 tile_copy:	ds.b	2048			; the colours ($4800 + n) and codes ($4C00 + n) the clean screen has
 dl_flag:	ds.b	NBUF*1024
