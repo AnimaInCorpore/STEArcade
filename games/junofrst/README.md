@@ -73,7 +73,7 @@ and SHA-1s).  Nothing ROM-derived is in git.  Paths are relative to this folder;
 
 ## Speed
 
-**With the sound (2026-11-08)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
+**With the sound (2026-11-08, MAX_SKIP 3, before the audit: the current figures, MAX_SKIP 6, are in the header and the audit table)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
 60.6) and 765 pictures (9.6 a second), no crash, no late border event.  The sound cost 11% of the speed first (31.5 a
 second: the driver's 14.4 ticks an arcade frame, ~28,000 Musashi cycles a frame, 17% of the logic's average); then
 `vram_wr` was rewritten (one table lookup for the plane byte and the pixel row, the pixel values' bit patterns in
@@ -89,7 +89,7 @@ draw whole shapes.
 
 (The earlier measurement below, 2026-11-07, is without sound.)
 
-Hatari 2026-11-07, `hatari.ps1 -Frames 4000` (AUTOPLAY: coin, start, move, the ship dies and the game plays on): 2,822
+Hatari 2026-11-07 (before the sound and the audit), `hatari.ps1 -Frames 4000` (AUTOPLAY: coin, start, move, the ship dies and the game plays on): 2,822
 arcade frames in 4,001 VBLs (35.3 a second, 58% of the arcade's 60.6; 13.2 before the work below) and 935 pictures
 (11.7 a second).  Musashi (`tools/logic_test.py`, 6,000 frames, seeds 1-12): the IRQ comes every other arcade frame, so
 the cost is per game tick (two arcade frames, 264,000 cycles at full speed): the frames between cost about 14,000; the

@@ -57,8 +57,7 @@ coin, **\*** + **#** quit.
 * Memory: a build of 2026-11-07 needs 3,310,662 bytes (text + data + BSS, `build/gunsmoke/gunsmoke.map`), under the
   load budget of [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release).
 * Missing: the flip screen (the DIP switch is upright), the service mode (its code in bank 3 is not translated).
-* Open: the 2026-11-02 changes are not measured in Hatari (by the budget about +1 picture a second).  The header
-  comment of `src/render.s` still describes the old AND + OR text passes.
+* Open: the 2026-11-02 changes are not measured in Hatari (by the budget about +1 picture a second).
 
 ## How it works
 

@@ -10,8 +10,9 @@ the game polls, is modelled (in the reference and in the runtime); the SN76489A 
 VLM5030's 24 phrases on the DMA sound (sound is new: Hatari-checked, not heard by a person).  The picture is MAME's, 240 x 224, at screen x 48-287 with the top and bottom borders open, sprites by
 generated code (`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette
 by the shared default fitter.  Status: **Incomplete** (no full-game verification; sound judged by measurement only).
-Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, the AUTOPLAY script, DEBUG build, 2026-11-07): in play about 50 arcade
-frames a second (83% of 60.6) and 12 pictures a second with the sound on; the picture is untuned (Speed).
+Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, the AUTOPLAY script, DEBUG build, sound on, 2026-11-08): over the whole
+3,001-VBL run (boot and attract mode included) 40.5 arcade frames a second (67% of 60.6) and 15.4 pictures a second; in
+play-only windows before the audit (2026-11-07) 46-54 frames (76-90%) and 11-13 pictures; see Speed.
 
 ## Build and run
 
@@ -158,7 +159,7 @@ pixels), the 9-bit sprite x, the first-to-last order (the last on top), 512 spri
 
 ## Speed
 
-Hatari, 3,001 VBLs of the AUTOPLAY build (a coin, start, then walking and firing), sound on (2026-11-07): 2,362 arcade
+Before the audit (2026-11-07), Hatari, 3,001 VBLs of the AUTOPLAY build (a coin, start, then walking and firing), sound on: 2,362 arcade
 frames (39.4 a second over everything, the boot's RAM test and the attract mode included), 825 pictures; in play
 (RATE.BIN, windows of 100 VBLs) 91-109 arcade frames and 22-27 pictures per 100 VBLs: about 46-54 arcade frames
 (76-90%) and 11-13 pictures a second.  Musashi (`tools/render_test.py 1400 --seed 3 --start 1000`): the logic ~104,000

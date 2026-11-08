@@ -3,7 +3,7 @@
 - Authoritative MAME (user, 2026-10-29), for every port: the source tree
   `C:\Arbeit\F030Arcade\third_party\jsm68kdisassembler\third_party\mame` (MAME 0.286 with local telemetry patches).
   Read drivers, palettes, resistor networks and devices there, not in other copies (`F030MXDRV`, `mamesrc`,
-  `F030Arcade\third_party\mame`) or GitHub. Where a MAME binary (0.289, WolfMAME 0.162) disagrees with this source,
+  `F030Arcade\third_party\mame`) or GitHub. Where a MAME binary (0.289, WolfMAME 0.162 and 0.248) disagrees with this source,
   the source wins: note the difference in the port's README. The `m68k.exe` beside it is a 0.286 build without
   most arcade drivers (no `dkong`/`dkongjr`).
 
