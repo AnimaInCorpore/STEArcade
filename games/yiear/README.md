@@ -160,15 +160,17 @@ length in arcade frames, not the chip's cycle-exact time.
 | Date | Setup | Logic | Pictures | Musashi cycles |
 |---|---|---|---|---|
 | 2026-11-07 | Hatari, `tools/hatari.ps1 -Frames 3000 -Sound 1` (AUTOPLAY: coin, start, moves and kicks), DEBUG build, 4 MB | 96%, 58.2 arcade frames a second | 34.2 a second (2,052 of 3,001 VBLs) | |
+| 2026-11-08 | Hatari, the same, after the unrolled playfield compare | 96%, 58.3 | 36.4 a second (2,185 of 3,001 VBLs) | |
+| 2026-11-08 | Musashi, `render_test.py 3000 --seed 1 --start 100 --every 3` (seed 2: 59.7k + 21.2k; cheat seed 24: 65.5k + 27.0k) | | | a picture 62.2k CPU + 24.5k Blitter bus cycles (was 79.1k + 24.5k) |
 | 2026-11-07 | the same without sound (2,500 VBLs, an earlier build) | 96%, 57.8 | 32.6 | |
 | 2026-11-07 | Musashi, `render_test.py 3000 --seed 1 --start 100 --every 3` (and seed 2) | | | logic with the sound 48.6k an arcade frame (seed 2: 48.2k; `logic_test.py`: 52-60k over 3,000-8,000 frames); a picture 78.9k CPU + 24.5k Blitter bus cycles (seed 2: 76.5k + 21.2k) |
 
 The logic is cheap (the whole IRQ handler plus eight NMIs is ~4,100 + 8 x 240 6809 cycles of 25,344); a picture is the
 cost.  What went into it: the playfield compare scans the 2 KB of video RAM every picture (512 longs); a screen change
-converts and draws its changed tiles once (first use per tile and flips).  Nothing was optimized beyond what Mario Bros.' and
+converts and draws its changed tiles once (first use per tile and flips).  The compare was 33k of the picture's 79k CPU cycles (64 cycles a long); eight `cmpm.l` + `bne.s` pairs a block (Duff's device, re-entered after a change) make it ~14k: the picture 79.1k -> 62.2k CPU, 34.2 -> 36.4 pictures a second in Hatari, exact in `render_test.py` (seeds 1, 2, 24) and `sprite_test.py`. Nothing else was optimized beyond what Mario Bros.' and
 Track & Field's renderer already do; the pictures a second are the 50 Hz VBLs' share left after the logic.
 
-Measured, not kept: nothing.
+Measured, not kept: nothing. Not tried: writer marks for the video RAM (its stores are plain `move.b` into the flat block, not I/O sites, so `video_inline` does not apply), dropping the arcade's own effects (none is costly: one layer, no scrolling, no colour cycling).
 
 Techniques other ports use that may apply:
 [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).

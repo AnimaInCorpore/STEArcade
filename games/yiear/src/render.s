@@ -241,20 +241,23 @@ render_tiles:
 	move.w	#2048/4-1,d5
 .cp:	move.l	(a0)+,(a1)+
 	dbf	d5,.cp
-	bra.s	.done
+	bra	.done
 .diff:	lea	VRAM,a0
 	lea	tile_vram,a1
-	moveq	#0,d7			; the cell of the long's first word
-	move.w	#512-1,d5
-.cmp:	move.l	(a0),d0
-	cmp.l	(a1),d0
+	moveq	#64-1,d5		; the scan: eight CMPMs a block (Duff's device: re-entered at the long after a change)
+.blk:
+	rept	8
+	cmpm.l	(a0)+,(a1)+
 	bne.s	.chg
-.nx:	addq.l	#4,a0
-	addq.l	#4,a1
-	addq.w	#2,d7
-	dbf	d5,.cmp
-	bra.s	.done
-.chg:	movem.l	d5/d7/a0-a1,-(sp)
+	endr
+.bend:	dbf	d5,.blk
+	bra	.done
+.chg:	subq.l	#4,a0
+	subq.l	#4,a1
+	move.l	a0,d7
+	sub.l	#VRAM,d7
+	lsr.l	#1,d7			; the cell of the long's first word
+	movem.l	d5/d7/a0-a1,-(sp)
 	move.w	(a0),d0
 	cmp.w	(a1),d0
 	beq.s	.w2
@@ -271,7 +274,24 @@ render_tiles:
 	bsr	cell_draw
 	movem.l	(sp)+,d5/d7/a0-a1
 .wd:	movem.l	(sp)+,d5/d7/a0-a1
-	bra.s	.nx
+	addq.l	#4,a0
+	addq.l	#4,a1
+	move.l	#VRAM+2048,d0
+	sub.l	a0,d0
+	lsr.l	#2,d0			; the longs left
+	beq.s	.done
+	move.w	d0,d1
+	lsr.w	#3,d0			; whole blocks
+	and.w	#7,d1			; the longs of the partial block
+	bne.s	.part
+	subq.w	#1,d0
+	move.w	d0,d5
+	bra	.blk
+.part:	move.w	d0,d5
+	lea	.bend(pc),a2
+	lsl.w	#2,d1
+	suba.w	d1,a2
+	jmp	(a2)
 .done:	or.l	d6,row_dirty
 	or.l	d6,row_dirty+4
 	or.l	d6,row_dirty+8
