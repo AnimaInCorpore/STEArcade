@@ -466,6 +466,9 @@ vbl:
 	move	d0,(a0)+
 	move	cnt_render,(a0)+
 	move	cnt_logic,(a0)+
+	moveq	#0,d0
+	move.b	g_ram+$0181,d0		; the area (the main CPU's $8181: 0-15)
+	move	d0,(a0)+
 	move.l	a0,rate_ptr
 .no_rate:
 	endc
