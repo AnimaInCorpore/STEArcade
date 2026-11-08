@@ -32,6 +32,7 @@ def main():
     ap.add_argument('--shots', default=None, help='a folder for the own pictures of the build (shot<frame>.png, 2x)')
     ap.add_argument('--tag', default='xevious_sim')
     ap.add_argument('--debug', action='store_true')
+    ap.add_argument('--prof', action='store_true', help='a histogram of where the render routine spends its cycles (symbols)')
     ap.add_argument('--entry', default='render_frame', help='(debugging) a routine to call instead')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -50,11 +51,20 @@ def main():
     g_ram = sym['g_block'] + 0x8000
     bad = {sym['z80_badpc'], sym['z80_badpc'] + 4}
 
+    hist = {}
+    import bisect
+    by = sorted((v, k) for k, v in sym.items() if not k.startswith('.'))
+    byaddr = [a for a, _ in by]
+
     def run_to(targets, limit=900_000_000):
         total = 0
         while total < limit:
-            total += cpu.execute(300).cycles
+            c = cpu.execute(30).cycles
+            total += c
             pc = cpu.r_pc()
+            if args.prof and prof_on[0]:
+                k = by[max(0, bisect.bisect_right(byaddr, pc) - 1)][1]
+                hist[k] = hist.get(k, 0) + c
             if pc in targets:
                 return total
             if pc in bad or s.terminated:
@@ -65,6 +75,7 @@ def main():
 
     # the program's start: it runs the Z80 code; stop it right after the hardware set-up (at the first hook) and use its
     # state only for the renderer
+    prof_on = [False]
     run_to({sym['sim_render_start']}, 900_000_000)
     ret = sym['sim_render_ret']
     g = Gfx()
@@ -121,7 +132,9 @@ def main():
             cpu.w_reg(R.A7, sp)
             mem.w32(sp, ret)
             cpu.w_pc(sym['compose_bg'])
+        prof_on[0] = True
         cycles.append(run_to({ret}))
+        prof_on[0] = False
         cpu.w_reg(R.A7, sp + 4)
         if args.debug:
             ring = bytes(mem.r_block(sym['ring'], 800 * 112))
@@ -176,6 +189,10 @@ def main():
             print('first differing pixels (line, x, got, want):', [(int(y), int(x), int(idx[y, x]), int(want[y, x])) for y, x in zip(ys[:12], xs[:12])], 'bbox', (int(ys.min()), int(ys.max()), int(xs.min()), int(xs.max())))
             Image.fromarray(np.concatenate([pal[idx], pal[want]], axis=1)).resize((896, 576), Image.NEAREST).save(
                 str(Path(args.png) / ('cmp%d.png' % f)))
+    if args.prof:
+        tot = sum(hist.values())
+        for k, v in sorted(hist.items(), key=lambda kv: -kv[1])[:25]:
+            print('%-24s %5.1f%%  %d' % (k, 100 * v / tot, v // max(1, tested)))
     print('%s: %d pictures, worst %d differing pixels' % ('PASS' if worst == 0 else 'FAIL', tested, worst))
     sys.exit(0 if worst == 0 else 1)
 
