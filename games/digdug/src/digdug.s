@@ -385,13 +385,37 @@ dump_rate:
 
 rate_name:
 	dc.b	"RATE.BIN",0
+ram_name:
+	dc.b	"RAM.BIN",0
 	even
+
+; RAM.BIN: the arcade RAM $8000-$9FFF and the video latch $A000-$A007 (g_ram + $2000) at the quit: the reference renderer
+; draws the screen the long run ended on (tools/ramshot.py)
+dump_ram:
+	clr	-(sp)
+	pea	ram_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	g_ram
+	move.l	#$2008,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
 
 	endc
 
 quit:
 	ifd RATE
 	bsr	dump_rate
+	bsr	dump_ram
 	endc
 	bsr	restore_hardware
 	ifd DEBUG
@@ -716,6 +740,92 @@ sndtest_n = *-sndtest_ids
 	even
 	endc
 
+	ifd BOTCHASE
+
+; tools/bot.py's player in 68000: walk to the nearest Pooka / Fygar (sprites 50-55 of colour 1 / 3: positions in the sprite
+; RAM at $9380, codes and colours at $8B80), pump when it is within 40 units.  In / out: d1 / d2 the pressed bits of in1 /
+; in0 (active high).  The sprite coordinates are rotated: RIGHT is +y, LEFT -y, DOWN +x, UP -x.
+bot_chase:
+	moveq	#0,d5
+	move.b	g_ram+$1380+34,d5	; the player (sprite 17): y
+	moveq	#0,d4
+	move.b	g_ram+$1380+35,d4	; x
+	move.w	#$7fff,d6		; the best distance so far
+	sub.l	a2,a2			; its dy, dx
+	sub.l	a3,a3
+	moveq	#50,d3
+.e:	move.w	d3,d0
+	add.w	d0,d0
+	lea	g_ram+$0B80,a0
+	moveq	#0,d7
+	move.b	1(a0,d0.w),d7		; the colour
+	cmp.b	#1,d7
+	beq.s	.col
+	cmp.b	#3,d7
+	bne.s	.skip
+.col:	lea	g_ram+$1380,a0
+	moveq	#0,d7
+	move.b	(a0,d0.w),d7		; ey (0: hidden)
+	beq.s	.skip
+	sub.w	d5,d7			; dy
+	movea.w	d7,a1
+	tst.w	d7
+	bpl.s	.ady
+	neg.w	d7
+.ady:	move.b	1(a0,d0.w),d0		; ex
+	sub.w	d4,d0			; dx
+	move.w	d0,-(sp)
+	tst.w	d0
+	bpl.s	.adx
+	neg.w	d0
+.adx:	add.w	d0,d7			; the distance
+	move.w	(sp)+,d0
+	cmp.w	d6,d7
+	bhs.s	.skip
+	move.w	d7,d6
+	movea.l	a1,a2
+	movea.w	d0,a3
+.skip:	addq	#1,d3
+	cmp	#56,d3
+	blo.s	.e
+	cmp.w	#$7fff,d6
+	beq.s	.none
+	move.l	a2,d0
+	move.l	a3,d7
+	move.l	d0,d4
+	bpl.s	.a1
+	neg.l	d4
+.a1:	move.l	d7,d5
+	bpl.s	.a2
+	neg.l	d5
+.a2:	cmp.l	d5,d4
+	ble.s	.vert
+	tst.l	d0
+	bmi.s	.left
+	or.b	#2,d2			; RIGHT
+	bra.s	.fire
+.left:	or.b	#8,d2
+	bra.s	.fire
+.vert:	tst.l	d7
+	bmi.s	.up
+	or.b	#4,d2			; DOWN
+	bra.s	.fire
+.up:	or.b	#1,d2
+.fire:	cmp.w	#40,d6
+	bhs.s	.rts
+	move.l	frame_counter,d0
+	and.l	#2,d0			; (two VBLs on, two off)
+	bne.s	.rts
+	or.b	#1,d1
+.rts:	rts
+.none:	btst	#6,frame_counter+3
+	beq.s	.d
+	or.b	#2,d2
+	rts
+.d:	or.b	#4,d2
+	rts
+	endc
+
 	ifd AUTOPLAY
 autoplay:
 	move.l	frame_counter,d0
@@ -736,7 +846,13 @@ autoplay:
 	cmp.l	#46,d3
 	bhs.s	.m
 	moveq	#4,d1
-.m:	cmp.l	#400,d3			; then moves (right / down / left / up in turn) and the pump
+.m:	ifd BOTCHASE
+	cmp.l	#500,d3			; (-D BOTCHASE=1: the chase of tools/bot.py, from the start's walk-in on)
+	blo.s	.set
+	bsr	bot_chase
+	bra.s	.set
+	endc
+	cmp.l	#400,d3			; then moves (right / down / left / up in turn) and the pump
 	blo.s	.set
 	move.l	d3,d4
 	lsr.l	#5,d4
@@ -1674,6 +1790,7 @@ key_table:
 	dc.b	$02,$00,$04		; 1 = start 1
 	dc.b	$03,$00,$08		; 2 = start 2
 	dc.b	$06,$00,$10		; 5 = coin
+	dc.b	$07,$00,$20		; 6 = coin 2 (the same coinage)
 	dc.b	0,0,0
 	even
 

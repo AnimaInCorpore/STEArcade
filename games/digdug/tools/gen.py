@@ -29,7 +29,7 @@ TOKEN = 0x4001
 # The ROMs are fixed code (inline_limit = the ROM's size).
 INLINE = 0 if os.environ.get("DIGDUG_NO_INLINE") else int(os.environ.get("DIGDUG_INLINE", 32))
 ENTRIES = 0x4002
-SEEDS = (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16)
+SEEDS = (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17)
 
 
 def configs():
