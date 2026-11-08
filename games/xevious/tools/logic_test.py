@@ -65,6 +65,14 @@ def main():
         hit = re.match(r'^([ZYX])([0-9A-F]{4}):\t\t; push .* \(merged\)', line)
         if hit:
             merged['ZYX'.index(hit[1])].add(int(hit[2], 16))
+    # a call (or rst) of a short leaf function is emitted in place (gen.py inline_leaves): the return address the reference
+    # writes there is a dead stack word, not compared until another instruction writes it.  Its marker line follows the label.
+    inl = [set(), set(), set()]
+    lines = (BUILD / 'xevious_code.s').read_text().splitlines()
+    for l, nx in zip(lines, lines[1:]):
+        hit = re.match(r'^([ZYX])([0-9A-F]{4}):', l)
+        if hit and nx.strip() == '; (inline)':
+            inl['ZYX'.index(hit[1])].add(int(hit[2], 16))
     dead, site = set(), [0, 0, 0]
     for n in range(3):
         def mk(n):
@@ -75,7 +83,7 @@ def main():
                 return step0()
 
             def ref_write(a, v):
-                (dead.add if site[n] in merged[n] else dead.discard)(a)
+                (dead.add if site[n] in merged[n] or site[n] in inl[n] else dead.discard)(a)
                 return write0(a, v)
             m.cpus[n].step, m.cpus[n].wr8 = ref_step, ref_write
         mk(n)
@@ -139,8 +147,8 @@ def main():
         diff = [0x7800 + i for i in range(len(want)) if want[i] != got[i] and 0x7800 + i not in dead and 0x7800 + i not in skip]
         diff2 = [0x7900 + i for i in range(0x700) if want[0x100 + i] != got2[i] and 0x7900 + i not in dead and 0x7900 + i not in skip]
         if diff or diff2:
-            raise RuntimeError('frame %d: %d + %d (sub half) RAM differences, ref pcs %s %s' % (
-                f, len(diff), len(diff2), ['%04x' % c.pc for c in m.cpus],
+            raise RuntimeError('frame %d: %d + %d (sub half) RAM differences, ref pcs %s sps %s' % (
+                f, len(diff), len(diff2), ['%04x' % c.pc for c in m.cpus], ['%04x' % c.sp for c in m.cpus]) + str(
                 [(hex(a), hex(got[a - 0x7800]), hex(want[a - 0x7800])) for a in diff[:12]] +
                 [('sub', hex(a), hex(got2[a - 0x7900]), hex(want[a - 0x7800])) for a in diff2[:6]]))
         lat = [mem.r8(sym['latch'] + i) for i in range(8)]
