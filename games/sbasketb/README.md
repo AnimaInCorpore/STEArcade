@@ -14,16 +14,18 @@ against the reference in the shown colours; one 16-colour palette by the shared 
 **Incomplete** (sound by recordings, one clip at a time, its timing and levels checked against MAME's in Hatari's audio
 capture, never listened to; the logic at 100% of the arcade's speed and 20-27 pictures a second in play in Hatari; the
 games of the scripted runs end at the first game over, no later stage was reached).
-Speed: 20,000 VBLs of the AUTOPLAY script in Hatari without a crash or a late border event: 57.1 arcade frames a second
-(95%) and 32.4 pictures a second over the whole run (the attract and game-over screens are drawn at 50 a second); in
-play (VBL 3,000-5,000 and the later games) the logic is 100% (120 frames per 100 VBLs) and the pictures 20-27 a second,
-busy stretches (many sprites, the court scrolling) 15-20 (Hatari, `tools/hatari.ps1 -Frames N`, sound build with its audio
-off, DEBUG build, 4 MB, 2026-11-08).
+Speed (Hatari, `tools/hatari.ps1 -Frames 20000`, the AUTOPLAY script, sound build with its audio off, DEBUG build, 4 MB,
+2026-11-08, the final build): 20,000 VBLs without a crash, 2 border fallbacks and no late border event; 58.3 arcade
+frames a second (97%) and 34.1 pictures a second over the run (the attract and game-over screens are drawn at 50 a second).
+In play (the 101 hundred-VBL intervals with fewer than 40 pictures a second): the logic 98% (mean; 84% in the worst
+interval), the pictures 23.5 a second (median 22.0, 10th percentile 17.5, worst 13.5).  The first 5,000 VBLs: 89% and
+24.5 pictures a second including the program's start (VBLs 0-200: the boot, 24 arcade frames in the first 300); VBLs
+1,000-5,000: 97% and 27.6.
 
 ## Build and run
 
 ```sh
-python port.py cover sbasketb               # coverage: ref/cover.py seeds 1-21 (~8 min in parallel)
+python port.py cover sbasketb               # coverage: ref/cover.py seeds 1-22 (~8 min in parallel)
 python port.py build sbasketb               # -> run/sbasketb/SBASKETB.PRG
 python port.py test sbasketb                # lock-step (seeds 1, 4, 6, AUTOPLAY), render (seed 1), sprite edges, sound
 python port.py mame sbasketb                # the reference against MAME (ref/mame_cmp_sbasketb.py)
@@ -61,7 +63,7 @@ kept, easy, demo sounds on).
   and three buttons; two players; 30 / 40 / 50 s games, other DIP switches; the service mode with its test screens; no
   coin at all: the whole attract cycle; fixed stick and button patterns) and seed 21, the runtime's AUTOPLAY script, 16,000
   frames.  The reference's self-test is skipped (below), so those are the game's own paths from `$6000` on.
-  **The translation covers what the coverage ran** (21 seeds, 12,787 instructions), the entries of 22 jump tables and 42
+  **The translation covers what the coverage ran** (22 seeds, 12,797 instructions), the entries of 22 jump tables and 42
   more roots (`gen.data_roots`: words of the data and 16-bit load immediates that name a code address not run, right
   after an executed return or jump or as a loaded state, decoding as ordinary code on every path up to run code; the
   object scripts and the `JMP ,U` state machines name their handlers so).  A handler that is neither run, in a table nor
@@ -197,7 +199,8 @@ $FF).  The commands the game sends (coverage): 0, effects $01-$40 (17 values), p
 | 2026-11-07 | Hatari, `tools/hatari.ps1 -Frames 5000` (the AUTOPLAY script: coin, start, moving and shooting; the AVI recorded), DEBUG build, 4 MB, sound build (Hatari's audio off) | 73%, 44.1 arcade frames a second (4,413 in 5,001 VBLs) | 16.2 a second (1,619) | |
 | 2026-11-07 | the same without the sound, 4,000 VBLs | 69%, 41.2 | 13.9 | |
 | 2026-11-08 | Hatari, natives `$8DD8` and `$64F7`, 5,000 VBLs (same script and build) | 83%, 49.6 (4,961) | 19.4 (1,939) | logic 56k an arcade frame |
-| 2026-11-08 | the same, 9,000 VBLs | 90%, 54.0 (9,713) | 30.6 (5,516) | (the rate differs by phase of the script: the first 5,000 VBLs were lower; not analysed further) |
+| 2026-11-08 | the same, 9,000 VBLs | 90%, 54.0 (9,713) | 30.6 (5,516) | (the rate differs by phase of the script: the first 5,000 VBLs were lower) |
+| 2026-11-08 | Hatari, 20,000 VBLs, after the merge: compose passes 4 lines a plane (a picture's CPU 100k -> 83k), the fixed rows not recomposed on a scroll change (Blitter 97.6k -> 89.1k), the boot's delay native | 97%, 58.3 | in play median 22.0, mean 23.5 (p10 17.5); 34.1 over the run | Musashi, seed 1 frames 1,000-1,500: a picture 82.5k CPU + 89.1k Blitter (was 100.4k + 97.6k); frames 2,900-3,200 (play): 48.5k + 62.0k |
 | 2026-11-07 | Musashi, seed 1's play (`render_test.py 1400 --seed 1 --start 1000`, 400 pictures) | | | logic 99.5k an arcade frame; a picture CPU 98.9k + Blitter 103.8k bus cycles |
 
 Where a picture's time goes (`render_test.py 1500 --seed 1 --start 1000 --prof`): `compose` 24%, `draw_cell` 24% (the
@@ -238,6 +241,12 @@ Blitter bus cycles (render_test, seed 1 frames 1,000+): `draw_cell` 25% (the gen
 | Sprite-only-row restore / writer marks | applied (`row_dirty`, `row_sdirty`: cells marked by the writers) | included above |
 | Spreading redraws, HUD as an image, skipping latch copies of skipped pictures | not tried | |
 | Pictures-per-second schedule | `MAX_SKIP` 3, `PASSES` 8; not tuned | |
+
+*The first 400 VBLs* (the start of the program, 2026-11-08): the arcade's power-on delay at `$6000` (65,536 turns of
+`STA $3C00` and `STA $3C81` through the I/O handler, 16.7M cycles) and the watchdog stores of the two RAM-clearing loops
+after it (`$3C00` through the handler, 18.6M) took 4.8 s with no picture; `nat_boot_6000` replaces the delay and
+`Program.watchdog` makes a watchdog store set the flags only: 38.3M -> 3.3M cycles to the first idle point.  The rest of the
+first 5,000 VBLs was the attract and demo screens (many sprites, the court scrolling) before the game starts at VBL ~2,400.
 
 Measured, not kept: nothing yet.  Techniques other ports use that may apply:
 [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).
