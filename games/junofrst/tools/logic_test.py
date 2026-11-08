@@ -56,6 +56,7 @@ def main():
     ap.add_argument('--sound', action='store_true', help='run snd_frame every frame and compare the sound board with tools/sound.py STEBoard')
     ap.add_argument('--exact', action='store_true', help='with --profile: every instruction counted with its cycles (slow; use few frames)')
     ap.add_argument('--pfrom', type=int, default=0, help='with --profile: from this frame')
+    ap.add_argument('--nopic', action='store_true', help='do not compare the picture (a --nobg build)')
     ap.add_argument('--count', action='store_true', help='count the video RAM writes (vram_wr calls) and reads')
     ap.add_argument('--tag', default='junofrst_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
@@ -158,6 +159,7 @@ def main():
             raise RuntimeError('frame %d: i8039 status %d busy %d, model %d %d' % (
                 f, mem.r8(sym['snd_status']), mem.r8(sym['snd_busy']), b.status, b.busy))
 
+    cellstat = []
     snd = [0]
     pics = [0]
     last_pic = [0]
@@ -177,7 +179,7 @@ def main():
         if mem.r8(sym['jf_bank']) != m.bank:
             raise RuntimeError('frame %d: bank %d, reference %d' % (f, mem.r8(sym['jf_bank']), m.bank))
         pic = picture(bytes(mem.r_block(vram, 256 * 160)))
-        n = int((pic != expected(m.mem)).sum())
+        n = 0 if args.nopic else int((pic != expected(m.mem)).sum())
         if n:
             ys, xs = np.nonzero(pic != expected(m.mem))
             raise RuntimeError('frame %d: %d video RAM pixels differ, first (line, column) %s' % (
@@ -191,6 +193,9 @@ def main():
         pcn = mem.r16(sym['pic_count'])
         fresh = pcn != last_pic[0]
         last_pic[0] = pcn
+        if args.render and f >= 100 and fresh:
+            mk = mem.r_block(sym['cell_marks'], 2048)
+            cellstat.append(sum(1 for i, v in enumerate(mk) if v & 7 and i % 16 < 14) / 1792)
         if args.render and f >= 0 and fresh and mem.r8(sym['frame_ready']):
             idx = mem.r8(sym['frame_ready']) - 1
             buf = mem.r32(sym['buf_base'] + 4 * idx)
@@ -221,6 +226,9 @@ def main():
         m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_p1', m.p1), ('io_p2', m.p2)):
             mem.w8(sym[n], v)
+        for a, v in cover.cheats(args.seed, f, state, m.mem):        # (seeds 13-16: the wave pokes, both sides)
+            m.mem[a] = v
+            mem.w8(base + a, v)
         mem.w8(sym['vbl_pending'], 1)
         if f == args.trace:
             ref = []
@@ -269,6 +277,8 @@ def main():
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact' % (f + 1), flush=True)
     print('PASS: %d frames (seed %d), RAM, palette RAM, picture, latch, bank and sound commands exact' % (args.frames, args.seed))
+    if args.render and cellstat:
+        print('cells marked for the other buffers after a picture: %.2f of 1792 on average' % (sum(cellstat) / len(cellstat)))
     if args.render:
         print('%d published pictures and palettes exact' % pics[0])
     if args.profile:

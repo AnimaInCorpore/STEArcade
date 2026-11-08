@@ -199,6 +199,9 @@ class Program:
         # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
         # stores still call io_w.
         self.video_inline = None
+        # io_w_alt (set after construction): {site: label}: a byte store at that site calls this routine instead of
+        # <name>_io_w (a port that leaves a drawing out: the routine returns at once)
+        self.io_w_alt = {}
         self.no_follow = set()                    # (set after construction) pcs whose successors discovery does not follow
         # a3_pb (set after construction, Juno First): the stack's / direct page's slot is above $7FFF, where a 68000
         # displacement cannot reach from VB: a3 holds PB[a3_slot] (the page's base) instead, the static accesses of the
@@ -1015,7 +1018,7 @@ class Emitter:
                 self.video_store(src, vi[0], vi[1])
                 return
             self.e("move.b %s,d5" % src)
-            self.e("bsr %s_io_w" % self.p.name)
+            self.e("bsr %s" % self.p.io_w_alt.get(v, "%s_io_w" % self.p.name))
             self.e("tst.b %s" % src)
             return
         self.e("move.b %s,%s" % (src, self.ea(v, ins, off)))

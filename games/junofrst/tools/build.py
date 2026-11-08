@@ -7,6 +7,7 @@
 from pathlib import Path
 import argparse
 import json
+import os
 import subprocess
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
@@ -20,6 +21,7 @@ def main():
     ap.add_argument('--sim', action='store_true')
     ap.add_argument('--debug', action='store_true')
     ap.add_argument('--assets', action='store_true', help='make the graphics and colours again')
+    ap.add_argument('--nobg', action='store_true', help='leave the background dots out (faster; the picture is not exact)')
     ap.add_argument('--frames', type=int, default=0)
     ap.add_argument('-D', dest='defines', action='append', default=[])
     ap.add_argument('--tag', help='another run/<tag> folder (default junofrst / junofrst_sim)')
@@ -27,6 +29,8 @@ def main():
     build = build_dir('junofrst')
     if not (EXTRACTED / 'junofrst' / gen.PROGRAM[0][0]).exists():
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'prepare.py')], check=True)
+    if args.nobg:
+        os.environ["JF_NOBG"] = "1"
     mem, banks = gen.rom_image()
     (build / 'junofrst.img').write_bytes(bytes(mem))
     (build / 'banks.rom').write_bytes(banks)

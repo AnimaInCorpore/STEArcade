@@ -45,14 +45,14 @@ JP1_UP = $04<<JP_SH
 JP1_DOWN = $08<<JP_SH
 JP1_B1 = $20<<JP_SH
 JP1_B2 = $10<<JP_SH
-JP1_B3 = 0
+JP1_B3 = $40<<JP_SH
 JP2_LEFT = $01<<8
 JP2_RIGHT = $02<<8
 JP2_UP = $04<<8
 JP2_DOWN = $08<<8
 JP2_B1 = $20<<8
 JP2_B2 = $10<<8
-JP2_B3 = 0
+JP2_B3 = $40<<8
 JP_START1 = $08<<24
 JP_START2 = $10<<24
 JP_COIN1 = $01<<24
@@ -592,6 +592,9 @@ main_io_r:
 	move.l	(sp)+,a0
 	rts
 
+main_io_w_nop:				; (a store of the background's dots left out: build.py --nobg)
+	rts
+
 main_io_w:
 	cmp.w	#$8000,d7
 	blo	vram_wr
@@ -783,7 +786,7 @@ compose_inputs:
 	rts
 
 ; scancode, SYSTEM bits (coin 1 = 0, coin 2 = 1, start 1 = 3, start 2 = 4), P1 bits (left 0, right 1, up 2, down 3,
-; fire 2 = 4, fire 1 = 5), P2 bits (the same: the cocktail's second stick, keys R F D A G)
+; fire 2 = 4, fire 1 = 5, button 3 = 6), P2 bits (the same: the cocktail's second stick, keys R F D A G)
 key_table:
 	dc.b	$4b,$00,$01,$00		; left
 	dc.b	$4d,$00,$02,$00		; right
@@ -802,6 +805,9 @@ key_table:
 	dc.b	$20,$00,$00,$02		; D = P2 right
 	dc.b	$1e,$00,$00,$01		; A = P2 left
 	dc.b	$22,$00,$00,$20		; G = P2 fire 1
+	dc.b	$23,$00,$00,$10		; H = P2 fire 2
+	dc.b	$24,$00,$00,$40		; J = P2 button 3
+	dc.b	$2e,$00,$40,$00		; C = button 3
 	dc.b	0,0,0,0
 	even
 
