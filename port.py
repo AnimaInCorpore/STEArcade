@@ -68,9 +68,11 @@ COVER = {
                                                                 # 10 rack test, 11-12 levels 20+ / 250+ (split screen)
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
-    "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
+    "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
+              ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
     "jailbrek": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles
-    "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
+    "trackfld": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
+              ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
     "sbasketb": [("ref/cover.py", list(range(1, 22)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script
     "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
@@ -454,6 +456,9 @@ def main():
         wanted = [int(x) for x in rest]
         for script, seeds, frames, *extra in COVER[game]:     # (extra: the script's further arguments)
             for s in [x for x in wanted if x in seeds] if wanted else seeds:   # (a seed given: its group's frames)
+                if script.startswith("shared:"):       # (a script of another port that takes the game first: cover_sound.py)
+                    jobs.append([PY, str(ROOT / script[7:]), game, str(s), str(frames)])
+                    continue
                 jobs.append([PY, game_script(game, script), str(s), str(frames)] + [str(x) for x in (extra[0] if extra else [])])
         if wanted and len(jobs) < len(wanted):
             sys.exit("port.py cover %s: not every seed is in COVER[%r]" % (game, game))
