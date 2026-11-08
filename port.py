@@ -345,7 +345,7 @@ TESTS = {
                ("../../engine/mb88x_test.py", ["{n}"], 3000),    # the translated 51XX against the event-driven one
                ("tools/n51_test.py", ["{n}"], 3000)],            # the build's 51XX traffic against the reference
     "digdug": [("tools/prepare.py", [], None),
-               ("tools/build.py", ["--sim"], None),
+               ("tools/build.py", ["--sim", "-D", "NOSIXFIVE=1"], None),       # (one game frame a VBL, as the reference machine's schedule)
                ("tools/schedule_test.py", ["{n}", "--no-build", "--every", "50", "--slack", "700"], 2400),   # the STE's tile / sprite RAM against the reference's schedule
                ("tools/native_test.py", [], None),                                                        # digdug.s's natives against the Z80 reference
                ("tools/render_test.py", ["1500", "2500", "3500", "5000"], None),                          # the picture against the reference renderer

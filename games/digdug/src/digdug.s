@@ -122,6 +122,7 @@ start:
 	bsr	init_hardware
 	bsr	init_video
 	bsr	init_render
+	move.b	#5,round5
 
 	lea	g1_dispatch,a0		; the dispatch tables in the order the code uses them: one table of 65536 longs for the
 	lea	g1_dispatch_sw,a1	; three CPUs (the index is the pc with its bytes swapped: the main CPU's pcs $0000-$3FFF and
@@ -528,6 +529,7 @@ vbl:
 	bhs.s	.no_rate
 	move	cnt_vbl,(a0)+
 	move	cnt_render,(a0)+
+	move	cnt_round,(a0)+
 	move.l	a0,rate_ptr
 .no_rate:
 	endc
@@ -548,6 +550,10 @@ vbl:
 	tst.b	in_game			; a VBL inside the game's interrupts below (Timer B's handler lowers the IPL, Hatari): the
 	bne	vbl_done		; interrupted code is a handler or the sub CPU's task, not the main thread: nothing
 	st	in_game
+game_round:
+	ifd RATE
+	addq	#1,cnt_round
+	endc
 	ifd FREEZEAT
 	cmp.l	#FREEZEAT,frame_counter	; test: the game stands still from VBL FREEZEAT on,
 	bhs	vbl_render		; the renderer goes on (screens of two builds compared)
@@ -624,6 +630,14 @@ vbl:
 
 	bsr	g_boot_turns		; a booting CPU waiting for the main CPU gets on
 	chk_sp	22
+	ifnd NOSIXFIVE
+	subq.b	#1,round5		; the arcade runs 60.6 frames a second, the VBL 50: every fifth VBL a second game frame
+	bne.s	.one_round		; (six rounds in five VBLs: the game at full speed when the CPU allows it; the sound CPU's
+	move.b	#5,round5		; NMIs, the 51XX's frame and the interrupts are all part of the round)
+	bsr	n51_vbl
+	bra	game_round
+	endc
+.one_round:
 	clr.b	in_game
 
 vbl_render:
@@ -711,6 +725,9 @@ autoplay:
 	blo.s	.set
 	move.l	d0,d3
 	sub.l	#AUTOPLAY,d3
+	divu	#3000,d3		; a game of 3000 VBLs, then the next coin and start (a game over ends it earlier)
+	swap	d3
+	and.l	#$ffff,d3
 	cmp.l	#6,d3			; the coin
 	bhs.s	.c1
 	moveq	#$10,d1
@@ -1861,6 +1878,7 @@ current:	ds.b	1		; 0: the main CPU's code runs, 1: the sub CPU's
 booted2:	ds.b	1		; the sub CPU reached its idle loop
 cpu3_state:	ds.b	1
 ctrl06_mode:	ds.b	1
+round5:		ds.b	1		; VBLs to the next second game frame
 in_game:	ds.b	1		; the VBL's game interrupts run (a nested VBL does nothing)
 in_fg2:		ds.b	1		; the sub CPU's EAROM task runs
 g1_iff:		ds.b	1		; the CPUs' interrupt enable (ei / di)
@@ -1882,6 +1900,7 @@ cnt_acia:	ds.w	1
 cnt_vbl:	ds.w	1
 cnt_skip:	ds.w	1
 cnt_render:	ds.w	1
+cnt_round:	ds.w	1
 	ifd RATE
 rate_count:	ds.w	1
 rate_ptr:	ds.l	1
