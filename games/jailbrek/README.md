@@ -90,22 +90,23 @@ game's speech state never ends and the frame sequence of MAME is not reproduced.
 pens and 0 pixels differ** at frames 60, 300, 600, 1200, 1500, 1548, 2000, 3000, 4000, 6000 (the renderer draws MAME's
 own memory).  The reference machine's RAM equals MAME's at frames 100 and 200 exactly and to frame 1548 but for the
 stack bytes below the stack pointer and the NMI handler's scratch ($1706-$1721, $16C0-$16C5), then drifts by one and then two
-arcade frames: MAME's frame 1555 equals the reference's 1554, its 1600 the reference's 1598 and 1700 its 1698 (the first
-speech comes at frame 1570 in MAME, 1568 in the reference); its picture is equal to MAME's again at 4000 and 6000.  The
-picture check does not depend on it.  **Not explained** (2026-11-07 investigation; what is known):
-* The first difference is at 1549 ($1521, the control register 4's shadow, caught with the IRQ handler running at the
-  dump) and at 1550 a game tick (text cleared, sprites moved 1-3 pixels) the other way: a tick more or fewer, i.e. an
-  IRQ taken or skipped (the 005849 raises it only while ctrl 4 bit 1 is set, which the handler clears for its duration:
-  a tick that overruns a frame skips the next IRQ, as the reference does too).
-* It starts where the game has no time to spare: the reference's main loop idles 2,000-3,400 cycles a frame before 1548
-  and 83 cycles at 1550, so a few tens of cycles decide whether a tick overruns.
-* Neither a phase of the timer against the CPU (-240 .. +240 cycles, in 20-cycle steps), nor extra interrupt entry
-  cycles (-4 .. +12), nor a dump point 0-1500 cycles after line 240 changes the first differing frame (1549).  The
-  reference's CPU timing is checked against MAME for this encryption (`engine/konami1_test.py`).  What is left: a
-  difference in MAME's scheduling at the dump (the frame_done callback's instant is not line 240: the last
-  control-register write of each frame is at line 211-237 of the beam and the first at 240.4, the Lua beam position
-  unit being 256 / 264 of a line), or a chip behaviour in this scene (MAME's tap shows nothing at $4000-$6000 before
-  frame 1570).  A cycle trace of MAME's main CPU over frames 1546-1551 (the debugger) would settle it.
+arcade frames against the 0.248 binary: MAME's frame 1555 equals the reference's 1554, its 1600 the reference's 1598 and 1700
+its 1698 (the first speech comes at frame 1570 in MAME, 1568 in the reference); its picture is equal to MAME's again at 4000 and
+6000.  **Cause found (2026-11-08): the binary is not the source.**  `ref/mame_ctrl_trace.py` runs the 0.248 binary with
+`ref/mame_ctrl_trace.lua`, which logs the writes to the control registers and the reads of the interrupt vectors with the
+main CPU's local time in cycles; compared with the reference's own vector reads:
+* the IRQ and NMI are first enabled at frame 248: until then nothing differs, so nothing could show a difference;
+* the 0.248 binary raises the NMI every 32 lines (3072 cycles) from power-on, free-running and not tied to the frame
+  (the NMIs' line in the frame goes 160, 88, 16, 208, ... : minus 8 lines a frame), and the IRQ at the frame's end
+  (its time origin is the vblank start); the 0.286 source (`k005849.cpp`, the reference) raises the NMI at the lines 16, 48,
+  ..., 240 of every frame (a 40-line gap at the frame's wrap) and the IRQ at line 240 -- the same rate, 8 a frame, but a
+  different phase against the game's tick, which is why the speech and the tick drift apart after 1550 where the game has no
+  time to spare;
+* `JailBreak.mame248 = True` (`run_frame_248`: the NMI as a pulse every 3072 cycles from power-on while ctrl 4 bit 0 is set, the IRQ
+  at the frame's end) with `JB248=1 python games/jailbrek/ref/mame_cmp_jailbrek.py 100 1200 1548 1555 1600 1700 2000 3000 4000 6000`:
+  **no frame differs but for 1-6 stack bytes below the stack pointer ($17C4-$17EF)**, at 1555, 1600, 1700, 2000, 3000, 4000 and 6000, with 0
+  pixels and 0 pens differing.  The drift is therefore the binary's interrupt schedule; the port and the default reference keep the
+  source's (the authoritative one).  There is no 0.286 binary with this driver here to check the source against.
 
 ### Translation
 

@@ -205,6 +205,8 @@ class JailBreak:
         self.frame = 0
         self.firq_parity = firq_parity
         self.trace = None                  # a list: (line since power-on, ctrl register, value) of every ctrl write
+        self.mame248 = False               # the 0.248 binary's interrupt schedule (run_frame_248)
+        self.nmi_next = 3072
         self.slack = slack                 # CPU cycles run after line 240's events before the frame is taken
         self.cpu = M6809(self.rd, self.wr, konami1_opcode(self.rd))
         self.video = None
@@ -270,8 +272,31 @@ class JailBreak:
             if self.ctrl[4] & 2:
                 c.set_irq(True)
 
+    def run_frame_248(self):
+        """The behaviour of the MAME 0.248 binary (measured, ref/mame_ctrl_trace.py; the 0.286 source differs): the NMI
+        every 32 lines (3072 cycles) from power-on, not tied to the frame, while ctrl 4 bit 0 is set; the IRQ at the
+        frame's end (the screen's time origin is its vblank start: the timer's line 0 is 24 lines after it) while
+        bit 1 is set.  Runs to the frame_done callback's instant, the IRQ's."""
+        c = self.cpu
+        end = (self.frame + 1) * FRAME
+        while True:
+            t = min(self.nmi_next, end)
+            c.run(t - c.cycles)
+            if t == self.nmi_next:
+                self.nmi_next += 3072
+                if self.ctrl[4] & 1:
+                    c.set_nmi(True)
+                    c.set_nmi(False)               # (a pulse)
+            if t == end:
+                break
+        if self.ctrl[4] & 2:
+            c.set_irq(True)
+        self.frame += 1
+
     def run_frame(self):
         """Runs to line 240's timer event (including it): the state MAME's frame_done callback sees."""
+        if self.mame248:
+            return self.run_frame_248()
         c = self.cpu
         while True:
             line = self.line

@@ -34,6 +34,7 @@ if __name__ == "__main__":
     print("pens: %d of %d differ" % (pen_diff, len(pens)))
     worst = pen_diff
     m = JailBreak()
+    m.mame248 = os.environ.get("JB248") == "1"       # the 0.248 binary's interrupt schedule (see README)
     state = {}
     for f in frames:
         mem = M.load_dump(d, f, "maincpu", 0)
