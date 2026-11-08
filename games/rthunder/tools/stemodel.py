@@ -77,7 +77,7 @@ def blit(out, x, y, img, color, lut):
     o[opq] = lut[2048 + color * 16 + sub[opq].astype(np.int32)]
 
 
-def picture(m, flat):
+def picture(m, flat, bgfirst=False):
     """the painter's-order picture as indirect colours (288 x 224), then mapped with `flat`"""
     bw, bh = 384, 264
     lut = m.pen_table()
@@ -85,6 +85,27 @@ def picture(m, flat):
     ys, xs = np.mgrid[0:bh, 0:bw]
     xextent, yextent = VIS_X1 + VIS_X0 + 1, VIS_Y1 + VIS_Y0 + 1
     spr_by_pri = sprite_entries(m)
+    if bgfirst:
+        # the renderer's order: the three scrolling layers, every sprite below priority 7 (by k, lowest entry first), the
+        # fixed layer 3, the sprites of priority 7
+        order = [i for i in sorted(range(3), key=lambda i: (((m.xscroll[i >> 1][i & 1] & 0x0E00) >> 9), 3 - i))] + [3]
+        for i in order:
+            if i == 3:
+                for k in range(7):
+                    for (x, y, img, color) in spr_by_pri[k]:
+                        blit(out, x, y, img, color, lut)
+            dev, lay = i >> 1, i & 1
+            pens, opaque = m.tilemap(dev, lay)
+            dx = (47 if dev == 0 else 46) + (0, 2)[lay]
+            sx, sy = m.xscroll[dev][lay], m.yscroll[dev][lay]
+            h, w = pens.shape
+            vx, vy = dx - sx, -9 - sy
+            px, py = (xs - vx) % w, (ys - vy) % h
+            o = opaque[py, px]
+            out[o] = pens[py, px][o]
+        for (x, y, img, color) in spr_by_pri[7]:
+            blit(out, x, y, img, color, lut)
+        return flat[out[VIS_Y0:VIS_Y1 + 1, VIS_X0:VIS_X1 + 1]]
     for pri in range(8):
         for i in (3, 2, 1, 0):
             dev, lay = i >> 1, i & 1
@@ -122,7 +143,7 @@ def main():
         m.run_frame_port()
         if f % 10 == 9:
             ref = flat[m.render_raw()]
-            got = picture(m, flat)
+            got = picture(m, flat, "--bgfirst" in sys.argv)
             n = int((ref != got).sum())
             worst = max(worst, n)
             if n:

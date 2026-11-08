@@ -121,3 +121,20 @@ renderer (hardware scroll from the start), the palette fit, input, sound, `port.
   asks), the fixed layer, sprites (HOP 2 / OP 3 passes, prepared per code and colour row), the STE program (loader, VBL, borders,
   IKBD input, palette, the arcade-frame schedule with MAX_BEHIND), sound (the YM2151 and the 63701X PCM), `port.py` / release
   registration, Hatari measurements, `sprite_test`.
+
+### 2026-11-08: what stands between the reference and an STE program (analysis, nothing run on the STE)
+
+* **The MCU is the hidden big item.**  The HD63701 (internal `cus60-60a1.mcu` + the external `rt3_4.6b` at $4000-$BFFF) is the
+  CPUs' mailbox: the main CPU reads the inputs, coins and the sound engine's states from CUS30 RAM ($4182-$4185, $4189-$418E,
+  $41A5, $423D-$4281, $4380) and writes commands ($4183, $418C/D, $4286-$4294, $4380); in the reference `run_others` runs the real
+  firmware, ~25k MCU cycles a frame.  Without it the STE program has no inputs and no coin handling.  Options: (a) translate
+  the firmware to 68000 code (engine/m6801x.py is the 6801 translator of Bubble Bobble's MCU; the 63701's extra instructions
+  and its sound engine's timers would have to be added; cost unmeasured, probably tens of thousands of 68000 cycles a frame),
+  (b) a native model of the mailbox protocol checked against the firmware (what Splatterhouse's `mcu.s` does for its CUS64),
+  with the sound commands recorded at build time.  Neither is started.
+* **Sprites over the scrolling layers** are drawn after all three of them (the renderer's order, `stemodel.py --bgfirst`); the
+  arcade lets sprites with a low priority go under the foreground layer: 52-427 pixels of a picture differ from the reference
+  on sampled frames of seeds 1, 2 and 4 (worst 427).  The exact painter's order (`stemodel.py` without --bgfirst) has 0.
+* **Sprite plan**: parts (code, sub-rectangle, flips, colour row) converted on first use to rows of an opaque mask and four
+  plane longs (left justified), drawn as one HOP 2 / OP 3 Blitter pass a row (3 destination words, the end masks the opaque
+  mask shifted, Y count 4 for the four planes, skew = the shift), no AND + OR pass.
