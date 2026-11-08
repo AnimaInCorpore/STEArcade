@@ -51,7 +51,16 @@ at `$8569` (`CLR <$07` ... RTS without the `INC <$07` of the normal path): the p
 same MAME frame 2369 MAME still runs the `$D2` handshake).  Port and MAME agree on `$1600-$16FF` apart from timing-loop
 temporaries (`$160E/F`, `$1612/13`, `$1624`, `$1626/27`) for 232 frames; the divergence is elsewhere and not found.
 `RthunderOverrun` (a blocked CPU stays in its handler into the next frame, as MAME's overruns) does not help: from frame
-~2170 on cpu1 is blocked every frame (3832 of 6000 frames), i.e. the game is hung, not slowed.  Not tried: taking the IRQs
+~2170 on cpu1 is blocked every frame (3832 of 6000 frames), i.e. the game is hung, not slowed.  **Working schedule (2026-11-08): `RthunderRule`.**  A search with rollback (one deep copy of the board a frame, trying
+ORDER (1, 0), then (0, 1)) needed exactly one flip in 12000 attract frames, at port frame 2168 (`$1604 = 1`, `$1605 = 0`:
+cpu1 has counted a sub-step cpu2 has not taken).  The rule `cpu1 first iff $1604 != $1605, else cpu2 first` then runs
+8000 frames on the reference board for seeds 0 (attract), 1 and 2 (`ref/cover.py` random play).  The play seeds first failed
+at frames 871 / 1055 (cpu2 in the loop at `$8928`): its spin wait writes the watchdog (`$8000`) every pass, which the
+spin learner counted as progress; writes at `$8000` and above no longer count.  What this shows and does not: the board
+neither deadlocks nor hangs in those runs (no check yet that the play seeds reach and stay in the game, nor that the RAM
+is right: the port's state is not MAME's, the idle-loop counters are the games' random numbers).  One flip and a rule from
+one data point is thin evidence for other scenes; seeds 3-9 and 11-19 are not run.  The translation, runtime, renderer, sound
+and Hatari are still not done.  Earlier note, kept: not tried: taking the IRQs
 mid-foreground as the board does; a lock-step comparison of the *whole* RAM of port and MAME to find the first real
 divergence (needs a per-frame normalisation of idle-loop counters).  Idle points found: cpu1 `$81BC` (the main loop's
 BRA, queues `$56B3/$56B4`, `$566E/$566F` equal), cpu2 `$80A6` (`$1667/$1668` equal).

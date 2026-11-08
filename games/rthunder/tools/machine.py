@@ -581,7 +581,8 @@ class RthunderPort(Rthunder):
     def wr1(self, a, v):
         if a == 0x8400:
             return
-        self.writes += 1
+        if a < 0x8000:                                  # (watchdog and acknowledge writes are not progress)
+            self.writes += 1
         super().wr1(a, v)
         if 0x4400 <= a < 0x5800 and a - 0x4000 in self.SEMO:
             self.yield_req = True
@@ -589,7 +590,8 @@ class RthunderPort(Rthunder):
     def wr2(self, a, v):
         if a == 0x8800:
             return
-        self.writes += 1
+        if a < 0x8000:                                  # (watchdog and acknowledge writes are not progress)
+            self.writes += 1
         super().wr2(a, v)
         if a < 0x1800 and a in self.SEMO:
             self.yield_req = True
@@ -762,3 +764,13 @@ class RthunderOverrun(RthunderPort):
             self.state[i] = "run"
         self.cooperate()
         self.port_frames += 1
+
+
+class RthunderRule(RthunderPort):
+    """RthunderPort with a rule for who runs first: cpu1 when `$1604 != $1605` (cpu1 has counted a sub-step that cpu2
+    has not taken yet), else cpu2.  One flip at port frame 2168 (found by search with rollback) is what the attract
+    mode needed to run 12000 frames."""
+    def run_frame_port(self):
+        s = self.shared
+        self.ORDER = (0, 1) if s[0x1604] != s[0x1605] else (1, 0)
+        super().run_frame_port()
