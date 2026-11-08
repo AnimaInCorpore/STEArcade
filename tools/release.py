@@ -212,7 +212,11 @@ by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 
 Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
 simulated); its full-game verification is pending.  Time Pilot has no sound yet.  Donkey Kong Junior, Pac-Man,
 Pooyan, Mr. Do!, Moon Patrol, Track & Field and Hyper Sports are new: their logic and picture are checked against
-the reference, their full-game verification is pending.  R-Type is not part of this release: while it is developed it needs more than 4 MB of
+the reference, their full-game verification is pending.  Mario Bros., Mikie, Yie Ar Kung-Fu, Super Basketball, Jail
+Break, Donkey Kong 3, Roc'n Rope, Juno First and Super Xevious are newer still: logic and picture are checked against
+the reference, their sound was not listened to and they were not played through; Juno First and Super Xevious are
+slow.  Dig Dug (3.66 MB, 18-33 pictures a second) is not in this release.
+R-Type is not part of this release: while it is developed it needs more than 4 MB of
 RAM.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.

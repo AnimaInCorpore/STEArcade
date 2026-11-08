@@ -8,7 +8,7 @@ statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitm
 turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
 here both draw into the planar STE picture directly.  The sound board is translated too: its Z80 driver runs on
 the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
-offline to PCM for the DMA sound.  Status **Experimental**: logic, picture and the sound board's state are exact against
+offline to PCM for the DMA sound.  Status **Experimental / deferred** (root README): logic, picture and the sound board's state are exact against
 their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
 the program runs at about 61% speed in Hatari (MAX_SKIP 6), and the sound has never been compared with MAME's audio or listened to.
 

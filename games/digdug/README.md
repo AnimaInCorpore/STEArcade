@@ -10,8 +10,8 @@ programs (`namco51.zip`, `namco53.zip`; never blank stand-ins): the 51XX as in G
 Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles and the 1-bit characters of the tile RAM
 (the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
 
-Status: **Experimental / deferred** (root README): the game boots, runs its attract mode and plays in the simulator (a
-scripted game of 8000 frames) and in Hatari (14 MB, the screenshot above: a scripted game, `-D AUTOPLAY`, 3600 VBLs
+Status: **Incomplete** (root README): the game boots, runs its attract mode and plays in the simulator (a
+scripted game of 8000 frames) and in Hatari (the screenshot above: a scripted game, `-D AUTOPLAY`, 3600 VBLs
 without a crash; the STE shows 277 of the 288 lines, so the lives and the round line at the bottom are cut); no full natural playthrough, speed see below, the program
 loads 3.66 MB and runs in Hatari with 4 MB.
 
@@ -26,8 +26,7 @@ python port.py test digdug                       # prepare, build --sim, schedul
 python port.py mame digdug                       # the reference picture against MAME's (ref/mame_cmp_digdug.py, MAME=<exe>)
 ```
 
-Hatari needs 14 MB for this program (`--memsize 14`): the `tools/windows/run.ps1` helper passes `--memsize 4`, so start
-Hatari directly (the AVI route of the other ports: `--run-vbls N --avirecord true --avi-vcodec bmp --avi-file ...`, with
+Hatari runs it with 4 MB (`--memsize 4`, what `tools/windows/run.ps1` passes); to record, start Hatari directly (the AVI route of the other ports: `--run-vbls N --avirecord true --avi-vcodec bmp --avi-file ...`, with
 `C:\msys64\ucrt64\bin` first on `PATH` for the DLLs).
 
 ## Controls
@@ -55,7 +54,7 @@ Verified (what each check ran, see Tests and tools):
   reference renderer through the colour map: 0 differing pixels at several moments of play (see below), the sprites'
   wrap-around copies (MAME draws a sprite 256 pixels to the right too) left out of both.  `tools/sprite_test.py`: 2664
   cases at both side edges, all 16 shifts, flips, double sizes, transparent holes and a 64 KB crossing, exact.
-* **Hatari (14 MB)**: boots, attract mode, coin, start and a scripted game (`-D AUTOPLAY=1400`: moves and pumps) for 3600
+* **Hatari**: boots, attract mode, coin, start and a scripted game (`-D AUTOPLAY=1400`: moves and pumps) for 3600
   VBLs without a crash, tunnels dug, score counting, enemies and rocks drawn.  Looked at in AVI captures only (no sound, no
   keyboard session, no timing); the attract screens look as MAME's (the all-yellow dirt of the title screen is MAME's too).
 * **The EAROM** (`g_earom_ctl`) is a model of the chip's states; its content is not kept between runs.  Coverage reaches
@@ -75,7 +74,7 @@ Verified (what each check ran, see Tests and tools):
   from the AVI): ids 10, 11, 12, 13, 15 alike (cosine 0.79-0.99, ids 11 / 12 within 10 cents), id 19 not (the tunes run at
   50/60.6 of the arcade's tempo, the 2 s windows catch other notes; not analysed further).  Nobody has listened to a
   whole game.  The sound CPU's commands are the arcade's (translated); only the chip is mapped.
-* **Speed** (Hatari 14 MB and 4 MB give the same figures, `tools/bench.ps1`: `-D RATE=500 -D AUTOPLAY=1400`, fast forward,
+* **Speed** (Hatari with 14 MB and with 4 MB gave the same figures, `tools/bench.ps1`: `-D RATE=500 -D AUTOPLAY=1400`, fast forward,
   6000 VBLs of the scripted game): the game's logic runs at every VBL (one arcade frame a VBL: 82% of the arcade's 60.6
   Hz); **pictures a second per 500 VBLs 28.9 on average at the start (12-48; 12 in the busiest windows), now 32.6 (17.9-49)**.
   The scripted moves follow the CPU budget, so windows are comparable as ranges only.  Where the time goes (simulator,

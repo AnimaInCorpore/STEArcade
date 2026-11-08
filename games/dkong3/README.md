@@ -8,7 +8,7 @@ lock-step against a reference machine (`tools/machine.py`); the Z80 DMA's sprite
 Mario Bros.' renderer (`games/mario/src/render.s`) turned to Donkey Kong's portrait screen: 224 x 256, tile playfield plus
 generated-code sprites, equal to the reference pixel for pixel in the simulator.  The two sound CPUs (N2A03s, a 6502 with the
 NES sound generator) are not run: their output is recorded in MAME per command and mixed on the DMA channel.  Status:
-**Verification pending** (the logic, the picture, the sprites and the sound driver's rules are checked in the simulator; Hatari
+**Incomplete** (root README: the logic, the picture, the sprites and the sound driver's rules are checked in the simulator; Hatari
 runs the whole program; no natural playthrough, the sound not listened to).  Speed: 51 arcade frames a second of 60.6 (84%),
 27 pictures a second in the attract mode and the first stage (Hatari, `-D AUTOPLAY=1`, 3000 VBLs, 4 MB, 2026-11-08).
 

@@ -476,7 +476,7 @@ Track & Field's and Hyper Sports' SN76489A with speech on the DMA); see the READ
   strips); the release's load limit is solved later (per-stage loading, packing, `engine/rt/hdd.s`).
 * **Floppy disks** (2026-10-28): `tools/release.py` packs each program with LZ4 (`tools/lz4prg.py`, `lz4 -12`) behind a
   0.9 KB stub (`tools/lz4stub.s`) in the AUTO folder of a bootable 720 or 800 KB image (`tools/stdisk.py`) when it
-  fits (12 ports; not Black Tiger, 1943 or Double Dragon at 0.99-1.26 MB packed).  The stub unpacks in place: the packer
+  fits (all but the largest, e.g. Black Tiger, 1943 and Double Dragon at 0.99-1.26 MB packed; release.py says which).  The stub unpacks in place: the packer
   simulates the depacker byte for byte and moves the frame only as far up as the output never overtakes it (~920 bytes
   more than the program; `tools/lz4prg_test.py` runs the stub on Musashi for every port).  4.4-12.7 s at 8 MHz, a VBL
   handler draws the progress bar from the depacker's output pointer; the lengths are longs (matches over 64 KB exist).

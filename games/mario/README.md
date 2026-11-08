@@ -1,11 +1,11 @@
-# Mario Bros., Atari STE (in progress)
+# Mario Bros., Atari STE
 
 Nintendo, 1983 (MAME `mario`, US revision E, `nintendo/mario.cpp`).  Z80 at 4 MHz, a Z80 DMA for the sprite copy, a
 sound MCU (M58715, internal ROM not dumped) with discrete sound.  256 x 224, horizontal, 59.185 Hz.
 
 ![Mario Bros. on the STE (Hatari)](docs/screenshot.png)
 
-State (2026-11-07): the picture runs on the STE (Hatari: title, attract, play; 1800 VBLs with `-D AUTOPLAY=1`: 56 arcade
+Status: **Incomplete** (root README).  State (2026-11-08): the picture runs on the STE (Hatari: title, attract, play; 1800 VBLs with `-D AUTOPLAY=1`: 56 arcade
 frames a second of 59, 29 pictures a second) and equals the reference through the fitted 16-colour palette in the
 simulator (`tools/render_test.py`: seeds 1, 2, 5, 3000 frames each, 0 differing pixels).  Sound: the board's output recorded in MAME and played on the DMA
 channel (`src/sound.s`: the tunes and effects the game commands; one clip at a time, the newest wins; the walk pulses are silent
@@ -46,9 +46,8 @@ port 0 player 2; Jaguar pads as the other ports.
 * The translation's dispatch table has 65535 entries (the ROM at `$F000` holds code; `z80_init_dispatch` compares words);
   the NMI token is `$E001`.  The upper ROM lies below the Z80 block (signed word index).
 * Not yet checked: the DMA's bus cycles (6 clocks a byte are modelled), the mid-frame latch writes (the title screen
-  writes the gfx and palette bank at line 19), cocktail flip, the MAME 0.286 palette (pens come from the 0.248 binary).
+  writes the gfx and palette bank at line 19), cocktail flip, the MAME 0.286 palette (the pens come from WolfMAME 0.248, a binary; the 0.286 source tree is authoritative, AGENTS.md).
 
 ## Next
 
-speed (the picture's 113k cycles), a coverage that reaches the later phases, the `tools/release.py` list
-and the main README's rows, full-game checks (`docs/port-status.md`).
+speed (the picture's ~96k CPU cycles + ~45k Blitter bus cycles: `tools/profile.py`), a coverage that reaches the later phases, full-game checks (`docs/port-status.md`).

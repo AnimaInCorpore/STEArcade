@@ -184,5 +184,5 @@ gone through for this port.
 ## Verification
 
 Evidence is above (MAME comparison, lock-step seeds, render and sprite tests, one Hatari run with stills).  No
-recorded or PPO play, no full-game run, no sound: see the [status policy](../../docs/port-status.md); the port is
+recorded or PPO play, no full-game run, sound only as register streams (never heard): see the [status policy](../../docs/port-status.md); the port is
 **Incomplete**.

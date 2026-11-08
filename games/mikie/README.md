@@ -7,7 +7,7 @@ encrypted), is statically translated to 68000 code (`engine/m6809x.py`) and chec
 lock-step.  The picture is MAME's ROT270 picture (**the monitor is turned: 224 x 256, portrait**), centred in the
 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
 against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat; the sound board's Z80
-driver translated too, its two SN76489As on the YM2149 (three of the eight voices at a time).  Status: **Experimental**: the
+driver translated too, its two SN76489As on the YM2149 (three of the eight voices at a time).  Status: **Incomplete** (root README): the
 picture, the logic and the sound driver are verified (below), the YM mix-down (three voices of eight) is a reduction by
 design, and no full-game play has been verified.
 

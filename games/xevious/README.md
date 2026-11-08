@@ -11,7 +11,7 @@ for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (e
 (background with a pattern ROM logic, foreground characters) and 3-bit sprites.  All three Z80 programs are translated to
 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
 the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
-three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental** (root README): the logic is exact in lock-step and the picture is exact against the
+three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental / deferred** (root README): the logic is exact in lock-step and the picture is exact against the
 reference renderer, which equals MAME's picture, but only one explosion sound exists, the picture is drawn by the CPU, and the speed is
 low.  Latest speed (Hatari, 4 MB STE, `tools/bench.ps1 3000`, attract mode, 2026-11-07): about 21.5 arcade frames a second
 (35% of the arcade's 60.6) and 5.4 pictures a second.
