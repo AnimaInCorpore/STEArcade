@@ -58,6 +58,10 @@ ROOTS = [[0, 0x38, 0x66], [0, 0x38, 0x66], [0, 0x66]]
 YIELDS = [{0x044C, 0x02AD, 0x0310}, {0x0356, 0x04DA}, {0x0098}]
 
 
+# hand-written 68000 routines that replace Z80 code (src/natives.s; XEV_NO_NATIVES=1: all translated)
+NATIVES = [{} if os.environ.get("XEV_NO_NATIVES") else {0x0469: "z_task", 0x045C: "z_slot", 0x305E: "z_obj_a", 0x306D: "z_obj_b"}, {} if os.environ.get("XEV_NO_NATIVES") else {0x04ED: "y_sprconv"}, {}]
+
+
 BLOCK_OPS = ("ldir", "lddr", "ldi", "ldd")
 
 
@@ -181,7 +185,7 @@ def generate(hooks=((), (), ()), skip_tests=True, invincible=False):
     for n, cfg in enumerate(configs()):
         code_lines, table, rep, em = generate_program(roms[n], ROOTS[n], dyn[n] & set(range(len(roms[n]))), cfg,
                                                       set(hooks[n]) | YIELDS[n], emitter=Emitter, vwriters=vw[n],
-                                                      lwriters=lw[n], ldi06=LDI06[n])
+                                                      lwriters=lw[n], ldi06=LDI06[n], natives=NATIVES[n])
         lines.append("; ---------------- CPU%d" % (n + 1))
         lines += code_lines
         tables += table

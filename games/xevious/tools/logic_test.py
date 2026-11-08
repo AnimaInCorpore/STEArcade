@@ -31,6 +31,7 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--prof', action='store_true', help='a histogram of the logic cycles by routine / 32-byte Z80 region')
+    ap.add_argument('--tasks', action='store_true', help='a histogram of the main CPU task loop handlers ($046F jp (hl))')
     ap.add_argument('--verbose', action='store_true')
     ap.add_argument('--tag', default='xevious_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
@@ -75,12 +76,16 @@ def main():
         if hit and nx.strip() == '; (inline)':
             inl['ZYX'.index(hit[1])].add(int(hit[2], 16))
     dead, site = set(), [0, 0, 0]
+    thist = {}
     for n in range(3):
         def mk(n):
             step0, write0 = m.cpus[n].step, m.cpus[n].wr8
 
             def ref_step():
                 site[n] = m.cpus[n].pc
+                if n == 0 and site[n] == 0x46F and args.tasks:
+                    c0 = m.cpus[0]
+                    thist[(c0.h << 8) | c0.l] = thist.get((c0.h << 8) | c0.l, 0) + 1
                 return step0()
 
             def ref_write(a, v):
@@ -262,6 +267,8 @@ def main():
         print('by program (Z main, Y sub, X sound, rt runtime):', {k: '%.1f%% %dk/frame' % (100 * v / tot, v // args.frames // 1000) for k, v in per.items()})
         for k, v in sorted(hist.items(), key=lambda kv: -kv[1])[:40]:
             print('%-22s %5.1f%% %6d/frame' % (k, 100 * v / tot, v // args.frames))
+    if args.tasks:
+        print('task handlers (count over %d frames): %s' % (args.frames, ', '.join('%04X:%d' % kv for kv in sorted(thist.items(), key=lambda kv: -kv[1]))))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

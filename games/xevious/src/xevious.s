@@ -1621,6 +1621,7 @@ vblock_range:
 	rts
 
 	include "render.s"
+	include "natives.s"
 
 ; ------------------------------------------------------------------------------
 ; The translated programs (and their dispatch tables in the data section).
