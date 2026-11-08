@@ -6,16 +6,18 @@ MAME set `junofrst` (Konami GX310, `konami/junofrst.cpp` with `tutankhm_v.cpp`).
 with encrypted opcodes: ROM $A000-$FFFF and sixteen 4 KB banks in a window at $9000-$9FFF, nine of them with code) is
 statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitmap of 4 bpp turned as MAME's ROT90
 turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
-here both draw into the planar STE picture directly.  Status **Experimental**: logic and picture are exact against the
-reference, but the program runs at ~58% speed and has **no sound**.  The sound board (a Z80 with an AY-3-8910, an i8039 with a
-DAC) is not done; the commands to it are collected (`snd_ring`) for later.  The driver's structure and the plan are in
-the session notes (tick = port A bit 5 edge, 14.4 a frame; Gyruss's `TickBoard` / `sndgen.py` / `sound.s` are the template).
+here both draw into the planar STE picture directly.  The sound board is translated too: its Z80 driver runs on
+the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
+offline to PCM for the DMA sound.  Status **Experimental**: logic, picture and the sound board's state are exact against
+their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
+the program runs at about 56% speed in Hatari, and the sound has never been compared with MAME's audio or listened to.
 
 ## Build and run
 
 ```sh
 python port.py prepare junofrst          # verify assets/roms/junofrst.zip, unpack to assets/roms/extracted/junofrst/
-python port.py cover junofrst            # coverage: ref/cover.py seeds 1-12 (30,000 frames each, ~15 min in parallel)
+python port.py cover junofrst            # coverage: ref/cover.py seeds 1-12 (30,000 frames each, ~15 min in parallel), then the
+                                         # sound commands (ref/sound_log.py) and the sound Z80 (ref/cover_sound.py)
 python port.py build junofrst            # -> run/junofrst/JUNOFRST.PRG (--sim: run/junofrst_sim; --tag: another folder)
 python port.py test junofrst             # logic and render tests
 python port.py mame junofrst             # the reference against MAME (WolfMAME 0.248: set MAME=...\wolfmame-0248\mame.exe)
@@ -48,11 +50,44 @@ and SHA-1s).  Nothing ROM-derived is in git.  Paths are relative to this folder;
   title screen and score table (all 256 lines, the colours as MAME's) and the first wave's warp intro; no crash, no
   late border event in 4,001 VBLs (2 fallbacks of the top border).  Play beyond the first seconds of wave 1 was not
   watched there.
-* **Not done / not verified**: sound; the flip (cocktail) screen; coverage is random play only (12 seeds,
+* **Sound** (`tools/logic_test.py --sound`, `tools/sound.py`, `tools/sndgen.py`, `src/sound.s`): the translated Z80 driver
+  (1,853 instructions, `tools/sndgen.py` from `ref/cover_sound.py`'s coverage of the game's commands and random ones) runs
+  every arcade frame on the sim; after each frame the AY's 16 registers, the YM registers written, the driver's RAM
+  ($2000-$23FF above the stack) and the i8039 status equal `tools/sound.py`'s `STEBoard` (the same driver run by the Python
+  Z80, the same schedule), 6,000 frames in each of the seeds 1-12.  What that does and does not say: the translation of
+  the driver and the YM mix-down equal the model; the model's schedule (14.42 ticks an arcade frame, the commands
+  handed over per frame, the loop's waits left out) is an approximation of the board's timing and **the audio has not
+  been compared with MAME's or listened to** (Hatari ran with `--sound off`; the DMA player, a copy of Gyruss's, is
+  only exercised there for crashes).
+  Known gaps: (1) the commands $4C and $55 (bit 6 of the slot: the loop passes run at once, not on the tick) play
+  by writing the AY's volume register thousands of times a second (a digitised effect on the real board): the YM gets the
+  volume as it stands once a frame, so these are silent or buzz; the passes are capped at 64 an arcade frame (the
+  real ones take 300-900 Z80 cycles of the frame's 29,500); (2) the AY's port B (the filters' capacitors, MAME's
+  `flt_rc`) is not modelled; (3) the i8039's effects (1-8, 53 KB at 6,258 Hz) are the rendered DAC output of its own
+  program, not compared with MAME's DAC writes (Gyruss's equivalent check was against a private MAME build);
+  the peak of effect 3 sets the scale so the others are quiet; (4) the effects' timing against the music is the
+  frame's, not the board's; (5) commands $59-$5B run the driver into garbage (the game never sends them).
+* **Not done / not verified**: the flip (cocktail) screen; coverage is random play only (12 seeds,
   ~13,700 translated instructions): later waves, the high-score entry and other rarely reached code may run into
   `main_badpc`; no PPO / Go-Explore profile; no recorded-play comparison; the compare with MAME has no input.
 
 ## Speed
+
+**With the sound (2026-11-08)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
+60.6) and 765 pictures (9.6 a second), no crash, no late border event.  The sound cost 11% of the speed first (31.5 a
+second: the driver's 14.4 ticks an arcade frame, ~28,000 Musashi cycles a frame, 17% of the logic's average); then
+`vram_wr` was rewritten (one table lookup for the plane byte and the pixel row, the pixel values' bit patterns in
+`vw_bt`, 4 registers saved, a separate path for a zero byte: 532 -> 462 cycles a write, ~330 for zero bytes) and the
+sound's tick loop runs inside the driver's hook without saving the registers between ticks (-6,000 cycles a frame).
+Musashi logic average a frame, seed 1, 3,000 frames: 157,000 without sound, 192,000 with it, 168,000 now
+(`logic_test.py --sound`; the 75th percentile of the frames 311,000, the 90th 450,000: a game tick's frame costs 300-500k and
+the one between ~14,000 + the sound).  What is left:
+`vram_wr` (~154 calls a frame on average, 40% of the cycles in play: the CPU's own sprite loops at $9EE0-$9F13 and the
+dot routines $B380-$B4C0), the title screens' $98EA copy loop, the 5,193 "wrapped" sites, the full-picture copy.  The
+per-write cost has no big cut left (4 `movep` + the table lookups ~ 330 cycles): the gain must come from natives that
+draw whole shapes.
+
+(The earlier measurement below, 2026-11-07, is without sound.)
 
 Hatari 2026-11-07, `hatari.ps1 -Frames 4000` (AUTOPLAY: coin, start, move, the ship dies and the game plays on): 2,822
 arcade frames in 4,001 VBLs (35.3 a second, 58% of the arcade's 60.6; 13.2 before the work below) and 935 pictures

@@ -54,6 +54,9 @@ def main():
     ap.add_argument('--profile', action='store_true', help='where the 68000 cycles go (a sample every 200 cycles)')
     ap.add_argument('--trace', type=int, default=-1, help='compare the executed instructions of this frame')
     ap.add_argument('--sound', action='store_true', help='run snd_frame every frame and compare the sound board with tools/sound.py STEBoard')
+    ap.add_argument('--exact', action='store_true', help='with --profile: every instruction counted with its cycles (slow; use few frames)')
+    ap.add_argument('--pfrom', type=int, default=0, help='with --profile: from this frame')
+    ap.add_argument('--count', action='store_true', help='count the video RAM writes (vram_wr calls) and reads')
     ap.add_argument('--tag', default='junofrst_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -64,12 +67,25 @@ def main():
     import bisect, collections
     prof = collections.Counter()
     symlist = sorted((a, n) for n, a in sym.items() if not re.fullmatch('M[0-9A-F]{6}', n))
+    allsyms = sorted((a, n) for n, a in sym.items())
+    alladdrs = [a for a, n in allsyms]
+    prof_all = collections.Counter()
     symaddrs = [a for a, n in symlist]
     if not args.render:
         mem.w16(sym['render_frame'], 0x4e75)
     wait, done = sym['sim_wait'], sym['sim_frame_done']
     bad = set(range(sym['main_badpc'], sym['main_badpc'] + 12, 2))
     base = sym['jf_mem']
+    counts = collections.Counter()
+    if args.count:
+        lo, hi = sym['vw_ptr'], sym['vw_ptr'] + 4 * 0x8000
+        on0 = s.on_access
+
+        def on_count(mode, width, addr, value, on0=on0):
+            if lo <= addr < hi and mode == "R" and width == 2:
+                counts['vw_ptr reads'] += 1
+            return on0(mode, width, addr, value)
+        mem.set_trace_func(on_count)
     vram = sym['vram']
 
     m = JunoPort(*cover.dsw(args.seed))
@@ -79,15 +95,19 @@ def main():
         mem.w8(sym[n], 0xFF)
     rnd = random.Random(args.seed)
     cycles = [0]
+    fr = [-1]
 
     def run_to(targets):
         total = 0
         while total < 400_000_000:
-            step = 200 if args.profile else 2000
-            total += cpu.execute(step).cycles
+            step = 1 if args.exact else 200 if args.profile else 2000
+            r = cpu.execute(step).cycles
+            total += r
             pc = cpu.r_pc()
-            if args.profile:
-                prof[bisect.bisect_right(symaddrs, pc) - 1] += 1
+            if args.profile and fr[0] >= args.pfrom:
+                w = r if args.exact else 1
+                prof[bisect.bisect_right(symaddrs, pc) - 1] += w
+                prof_all[bisect.bisect_right(alladdrs, pc) - 1] += w
             if pc in targets:
                 cycles[0] += total
                 return pc
@@ -196,6 +216,7 @@ def main():
     cycles[0] = 0
     per_frame = []
     for f in range(args.frames):
+        fr[0] = f
         m.frame = f
         m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_p1', m.p1), ('io_p2', m.p2)):
@@ -256,6 +277,16 @@ def main():
             print('  %5.1f%% %s' % (100 * n / tot, symlist[i][1]))
         if args.sound:
             print('  sound hot spots: ' + ', '.join('%s %.1f%%' % (symlist[i][1], 100 * n / tot) for i, n in prof.most_common(60) if re.fullmatch('X[0-9A-F]{4}(_r)?', symlist[i][1]) or symlist[i][1].startswith('snd_')))
+        bucket = collections.Counter()
+        for i, n in prof_all.items():
+            nm = allsyms[i][1]
+            mm = re.match(r'M([0-9A-F]{6})', nm)
+            if mm:
+                a = int(mm.group(1), 16)
+                bucket['page %02X %04X-%04X' % (a >> 16, a & 0xFFC0, (a & 0xFFC0) + 63)] += n
+            else:
+                bucket[nm] += n
+        print('  by label (6809 code in 64-byte ranges, else the runtime symbol): ' + ', '.join('%s %.1f%%' % (k, 100 * v / tot) for k, v in bucket.most_common(28)))
         agg = collections.Counter()
         for i, n in prof.items():
             nm = symlist[i][1]
@@ -264,6 +295,8 @@ def main():
     if per_frame:
         pf = sorted(per_frame)
         print('per arcade frame: median %d, 75%% %d, 90%% %d, 99%% %d, max %d cycles (the 50 Hz STE has 160,000 a VBL, the arcade 60.6 frames a second need <= 132,000 each)' % (pf[len(pf) // 2], pf[len(pf) * 3 // 4], pf[len(pf) * 9 // 10], pf[len(pf) * 99 // 100], pf[-1]))
+    if args.count:
+        print('vram_wr calls a frame: %.1f' % (counts['vw_ptr reads'] / args.frames))
     if args.sound:
         b = sndb[0]
         print('sound: AY registers, YM registers, sound RAM and i8039 status equal every frame; %d commands, %d YM writes, %d i8039 effects, %d fast loop passes' % (sndc[2], sum(len(w) for w in b.ym_log), len(b.dac_log), b.fast))

@@ -20,6 +20,7 @@
 
 BL = 280				; buffer lines: PIC_TOP above the picture, its 256, 14 guard lines
 LB = 160
+VW_BASE = 32650			; vram_wr's table: offsets from vram+32650 (a byte outside the picture's 24..135 of a line)
 BUFSZ = BL*LB
 NBUF = 3
 PIC0 = PIC_TOP*LB			; the picture's line 0 in a buffer
@@ -105,6 +106,22 @@ init_render:
 .yn:	addq.w	#1,d2
 	cmp.w	#256,d2
 	bne.s	.yr
+	lea	vw_ptr,a0		; vram_wr's table: per video RAM byte (the plane 0 byte's offset from vram+VW_BASE) << 16
+	lea	vw_tab,a1		; | (68 * (y & 7)), the offset of its row of vw_bt; 0 where the row is not shown
+	moveq	#0,d2
+.vt:	move.l	(a0)+,d0
+	beq.s	.vh
+	sub.l	#vram+VW_BASE,d0
+	swap	d0
+	clr.w	d0
+	move.w	d2,d3
+	lsr.w	#7,d3
+	and.w	#7,d3
+	mulu	#68,d3
+	or.w	d3,d0
+.vh:	move.l	d0,(a1)+
+	addq.w	#1,d2
+	bpl.s	.vt
 	rts
 
 ; ======================================================================================================================
@@ -268,43 +285,46 @@ get_px:
 ; vram_wr: d7.w = the address ($0000-$7FFF), d5.b = the byte: pixel x = 2 * (a & 127) in the low nibble, x + 1 in the
 ; high nibble, row y = a >> 7
 vram_wr:
-	movem.l	d0-d3/a0-a1,-(sp)
-	moveq	#0,d1
-	move.w	d7,d1
-	lsl.l	#2,d1
-	lea	vw_ptr,a0
-	move.l	(a0,d1.l),d0		; the byte's plane 0 byte of the low nibble's pixel (0: a row not shown)
+	movem.l	d0-d1/a0-a1,-(sp)
+	and.l	#$FFFF,d7
+	lsl.l	#2,d7
+	lea	vw_tab,a0
+	move.l	(a0,d7.l),d1		; the plane 0 byte's offset << 16 | the row of vw_bt (0: a row not shown)
 	beq.s	.out
-	move.l	d0,a0
-	move.w	d7,d1
-	lsr.w	#7,d1
-	and.w	#7,d1			; (C & 7 = y & 7: the shown rows start at 16)
-	lsl.w	#2,d1
-	lea	vw_mask,a1
-	move.l	(a1,d1.w),d2		; the pixel's bit in the four plane bytes
-	move.l	d2,d3
-	not.l	d3
-	lea	vw_spread,a1
-	moveq	#0,d1
-	move.b	d5,d1
-	move.w	d1,d0
-	and.w	#15,d0			; the low nibble
-	lsl.w	#2,d0
-	move.l	(a1,d0.w),d0
-	and.l	d2,d0
+	lea	vw_bt,a1
+	add.w	d1,a1			; (68 bytes: the 16 pixel values' bits in the four plane bytes, then the inverted mask)
+	swap	d1
+	lea	vram+VW_BASE,a0
+	add.w	d1,a0
+	move.l	64(a1),d1		; the pixel's bit cleared in the four plane bytes
+	tst.b	d5
+	beq.s	.erase
+	moveq	#15,d7
+	and.w	d5,d7			; the low nibble
+	lsl.w	#2,d7
+	move.l	(a1,d7.w),d0
 	movep.l	0(a0),d7		; the four planes' bytes (every other byte)
-	and.l	d3,d7
+	and.l	d1,d7
 	or.l	d0,d7
 	movep.l	d7,0(a0)
-	lsr.w	#4,d1			; the high nibble: the next picture line (160 bytes below)
-	lsl.w	#2,d1
-	move.l	(a1,d1.w),d0
-	and.l	d2,d0
+	moveq	#0,d0			; the high nibble: the next picture line (160 bytes above)
+	move.b	d5,d0
+	lsr.b	#4,d0
+	lsl.w	#2,d0
+	move.l	(a1,d0.w),d0
 	movep.l	-LB(a0),d7
-	and.l	d3,d7
+	and.l	d1,d7
 	or.l	d0,d7
 	movep.l	d7,-LB(a0)
-.out:	movem.l	(sp)+,d0-d3/a0-a1
+.out:	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+.erase:	movep.l	0(a0),d7		; a zero byte: both pixels cleared
+	and.l	d1,d7
+	movep.l	d7,0(a0)
+	movep.l	-LB(a0),d7
+	and.l	d1,d7
+	movep.l	d7,-LB(a0)
+	movem.l	(sp)+,d0-d1/a0-a1
 	rts
 
 ; vram_rd: d7.w = the address -> d7 the byte (the invisible rows read 0)
@@ -672,16 +692,19 @@ native_clear_A055:
 
 	section data,data
 	even
-vw_spread:				; per pixel value the four plane bytes' bits as $FF / 0 (plane 0 the high byte)
-N	set	0
-	rept	16
-	dc.l	((N&1)*$FF000000)|(((N>>1)&1)*$00FF0000)|(((N>>2)&1)*$0000FF00)|(((N>>3)&1)*$000000FF)
-N	set	N+1
-	endr
-vw_mask:				; per C & 7 the pixel's bit (7 - C & 7) in the four bytes
-N	set	0
+vw_bt:					; per y & 7 (68 bytes): the 16 pixel values' bit (7 - y & 7) in the four plane bytes ($01 each, plane
+N	set	0			; 0 the high byte of the long), then the inverted bit in all four
 	rept	8
-	dc.l	(1<<(7-N))*$01010101
+M0	set	(1<<(7-N))*$1000000
+M1	set	(1<<(7-N))*$10000
+M2	set	(1<<(7-N))*$100
+M3	set	(1<<(7-N))
+V	set	0
+	rept	16
+	dc.l	(V&1)*M0+((V>>1)&1)*M1+((V>>2)&1)*M2+((V>>3)&1)*M3
+V	set	V+1
+	endr
+	dc.l	~((1<<(7-N))*$01010101)
 N	set	N+1
 	endr
 	section bss,bss
@@ -705,6 +728,7 @@ pend_pal:	ds.w	16
 buffers:	ds.b	NBUF*BUFSZ
 vram:		ds.b	VSZ
 vw_ptr:		ds.l	32768
+vw_tab:		ds.l	32768
 	section data,data
 	include	"jf_assets.s"
 	include	"jf_blitimg.s"
