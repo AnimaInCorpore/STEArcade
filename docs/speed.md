@@ -328,7 +328,7 @@ not been re-measured in Hatari since).
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
 | Galaga '88 | ~20% / 6.1 BENCH | n/a | - | both | - | `tile_marks` | ? |
-| Dragon Spirit | 13% / 3.0 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
+| Dragon Spirit | 14% / 2.9 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
 
 **Pictures**
 

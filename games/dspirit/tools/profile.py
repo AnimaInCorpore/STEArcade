@@ -21,10 +21,13 @@ def main():
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument("--pcs", type=int, default=0)
     ap.add_argument("--dump", help="write the cycles and executions per label to this file (pickle)")
+    ap.add_argument("--callers", type=int, default=0, help="print the N labels whose code goes on into a runtime routine "
+                    "most (its cycles counted to them)")
     args = ap.parse_args()
     prof = collections.Counter()
     pch = collections.Counter()                 # (runtime cycles per 68000 pc: --pcs N prints the top N)
     counts = collections.Counter()
+    callers = collections.Counter()             # ((the last translated label, the runtime routine): cycles)
     state = {}
 
     def stepper(cpu, mem, sym, labels, stop):
@@ -37,6 +40,7 @@ def main():
         nv = [v for v, k in names]
         state["names"] = names
         total = 0
+        last = None
         while True:
             pc = cpu.r_pc()
             if pc == stop:
@@ -46,11 +50,13 @@ def main():
             i = bisect.bisect_right(lv, pc) - 1
             j = bisect.bisect_right(nv, pc) - 1
             if i >= 0 and (j < 0 or nv[j] <= lv[i]):
+                last = labels[i][1]
                 prof[labels[i][1]] += n
                 if lv[i] == pc:
                     counts[labels[i][1]] += 1
             elif j >= 0:
                 prof["rt:" + names[j][1]] += n
+                callers[(last, names[j][1])] += n
                 pch[pc] += n
     logic_test.PROFILE = dict(start=args.start, frames=args.frames, stepper=stepper)
     logic_test.main_args = ["%d" % (args.start + args.frames), "--seed", str(args.seed)]
@@ -99,6 +105,10 @@ def main():
     for k, n in kinds.most_common(30):
         c = kcount[k]
         print("  %-12s %5.1f%% %8d %7.1f" % (k, 100 * n / total, c, n / c if c else 0))
+    if args.callers:
+        print("runtime routines by the translated label before them:")
+        for (lab, rt), n in callers.most_common(args.callers):
+            print("  %-10s %-20s %5.2f%%  %s" % (lab, rt, 100 * n / total, text.get(lab, "")))
     if args.pcs:
         print("runtime by 68000 pc (offset from the program's start):")
         for pc, n in pch.most_common(args.pcs):
