@@ -97,3 +97,27 @@ runs past 3000 frames, the PCM writes (`$6000-$63FF`, ignored), a picture, Hatar
 mailbox were missing from the coverage's I/O sites (`ref/cover.py` recorded reads only), and the vertical blank's sprite buffer copy
 (machine.py `vblank_begin`) is the harness' job.  Still missing for a program on the STE: the vertical blank's sprite copy, the
 renderer (hardware scroll from the start), the palette fit, input, sound, `port.py` / `tools/release.py` registration.
+
+### 2026-11-08: the renderer's first steps (NOT playable: no STE program, no Hatari run)
+
+* `tools/palfit.py`: one fixed 16-colour STE palette for the whole game (the PROM palette is fixed: 154 of its 512 indirect
+  colours occur in frames of seeds 0-5; 60-73 colours a picture), fitted with `engine/palette_quantize.py` to frames of those seeds
+  (`build/rthunder/shots_1.png`: left the reference, right the fit).  A per-scene palette would look better; not done.
+* `tools/stemodel.py`: the picture as the renderer composes it (painter's order: priority 0-7, per priority the scrolling layers
+  3..0, then the sprites with that priority k, the lowest entry first): 0 pixels differ from the reference's per-pixel priority
+  rule on sampled frames of seeds 1, 2 and 4 (every 10th frame of 600-1500).
+* Layout facts from the traces: the three scrolling layers (CUS42 layers 0 and 1, CUS43 layer 0) get the same scroll (their
+  values differ by exactly the layers' dx offsets: no parallax), only horizontal in the frames seen (y constant); layer 3 is a
+  fixed front layer (priority 7: the HUD and texts), tile aligned on the screen.  So the design is a tile-aligned virtual screen
+  `ren_bg` (512 x 256) holding the three layers composed, a window of it on the screen, the fixed layer and the sprites drawn
+  over it.
+* `src/render.s`, step 1: `tile_get` (a direct mapped cache of tiles in STE planar form: opaque mask + 4 planes a line, made from
+  the 3 bit pens and the colour row's map on first use), `ren_setup` (layer order, back colour), `ren_cell`, `ren_bg_all`.
+  `tools/render_test.py`: 0 pixels differ from the reference's layers on 4 pictures (seed 1).  Cost: a full recomposition is
+  9.8M 68000 cycles with a warm tile cache (4.8k a cell; a cold cache 15-28M): the renderer must work incrementally (changed
+  cells, the column scrolling in), which needs the tile writers' marks (`ref/cover.py` now records which tile RAM layer each
+  store site writes: `tilew`; gen.py does not use it yet).
+* Not started: the window onto the screen (Blitter copy with skew, later hardware scroll with twin columns, as `docs/speed.md`
+  asks), the fixed layer, sprites (HOP 2 / OP 3 passes, prepared per code and colour row), the STE program (loader, VBL, borders,
+  IKBD input, palette, the arcade-frame schedule with MAX_BEHIND), sound (the YM2151 and the 63701X PCM), `port.py` / release
+  registration, Hatari measurements, `sprite_test`.

@@ -92,6 +92,7 @@ def run(seed, frames, port=False, out=None):
     wraps = {0: set(), 1: set()}
     spin = {0: set(), 1: set()}
     semw = {0: set(), 1: set()}
+    tilew = {0: collections.defaultdict(set), 1: collections.defaultdict(set)}
     idx = {0: {}, 1: {}}
     accs = [[], []]
     writes = [0, 0]
@@ -159,6 +160,11 @@ def run(seed, frames, port=False, out=None):
                 if rw == "w" and (i == 0 and 0x4400 <= a < 0x5800 and a - 0x4000 in m.SEMO or
                                   i == 1 and a < 0x1800 and a in m.SEMO):
                     semw[i].add(v)
+                if rw == "w":
+                    if i == 0 and a < 0x4000:
+                        tilew[i][key].add((a >> 13) * 2 + ((a >> 12) & 1))
+                    elif i == 1 and 0x2000 <= a < 0x6000:
+                        tilew[i][key].add(((a - 0x2000) >> 13) * 2 + ((a >> 12) & 1))
                 prev = (rw, a)
             nxt = c.pc
             if not (pc < nxt <= pc + 5):
@@ -203,7 +209,7 @@ def run(seed, frames, port=False, out=None):
     data = dict(exec=exec_, semw=semw, acc={i: dict(v) for i, v in acc.items()}, ioacc={i: dict(v) for i, v in ioacc.items()},
                 targets={i: dict(v) for i, v in targets.items()}, semo=set(m.SEMO) if port else set(),
                 dp={i: {k: s for k, s in v.items() if s != {0}} for i, v in dps.items()}, wrap=wraps, spin=spin,
-                frames=frames, seed=seed, port=port)
+                frames=frames, seed=seed, port=port, tilew={i: dict(v) for i, v in tilew.items()})
     out = out or build_dir("rthunder") / ("cover_%s%d.pkl" % ("p_" if port else "", seed))
     with open(out, "wb") as f:
         pickle.dump(data, f)
