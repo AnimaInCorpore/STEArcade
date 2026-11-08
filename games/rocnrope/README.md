@@ -73,7 +73,7 @@ SHA-1s).  Nothing ROM-derived is in git.  The MAME comparison needs a binary tha
 
 ## Controls
 
-**5/6** coin 1 / 2, **1/2** start, **arrow keys** move / climb, **Space / Z** button 1, **Control / X** button 2, **Esc**
+**5/6** coin 1 / 2, **1/2** start, **arrow keys** move / climb, **Space / Z** button 1, **Control / X** button 2; player 2 (the second player's turn) **A D W S** move, **Q** button 1, **E** button 2; **Esc**
 quits.  Joystick port 1 player 1, port 0 player 2 (fire = button 1); Jaguar pads as in the other ports (A, C button 1,
 B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 / 60000, demo sounds on); upright only
 (the cocktail's flipped screen is not drawn).

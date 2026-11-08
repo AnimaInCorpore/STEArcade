@@ -7,7 +7,7 @@ ROM's reads, the video RAM's stores), dps: the DP values each pc ran with; pens:
 sprites: Counter of (code, colour, flip x, flip y) entries.
 
 Seeds: 1-3 attract, coin, start, random play to the game over and again (the game ends after 3 lives); 4-9 infinite
-lives ($50C0 kept at 2) with random play (4-6) and the same with the stage poked (7-9, STAGE_POKES: see below); 16-19 the cheats with stages 2, 3, 4 and 8 poked;
+lives ($50C0 kept at 2) with random play (4-6) and the same with the stage poked (7-9, STAGE_POKES: see below); 16-19 the cheats with stages 2, 3, 4 and 8 poked; 20-23 the cheats with the stages finished by poking the stage-clear state (STAGE_CLEAR);
 10 two players; 12-15 MAME's cheats (infinite lives $50C0 = 10, invincibility $51C0 = 2 / $51DE = 0, infinite bonus
 $509B = $99) with random play for 60000 frames; 11 the DIP switches' other settings (5 lives, difficulty 1 / 16 alternating, bonus 80000, no repeated
 bonus, no demo sounds).
@@ -29,6 +29,7 @@ LIVES1 = 0x50C0
 LEFT, RIGHT, UP, DOWN, B1, B2 = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20     # IN0 / IN1 bits (active low)
 STAGE_POKES = {7: 1, 8: 2, 9: 3, 16: 1, 17: 2, 18: 3, 19: 7}   # the stage index $50C1 (0-based: the HUD shows +1; the scenery repeats every 4), poked 450 frames after each play start, before the HUD draws it
 STAGE = 0x50C1
+STAGE_CLEAR = {20: 1200, 21: 1700, 22: 2500, 23: 900}   # seeds 20-23: the cheats, and every N frames of play the stage is finished by the state bytes ($5005 = 3, $5008 = 0: the stage-clear handler $7AA9 -> $7AE3 counts $50C1 up), the whole game's stages in turn
 
 
 def dsw(seed):
@@ -72,7 +73,7 @@ def inputs(frame, rnd, state):
 
 def cheats(seed, frame, m, state):
     mem = m.mem
-    if seed >= 12 and state.get('phase') == 'play':          # MAME's cheats: infinite lives, invincibility, infinite bonus
+    if (12 <= seed <= 19 or seed >= 20) and state.get('phase') == 'play':          # MAME's cheats: infinite lives, invincibility, infinite bonus
         mem[LIVES1] = 0x0A
         mem[0x51C0] = 0x02
         mem[0x51DE] = 0x00
@@ -80,6 +81,8 @@ def cheats(seed, frame, m, state):
     if 4 <= seed <= 9 and state.get('phase') == 'play':
         if mem[LIVES1] < 2:
             mem[LIVES1] = 2
+    if seed in STAGE_CLEAR and state.get('phase') == 'play' and mem[0x5005] == 1 and (frame - state['t0']) % STAGE_CLEAR[seed] == STAGE_CLEAR[seed] - 1:
+        mem[0x5005], mem[0x5008] = 3, 0
     if seed in STAGE_POKES and state.get('phase') == 'play' and frame == state['t0'] + 450:
         mem[STAGE] = STAGE_POKES[seed]
 
