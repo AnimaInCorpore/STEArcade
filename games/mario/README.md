@@ -10,8 +10,7 @@ frames a second of 59, 29 pictures a second) and equals the reference through th
 simulator (`tools/render_test.py`: seeds 1, 2, 5, 3000 frames each, 0 differing pixels).  Sound: the board's output recorded in MAME and played on the DMA
 channel (`src/sound.s`: the tunes and effects the game commands; one clip at a time, the newest wins; the walk pulses are silent
 in MAME's netlist and not played); checked in the simulator only (`tools/sound_test.py`: the DMA registers name the
-clip each command starts), not listened to in Hatari.  `tools/sprite_test.py` passes (316 pictures, both screen orientations: edges, 16 shifts, flips, guards, 64 KB crossings, sequences, in the simulator), no full-game verification, no speed work (a picture is ~113k CPU cycles + ~45k
-Blitter bus cycles).
+clip each command starts), not listened to in Hatari.  `tools/sprite_test.py` passes (316 pictures, both screen orientations: edges, 16 shifts, flips, guards, 64 KB crossings, sequences, in the simulator), no full-game verification, speed work started (a picture was ~113k CPU cycles + ~45k Blitter bus cycles; now ~96k + ~45k in Musashi, not re-measured in Hatari: a fast skip of unused sprite entries -8k, the video RAM compared with `cmpm.l`/`dbne` -8.5k; `tools/profile.py` shows the rest: sprites ~60%, row copies 15%, tile compare 8%).
 
 ```sh
 python port.py cover mario                  # coverage (12 seeds), then

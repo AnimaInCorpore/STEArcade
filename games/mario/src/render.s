@@ -274,17 +274,18 @@ render_tiles:
 	bra.s	.done
 .diff:	lea	VRAM,a0
 	lea	tile_vram,a1
-	moveq	#0,d7			; the cell of the long's first byte
 	move.w	#256-1,d5
-.cmp:	move.l	(a0),d0
-	cmp.l	(a1),d0
-	bne.s	.chg
-.nx:	addq.l	#4,a0
-	addq.l	#4,a1
-	addq.w	#4,d7
-	dbf	d5,.cmp
-	bra.s	.done
-.chg:	movem.l	d5/d7/a0-a1,-(sp)
+.cmp:	cmpm.l	(a0)+,(a1)+		; (the video RAM against what the playfield was drawn from, a long at a time)
+	dbne	d5,.cmp
+	beq.s	.done			; (the count ran out on equal longs)
+	moveq	#-1,d7
+	move.b	d5,d7
+	not.b	d7
+	and.w	#255,d7
+	lsl.w	#2,d7			; the cell of the differing long's first byte: (255 - d5) * 4
+	move.w	d5,-(sp)
+	subq.l	#4,a0
+	subq.l	#4,a1
 	moveq	#3,d5
 .byte:	move.b	(a0)+,d0
 	cmp.b	(a1),d0
@@ -296,8 +297,9 @@ render_tiles:
 .same:	addq.l	#1,a1
 	addq.w	#1,d7
 	dbf	d5,.byte
-	movem.l	(sp)+,d5/d7/a0-a1
-	bra.s	.nx
+	move.w	(sp)+,d5
+	subq.w	#1,d5			; (the longs left)
+	bpl.s	.cmp
 .done:	or.l	d6,row_dirty
 	or.l	d6,row_dirty+4
 	or.l	d6,row_dirty+8
@@ -675,11 +677,16 @@ draw_sprites:
 	moveq	#3,d0			; (flipped: both flips inverted)
 .nf:	move.w	d0,key_flip
 	moveq	#0,d0			; the entry's offset
-.e:	move.w	d0,-(sp)
-	lea	SPRRAM,a0
+.e:	lea	SPRRAM,a0
+.sk:	tst.b	(a0,d0.w)		; (the unused entries, y 0, skipped fast)
+	bne.s	.live
+	addq.w	#4,d0
+	cmp.w	#$400,d0
+	blo.s	.sk
+	bra	.done
+.live:	move.w	d0,-(sp)
 	moveq	#0,d3
 	move.b	(a0,d0.w),d3		; y
-	beq	.n
 	moveq	#0,d6
 	moveq	#0,d7
 	move.b	1(a0,d0.w),d7		; attributes
@@ -721,7 +728,7 @@ draw_sprites:
 	addq.w	#4,d0
 	cmp.w	#$400,d0
 	blo	.e
-	move.w	draw_idx,d0		; the buffer's next picture redraws what these covered
+.done:	move.w	draw_idx,d0		; the buffer's next picture redraws what these covered
 	move.w	d0,d1
 	add.w	d1,d1
 	add.w	d1,d1
