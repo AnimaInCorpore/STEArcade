@@ -632,26 +632,38 @@ turn_end:				; (from z80_hook; the resume address is on the stack)
 	clr.b	current
 	rts
 
-; The shared work RAM $7900-$7FFF between the two halves.
+; The shared work RAM $7900-$7FFF between the two halves.  Only what the sub CPU touches is copied (the reference's
+; accesses over 3 seeds of 3000 frames, and logic_test.py checks every access): it reads four blocks of 128 bytes
+; ($7900, $7A00, $7B00, $7C00) and writes those and $7F00-$7F7F.
+
+SHB	macro
+	movem.l	\1+\3+0,d1-d7/a2
+	movem.l	d1-d7/a2,\2+\3+0
+	movem.l	\1+\3+32,d1-d7/a2
+	movem.l	d1-d7/a2,\2+\3+32
+	movem.l	\1+\3+64,d1-d7/a2
+	movem.l	d1-d7/a2,\2+\3+64
+	movem.l	\1+\3+96,d1-d7/a2
+	movem.l	d1-d7/a2,\2+\3+96
+	endm
 
 sync_to_sub:
-	lea	G_ROM1+SHARE_LO,a0
-	lea	G_IO2+SHARE_LO,a1
-	bra.s	sync_copy
+	movem.l	d1-d7/a2,-(sp)
+	SHB	G_ROM1,G_IO2,$7900
+	SHB	G_ROM1,G_IO2,$7A00
+	SHB	G_ROM1,G_IO2,$7B00
+	SHB	G_ROM1,G_IO2,$7C00
+	SHB	G_ROM1,G_IO2,$7F00
+	movem.l	(sp)+,d1-d7/a2
+	rts
 sync_to_main:
-	lea	G_IO2+SHARE_LO,a0
-	lea	G_ROM1+SHARE_LO,a1
-sync_copy:
-	movem.l	d0-d7/a2-a4,-(sp)
-	moveq	#(SHARE_HI-SHARE_LO)/40-1,d0
-.l:	movem.l	(a0)+,d1-d7/a2-a4
-	movem.l	d1-d7/a2-a4,(a1)
-	lea	40(a1),a1
-	dbf	d0,.l
-	rept ((SHARE_HI-SHARE_LO)-((SHARE_HI-SHARE_LO)/40)*40)/4
-	move.l	(a0)+,(a1)+
-	endr
-	movem.l	(sp)+,d0-d7/a2-a4
+	movem.l	d1-d7/a2,-(sp)
+	SHB	G_IO2,G_ROM1,$7900
+	SHB	G_IO2,G_ROM1,$7A00
+	SHB	G_IO2,G_ROM1,$7B00
+	SHB	G_IO2,G_ROM1,$7C00
+	SHB	G_IO2,G_ROM1,$7F00
+	movem.l	(sp)+,d1-d7/a2
 	rts
 
 ; The sound CPU's NMIs (twice a frame, lines 64 and 192) once it has booted, while its NMION ($6822) is off.  The shared

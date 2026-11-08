@@ -30,6 +30,7 @@ def main():
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--prof', action='store_true', help='a histogram of the logic cycles by routine / 32-byte Z80 region')
     ap.add_argument('--verbose', action='store_true')
     ap.add_argument('--tag', default='xevious_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
@@ -108,12 +109,46 @@ def main():
             expl.trigger()
             n54['n'] = n54.get('n', 0) + 1
     m.n54.write = n54_write
+    # the sub CPU's window onto the shared RAM: only these blocks are copied (xevious.s sync_to_sub / sync_to_main)
+    sub_ok = set()
+    for blk in (0x7900, 0x7a00, 0x7b00, 0x7c00, 0x7f00):
+        sub_ok.update(range(blk, blk + 128))
+    sub_rd = {a for blk in (0x7900, 0x7a00, 0x7b00, 0x7c00, 0x7f00) for a in range(blk, blk + 128)}
+    rd0, wr0 = m.cpus[1].rd8, m.cpus[1].wr8
+
+    def sub_rd8(a):
+        if 0x7800 <= a < 0x8000 and a not in sub_rd:
+            raise RuntimeError('the sub CPU read %04x of the shared RAM outside the copied blocks (xevious.s sync_to_sub)' % a)
+        return rd0(a)
+
+    def sub_wr8(a, v):
+        if 0x7800 <= a < 0x8000 and a not in sub_ok:
+            raise RuntimeError('the sub CPU wrote %04x of the shared RAM outside the copied blocks (xevious.s sync_to_main)' % a)
+        return wr0(a, v)
+    m.cpus[1].rd8, m.cpus[1].wr8 = sub_rd8, sub_wr8
     cycles = [0]
+    hist = {}
+    if args.prof:
+        import bisect
+        psy = sorted((v - s.base, k) for k, v in sym.items() if v - s.base >= 0 and not k.startswith('.'))
+        paddr = [a for a, _ in psy]
+
+        def bucket(pc):
+            k = psy[max(0, bisect.bisect_right(paddr, pc - s.base) - 1)][1]
+            if len(k) == 5 and k[0] in 'ZYX' and all(c in '0123456789ABCDEF' for c in k[1:]):
+                return '%s%04X+' % (k[0], int(k[1:], 16) & ~31)
+            return k
 
     def run_to(targets):
         total = 0
         while total < 2_000_000_000:
-            total += cpu.execute(2000).cycles
+            if args.prof:
+                c = cpu.execute(25).cycles
+                total += c
+                b = bucket(cpu.r_pc())
+                hist[b] = hist.get(b, 0) + c
+            else:
+                total += cpu.execute(2000).cycles
             pc = cpu.r_pc()
             if pc in targets:
                 cycles[0] += total
@@ -145,7 +180,7 @@ def main():
         got = bytes(mem.r_block(g_rom1 + 0x7800, 0x800)) + bytes(mem.r_block(g_ram, 0x5000))
         got2 = bytes(mem.r_block(g_block + 0x7900, 0x700))
         diff = [0x7800 + i for i in range(len(want)) if want[i] != got[i] and 0x7800 + i not in dead and 0x7800 + i not in skip]
-        diff2 = [0x7900 + i for i in range(0x700) if want[0x100 + i] != got2[i] and 0x7900 + i not in dead and 0x7900 + i not in skip]
+        diff2 = [0x7900 + i for i in range(0x700) if (0x7900 + i) in sub_ok and want[0x100 + i] != got2[i] and 0x7900 + i not in dead and 0x7900 + i not in skip]
         if diff or diff2:
             raise RuntimeError('frame %d: %d + %d (sub half) RAM differences, ref pcs %s sps %s' % (
                 f, len(diff), len(diff2), ['%04x' % c.pc for c in m.cpus], ['%04x' % c.sp for c in m.cpus]) + str(
@@ -236,6 +271,14 @@ def main():
     print('PASS: %d frames (seed %d), work RAM, latches, scroll registers and the 51XX exact; every tile RAM change marked'
           % (args.frames, args.seed))
     print('explosions started: %d' % n54.get('n', 0))
+    if args.prof:
+        tot = sum(hist.values())
+        per = {}
+        for k, v in hist.items():
+            per[k[0] if k[0] in 'ZYX' and k[-1] == '+' else 'rt'] = per.get(k[0] if k[0] in 'ZYX' and k[-1] == '+' else 'rt', 0) + v
+        print('by program (Z main, Y sub, X sound, rt runtime):', {k: '%.1f%% %dk/frame' % (100 * v / tot, v // args.frames // 1000) for k, v in per.items()})
+        for k, v in sorted(hist.items(), key=lambda kv: -kv[1])[:40]:
+            print('%-22s %5.1f%% %6d/frame' % (k, 100 * v / tot, v // args.frames))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 
