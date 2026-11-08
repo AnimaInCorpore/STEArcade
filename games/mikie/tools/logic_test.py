@@ -29,6 +29,7 @@ def main():
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
+    ap.add_argument('--profile', action='store_true', help='step every instruction, print the cycles by 6809 block (slow)')
     ap.add_argument('--tag', default='mikie_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -50,10 +51,26 @@ def main():
     rnd = random.Random(args.seed)
     cycles = [0]
 
+    import bisect
+    import collections
+    labels = sorted((v, k) for k, v in sym.items())
+    lab_addr = [v for v, _ in labels]
+    prof = collections.Counter()
+
+    def charge(pc, cyc):
+        name = labels[bisect.bisect_right(lab_addr, pc) - 1][1]
+        prof[name] += cyc
+
     def run_to(targets):
         total = 0
         while total < 400_000_000:
-            total += cpu.execute(2000).cycles
+            if args.profile:
+                pc0 = cpu.r_pc()
+                c = cpu.execute(1).cycles
+                charge(pc0, c)
+                total += c
+            else:
+                total += cpu.execute(2000).cycles
             pc = cpu.r_pc()
             if pc in targets:
                 cycles[0] += total
@@ -125,6 +142,20 @@ def main():
             print('%d frames exact (lives %d)' % (f + 1, m.mem[cover.LIVES1]), flush=True)
     print('PASS: %d frames (seed %d), RAM, sprite and video RAM, latch, palette bank and sound commands exact' % (args.frames, args.seed))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
+    if args.profile:
+        blocks = collections.Counter()
+        for name, c in prof.items():
+            if len(name) == 7 and name[0] == 'M' and all(ch in '0123456789ABCDEF' for ch in name[1:]):
+                blocks['6809 $%sxx' % name[3:6]] += c         # (M009962: two bank digits, the address)
+            else:
+                blocks[name] += c
+        print('hottest 6809 instructions:')
+        for name, c in [kv for kv in prof.most_common() if len(kv[0]) == 7 and kv[0][0] == 'M'][:25]:
+            print('%7d  %s' % (c // args.frames, name))
+        tot = sum(prof.values())
+        print('profile: %d cycles a frame charged' % (tot // args.frames))
+        for name, c in blocks.most_common(40):
+            print('%7d  %5.1f%%  %s' % (c // args.frames, 100.0 * c / tot, name))
 
 
 if __name__ == '__main__':

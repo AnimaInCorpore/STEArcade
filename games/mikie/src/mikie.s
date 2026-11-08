@@ -422,6 +422,88 @@ mk_sort:
 .orig:	move.w	#$2890,d4
 	jmp	M009936
 
+; mk_sprcopy: the native at $6253, the sprite list's copy ($36D0 -> $2800: 38 words of 2 x 2 bytes, the second pair skipped
+; (X + 2) where the first pair's second byte is $FC; then $FC into the second byte of each remaining 4 bytes up to $2888).
+; State left as the 6809 code leaves it: A = $FC, B = the last byte read, X, U, $50 = 0; the flags of CMPU #$2888.
+mk_sprcopy:
+	lea	$36D0(a3),a0
+	lea	$2800(a3),a1
+	moveq	#$26-1,d6
+.l:	move.b	(a0)+,d0
+	move.b	(a0)+,d1
+	cmp.b	#$FC,d1
+	beq.s	.skip
+	move.b	d0,(a1)+
+	move.b	d1,(a1)+
+	move.b	(a0)+,d0
+	move.b	(a0)+,d1
+	move.b	d0,(a1)+
+	move.b	d1,(a1)+
+	dbf	d6,.l
+	bra.s	.e
+.skip:	addq.l	#2,a0
+	dbf	d6,.l
+.e:	clr.b	$2950(a3)
+	move.l	a0,d7
+	sub.l	a3,d7
+	move.w	d7,d2			; X
+	move.b	#$FC,d0			; A = $FC
+	lea	$2888(a3),a2
+.f:	cmp.l	a2,a1
+	bhs.s	.d
+	move.b	d0,1(a1)
+	addq.l	#4,a1
+	bra.s	.f
+.d:	move.l	a1,d7
+	sub.l	a3,d7
+	move.w	d7,d4			; U
+	cmp.w	#$2888,d4		; (CMPU: the flags BCC read)
+	jmp	M00627F
+
+; mk_emit (inline call of $998B): X = d2 (the object + $10), U = d4: its 4-byte sprite record; a blank one ($FC) when the
+; object's byte at -$10 is 0.  The flags are not live at the three call sites (mk_emit_nf only).
+mk_emit_nf:
+mk_emit:
+	lea	(a3,d2.w),a0
+	lea	(a3,d4.w),a1
+	tst.b	$29FA(a3)
+	beq.s	.p2
+	move.b	-16(a0),d1
+	beq.s	.blank
+	move.b	-8(a0),d0
+	move.b	-7(a0),d1
+	eor.b	#$10,d1
+	move.b	d1,(a1)+
+	move.b	-12(a0),d1
+	not.b	d1
+	sub.b	#3,d1
+	move.b	d1,(a1)+
+	move.b	d0,(a1)+
+	move.b	-10(a0),d1
+	move.b	d1,(a1)+
+	addq.w	#4,d4
+	rts
+.p2:	move.b	-16(a0),d1
+	beq.s	.blank
+	move.b	-8(a0),d0
+	move.b	-7(a0),d1
+	move.b	d1,(a1)+
+	move.b	-12(a0),d1
+	not.b	d1
+	sub.b	#5,d1
+	move.b	d1,(a1)+
+	move.b	d0,(a1)+
+	move.b	-10(a0),d1
+	not.b	d1
+	sub.b	#$0F,d1
+	move.b	d1,(a1)+
+	addq.w	#4,d4
+	rts
+.blank:	move.b	#$FC,d0
+	move.b	d0,1(a1)
+	addq.w	#4,d4
+	rts
+
 mk_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7

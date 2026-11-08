@@ -24,7 +24,8 @@ RESET, IRQ = MikiePort.START, MikiePort.IRQ
 SEEDS = [int(x) for x in os.environ.get("MK_SEEDS", "").split(",") if x] or range(1, 10)
 DEAD = {0x6E80: "main_dead"}               # LBRA $D791 into zero padding, never run: a crash if it is
 SORT_PC = 0x9933                           # the sprite list's bubble sort (LDU #$2890 ...): mk_sort, a stable insertion sort
-NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai", SORT_PC: "mk_sort"}
+COPY_PC, EMIT_PC = 0x6253, 0x998B          # the sprite list copy (mk_sprcopy); the record emitter (mk_emit: inline calls)
+NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai", SORT_PC: "mk_sort", COPY_PC: "mk_sprcopy"}
 CWAI_RET = MikiePort.CWAI_PC + 2           # the IRQ's return point from the CWAI native (its RTI dispatches here)
 ROM_FILES = ("n14.11c", "o13.12a", "o17.12d")
 
@@ -70,6 +71,7 @@ def program(cover):
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(3, 8)},
                           roots=[RESET, IRQ, CWAI_RET] + sorted(NATIVES), exec_cover=set(exec_), acc_cover=flat, targets=tg,
                           page_addr=page_addr, hooks=dict(DEAD), io_sites=io, wrap_sites=wraps, dp=0x29, a3_slot=1, a4_slot=0,
+                          inline_calls={EMIT_PC: ("mk_emit", 0x29)},
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('MK_NO_NATIVES', '')},
                           )
