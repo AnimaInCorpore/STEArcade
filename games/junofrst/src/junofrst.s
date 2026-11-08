@@ -371,6 +371,22 @@ vbl:
 	bne.s	.ap5
 	and.b	#$FD,d1
 .ap5:	move.b	d1,io_p1
+	ifd WAVECHEAT				; (the next wave at the periods' VBLs 1800, 2400, 3000, 3600: the later waves run)
+	cmp.w	#1800,d0
+	beq.s	.wv
+	cmp.w	#2400,d0
+	beq.s	.wv
+	cmp.w	#3000,d0
+	beq.s	.wv
+	cmp.w	#3600,d0
+	bne.s	.ap3
+.wv:	move.b	jf_mem+$8823,d2
+	cmp.b	#1,d2
+	blo.s	.ap3
+	cmp.b	#59,d2
+	bhs.s	.ap3
+	addq.b	#1,jf_mem+$8823
+	endc
 .ap3:	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
