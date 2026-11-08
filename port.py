@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -43,6 +43,8 @@ COVER = {
               ("ref/cover_sound.py", list(range(1, 10)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
     "yiear": [("ref/cover.py", list(range(1, 12)), 20000),        # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
               ("ref/cover.py", list(range(12, 27)), 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
+    "dkong3": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-6 and 11 play, 7 two players, 8-9 DIPs, 10 test mode (service DIP), 12 service button
+               ("ref/cover_pens.py", [1, 2, 3, 4, 5, 6], 12000)],  # the pens the colour fit is trained on
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
@@ -103,6 +105,14 @@ TESTS = {
               ("tools/render_test.py", ["3000", "--seed", "2", "--start", "100", "--every", "3"], None),
               ("tools/render_test.py", ["9000", "--seed", "24", "--start", "100", "--every", "9"], None),   # later stages
               ("tools/sprite_test.py", [], None)],              # edges, 16 shifts, holes, guards, 64 KB crossings
+    "dkong3": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/logic_test.py", ["{n}"], 3000),
+               ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+               ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
+               ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
+               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, guards, 64 KB crossings, both orientations
+               ("tools/sound_test.py", ["3000"], None)],          # the DMA sound driver against the game's commands, snd_mix against the clips
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),
