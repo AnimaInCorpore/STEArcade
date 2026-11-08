@@ -130,7 +130,7 @@ other Konami ports.
 
 ### Picture
 
-`src/render.s` is Hyper Sports': a 64 x 32 tilemap in a 768-pixel-wide playfield of STE planes, a tile cache, three
+`src/render.s` is Hyper Sports' with the playfield shown through the Shifter's fine scroll (see the speed table; `src/render_rows.s` is the version before, which copies each row at its exact scroll). The rest of this section describes the row version: a 64 x 32 tilemap in a 768-pixel-wide playfield of STE planes, a tile cache, three
 display buffers whose rows are copied at their scroll (+ 8: the picture starts at bitmap column 8; 15 words a line),
 a sprite cache baked on first use, generated code per (transparency class, code, flips) shape (544 shapes of the
 coverage, 100% of the draws: 7,457 routines, 477 k lines, 682 KB of end-mask streams), Blitter HOP 2 / OP 3 passes with
@@ -192,7 +192,7 @@ cycles an arcade frame (108,000 before the SN native), a picture 78,000 CPU cycl
   | 6809 inline_calls | applied for the 5 direct `JSR $AF96` sites (`_nf` forms); the `JMP $AF96` tail calls cannot | 93.8k -> 92.2k |
   | call_summaries, fast_forms, ret_weights, fixed_slots, video_inline | applied (translation settings) | - |
   | Window guards at coverage sites only | n/a (one flat 64 KB block) | - |
-  | Hardware scroll (video address + HSCROLL, groups copied unshifted, side slivers cleared: `-D REN_HSCROLL=1`, `src/render_hscroll.s`) | built, exact (render_test, sprite_test), **rejected as default** | picture 78k CPU + 75k Blitter -> 80k + 55k Musashi; Hatari with a picture every arcade frame 927 -> 936 frames in 2,000 VBLs (+1%); needs an STE fine-scroll check on hardware |
+  | Hardware scroll (`src/render.s`, the default since 2026-11-08; `-D REN_ROWS=1` builds the older `render_rows.s`): the picture's 16 groups copied unshifted at the scroll's 16-pixel step, the fine part in HSCROLL (LINEWID -4), the side slivers cleared with end-mask passes, tile writes restore only their groups | applied, exact (render_test, sprite_test, lock-step) | picture 78k CPU + 75k Blitter -> 81k + 61k Musashi; Hatari 3,001 VBLs: 2,429 frames / 926 pictures -> 2,401 / 937 (a tie: -1.2% frames, +1.2% pictures); a halftone-masked copy (HOP 3) crashed Hatari (RAM corrupted after ~2,000 VBLs) and was replaced by a plain copy + clear; not checked on a real STE |
   | Tile column spans instead of whole-row redraws on a tile write | applied (in the option only) | whole rows 6.3 a picture -> spans |
   | Sprite programs (reordered-source passes), per-slot sprite cache, guard rows, damage by rows/groups | applied (before this audit) | - |
   | Palette stamps, colour cycling, parallax, two layers | n/a (one 16-colour palette, one scrolling layer) | - |

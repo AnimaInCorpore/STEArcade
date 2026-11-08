@@ -957,8 +957,8 @@ dbg_name4:
 	even
 	endc
 
-	ifd REN_HSCROLL			; (the experiment: the fine scroll in the video hardware; README, "Picture")
-	include	"render_hscroll.s"
+	ifd REN_ROWS			; (the older renderer: the rows copied at the scroll, no fine scroll; README, "Picture")
+	include	"render_rows.s"
 	else
 	include	"render.s"
 	endc

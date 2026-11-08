@@ -40,7 +40,9 @@ BUFSZ = BL*LB
 NBUF = 3
 PIC0 = PIC_TOP*LB			; the picture's line 0 in a buffer
 LEFT = 48				; the picture's left edge (screen x)
-PICW = 240				; the picture's width
+PICG = 16				; picture groups in a buffer
+PICW = 256				; the picture's groups in a buffer (16: groups 3-18; the arcade's picture is 240 wide, the hardware
+					; scroll's fine offset f (0-15) shows it at buffer pixels 48 + f .. 288 + f)
 PF_LB = 384				; the playfield's bytes a line
 TC_SLOTS = 2048				; tile cache slots (32 bytes)
 SC_SLOTS = 1024				; sprite cache slots
@@ -97,9 +99,19 @@ init_render:
 	move.w	#NBUF*28-1,d0
 .rs:	move.w	#-1,(a0)+
 	dbf	d0,.rs
-	clr.l	row_dirty
-	clr.l	row_dirty+4
-	clr.l	row_dirty+8
+	lea	buf_mf,a0		; (no buffer's side groups masked yet; the fine scroll 0)
+	lea	buf_fine,a1
+	moveq	#NBUF-1,d0
+.mf:	move.w	#-1,(a0)+
+	clr.w	(a1)+
+	dbf	d0,.mf
+	clr.w	cur_fine
+	clr.b	rows_redo
+	lea	row_tspan,a0		; (no tile change noted: g0 $FF, g1 0)
+	move.w	#NBUF*28-1,d0
+.ts:	move.w	#$FF00,(a0)+
+	dbf	d0,.ts
+	clr.l	mask_rows
 	clr.l	guard_dirty
 	move.l	#cell_list,cell_ptr
 	lea	tile_copy,a0		; (no cell drawn yet: the first write of each changes it)
@@ -143,6 +155,8 @@ init_render:
 	move.b	2(sp),$ffff8203.w
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
+	clr.b	$ffff8265.w		; (no fine scroll, the line width 160 bytes)
+	clr.b	$ffff820f.w
 	rts
 
 cache_flush:
@@ -188,6 +202,15 @@ vbl_video:
 	move.b	2(sp),$ffff8203.w
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
+	lsr.w	#1,d1			; (d1 = the index * 4: the buffer's fine scroll, a word each)
+	lea	buf_fine,a0
+	move.w	(a0,d1.w),d0
+	move.b	d0,$ffff8265.w
+	moveq	#0,d1			; the line width: 4 words less with a fine scroll (the shifter reads a group more)
+	tst.w	d0
+	beq.s	.lw
+	moveq	#-4,d1
+.lw:	move.b	d1,$ffff820f.w
 	addq.w	#1,pic_shown
 .out:	movem.l	(sp)+,d0-d1/a0
 	rts
@@ -223,8 +246,12 @@ render_frame:
 	lea	buf_base,a0
 	move.l	(a0,d0.w),draw_base
 	bsr	guard_clear
+	bsr	pick_fine
 	bsr	draw_rows
 	bsr	draw_sprites
+	ifnd HS_NOMASK
+	bsr	edge_mask
+	endc
 	move.w	draw_idx,d0
 	addq.b	#1,d0
 	move.b	d0,frame_ready
@@ -242,7 +269,6 @@ render_tiles:
 	cmp.l	a3,a4
 	beq	.out
 	move.l	a3,cell_ptr
-	moveq	#0,d6			; the rows changed
 .cell:	move.w	(a3)+,d7		; a written cell (ty * 64 + tx): changed?
 	lea	cell_dirty,a2
 	clr.b	(a2,d7.w)
@@ -265,16 +291,84 @@ render_tiles:
 	bmi.s	.same
 	cmp.w	#28,d2
 	bhs.s	.same
-	bset	d2,d6
-	movem.l	d6/a3-a4,-(sp)
+	movem.l	a3-a4,-(sp)
 	bsr	tile_draw
-	movem.l	(sp)+,d6/a3-a4
+	bsr	tile_spans
+	movem.l	(sp)+,a3-a4
 .same:	cmp.l	a4,a3
 	blo.s	.cell
-	or.l	d6,row_dirty
-	or.l	d6,row_dirty+4
-	or.l	d6,row_dirty+8
 .out:	rts
+
+
+; tile_spans: d7.w = the cell (ty * 64 + tx) of a visible row, just drawn into the playfield: its column tx noted for every
+; buffer's row in row_tspan (the first and last column changed since the buffer last drew the row; $FF, 0: none).  A row never
+; drawn (-1) is drawn whole anyway.  Keeps d6-d7 a3-a6.
+tile_spans:
+	move.w	d7,d0
+	lsr.w	#6,d0
+	subq.w	#2,d0			; the row
+	add.w	d0,d0
+	moveq	#63,d1
+	and.w	d7,d1			; tx
+	lea	row_tspan,a1
+	add.w	d0,a1
+	moveq	#NBUF-1,d2
+.b:	cmp.b	(a1),d1
+	bhs.s	.m0
+	move.b	d1,(a1)
+.m0:	cmp.b	1(a1),d1
+	bls.s	.m1
+	move.b	d1,1(a1)
+.m1:	lea	56(a1),a1
+	dbf	d2,.b
+	rts
+
+; ts_groups: d0.w = the row's copy scroll c, d1.b / d2.b = the first and last column changed (row_tspan) -> d5.w = the first and
+; d2.w = the last of the buffer's picture groups that show them (d5 = 255: none).  The columns' pixels p (8 tx .. 8 tx + 7,
+; and + 512 for the columns below 32: the playfield's second copy) lie at q = p - c in the picture (0-255).  Uses d1-d5.
+ts_groups:
+	moveq	#0,d3
+	move.b	d1,d3
+	lsl.w	#3,d3			; p0 = 8 * first
+	moveq	#0,d4
+	move.b	d2,d4
+	lsl.w	#3,d4
+	addq.w	#7,d4			; p1 = 8 * last + 7
+	move.w	#255,d5			; (g0: none)
+	moveq	#0,d2			; (g1)
+	bsr.s	.copy
+	cmp.w	#256,d3			; the first column below 32: the second copy too
+	bge.s	.out
+	add.w	#512,d3
+	cmp.w	#255,d4
+	ble.s	.l
+	move.w	#255,d4
+.l:	add.w	#512,d4
+	bsr.s	.copy
+.out:	rts
+.copy:	move.w	d3,d1
+	sub.w	d0,d1			; q0
+	move.w	d4,-(sp)
+	sub.w	d0,d4			; q1
+	bmi.s	.no
+	cmp.w	#255,d1
+	bgt.s	.no
+	tst.w	d1
+	bpl.s	.a
+	moveq	#0,d1
+.a:	lsr.w	#4,d1			; first group
+	cmp.w	#255,d4
+	ble.s	.b
+	move.w	#255,d4
+.b:	lsr.w	#4,d4			; last group
+	cmp.w	d1,d5
+	bls.s	.c
+	move.w	d1,d5
+.c:	cmp.w	d4,d2
+	bhs.s	.no
+	move.w	d4,d2
+.no:	move.w	(sp)+,d4
+	rts
 
 ; tile_draw: d7.w = the cell (ty * 64 + tx), d0.b = its colour byte, d1.b = its code byte: drawn into the playfield
 ; (twice when tx < 32).  d0-d5 a0-a2 used.
@@ -475,11 +569,8 @@ draw_rows:
 	move.w	d0,d1
 	add.w	d1,d1
 	add.w	d1,d1
-	lea	row_dirty,a0
-	move.l	(a0,d1.w),d6		; the rows to draw whatever their scroll
-	clr.l	(a0,d1.w)
 	lea	row_sdirty,a0
-	move.l	(a0,d1.w),sd_rows	; the rows only the buffer's last sprites covered: their groups
+	move.l	(a0,d1.w),d6		; the rows only the buffer's last sprites covered: their groups
 	mulu	#56,d0
 	lea	row_scroll,a2
 	add.w	d0,a2			; the buffer's rows' scrolls
@@ -488,50 +579,134 @@ draw_rows:
 	move.w	d0,B_END1.w
 	move.w	d0,B_END2.w
 	move.w	d0,B_END3.w
-	move.w	#8,B_SXI.w
-	move.w	#8,B_DXI.w
-	move.w	#15,B_XC.w
-	move.w	#2-14*8,B_DYI.w
+	move.b	#2,rmode		; (the Blitter's X/Y increments: unknown)
 	lea	B_SRC.w,a3
 	lea	B_DST.w,a4
 	lea	B_YC.w,a5
 	lea	B_CTRL.w,a6
 	moveq	#1,d3
 	moveq	#-$40,d4		; ($C0: start, HOG)
-	move.l	draw_base,a1
-	lea	PIC0+24(a1),a1		; the picture's first line, its first group
 	move.l	pf_base,a0
 	lea	2*8*PF_LB(a0),a0	; raw row 2
 	moveq	#0,d7			; the row
-.row:	lea	jb_mem+$2002,a1		; its scroll: $2000 + 2 + r, bit 8 from $2020 + 2 + r; + 8: the picture starts at bitmap column 8
+.row:	cmp.w	#2,d7			; the band rows (2-25) share one scroll (band_c; -1: they do not)
+	blo.s	.own
+	cmp.w	#26,d7
+	bhs.s	.own
+	move.w	band_c,d0
+	bpl.s	.have
+.own:	lea	jb_mem+$2002,a1		; its scroll: $2000 + 2 + r, bit 8 from $2020 + 2 + r; + 8: the picture starts at bitmap column 8
 	moveq	#0,d0
 	move.b	(a1,d7.w),d0
 	btst	#0,$20(a1,d7.w)
 	beq.s	.s
 	or.w	#$100,d0
 .s:	addq.w	#8,d0
+	sub.w	cur_fine,d0		; the copy's scroll: the fine part is the shifter's
 	and.w	#$1FF,d0
-	cmp.w	(a2),d0
-	bne.s	.draw
+.have:	cmp.w	(a2),d0
+	bne	.draw
+	cmp.w	#$FF00,row_tspan-row_scroll(a2)
+	bne.s	.chk
 	btst	d7,d6
-	bne.s	.draw
-	move.l	sd_rows,d1
-	btst	d7,d1
-	bne	.part
+	beq	.next
+.chk:	move.w	#255,d5			; the groups to restore: the sprites' (row_span) and the tile changes' (row_tspan)
+	moveq	#0,d2
+	btst	d7,d6
+	beq.s	.nosp
+	moveq	#0,d5
+	move.b	row_span-row_scroll(a2),d5
+	move.b	row_span-row_scroll+1(a2),d2
+.nosp:	move.w	row_tspan-row_scroll(a2),d1	; the tile columns changed since: their groups
+	cmp.w	#$FF00,d1
+	beq.s	.t1
+	movem.l	d2-d5,-(sp)
+	move.w	d1,d2
+	lsr.w	#8,d1			; first column
+	and.w	#255,d2			; last column
+	bsr	ts_groups		; -> d5 = first group, d2 = last group (255: none)
+	move.w	d5,d1
+	swap	d1
+	move.w	d2,d1			; (packed: first group high, last low)
+	movem.l	(sp)+,d2-d5
+	swap	d1
+	cmp.w	d1,d5
+	bls.s	.t0
+	move.w	d1,d5
+.t0:	swap	d1
+	cmp.w	d1,d2
+	bhs.s	.t1
+	move.w	d1,d2
+.t1:	move.w	#$FF00,row_tspan-row_scroll(a2)
+	cmp.w	#255,d5
+	beq	.next
+	sub.w	d5,d2			; d0 = the scroll (the buffer's), d5 = g0, d2 = g1: n - 1
+	tst.w	d5
+	beq.s	.pe
+	move.w	d5,d1
+	add.w	d2,d1
+	cmp.w	#PICG-1,d1
+	bne.s	.pf
+.pe:	move.l	mask_rows,d1		; (across a side group: its slivers need clearing)
+	bset	d7,d1
+	move.l	d1,mask_rows
+.pf:	moveq	#15,d1
+	and.w	d0,d1
+	bne	.partsh
+	; no shift: the groups g0 .. g1 a pass each (the 4 planes' words in a row, 8 lines: ~256 bus cycles)
+.cols:	cmp.b	#1,rmode
+	beq.s	.cm
+	move.b	#1,rmode
+	clr.b	B_SKEW.w
+	move.w	#4,B_XC.w
+	move.w	#2,B_SXI.w
+	move.w	#2,B_DXI.w
+	move.w	#PF_LB-6,B_SYI.w
+	move.w	#LB-6,B_DYI.w
+.cm:	lsr.w	#4,d0
+	add.w	d5,d0
+	lsl.w	#3,d0
+	lea	(a0,d0.w),a1		; the source's group g0
+	lsl.w	#3,d5
+	move.w	d7,d1
+	mulu	#8*LB,d1
+	add.w	d5,d1			; (d5: the groups' bytes)
+	move.l	draw_base,d0
+	add.l	#PIC0+24,d0
+	add.l	d1,d0			; the destination's group g0
+	moveq	#8,d1
+.cl:	move.l	a1,(a3)
+	move.l	d0,(a4)
+	move.w	d1,(a5)
+	move.b	d4,(a6)
+	addq.l	#8,a1
+	addq.l	#8,d0
+	dbf	d2,.cl
 	bra	.next
 .draw:	move.w	d0,(a2)
+	move.w	#$FF00,row_tspan-row_scroll(a2)
+	move.l	mask_rows,d1
+	bset	d7,d1
+	move.l	d1,mask_rows
 	moveq	#15,d1
 	and.w	d0,d1			; the shift
-	beq.s	.k0
+	bne.s	.sh
+	moveq	#0,d5			; none: all 16 groups
+	moveq	#PICG-1,d2
+	bra	.cols
+.sh:	tst.b	rmode
+	beq.s	.shm
+	clr.b	rmode
+	move.w	#8,B_SXI.w
+	move.w	#8,B_DXI.w
+.shm:	move.w	#PICG,B_XC.w
+	move.w	#2-(PICG-1)*8,B_DYI.w
 	moveq	#16,d2
 	sub.w	d1,d2			; skew 16 - shift, FXSR: 16 source words a line
 	or.b	#FXSR,d2
 	move.b	d2,B_SKEW.w
-	move.w	#2-15*8,B_SYI.w
-	bra.s	.k
-.k0:	clr.b	B_SKEW.w
-	move.w	#2-14*8,B_SYI.w
-.k:	lsr.w	#4,d0
+	move.w	#2-PICG*8,B_SYI.w
+	lsr.w	#4,d0
 	lsl.w	#3,d0
 	lea	(a0,d0.w),a1		; (the source's first group)
 	move.l	draw_base,d2
@@ -558,13 +733,18 @@ draw_rows:
 	addq.w	#1,d7
 	cmp.w	#28,d7
 	bne	.row
+	ifd HS_NOEDGE
 	rts
-.part:	moveq	#0,d5			; d0 = the scroll (the buffer's): groups g0 .. g1 of the row (row_span)
-	move.b	row_span-row_scroll(a2),d5
-	moveq	#0,d2
-	move.b	row_span-row_scroll+1(a2),d2
-	sub.w	d5,d2			; n - 1
-	move.w	d2,d1
+	else
+	bra	rows_edges
+	endc
+.partsh:				; a shifted row (never the band's): the groups g0 .. g1, the planes a pass each (FXSR)
+	tst.b	rmode
+	beq.s	.psm
+	clr.b	rmode
+	move.w	#8,B_SXI.w
+	move.w	#8,B_DXI.w
+.psm:	move.w	d2,d1
 	addq.w	#1,d1
 	move.w	d1,B_XC.w		; n
 	lsl.w	#3,d2
@@ -573,24 +753,20 @@ draw_rows:
 	move.w	d1,B_DYI.w		; 2 - (n - 1) * 8
 	moveq	#15,d2
 	and.w	d0,d2			; the shift
-	beq.s	.p0
 	subq.w	#8,d1
 	move.w	d1,B_SYI.w		; 2 - n * 8 (FXSR: n + 1 source words)
 	moveq	#16,d1
 	sub.w	d2,d1
 	or.b	#FXSR,d1
 	move.b	d1,B_SKEW.w
-	bra.s	.pk
-.p0:	move.w	d1,B_SYI.w
-	clr.b	B_SKEW.w
-.pk:	lsr.w	#4,d0
+	lsr.w	#4,d0
 	add.w	d5,d0
 	lsl.w	#3,d0
 	lea	(a0,d0.w),a1		; the source's group g0
 	lsl.w	#3,d5
 	move.w	d7,d1
 	mulu	#8*LB,d1
-	add.l	d5,d1
+	add.w	d5,d1
 	move.l	draw_base,d2
 	add.l	#PIC0+24,d2
 	add.l	d1,d2			; the destination's group g0
@@ -608,9 +784,158 @@ draw_rows:
 	lea	PF_LB(a1),a1
 	add.l	#LB,d2
 	dbf	d5,.pl
-	move.w	#15,B_XC.w
-	move.w	#2-14*8,B_DYI.w
 	bra	.next
+
+; pick_fine: the hardware scroll's fine offset f of this picture: the band's scroll (the first band row's, + 8) mod 16 ->
+; cur_fine and the buffer's buf_fine (the VBL shows the buffer with it); band_c: the band rows' (2-25) common copy scroll
+; (scroll + 8 - f, a multiple of 16), or -1 when they differ
+pick_fine:
+	moveq	#0,d0
+	move.b	jb_mem+$2004,d0
+	addq.w	#8,d0
+	and.w	#15,d0
+	move.w	d0,cur_fine
+	move.w	draw_idx,d1
+	add.w	d1,d1
+	lea	buf_fine,a0
+	move.w	d0,(a0,d1.w)
+	lea	jb_mem+$2004,a1
+	move.b	(a1),d2
+	move.b	$20(a1),d3
+	and.b	#1,d3
+	moveq	#22,d4
+.u:	addq.l	#1,a1
+	cmp.b	(a1),d2
+	bne.s	.non
+	move.b	$20(a1),d5
+	and.b	#1,d5
+	cmp.b	d3,d5
+	bne.s	.non
+	dbf	d4,.u
+	moveq	#0,d1
+	move.b	d2,d1
+	tst.b	d3
+	beq.s	.nb
+	or.w	#$100,d1
+.nb:	addq.w	#8,d1
+	sub.w	d0,d1
+	and.w	#$1FF,d1
+	move.w	d1,band_c
+	rts
+.non:	move.w	#-1,band_c
+	rts
+
+; rows_edges (end of draw_rows): the buffer's side groups (picture groups 0 and 15) were masked for another fine scroll
+; (buf_mf): the band rows' (picture lines 16-207) restored from the playfield, in 8-line passes, before the sprites;
+; edge_mask clears the slivers after them.  Rows with scrolls of their own (never seen) are drawn whole instead.
+rows_edges:
+	tst.b	rows_redo
+	bne	.out
+	move.w	draw_idx,d0
+	add.w	d0,d0
+	lea	buf_mf,a0
+	move.w	cur_fine,d1
+	cmp.w	(a0,d0.w),d1
+	beq	.out
+	move.w	band_c,d2
+	bmi	.nonuni
+	move.w	d1,(a0,d0.w)		; (the buffer's side groups are masked for this f from here on)
+	or.l	#$0FFFFFFF,mask_rows	; (all rows: the slivers cleared after the sprites)
+	move.w	d2,d0
+	lsr.w	#4,d0
+	lsl.w	#3,d0			; its group's byte
+	move.w	#$0203,B_HOP.w
+	clr.b	B_SKEW.w
+	move.w	#4,B_XC.w
+	move.w	#2,B_SXI.w
+	move.w	#2,B_DXI.w
+	move.w	#PF_LB-6,B_SYI.w
+	move.w	#LB-6,B_DYI.w
+	moveq	#-1,d2
+	lsr.w	d1,d2			; $FFFF >> f: pixels f .. 15 (the left group's), its complement the right group's
+	move.l	pf_base,a0
+	add.l	#4*8*PF_LB,a0		; raw row 4: picture line 16
+	add.w	d0,a0
+	move.l	draw_base,a2
+	add.l	#PIC0+24+16*LB,a2
+	bsr.s	.col
+	lea	15*8(a0),a0
+	lea	15*8(a2),a2
+	bsr.s	.col
+	move.b	#2,rmode		; (draw_rows' increments are gone)
+.out:	rts
+.col:	lea	B_SRC.w,a3
+	lea	B_DST.w,a4
+	lea	B_YC.w,a5
+	lea	B_CTRL.w,a6
+	moveq	#8,d4
+	moveq	#-$40,d5
+	moveq	#24-1,d3
+.cp:	move.l	a0,(a3)
+	move.l	a2,(a4)
+	move.w	d4,(a5)
+	move.b	d5,(a6)
+	lea	8*PF_LB(a0),a0
+	lea	8*LB(a2),a2
+	dbf	d3,.cp
+	sub.l	#24*8*PF_LB,a0
+	sub.l	#24*8*LB,a2
+	rts
+.nonuni:
+	move.w	draw_idx,d0
+	mulu	#56,d0
+	lea	row_scroll+4,a2
+	add.w	d0,a2
+	moveq	#24-1,d4
+.n1:	move.w	#-1,(a2)+
+	dbf	d4,.n1
+	st	rows_redo
+	bsr	draw_rows
+	clr.b	rows_redo
+	rts
+
+; edge_mask (after the sprites): the slivers that show in the side bands with the fine scroll f (picture group 0's pixels
+; 0 .. f-1, group 15's f .. 15) cleared in the lines of the rows that were drawn into since (mask_rows: tile rows drawn
+; or restored across the side groups, and rows with sprites there), 8 lines a pass
+edge_mask:
+	move.l	mask_rows,d4
+	beq.s	.out
+	clr.l	mask_rows
+	clr.w	B_HOP.w			; HOP 0, OP 0: the masked pixels cleared
+	clr.b	B_SKEW.w
+	move.w	#4,B_XC.w
+	move.w	#2,B_DXI.w
+	move.w	#LB-6,B_DYI.w
+	moveq	#-1,d2
+	move.w	cur_fine,d1
+	lsr.w	d1,d2			; $FFFF >> f: pixels f .. 15
+	move.w	d2,d3
+	not.w	d3			; pixels 0 .. f-1
+	move.l	draw_base,a1
+	add.l	#PIC0+24,a1
+	bsr.s	.pass
+	move.l	draw_base,a1
+	add.l	#PIC0+24+15*8,a1
+	move.w	d2,d3
+.pass:	move.w	d3,B_END1.w
+	move.w	d3,B_END2.w
+	move.w	d3,B_END3.w
+	lea	B_DST.w,a2
+	lea	B_YC.w,a3
+	lea	B_CTRL.w,a4
+	moveq	#8,d0
+	moveq	#-$40,d1
+	moveq	#0,d5
+.r:	btst	d5,d4
+	beq.s	.nr
+	move.l	a1,(a2)
+	move.w	d0,(a3)
+	move.b	d1,(a4)
+.nr:	lea	8*LB(a1),a1
+	addq.w	#1,d5
+	cmp.w	#28,d5
+	bne.s	.r
+.out:	rts
 
 ; ======================================================================================================================
 ; draw_sprites: the 48 entries, the first first (the last on top); the rows they cover and the guard lines they reach
@@ -657,6 +982,7 @@ draw_sprites:
 	or.w	(a0,d7.w),d6		; the key: code << 6 | colour << 2 | flips
 	move.w	d6,d2
 	move.w	d5,d3
+	add.w	cur_fine,d3		; (the buffer's x: the picture is shown f pixels to the right of its groups)
 	bsr	draw_cell
 .n:	move.w	(sp)+,d0
 	addq.w	#4,d0
@@ -695,6 +1021,7 @@ draw_cell:
 	move.w	#223,d1
 .r1:	lsr.w	#3,d0
 	lsr.w	#3,d1
+	move.w	d0,d4			; (the first row)
 	move.w	d3,d6			; the groups: X >> 4 .. (X + 15) >> 4 within 0-15
 	asr.w	#4,d6
 	bpl.s	.g0
@@ -702,9 +1029,9 @@ draw_cell:
 .g0:	move.w	d3,d7
 	add.w	#15,d7
 	asr.w	#4,d7
-	cmp.w	#14,d7
+	cmp.w	#PICG-1,d7
 	ble.s	.g1
-	moveq	#14,d7
+	moveq	#PICG-1,d7
 .g1:	move.l	spr_span,a1
 	add.w	d0,a1
 	add.w	d0,a1
@@ -724,7 +1051,17 @@ draw_cell:
 	cmp.w	d1,d0
 	bls.s	.rb
 	move.l	d5,spr_rows
-	bsr	sprite_baked		; a0 = the slot
+	tst.w	d6			; across a side group: its rows need the mask
+	beq.s	.eh
+	cmp.w	#PICG-1,d7
+	bne.s	.en
+.eh:	move.l	mask_rows,d3
+.em:	bset	d4,d3
+	addq.w	#1,d4
+	cmp.w	d1,d4
+	bls.s	.em
+	move.l	d3,mask_rows
+.en:	bsr	sprite_baked		; a0 = the slot
 	if REN_GEN
 	; the generated path (engine/sprite_programs.py): the shape's code for the shift and clip case, the end masks
 	; from its stream, the slot's aligned plane words; 64 KB crossings and shapes without code take the row path
@@ -1160,6 +1497,10 @@ shown_idx:	ds.w	1
 prev_idx:	ds.w	1
 draw_idx:	ds.w	1
 pic_shown:	ds.w	1
+cur_fine:	ds.w	1			; this picture's fine scroll
+band_c:		ds.w	1			; the band rows' common copy scroll (-1: they differ)
+buf_fine:	ds.w	NBUF			; per buffer: the fine scroll it is shown with
+buf_mf:		ds.w	NBUF			; per buffer: the fine scroll its side groups' slivers are cleared for (-1: none)
 cell_x:		ds.w	1
 cell_y:		ds.w	1
 cell_mode:	ds.w	1
@@ -1168,7 +1509,8 @@ last_mode:	ds.w	1
 sc_used:	ds.w	1
 tc_used:	ds.w	1
 spr_rows:	ds.l	1			; draw_sprites: the rows the sprites drawn now cover
-row_dirty:	ds.l	NBUF			; per buffer: rows to draw whatever their scroll
+row_tspan:	ds.b	NBUF*56			; per buffer and row: the groups g0, g1 the tile changes since its last draw touch ($FF, 0: none)
+mask_rows:	ds.l	1			; rows drawn into across the side groups since their slivers were cleared (edge_mask)
 row_scroll:	ds.w	NBUF*28			; per buffer and row: the scroll it was drawn at (-1: never)
 row_span:	ds.b	NBUF*56			; per buffer and row: the groups g0, g1 its last sprites covered
 row_sdirty:	ds.l	NBUF			; per buffer: the rows its last sprites covered (only their groups drawn)
@@ -1177,6 +1519,8 @@ spr_span:	ds.l	1			; draw_sprites: the buffer's row_span
 guard_dirty:	ds.b	4			; per buffer: bit 0 the top guard lines, bit 1 the bottom ones hold sprites
 spr_guard:	ds.b	1
 frame_ready:	ds.b	1
+rows_redo:	ds.b	1
+rmode:		ds.b	1			; draw_rows: the Blitter's increments: 0 line passes, 1 group passes, 2 unknown
 	even
 cell_ptr:	ds.l	1			; the end of cell_list (render_tiles empties it)
 cell_list:	ds.w	2048			; the cells written since the renderer looked (main_io_w), once each
