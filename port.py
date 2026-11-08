@@ -246,6 +246,7 @@ TESTS = {
     "digdug": [("tools/prepare.py", [], None),
                ("tools/build.py", ["--sim"], None),
                ("tools/schedule_test.py", ["{n}", "--no-build", "--every", "50", "--slack", "700"], 2400),   # the STE's tile / sprite RAM against the reference's schedule
+               ("tools/native_test.py", [], None),                                                        # digdug.s's natives against the Z80 reference
                ("tools/render_test.py", ["1500", "2500", "3500", "5000"], None),                          # the picture against the reference renderer
                ("tools/sprite_test.py", [], None),                                                        # the sprite renderer's edge cases
                ("tools/sound_test.py", ["2600"], None)],                                                  # the YM registers against tools/sound.py

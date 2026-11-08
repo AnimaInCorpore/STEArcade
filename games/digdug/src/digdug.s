@@ -1137,6 +1137,56 @@ g_ctrl06:
 .nested:
 	rts
 
+; ------------------------------------------------------------------------------
+; Natives (tools/gen.py NATIVES: the translation of the sub CPU jumps here at the routine's pc; tools/native_test.py checks
+; them against the Z80 reference).  Registers as engine/z80x.py keeps them (d0.b A, d1 BC with B in the low byte, d2.w DE,
+; d3.w HL; the sub CPU's a0-a2 are BC' DE' HL', a6 its block).
+;
+; nat_y0e4c: the sub CPU's sprite position copy, $0E4C-$0E82 (6,300 cycles a frame translated): from the table at $9880 to
+; the sprite RAM at $9380, 64 entries of two bytes: the first byte as it is, the second + $37 (the flipped cabinet, $8400
+; bits 1 and 2 both set: $F2 - first, $27 - second); nothing when $87F0 bit 3 is set.  Leaves what the Z80 code would:
+; HL = $9900, DE = $9400, B = 0, A the last byte written (with $87F0 set: HL = $9880, DE = $9380, B = $40, A = $87F0), and
+; continues at the `ret` ($0E73).  The flags are not kept (the caller, the call at $0090, reads none).
+; ------------------------------------------------------------------------------
+
+nat_y0e4c:
+	move.b	g_ram+$07F0,d0
+	move.w	#$9880,d3
+	move.w	#$9380,d2
+	move.b	#$40,d1
+	btst	#3,d0
+	bne	Y0E73
+	movem.l	a0-a1,-(a7)
+	lea	g_ram+$1880,a0
+	lea	g_ram+$1380,a1
+	move.b	g_ram+$0400,d0
+	btst	#1,d0
+	beq.s	.plain
+	btst	#2,d0
+	beq.s	.plain
+	moveq	#64-1,d5		; the flipped cabinet
+.flip:	move.b	#$F2,d7
+	sub.b	(a0)+,d7
+	move.b	d7,(a1)+
+	move.b	#$27,d7
+	sub.b	(a0)+,d7
+	move.b	d7,(a1)+
+	dbf	d5,.flip
+	bra.s	.done
+.plain:	moveq	#8-1,d5			; 8 x 8 entries
+.p8:	rept	8
+	move.w	(a0)+,d7
+	add.b	#$37,d7
+	move.w	d7,(a1)+
+	endr
+	dbf	d5,.p8
+.done:	move.b	d7,d0
+	movem.l	(a7)+,a0-a1
+	move.w	#$9900,d3
+	move.w	#$9400,d2
+	clr.b	d1
+	bra	Y0E73
+
 ; A plain data write ($7000, hooked): into the 51XX's latch if the transfer is a write to it.
 
 g_data06:

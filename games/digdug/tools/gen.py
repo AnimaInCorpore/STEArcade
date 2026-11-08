@@ -52,6 +52,9 @@ def configs():
     ]
 
 
+# hand-written 68000 routines for hot Z80 code (digdug.s; tools/native_test.py checks them; DIGDUG_NO_NATIVES=1: none)
+NATIVES = [{}, {} if os.environ.get("DIGDUG_NO_NATIVES") else {0x0E4C: "nat_y0e4c"}, {}]
+
 ROOTS = [[0, 0x38, 0x66], [0, 0x38, 0x1DDC], [0, 0x66]]
 # the sound CPU's sound routines: $0391 looks the id in $9B34 up in a table of 21 routine pointers at $040D (rst $08,
 # jp (hl) at $0390); coverage only sees the sounds a play brings, the id 6 of the scripted game (frame ~4930) ended at
@@ -157,7 +160,8 @@ def generate(hooks=((), (), ()), skip_tests=True):
     ems = []
     for n, cfg in enumerate(configs()):
         code_lines, table, rep, em = generate_program(roms[n], roots[n], dyn[n] & set(range(len(roms[n]))), cfg,
-                                                      set(hooks[n]) | YIELDS[n], emitter=Emitter, ewriters=ew[n])
+                                                      set(hooks[n]) | YIELDS[n], emitter=Emitter, ewriters=ew[n],
+                                                      natives=NATIVES[n])
         lines.append("; ---------------- CPU%d" % (n + 1))
         lines += code_lines
         tables += table
