@@ -41,8 +41,8 @@ CELL = {1: 0x81, 2: 0x82, 3: 0x83, 4: 0x84, 5: 0x85, 6: 0x86, 7: 0x87, 8: 0x88, 
 
 
 def _tmproot():
-    """scratch under F:\claude\tmp\digdug (user rule 2026-11-08), else the system temp"""
-    d = r"F:\claude	mp\digdug"
+    """scratch under F:/claude/tmp/digdug (user rule 2026-11-08), else the system temp"""
+    d = "F:/claude/tmp/digdug"
     try:
         os.makedirs(d, exist_ok=True)
         return d
