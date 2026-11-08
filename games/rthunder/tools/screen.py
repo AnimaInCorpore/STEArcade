@@ -15,7 +15,8 @@ from render_test import planar_to_index
 
 def main():
     data = Path(sys.argv[1]).read_bytes()
-    fine = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    cnt = Path(sys.argv[1]).with_name("COUNTERS.BIN")
+    fine = int(sys.argv[3]) if len(sys.argv) > 3 else (int.from_bytes(cnt.read_bytes()[22:24], "big") if cnt.exists() else 0)
     lines = np.frombuffer(data, np.uint8).reshape(224, 544)[:, :168]
     idx = planar_to_index(bytes(lines.tobytes()), 224, 21)[:, fine:fine + 320]
     pal = np.load(build_dir("rthunder") / "palfit.npz")["palette"].astype(np.uint8)

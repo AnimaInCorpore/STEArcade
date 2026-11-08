@@ -15,7 +15,7 @@ DB_ROWS = 68			; a buffer: 68 cell rows = 544 lines: the map twice with 4 rows (
 DB_SIZE = RB_LB*DB_ROWS*8
 ; Map cell (c, r) lies at buffer cells (bc, br) = (c + 8 + {0, 64, -64 if c >= 56}, r + 4 + {0, 32, -32 if r >= 28}); the
 ; display buffers (dbuf0/1) hold the same layout as the clean buffer ren_bg, copies of the cells inside the window.
-TC_SLOTS = 8192
+TC_SLOTS = 4096
 TC_SIZE = 44
 
 	section text,code
@@ -423,9 +423,37 @@ ren_update:
 .nochg:	moveq	#3,d7
 .lay:	lea	tile_written,a0
 	tst.b	(a0,d7.w)
-	beq.s	.nolay
+	beq.s	.rows
 	clr.b	(a0,d7.w)
+	lea	tile_dirty,a0		; (the layer compared whole: its rows' marks are done)
+	move.w	d7,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	moveq	#7,d0
+.cld:	clr.l	(a0)+
+	dbf	d0,.cld
 	bsr	ren_scan
+	bra.s	.nolay
+.rows:	lea	tile_dirty,a0
+	move.w	d7,d0
+	lsl.w	#5,d0
+	add.w	d0,a0
+	moveq	#0,d4
+.rr0:	tst.b	(a0,d4.w)
+	beq.s	.rn
+	clr.b	(a0,d4.w)
+	move.l	a0,-(sp)
+	move.w	d4,-(sp)
+	moveq	#0,d5
+	move.w	d4,d5
+	lsl.w	#7,d5			; the row's first byte
+	moveq	#32-1,d6
+	bsr	ren_scan_range
+	move.w	(sp)+,d4
+	move.l	(sp)+,a0
+.rn:	addq.w	#1,d4
+	cmp.w	#32,d4
+	bne.s	.rr0
 .nolay:	dbf	d7,.lay
 	bsr	ren_window
 	; the window's cells: columns (x >> 3) .. (x + 319) >> 3, rows (line >> 3) .. (line + 223) >> 3 (the buffer's map twice)
@@ -492,6 +520,10 @@ ren_update:
 
 ; d7 = the layer 0-2: its cells against the shadow
 ren_scan:
+	moveq	#0,d5
+	move.w	#1024-1,d6
+; d7 = the layer, d5.l = the first byte, d6.w = the longs - 1: compared with the shadow
+ren_scan_range:
 	lea	vram0,a0
 	move.w	d7,d0
 	lsr.w	#1,d0
@@ -503,12 +535,13 @@ ren_scan:
 	lsl.w	#4,d0
 	add.w	d0,a0			; the layer's 4096 bytes
 	move.l	a0,a2
+	add.l	d5,a0
 	lea	shadow,a1
 	move.w	d7,d0
 	lsl.w	#8,d0
 	lsl.w	#4,d0
 	add.w	d0,a1
-	move.w	#1024-1,d6
+	add.l	d5,a1
 .l:	cmpm.l	(a0)+,(a1)+
 	beq.s	.same
 	move.l	-4(a0),-4(a1)
@@ -700,6 +733,7 @@ ren_bg_all:
 	even
 rbss_start:
 tile_written:	ds.b	4
+tile_dirty:	ds.b	128
 cell_ok:	ds.b	2048
 shadow:		ds.b	4*4096
 tm_rows:	ds.w	1

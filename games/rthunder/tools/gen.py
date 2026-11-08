@@ -125,6 +125,36 @@ def io_sites(cpu, ioacc):
     return out
 
 
+TILE_BASE = {0: 0x0000, 1: 0x2000}     # where the CPU sees the four tile RAM layers (4096 bytes each, 128 bytes a row)
+REG = {"x": "d2", "y": "d3", "u": "d4"}
+
+
+def tile_mark(cpu, ins, layers):
+    """what a store into tile RAM leaves for the renderer (src/render.s ren_update): the row of the cell (tile_dirty: 128
+    bytes of the layer = 64 cells, so the rows of a layer 0-31 are blocks b = layer * 32 + row), computed from the
+    address where the instruction names it (the registers X, Y, U after the instruction), else the layers' flags
+    (tile_written: the layer compared whole)"""
+    base = TILE_BASE[cpu]
+    if ins.mode == "ext":
+        return ["st tile_dirty+%d" % (((ins.arg - base) >> 7) & 127)]
+    if ins.mode == "idx":
+        ix = ins.arg
+        if not ix.indirect and ix.reg in REG and ix.kind in ("inc1", "inc2", "dec1", "dec2", "zero", "off5", "off8",
+                                                               "off16", "acc_a", "acc_b"):
+            out = ["move sr,d7", "move.w %s,d6" % REG[ix.reg]]
+            if ix.kind in ("inc1", "inc2"):
+                out.append("subq.w #1,d6")            # (the last byte stored)
+            elif ix.kind.startswith("off") and ix.offset:
+                out.append("add.w #%d,d6" % ix.offset)
+            elif ix.kind in ("acc_a", "acc_b"):
+                out += ["move.b %s,d5" % ("d0" if ix.kind == "acc_a" else "d1"), "ext.w d5", "add.w d5,d6"]
+            if base:
+                out.append("sub.w #%d,d6" % base)
+            out += ["lsr.w #7,d6", "and.w #127,d6", "lea tile_dirty,a0", "st (a0,d6.w)", "move d7,ccr"]
+            return out
+    return ["st tile_written+%d" % layer for layer in layers]
+
+
 def program(cpu, r, cov):
     name, prefix = NAMES[cpu]
     exec_ = cov["exec"][cpu]
@@ -147,8 +177,8 @@ def program(cpu, r, cov):
         out = []
         if ins.mode == "ext" and ins.arg == LATCH[cpu] and m6809x.base_mn(ins.mn).startswith("st"):
             out.append("st sprite_latch")
-        for layer in sorted(cov["tilew"][cpu].get(v, ())):
-            out.append("st tile_written+%d" % layer)       # (the renderer compares the layers marked: src/render.s)
+        if v in cov["tilew"][cpu]:
+            out += tile_mark(cpu, ins, sorted(cov["tilew"][cpu][v]))
         if v in semw:
             out.append("bsr %s_sem_yield" % name)
         return out or None

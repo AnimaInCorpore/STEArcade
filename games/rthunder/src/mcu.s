@@ -9,6 +9,7 @@ mcu_init:
 .h:	clr.b	(a0)+
 	dbf	d0,.h
 	clr.w	snd_head
+	clr.w	snd_timer
 	rts
 
 ; the vertical blank's work: the sprite list buffered when the program wrote the latch ($7F2 of the sprite RAM): the
@@ -52,11 +53,11 @@ mcu_frame:
 	move.b	d1,1(a0,d4.w)		; the level: the previous frame's
 	moveq	#0,d1
 	move.b	d0,d2
-	and.b	#6,d2
-	cmp.b	#2,d2
+	and.b	#7,d2
+	cmp.b	#3,d2
 	bne.s	.np
 	moveq	#1,d1
-.np:	move.b	d1,(a0,d4.w)		; the pulse: pressed two frames ago, not three
+.np:	move.b	d1,(a0,d4.w)		; the pulse: pressed two frames running, not three ago
 	bra.s	.upd
 .coin:	move.b	d0,d1
 	and.b	#1,d1
@@ -108,13 +109,26 @@ mcu_frame:
 	cmp.b	#2,$1A5(a0)
 	blo.s	.sound
 	subq.b	#2,$1A5(a0)
-	move.b	#2,$18C(a0)
+	move.b	#1,$18C(a0)
 	move.b	#2,$1A7(a0)
-.sound:	move.b	$380(a0),d0		; a sound command: acknowledged ($FF); the notes themselves are recorded
+.sound:	move.w	snd_timer,d1		; a jingle ends: the firmware clears the command byte
+	beq.s	.nt
+	subq.w	#1,d1
+	move.w	d1,snd_timer
+	bne.s	.nt
+	cmp.b	#$FF,$380(a0)
+	bne.s	.nt
+	clr.b	$380(a0)
+.nt:	move.b	$380(a0),d0		; a sound command: acknowledged ($FF); the notes themselves are recorded
 	beq.s	.out
 	cmp.b	#$FF,d0
 	beq.s	.out
 	move.b	#$FF,$380(a0)
+	moveq	#0,d1
+	move.b	d0,d1
+	add.w	d1,d1
+	lea	snd_dur,a2
+	move.w	(a2,d1.w),snd_timer
 	move.w	snd_head,d1
 	lea	snd_ring,a1
 	move.b	d0,(a1,d1.w)
@@ -177,6 +191,10 @@ mcu_tab:
 	dc.w	$264
 	dc.b	1,0
 
+	section data,data
+	even
+snd_dur:	incbin	"ren_snddur.bin"
+
 	section bss,bss
 io_in0:		ds.b	1		; the inputs, active low (IN0, IN1, IN2): the keyboard, sticks and pads
 io_in1:		ds.b	1
@@ -184,4 +202,5 @@ io_in2:		ds.b	1
 mcu_hist:	ds.b	17
 	even
 snd_head:	ds.w	1
+snd_timer:	ds.w	1		; frames until the command byte is cleared (0: none)
 snd_ring:	ds.b	256		; the sound commands the main CPU sent (the last 256)

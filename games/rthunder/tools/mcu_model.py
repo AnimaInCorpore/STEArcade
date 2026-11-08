@@ -6,13 +6,14 @@ The firmware (cus60-60a1.mcu + rt3_4.6b, run by tools/machine.py) reads the inpu
 and acknowledges the main CPU's sound commands in CUS30 RAM (main $4000-$43FF).  The model runs once per arcade frame
 before the CPUs (where the reference runs the MCU) and writes the bytes the main CPU reads:
 
-  * every input has a pair of bytes: the level (the input one frame ago) and the pulse (its rising edge, a frame later);
+  * every input has a pair of bytes: the level (the input one frame ago) and the pulse (two frames pressed, the second the first of them: a tap of one frame has none);
   * the coins (coin 1: $266/$267, coin 2: $264/$265) are inverted levels; a coin counts when the line was low for at least two
     frames and rises: credits ($1A5) + 1, the coin counter ($18B) + 1, the display digits $189 / $18A; $1A6 follows $1A5 a frame
     late ($18A too, but at once after a coin);
-  * start 1 / start 2 ($262 / $260 pulses): with credits (1 / 2) and no start taken ($18C = 0): the credits are used, $18C = 1 / 2,
+  * start 1 / start 2 ($262 / $260 pulses): with credits (1 / 2) and no start taken ($18C = 0): the credits are used, $18C = 1,
     $1A7 = the players;
-  * a sound command in $380: acknowledged with $FF (the sound engine itself is not modelled: its notes are recorded).
+  * a sound command in $380: acknowledged with $FF; a jingle that ends by itself clears the byte again after its length
+    (snd_dur.json); the sound engine itself is not modelled (its notes are recorded).
 
 The bytes the model does not write keep the snapshot's values (the DIP switch copies, the sound engine's flags).
 """
@@ -29,8 +30,19 @@ PAIRS = {(0, 1): 0x276, (0, 2): 0x27C, (0, 3): 0x270, (0, 4): 0x272, (0, 6): 0x2
 COINS = {(0, 5): 0x266, (1, 5): 0x264}
 
 
+def load_durations():
+    """the frames after which the firmware clears the command byte, per sound command (build/rthunder/snd_dur.json from
+    tools/sounds.py: the commands that end by themselves; the others play on until the program clears the byte)"""
+    import json
+    from paths import build_dir
+    f = build_dir("rthunder") / "snd_dur.json"
+    return {int(k): v for k, v in json.loads(f.read_text()).items()} if f.exists() else {}
+
+
 class McuModel:
     def __init__(self):
+        self.durations = load_durations()
+        self.timer = 0
         self.hist = {}                  # (port, bit) -> pressed in the last four frames, newest first
         self.cred = 0
         self.coins = 0
@@ -48,7 +60,7 @@ class McuModel:
             if key in PAIRS:
                 off = PAIRS[key]
                 ram[off + 1] = int(p1)
-                ram[off] = int(p2 and not p3)
+                ram[off] = int(p1 and p2 and not p3)
             else:
                 off = COINS[key]
                 ram[off + 1] = int(not p1)
@@ -76,11 +88,16 @@ class McuModel:
                 ram[0x1A7] = 1
             elif ram[0x260] and ram[0x1A5] >= 2:
                 ram[0x1A5] -= 2
-                ram[0x18C] = 2
+                ram[0x18C] = 1
                 ram[0x1A7] = 2
+        if self.timer:                  # (a jingle ends: the firmware clears the command byte)
+            self.timer -= 1
+            if self.timer == 0 and ram[0x380] == 0xFF:
+                ram[0x380] = 0
         c = ram[0x380]
         if c not in (0, 0xFF):
             ram[0x380] = 0xFF
+            self.timer = self.durations.get(c, 0)
 
 
 def main():
@@ -90,6 +107,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=3000)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--hist", action="store_true")
     ap.add_argument("--random", action="store_true", help="random inputs (bits held for random lengths) instead of the coverage's play")
     args = ap.parse_args()
     dswa, dswb, inputs = cover.schedule(args.seed)
@@ -120,7 +138,7 @@ def main():
     m.dsw = [dswa, dswb]
     m.boot()
     model = McuModel()
-    watch = sorted(set(list(range(0x25C, 0x282)) + [0x189, 0x18A, 0x18B, 0x18C, 0x18D, 0x1A5, 0x1A6, 0x1A7, 0x380]))
+    watch = sorted(set(list(range(0x25C, 0x282)) + [0x189, 0x18A, 0x18C, 0x18D, 0x1A5, 0x380]))      # (the bytes the main CPU reads)
     bad = 0
     for f in range(args.frames):
         m.in0, m.in1, m.in2 = inputs(f)
@@ -129,6 +147,11 @@ def main():
         pred = bytearray(before)
         model.frame(pred, m.in0, m.in1, m.in2)
         diff = [(o, pred[o], m.cus30[o]) for o in watch if pred[o] != m.cus30[o]]
+        if diff and diff[0][0] in (0x380, 0x1A7):
+            print("   before: 380=%02x 18c=%02x 18d=%02x 1a5=%02x 1a7=%02x" % (before[0x380], before[0x18C], before[0x18D], before[0x1A5], before[0x1A7]))
+        if diff and args.hist:
+            key = {v: k for k, v in PAIRS.items()}.get(diff[0][0] & ~1)
+            print("   hist of", key, [int(x) for x in model.hist.get(key, [])] if key else None)
         if diff:
             bad += 1
             if bad <= 12:

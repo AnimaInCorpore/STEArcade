@@ -39,6 +39,24 @@ from paths import build_dir
 
 def schedule(seed):
     """-> (DSWA, DSWB, inputs(f) -> (IN0, IN1, IN2)): the seed's inputs frame by frame (active low)"""
+    if seed >= 100:                                  # the benchmark build's play (src/ste.s autoplay)
+        tab = ((0xFF, 0xFF, 0xDF), (0xFD, 0xFF, 0xDF), (0xFF, 0xFF, 0xDF), (0xFF, 0xFB, 0xFF), (0xFF, 0xFF, 0xEF),
+               (0xFB, 0xFF, 0xFF), (0xFD, 0xFF, 0xDF), (0xFF, 0xFF, 0xFF))
+
+        def autoplay(f):
+            d0 = f % 4000
+            i = [0xFF, 0xFF, 0xFF]
+            if 100 <= d0 < 106:
+                i[0] &= ~0x20
+            if 140 <= d0 < 144:
+                i[0] &= ~0x40
+            if d0 >= 400:
+                t = tab[(d0 >> 5) & 7]
+                i = [i[k] & t[k] for k in range(3)]
+                if not d0 & 4:
+                    i[2] &= ~0x08
+            return tuple(i)
+        return 0xFF, 0xD7, autoplay
     rng = random.Random(seed)
     play = seed > 0
     dswb = 0xD7 if seed >= 11 else 0xD7          # (the driver's default has the level select cheat on)

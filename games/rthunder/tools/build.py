@@ -53,6 +53,12 @@ def main():
         subprocess.run([sys.executable, str(Path(__file__).with_name("prepare.py"))], check=True)
     import assets
     assets.build()
+    import parts
+    parts.build()
+    import json, struct
+    dur = build_dir("rthunder") / "snd_dur.json"
+    d = {int(k): v for k, v in json.loads(dur.read_text()).items()} if dur.exists() else {}
+    (build_dir("rthunder") / "ren_snddur.bin").write_bytes(b"".join(struct.pack(">H", d.get(c, 0)) for c in range(256)))
     report = gen.generate()
     for name in ("main", "sub"):
         r = report[name]

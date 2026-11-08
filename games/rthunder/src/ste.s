@@ -276,6 +276,21 @@ vbl:
 	borders_vbl
 	movem.l	d0-d2/a0,-(sp)
 	addq.l	#1,frame_counter
+	ifd DEBUG
+	subq.w	#1,dbg_tl_n		; every 100 VBLs: the arcade frames and pictures so far (RATE.BIN)
+	bgt.s	.tl
+	move.w	#100,dbg_tl_n
+	move.l	dbg_tl_p,a0
+	cmp.w	#0,a0
+	bne.s	.tl1
+	lea	dbg_tl,a0
+.tl1:	cmp.l	#dbg_tl_end,a0
+	bhs.s	.tl
+	move.w	isr_count,(a0)+
+	move.w	pic_count,(a0)+
+	move.l	a0,dbg_tl_p
+.tl:
+	endc
 	tst.b	quit_flag
 	bne	quit
 	bsr	vbl_video
@@ -427,7 +442,9 @@ game_loop:
 	cmp.b	#MAX_SKIP,render_skips
 	bls.s	game_loop
 .draw:	clr.b	render_skips
+	ifnd NOPIC
 	bsr	render_picture
+	endc
 	bra.s	game_loop
 
 ; render_picture: a display buffer neither shown nor waiting brought up to the arcade frame, then published
@@ -725,9 +742,13 @@ dbg_counters:
 	move.w	bd_late_off,(a0)+
 	move.l	bd_pieced,(a0)+
 	move.w	pic_count,(a0)+
+	move.w	shown_idx,d0
+	add.w	d0,d0
+	lea	pub_fine,a1
+	move.w	(a1,d0.w),(a0)+		; the shown picture's fine scroll
 	lea	dbg_name2,a1
 	lea	dbg_buf,a2
-	moveq	#22,d0
+	moveq	#24,d0
 	bsr.s	dbg_write
 	move.w	shown_idx,d0		; SCREEN.BIN: the shown buffer from the picture's first line (224 lines of RB_LB bytes)
 	lsl.w	#2,d0
@@ -735,6 +756,11 @@ dbg_counters:
 	move.l	(a2,d0.w),a2
 	lea	dbg_name3,a1
 	move.l	#224*RB_LB,d0
+	bsr.s	dbg_write
+	lea	dbg_name4,a1
+	lea	dbg_tl,a2
+	move.l	dbg_tl_p,d0
+	sub.l	a2,d0
 dbg_write:				; a1 = the name, a2 = the data, d0.l = its length
 	movem.l	d0/a2,-(sp)
 	clr	-(sp)
@@ -759,6 +785,8 @@ dbg_name2:
 	dc.b	"COUNTERS.BIN",0
 dbg_name3:
 	dc.b	"SCREEN.BIN",0
+dbg_name4:
+	dc.b	"RATE.BIN",0
 	even
 	endc
 
@@ -836,4 +864,8 @@ crash_regs:	ds.l	16
 crash_text:	ds.b	512
 	ifd DEBUG
 dbg_buf:	ds.l	8
+dbg_tl_n:	ds.w	1
+dbg_tl_p:	ds.l	1
+dbg_tl:		ds.l	400		; (40000 VBLs)
+dbg_tl_end:
 	endc

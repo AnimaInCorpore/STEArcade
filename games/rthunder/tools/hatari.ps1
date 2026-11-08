@@ -6,7 +6,7 @@
 #     the AVI's audio track extracted to run/<Name>/rthunder.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
 param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rthunder_hatari", [int]$Avi = 0,
-      [string[]]$Extra = @(), [int]$Sound = 0, [int]$Autoplay = 0)
+      [string[]]$Extra = @(), [int]$Sound = 0, [int]$Autoplay = 0, [string]$Define = "")
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
@@ -15,6 +15,7 @@ $msys = if ($env:MSYS2) { $env:MSYS2 } else { "C:/msys64" }
 $py = if (Test-Path (Join-Path $root "venv/bin/python.exe")) { Join-Path $root "venv/bin/python.exe" } else { "python" }
 $env:PATH += ";$msys/mingw64/bin;$msys/ucrt64/bin;$msys/usr/bin"
 if ($Autoplay) { $Extra += @("-D", "AUTOPLAY=1") }
+if ($Define) { $Extra += @("-D", $Define) }
 & $py "$PSScriptRoot/build.py" --debug --frames $Frames --tag $Name @Extra
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 $out = (Get-Item -LiteralPath (Join-Path $root "run/$Name")).FullName
@@ -40,6 +41,11 @@ if (Test-Path "$out/COUNTERS.BIN") {
     $w = @(0..7 | ForEach-Object { $b[2*$_]*256 + $b[2*$_+1] })
     "VBLs {0}, arcade frames {1} ({2:N1} a second), pictures {3} ({4:N1} a second); border fallbacks {5}, late top/on/low/off {6}/{7}/{8}/{9}" -f `
         $w[0], $w[2], (50*$w[2]/$w[0]), $w[1], (50*$w[1]/$w[0]), $w[3], $w[4], $w[5], $w[6], $w[7]
+    if (Test-Path "$out/RATE.BIN") {
+        $r = [IO.File]::ReadAllBytes("$out/RATE.BIN")
+        $pts = @(0..(($r.Length/4)-1) | ForEach-Object { @($r[4*$_]*256 + $r[4*$_+1], $r[4*$_+2]*256 + $r[4*$_+3]) })
+        "per 100 VBLs (arcade frames / pictures made): " + (($pts | ForEach-Object { "{0}/{1}" -f $_[0], $_[1] }) -join " ")
+    }
 } else { "no COUNTERS.BIN (the program did not reach its end)" }
 if ($Avi -and (Test-Path "$out/rthunder.avi")) {
     & ffmpeg -v error -i "$out/rthunder.avi" -vf "select=not(mod(n\,$Every))" -fps_mode passthrough "$out/still_%03d.png"

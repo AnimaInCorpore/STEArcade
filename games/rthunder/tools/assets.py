@@ -57,6 +57,12 @@ def build(out=None):
     (out / "ren_rowmap.bin").write_bytes(rowmap.tobytes())
     (out / "ren_hi.bin").write_bytes(hi.astype(">u2").tobytes())
     (out / "ren_bk.bin").write_bytes(bk.tobytes())
+    yv = np.zeros((4, 256), np.uint8)
+    for hi, h in enumerate((16, 8, 32, 4)):
+        for t in range(256):
+            cy = ((17 - t - h) & 255) - 16
+            yv[hi, t] = 1 if (cy + h > 16 and cy < 240) else 0
+    (out / "ren_yvis.bin").write_bytes(yv.tobytes())
     lut = m.pen_table()
     spm = np.zeros((128, 16), np.uint8)
     for c in range(128):

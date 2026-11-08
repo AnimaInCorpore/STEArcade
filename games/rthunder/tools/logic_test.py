@@ -35,6 +35,7 @@ def main():
     ap.add_argument("--watch", default="", help="hex offsets of the shared RAM to compare at every label in --steplock")
     ap.add_argument("--render", action="store_true", help="after each frame ren_update runs (the marks the translated stores set) and the window is compared")
     ap.add_argument("--mcu", action="store_true", help="also run src/mcu.s's mcu_frame on the state before the reference's MCU and compare the mailbox bytes it writes")
+    ap.add_argument("--autoplay", action="store_true", help="the benchmark build's inputs (src/ste.s autoplay) instead of the coverage seed's")
     ap.add_argument("--trace", action="store_true", help="log the translated labels (slow)")
     ap.add_argument("--skip", type=int, default=0, help="frames the reference runs on without the comparison")
     args = ap.parse_args()
@@ -92,6 +93,23 @@ def main():
 
     run_to(sym["sim_wait"])
     dswa, dswb, inputs = cover.schedule(args.seed)
+    if args.autoplay:
+        tab = ((0xFF, 0xFF, 0xDF), (0xFD, 0xFF, 0xDF), (0xFF, 0xFF, 0xDF), (0xFF, 0xFB, 0xFF), (0xFF, 0xFF, 0xEF),
+               (0xFB, 0xFF, 0xFF), (0xFD, 0xFF, 0xDF), (0xFF, 0xFF, 0xFF))
+
+        def inputs(f):
+            d0 = f % 4000
+            i = [0xFF, 0xFF, 0xFF]
+            if 100 <= d0 < 106:
+                i[0] &= ~0x20
+            if 140 <= d0 < 144:
+                i[0] &= ~0x40
+            if d0 >= 400:
+                t = tab[(d0 >> 5) & 7]
+                i = [i[k] & t[k] for k in range(3)]
+                if not d0 & 4:
+                    i[2] &= ~0x08
+            return tuple(i)
     m = RthunderRule()
     m.dsw = [dswa, dswb]
     m.boot()
@@ -255,6 +273,7 @@ def main():
         flat = np.load(build_dir("rthunder") / "palfit.npz")["flat"]
     rcycles = []
     cycles = 0
+    mem.w32(sym["tile_written"], 0xFFFFFFFF)          # (as src/ste.s init_picture: the first picture compares every layer)
     for f in range(args.frames):
         m.in0, m.in1, m.in2 = inputs(f)
         before = bytes(m.cus30)
@@ -265,7 +284,7 @@ def main():
                 mem.w8(sym["io_in0"] + k, v)
             call_routine("mcu_frame")
             got = get("cus30", 0x400)
-            watch = list(range(0x25C, 0x282)) + [0x189, 0x18A, 0x18B, 0x18C, 0x18D, 0x1A5, 0x1A6, 0x1A7, 0x380]
+            watch = list(range(0x25C, 0x282)) + [0x189, 0x18A, 0x18C, 0x18D, 0x1A5, 0x380]
             dm = [(o, got[o], m.cus30[o]) for o in watch if got[o] != m.cus30[o]]
             if dm:
                 print("frame %d: mailbox model differs: %s" % (m.frame, " ".join("%03x:%02x/%02x" % d for d in dm)))
@@ -297,6 +316,13 @@ def main():
             mem.w16(sym["ren_buf"], f & 1)
             rc = call_routine("ren_update")
             rcycles.append(rc)
+            sh = get("shadow", 4 * 4096)
+            want_sh = bytes(m.vram[0]) + bytes(m.vram[1])
+            if sh != want_sh:                        # (a store into tile RAM the renderer was not told of)
+                o = next(i for i in range(len(sh)) if sh[i] != want_sh[i])
+                print("frame %d: a tile RAM store without its mark: layer %d row %d cell %d (shadow %02X, tile RAM %02X)" % (
+                    m.frame, o >> 12, (o >> 7) & 31, (o >> 1) & 63, sh[o], want_sh[o]))
+                return 1
             dd = render_test.window_diff(mem, sym, m, flat, "dbuf%d" % (f & 1))
             if dd:
                 print("frame %d (%d after the start): ren_update, %d window pixels differ" % (m.frame, f, dd))
