@@ -30,11 +30,26 @@ LEFT, RIGHT, UP, DOWN, FIRE2, FIRE1 = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
 
 
 def dsw(seed):
-    if seed in (5, 6):
+    if seed in (5, 6) or seed >= 13:
         return DSW1, DSW2 & ~3                    # 256 lives
     if seed == 8:
         return DSW1, 0x02 | 0x08 | 0x00 | 0x80    # 4 lives, difficulty 8, demo sounds off
     return DSW1, DSW2
+
+
+WAVE = 0x8823                                       # the wave number (0 in the attract mode, 1 in wave 1)
+
+
+def cheats(seed, frame, state, mem):
+    """-> [(address, value)] pokes the reference and the translation both get this frame: seeds 13-16 move to the next
+    wave every STEP frames of play (the game then loads that wave's parameters: later waves' code and data run)"""
+    if seed < 13 or state.get('phase') != 'play':
+        return []
+    t = frame - state['t0']
+    step = (1200, 1800, 2400, 900)[(seed - 13) % 4]
+    if t > 0 and t % step == 0 and 1 <= mem[WAVE] < 60:
+        return [(WAVE, mem[WAVE] + 1)]
+    return []
 
 
 def inputs(frame, rnd, state):
@@ -151,6 +166,8 @@ def main():
     for frame in range(frames):
         m.frame = frame
         m.system, m.p1, m.p2 = inputs(frame, rnd, state)
+        for a, v in cheats(seed, frame, state, m.mem):
+            m.mem[a] = v
         m.run_frame_port()
         for src, dest, copy in m.blits:
             blits[(src, copy)] += 1

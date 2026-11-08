@@ -46,7 +46,7 @@ COVER = {
               ("ref/cover.py", [27, 28], 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
     "dkong3": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-6 and 11 play, 7 two players, 8-9 DIPs, 10 test mode (service DIP), 12 service button
                ("ref/cover_pens.py", [1, 2, 3, 4, 5, 6], 12000)],  # the pens the colour fit is trained on
-    "junofrst": [("ref/cover.py", list(range(1, 13)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play
+    "junofrst": [("ref/cover.py", list(range(1, 17)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play, 13-16 256 lives + wave pokes
                  ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
     "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives (7-9 stages 2-4), 10 two players, 11 DIPs

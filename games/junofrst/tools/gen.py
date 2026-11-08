@@ -25,7 +25,7 @@ from machine import JunoPort, load, PROGRAM, BANKED
 from paths import build_dir, require_coverage
 
 RESET, IRQ = 0xA000, JunoPort.IRQ
-SEEDS = [int(x) for x in os.environ.get("JF_SEEDS", "").split(",") if x] or range(1, 13)
+SEEDS = [int(x) for x in os.environ.get("JF_SEEDS", "").split(",") if x] or range(1, 17)
 NATIVES = {JunoPort.IDLE: "jf_idle",
            0xA0ED: "native_clear_A0ED",       # STD ,U++ x 4 to $7A00: the video RAM clear (src/render.s)
            0xA055: "native_clear_A055"}       # CLR ,X+ to $8000: the boot's clear
@@ -111,6 +111,14 @@ def program(cover):
     prog.fast_forms = 'JF_NO_FAST' not in os.environ       # (the env switches are for the A/B in the README's table)
     prog.ret_weights = None if 'JF_NO_RET' in os.environ else dict(returns) or dict(exec_)
     prog.call_summaries = 'JF_NO_SUM' not in os.environ
+    if os.environ.get('JF_NOBG'):
+        # the background's dots (the dotted perspective lines $B340-$B520, the star dots $9EC0-$9F40 of the bank
+        # window) are not drawn: their video RAM stores return at once; the program's own state is unchanged
+        def bg(v):
+            if v < 0x10000:
+                return 0xB340 <= v < 0xB520
+            return 0x1EC0 <= (v & 0x1FFF) < 0x1F40
+        prog.io_w_alt = {v: 'main_io_w_nop' for v in io if bg(v)}
     return prog
 
 

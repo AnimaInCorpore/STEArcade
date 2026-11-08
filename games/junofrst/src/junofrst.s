@@ -16,7 +16,7 @@
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 6				; arcade frames in a row that are not drawn while the game is behind
+MAX_SKIP = 2				; arcade frames in a row that are not drawn while the game is behind
 	endc
 	ifnd FRAMES
 FRAMES = 0
@@ -45,14 +45,14 @@ JP1_UP = $04<<JP_SH
 JP1_DOWN = $08<<JP_SH
 JP1_B1 = $20<<JP_SH
 JP1_B2 = $10<<JP_SH
-JP1_B3 = 0
+JP1_B3 = $40<<JP_SH
 JP2_LEFT = $01<<8
 JP2_RIGHT = $02<<8
 JP2_UP = $04<<8
 JP2_DOWN = $08<<8
 JP2_B1 = $20<<8
 JP2_B2 = $10<<8
-JP2_B3 = 0
+JP2_B3 = $40<<8
 JP_START1 = $08<<24
 JP_START2 = $10<<24
 JP_COIN1 = $01<<24
@@ -371,6 +371,22 @@ vbl:
 	bne.s	.ap5
 	and.b	#$FD,d1
 .ap5:	move.b	d1,io_p1
+	ifd WAVECHEAT				; (the next wave at the periods' VBLs 1800, 2400, 3000, 3600: the later waves run)
+	cmp.w	#1800,d0
+	beq.s	.wv
+	cmp.w	#2400,d0
+	beq.s	.wv
+	cmp.w	#3000,d0
+	beq.s	.wv
+	cmp.w	#3600,d0
+	bne.s	.ap3
+.wv:	move.b	jf_mem+$8823,d2
+	cmp.b	#1,d2
+	blo.s	.ap3
+	cmp.b	#59,d2
+	bhs.s	.ap3
+	addq.b	#1,jf_mem+$8823
+	endc
 .ap3:	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
@@ -592,6 +608,9 @@ main_io_r:
 	move.l	(sp)+,a0
 	rts
 
+main_io_w_nop:				; (a store of the background's dots left out: build.py --nobg)
+	rts
+
 main_io_w:
 	cmp.w	#$8000,d7
 	blo	vram_wr
@@ -783,7 +802,7 @@ compose_inputs:
 	rts
 
 ; scancode, SYSTEM bits (coin 1 = 0, coin 2 = 1, start 1 = 3, start 2 = 4), P1 bits (left 0, right 1, up 2, down 3,
-; fire 2 = 4, fire 1 = 5), P2 bits (the same: the cocktail's second stick, keys R F D A G)
+; fire 2 = 4, fire 1 = 5, button 3 = 6), P2 bits (the same: the cocktail's second stick, keys R F D A G)
 key_table:
 	dc.b	$4b,$00,$01,$00		; left
 	dc.b	$4d,$00,$02,$00		; right
@@ -802,6 +821,9 @@ key_table:
 	dc.b	$20,$00,$00,$02		; D = P2 right
 	dc.b	$1e,$00,$00,$01		; A = P2 left
 	dc.b	$22,$00,$00,$20		; G = P2 fire 1
+	dc.b	$23,$00,$00,$10		; H = P2 fire 2
+	dc.b	$24,$00,$00,$40		; J = P2 button 3
+	dc.b	$2e,$00,$40,$00		; C = button 3
 	dc.b	0,0,0,0
 	even
 

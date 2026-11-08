@@ -114,15 +114,26 @@ init_render:
 	sub.l	#vram+VW_BASE,d0
 	swap	d0
 	clr.w	d0
-	move.w	d2,d3
-	lsr.w	#7,d3
-	and.w	#7,d3
-	mulu	#68,d3
-	or.w	d3,d0
+	move.w	d2,d3			; the low word: the cell k * 16 + g (the line pair k = 127 - (a & 127), the group g =
+	lsr.w	#7,d3			; (y - 16) >> 4: cell_marks) | (y & 7) << 11 (the pixel's bit row in vw_bt)
+	move.w	d3,d4
+	and.w	#7,d4
+	lsl.w	#8,d4
+	lsl.w	#3,d4
+	sub.w	#16,d3
+	lsr.w	#4,d3
+	move.w	d2,d5
+	and.w	#127,d5
+	neg.w	d5
+	add.w	#127,d5
+	lsl.w	#4,d5
+	or.w	d3,d5
+	or.w	d4,d5
+	or.w	d5,d0
 .vh:	move.l	d0,(a1)+
 	addq.w	#1,d2
 	bpl.s	.vt
-	rts
+	bra	mark_all
 
 ; ======================================================================================================================
 ; vbl_video: the published buffer shown from the next frame on (the video base is read at the frame's start), its
@@ -194,22 +205,50 @@ render_frame:
 	add.w	d1,d1
 	move.w	(a2,d1.w),(a3)+
 	dbf	d0,.pl
-	; one HOG copy of the 256 lines (80 words each)
-	move.w	#$0203,B_HOP.w
-	moveq	#-1,d0
-	move.w	d0,B_END1.w
-	move.w	d0,B_END2.w
-	move.w	d0,B_END3.w
-	move.w	#2,B_SXI.w
-	move.w	#2,B_SYI.w
-	move.w	#2,B_DXI.w
-	move.w	#2,B_DYI.w
-	clr.b	B_SKEW.w
-	move.l	#vram,B_SRC.w
-	move.l	a1,B_DST.w
-	move.w	#LB/2,B_XC.w
-	move.w	#256,B_YC.w
-	bsr	blit_go_copy
+	; the cells changed since this buffer was last drawn: 2 lines x 8 bytes each (cell_marks: a bit per buffer)
+	move.w	draw_idx,d0
+	moveq	#1,d5
+	lsl.b	d0,d5			; the buffer's bit
+	move.w	d5,d6
+	lsl.w	#8,d6
+	or.w	d5,d6
+	move.w	d6,d7
+	swap	d6
+	move.w	d7,d6			; (in all four bytes of a long)
+	not.b	d5			; (to clear it)
+	lea	cell_marks,a2
+	lea	vram+24,a3
+	lea	24(a1),a4
+	moveq	#128-1,d7
+.row:	movem.l	(a2),d0-d3
+	and.l	#$FFFF0000,d3		; (the bytes 14 and 15 of a row are no cells)
+	or.l	d1,d0
+	or.l	d3,d2
+	or.l	d2,d0
+	and.l	d6,d0
+	beq.s	.next
+	moveq	#0,d1
+.cell:	move.b	(a2,d1.w),d0
+	and.b	d6,d0
+	beq.s	.nc
+	and.b	d5,(a2,d1.w)
+	move.w	d1,d4
+	lsl.w	#3,d4
+	lea	(a3,d4.w),a0
+	lea	(a4,d4.w),a1
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+	lea	LB-8(a0),a0
+	lea	LB-8(a1),a1
+	move.l	(a0)+,(a1)+
+	move.l	(a0)+,(a1)+
+.nc:	addq.w	#1,d1
+	cmp.w	#14,d1
+	blo.s	.cell
+.next:	lea	16(a2),a2
+	lea	2*LB(a3),a3
+	lea	2*LB(a4),a4
+	dbf	d7,.row
 	move.w	draw_idx,d0
 	addq.b	#1,d0
 	move.b	d0,frame_ready
@@ -289,10 +328,16 @@ vram_wr:
 	and.l	#$FFFF,d7
 	lsl.l	#2,d7
 	lea	vw_tab,a0
-	move.l	(a0,d7.l),d1		; the plane 0 byte's offset << 16 | the row of vw_bt (0: a row not shown)
+	move.l	(a0,d7.l),d1		; the plane 0 byte's offset << 16 | (y & 7) << 11 | the cell (0: a row not shown)
 	beq.s	.out
+	move.w	d1,d0
+	and.w	#$7FF,d0
+	lea	cell_marks,a1
+	st	(a1,d0.w)		; the cell changed (all three buffers' bits)
+	and.w	#$3800,d1
+	lsr.w	#4,d1
 	lea	vw_bt,a1
-	add.w	d1,a1			; (68 bytes: the 16 pixel values' bits in the four plane bytes, then the inverted mask)
+	add.w	d1,a1			; (128 bytes: the 16 pixel values' bits in the four plane bytes, then the inverted mask)
 	swap	d1
 	lea	vram+VW_BASE,a0
 	add.w	d1,a0
@@ -361,6 +406,7 @@ vram_rd:
 ; shift is c0 & 15.  Only the words inside the picture are drawn (AGENTS.md: group-aligned edges); the slow path takes
 ; what has no image, or a row that wraps into the next (x > 240).
 blit_run:
+	bsr	mark_blit
 	movem.l	d0-d4/d6/a0-a3,-(sp)
 	lea	jf_blt,a2
 	moveq	#0,d3
@@ -519,6 +565,95 @@ blit_slow:
 	rts
 
 
+; mark_all: every cell changed.  mark_blit: the cells the blit of jf_blt may change (a conservative rectangle).
+mark_all:
+	movem.l	d0-d1/a0,-(sp)
+	lea	cell_marks,a0
+	move.w	#2048/4-1,d0
+	moveq	#-1,d1
+.l:	move.l	d1,(a0)+
+	dbf	d0,.l
+	movem.l	(sp)+,d0-d1/a0
+	rts
+
+; mark_rows: the cells of the video RAM rows d2.w .. d3.w - 1 (every line; the groups of those rows).  Keeps every register.
+mark_rows:
+	movem.l	d0-d4/a0,-(sp)
+	move.w	d2,d0
+	sub.w	#16,d0
+	bpl.s	.a
+	moveq	#0,d0
+.a:	lsr.w	#4,d0			; the first group
+	move.w	d3,d1
+	subq.w	#1,d1
+	sub.w	#16,d1
+	bmi.s	.out			; (only rows not shown)
+	lsr.w	#4,d1
+	cmp.w	#13,d1
+	ble.s	.b
+	moveq	#13,d1
+.b:	cmp.w	d0,d1
+	blt.s	.out
+	sub.w	d0,d1			; groups - 1
+	lea	cell_marks,a0
+	add.w	d0,a0
+	moveq	#128-1,d3
+.row:	move.w	d1,d4
+	move.l	a0,-(sp)
+.col:	st	(a0)+
+	dbf	d4,.col
+	move.l	(sp)+,a0
+	lea	16(a0),a0
+	dbf	d3,.row
+.out:	movem.l	(sp)+,d0-d4/a0
+	rts
+
+mark_blit:
+	movem.l	d0-d4/a0-a1,-(sp)
+	moveq	#0,d0
+	move.b	jf_blt+1,d0		; x0
+	cmp.w	#240,d0
+	bhi.s	.all			; (a row that wraps)
+	moveq	#0,d2
+	move.b	jf_blt,d2
+	sub.w	#16,d2			; the first column
+	cmp.w	#-16,d2
+	ble.s	.out
+	cmp.w	#224,d2
+	bge.s	.out
+	move.w	d2,d3
+	asr.w	#4,d3			; the first group (-1 .. 13)
+	move.w	d3,d4
+	addq.w	#1,d4			; the second
+	tst.w	d3
+	bpl.s	.g1
+	moveq	#0,d3
+.g1:	cmp.w	#13,d4
+	ble.s	.g2
+	moveq	#13,d4
+.g2:	move.w	#255,d1
+	sub.w	d0,d1			; the first picture line
+	move.w	d1,d0
+	lsr.w	#1,d0			; the last pair
+	sub.w	#15,d1
+	lsr.w	#1,d1			; the first pair
+	sub.w	d1,d0			; pairs - 1
+	lsl.w	#4,d1
+	lea	cell_marks,a0
+	add.w	d1,a0
+	add.w	d3,a0
+	sub.w	d3,d4			; groups - 1
+.row:	move.w	d4,d2
+	move.l	a0,a1
+.col:	st	(a1)+
+	dbf	d2,.col
+	lea	16(a0),a0
+	dbf	d0,.row
+.out:	movem.l	(sp)+,d0-d4/a0-a1
+	rts
+.all:	bsr	mark_all
+	bra.s	.out
+
 ; ----------------------------------------------------------------------------------------------------------------------
 ; vram_clear_bytes: the video RAM bytes d5.l .. d7.l - 1 to 0 (the program's clear loops, natives below); keeps every
 ; register but d5 / d7.  The partial rows at the ends pixel by pixel, the rows between by Blitter fills (clear_rows).
@@ -547,6 +682,7 @@ vram_clear_bytes:
 	lsr.l	#7,d3			; the row the end is in
 	cmp.w	d3,d2
 	bhs.s	.tail
+	bsr	mark_rows
 	bsr	clear_rows
 	move.l	d3,d0
 	lsl.l	#7,d0
@@ -692,7 +828,7 @@ native_clear_A055:
 
 	section data,data
 	even
-vw_bt:					; per y & 7 (68 bytes): the 16 pixel values' bit (7 - y & 7) in the four plane bytes ($01 each, plane
+vw_bt:					; per y & 7 (128 bytes): the 16 pixel values' bit (7 - y & 7) in the four plane bytes ($01 each, plane
 N	set	0			; 0 the high byte of the long), then the inverted bit in all four
 	rept	8
 M0	set	(1<<(7-N))*$1000000
@@ -705,6 +841,7 @@ V	set	0
 V	set	V+1
 	endr
 	dc.l	~((1<<(7-N))*$01010101)
+	dcb.b	60,0
 N	set	N+1
 	endr
 	section bss,bss
@@ -729,6 +866,7 @@ buffers:	ds.b	NBUF*BUFSZ
 vram:		ds.b	VSZ
 vw_ptr:		ds.l	32768
 vw_tab:		ds.l	32768
+cell_marks:	ds.b	2048		; per cell (16 line pairs' cells a row: k * 16 + g): a bit per display buffer that does not have it yet
 	section data,data
 	include	"jf_assets.s"
 	include	"jf_blitimg.s"
