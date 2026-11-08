@@ -37,7 +37,7 @@ Screenshots from Hatari (2026-11-07).  Status as of 2026-11-08, sorted by status
 
 Short attract-mode or assisted runs do not establish complete playability: see the
 [full-game verification policy](docs/port-status.md).  `python port.py list` lists the registered ports, the ones the
-common build, test, run and release commands handle.  Juno First and Super Xevious are experimental but registered (and in the release list).  Rolling Thunder ([games/rthunder](games/rthunder/README.md)) is registered but not released: exact logic and picture in the tests, but not playable yet (about a third of the arcade's speed, no sound, coverage of a long game incomplete).  Not registered and not released: Splatterhouse, Galaga '88, Mr. HELI and Dragon Spirit have STE programs with their own build, test and bench scripts; Pac-Mania has board and reference work only.
+common build, test, run and release commands handle.  Juno First and Super Xevious are experimental but registered (and in the release list).  Rolling Thunder ([games/rthunder](games/rthunder/README.md)) is registered but not released: exact logic and picture in the tests, but not playable yet (Hatari 2026-11-08: half the arcade's speed over a 6,000-VBL run, about 70% and 10.6 pictures a second in play; no sound, coverage of a long game incomplete).  Not registered and not released: Splatterhouse, Galaga '88, Mr. HELI and Dragon Spirit have STE programs with their own build, test and bench scripts; Pac-Mania has board and reference work only.
 
 ## Download
 
