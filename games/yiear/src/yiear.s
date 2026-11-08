@@ -801,6 +801,8 @@ acia_isr:
 	or.b	d0,sys_kbd
 	move.b	2(a0),d0
 	or.b	d0,in1_kbd
+	move.b	3(a0),d0
+	or.b	d0,in2_kbd
 	bsr	compose_inputs
 	bra	.again
 .release:
@@ -810,6 +812,9 @@ acia_isr:
 	move.b	2(a0),d0
 	not.b	d0
 	and.b	d0,in1_kbd
+	move.b	3(a0),d0
+	not.b	d0
+	and.b	d0,in2_kbd
 	bsr	compose_inputs
 	bra	.again
 .packet_byte:
@@ -858,12 +863,13 @@ compose_inputs:
 	not.b	d0
 	move.b	d0,in_in1
 	move.b	in2_joy,d0
+	or.b	in2_kbd,d0
 	not.b	d0
 	move.b	d0,in_in2
 	rts
 
 ; scancode, SYSTEM bits (coin 1 = 0, coin 2 = 1, start 1 = 3, start 2 = 4), IN1 bits (left 0, right 1, up 2, down 3,
-; kick 4, punch 5, button 3 6), (unused)
+; kick 4, punch 5, button 3 6), IN2 bits (the same: the keypad)
 key_table:
 	dc.b	$4b,$00,$01,$00		; left
 	dc.b	$4d,$00,$02,$00		; right
@@ -875,6 +881,13 @@ key_table:
 	dc.b	$2d,$00,$20,$00		; X = punch
 	dc.b	$38,$00,$20,$00		; alternate = punch
 	dc.b	$2e,$00,$40,$00		; C = button 3
+	dc.b	$6a,$00,$00,$01		; keypad 4 = player 2 left (IN2)
+	dc.b	$6c,$00,$00,$02		; keypad 6 = right
+	dc.b	$68,$00,$00,$04		; keypad 8 = up
+	dc.b	$6e,$00,$00,$08		; keypad 2 = down
+	dc.b	$70,$00,$00,$10		; keypad 0 = kick
+	dc.b	$71,$00,$00,$20		; keypad . = punch
+	dc.b	$72,$00,$00,$40		; keypad Enter = button 3
 	dc.b	$02,$08,$00,$00		; 1 = start 1
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
@@ -1134,6 +1147,7 @@ sys_kbd:	ds.b	1
 in1_kbd:	ds.b	1
 in1_joy:	ds.b	1
 in2_joy:	ds.b	1
+in2_kbd:	ds.b	1
 in_sys:		ds.b	1
 in_in1:		ds.b	1
 in_in2:		ds.b	1

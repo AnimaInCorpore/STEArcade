@@ -42,6 +42,8 @@ def dsws(seed):
         return DSW1, 0xC2, DSW3 & ~0x02
     if seed == 11:
         return DSW1, DSW2, DSW3 & ~0x04
+    if seed == 27:
+        return DSW1, DSW2, DSW3 & ~0x01                  # flip screen on (the game sets the control latch's bit 0)
     return DSW1, DSW2, DSW3
 
 
