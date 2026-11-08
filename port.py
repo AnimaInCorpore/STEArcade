@@ -212,6 +212,7 @@ TESTS = {
               ("tools/render_test.py", ["3000", "--seed", "4", "--start", "500", "--every", "3"], None),
               ("tools/render_test.py", ["6000", "--seed", "10", "--start", "500", "--every", "7"], None),   # all rooms
               ("tools/sprite_test.py", [], None),             # edges, 16 shifts, holes, guards, 64 KB crossings
+              ("tools/input_test.py", [], None),              # every key of both players, coins, starts, both joysticks (the IKBD handler)
               ("tools/sound_test.py", ["3000"], None),                # the translated sound driver and the YM against sound.py
               ("tools/sound_test.py", ["3000", "--seed", "2", "--random"], None)],   # the same with random commands
     "jailbrek": [("tools/prepare.py", [], None),
