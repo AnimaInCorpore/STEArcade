@@ -76,7 +76,7 @@ COVER = {
     "jailbrek": [("ref/cover.py", list(range(1, 14)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles, 13 the recorded play (tools/play_search.py)
     "trackfld": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
               ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
-    "sbasketb": [("ref/cover.py", list(range(1, 22)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script
+    "sbasketb": [("ref/cover.py", list(range(1, 23)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script, 22 the same with the score held high
     "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
@@ -242,6 +242,7 @@ TESTS = {
                  ("tools/render_test.py", ["3000", "--seed", "1", "--start", "300", "--every", "5"], None),
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, banks, guards, 64 KB crossings
                  ("tools/logic_test.py", ["16000", "--autoplay", "--quiet"], None),   # the runtime's AUTOPLAY script
+                 ("tools/logic_test.py", ["12000", "--autoplay", "--cheat", "--quiet"], None),   # the same, the score held high (seed 22)
                  ("tools/sound_test.py", ["3000"], None)],        # the DMA clips against the game's sound commands
     "timeplt": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),

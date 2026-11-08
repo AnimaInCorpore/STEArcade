@@ -122,3 +122,12 @@ nat_list_64F7:
 	move.b	d1,(a0)+
 	dbf	d5,.run
 	rts
+
+; $6000, the power-on delay: 65,536 turns of STA $3C00 (the watchdog), CLRA, STA $3C81 (latch Q1 = 0), LEAX 1,X.  It ends
+; with A = 0, X = 0, the latch's Q1 0 and the flags of the last LEAX (Z set; N V C clear from the CLRA).
+nat_boot_6000:
+	clr.b	sb_latch+1
+	moveq	#0,d0
+	moveq	#0,d2
+	move	#$04,ccr
+	jmp	M00600E

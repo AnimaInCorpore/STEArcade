@@ -4,7 +4,7 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Mario Bros.'s.
 #   powershell -File games/sbasketb/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name sbasketb_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "sbasketb_hatari", [int]$Avi = 1, [int]$Sound = 0, [string]$Codec = 'bmp',
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "sbasketb_hatari", [int]$Avi = 0, [int]$Sound = 0, [string]$Codec = 'bmp',
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
 if ($Sound) { $env:SDL_AUDIODRIVER = 'dummy' }      # (no audio device needed: the AVI still carries the mixed audio)

@@ -320,7 +320,7 @@ not been re-measured in Hatari since).
 | Juno First | 61% / 8.1 play (MAX_SKIP 6) | n/a | - | both (+1% only) | clears, blit passes | - (planar `vram_wr`) | custom |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Yie Ar Kung-Fu | 96% / 37.7 autoplay | flat | - | both | sprite RAM builder, idle | `st vram_w` / `vram_n` after coverage-recorded store sites, `static_write` for the sound ports | n/a (idle native) |
-| Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
+| Super Basketball | 97% / 22.0 play (20,000 VBLs autoplay) | n/a (flat) | - | both | 3 (division, sprite list, boot delay) | `video_inline` | n/a (idle native) |
 | Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | Xevious | 45-53% (27-32 arcade fps) / 6.8-8.0 attract and autoplay (2026-11-08, after the sprite passes; 35% / 5.4 before) | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |

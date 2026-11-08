@@ -33,6 +33,7 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--autoplay', action='store_true', help='the inputs of the runtime AUTOPLAY script (src/sbasketb.s)')
+    ap.add_argument('--cheat', action='store_true', help='with --autoplay: cover.cheat (the score held high), as seed 22')
     ap.add_argument('--tag', default='sbasketb_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -141,6 +142,10 @@ def main():
         cur[0] = f
         m.frame = f
         m.system, m.p1, m.p2 = autoplay(f) if args.autoplay else cover.inputs(f, rnd, state)
+        if args.cheat:
+            cover.cheat(m.mem, f)
+            for a in (0x20A1, 0x20A2):
+                mem.w8(base + a, m.mem[a])
         for n, v in (('io_sys', m.system), ('io_p1', m.p1), ('io_p2', m.p2)):
             mem.w8(sym[n], v)
         mem.w8(sym['vbl_pending'], 1)
