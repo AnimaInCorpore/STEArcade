@@ -109,23 +109,6 @@ def main():
             expl.trigger()
             n54['n'] = n54.get('n', 0) + 1
     m.n54.write = n54_write
-    # the sub CPU's window onto the shared RAM: only these blocks are copied (xevious.s sync_to_sub / sync_to_main)
-    sub_ok = set()
-    for blk in (0x7900, 0x7a00, 0x7b00, 0x7c00, 0x7f00):
-        sub_ok.update(range(blk, blk + 128))
-    sub_rd = {a for blk in (0x7900, 0x7a00, 0x7b00, 0x7c00, 0x7f00) for a in range(blk, blk + 128)}
-    rd0, wr0 = m.cpus[1].rd8, m.cpus[1].wr8
-
-    def sub_rd8(a):
-        if 0x7800 <= a < 0x8000 and a not in sub_rd:
-            raise RuntimeError('the sub CPU read %04x of the shared RAM outside the copied blocks (xevious.s sync_to_sub)' % a)
-        return rd0(a)
-
-    def sub_wr8(a, v):
-        if 0x7800 <= a < 0x8000 and a not in sub_ok:
-            raise RuntimeError('the sub CPU wrote %04x of the shared RAM outside the copied blocks (xevious.s sync_to_main)' % a)
-        return wr0(a, v)
-    m.cpus[1].rd8, m.cpus[1].wr8 = sub_rd8, sub_wr8
     cycles = [0]
     hist = {}
     if args.prof:
@@ -180,7 +163,7 @@ def main():
         got = bytes(mem.r_block(g_rom1 + 0x7800, 0x800)) + bytes(mem.r_block(g_ram, 0x5000))
         got2 = bytes(mem.r_block(g_block + 0x7900, 0x700))
         diff = [0x7800 + i for i in range(len(want)) if want[i] != got[i] and 0x7800 + i not in dead and 0x7800 + i not in skip]
-        diff2 = [0x7900 + i for i in range(0x700) if (0x7900 + i) in sub_ok and want[0x100 + i] != got2[i] and 0x7900 + i not in dead and 0x7900 + i not in skip]
+        diff2 = [0x7900 + i for i in range(0x700) if want[0x100 + i] != got2[i] and 0x7900 + i not in dead and 0x7900 + i not in skip]
         if diff or diff2:
             raise RuntimeError('frame %d: %d + %d (sub half) RAM differences, ref pcs %s sps %s' % (
                 f, len(diff), len(diff2), ['%04x' % c.pc for c in m.cpus], ['%04x' % c.sp for c in m.cpus]) + str(
