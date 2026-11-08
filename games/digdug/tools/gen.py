@@ -24,6 +24,10 @@ from machine import load, patch_tests
 ROMS = [("dd1a.1", "dd1a.2", "dd1a.3", "dd1a.4"), ("dd1a.5", "dd1a.6"), ("dd1.7",)]
 IY = [0x9FF0, 0x9FF4, 0x9FF8]          # unused RAM words of the map for IY and F' per CPU
 TOKEN = 0x4001
+# calls of leaf functions of up to INLINE instructions (z80x Config.inline_leaves; DIGDUG_NO_INLINE=1: none, the old build) are
+# emitted in place, rst helpers ($08 / $10 / $18 of the sound CPU) and jumps inside them too: a call and a ret cost ~70 cycles.
+# The ROMs are fixed code (inline_limit = the ROM's size).
+INLINE = 0 if os.environ.get("DIGDUG_NO_INLINE") else int(os.environ.get("DIGDUG_INLINE", 32))
 ENTRIES = 0x4002
 SEEDS = (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16)
 
@@ -36,14 +40,15 @@ def configs():
         z80x.Config(prefix="Z", table="g1_dispatch", token_sym="g1_ret", mode="signed", block=0x10000,
                     iyaddr=IY[0], fshadow=IY[0] + 2, io_read_redirect={}, write_hooks=hooks1,
                     nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g1_iff", hl_tables=True,
-                    **z80x.FAST),
+                    inline_leaves=INLINE, inline_limit=0x4000, inline_rst=True, inline_jumps=True, **z80x.FAST),
         z80x.Config(prefix="Y", table="g2_dispatch", token_sym="g2_ret", mode="long", block=0x10000,
                     ram_sym="g_ram", iyaddr=IY[1], fshadow=IY[1] + 2, io_read_redirect={}, write_hooks=hooks2,
                     nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, iff_sym="g2_iff", hl_tables=True,
-                    **z80x.FAST_LONG),
+                    inline_leaves=INLINE, inline_limit=0x2000, inline_rst=True, inline_jumps=True, **z80x.FAST_LONG),
         z80x.Config(prefix="X", table="g3_dispatch", token_sym="g3_ret", mode="long", block=0x10000,
                     ram_sym="g3_ram", iyaddr=IY[2], fshadow=IY[2] + 2, io_read_redirect={}, write_hooks=[],
-                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False, **z80x.FAST_LONG),
+                    nmi_token=TOKEN, table_entries=ENTRIES, rst28_tables=False,
+                    inline_leaves=INLINE, inline_limit=0x1000, inline_rst=True, inline_jumps=True, **z80x.FAST_LONG),
     ]
 
 

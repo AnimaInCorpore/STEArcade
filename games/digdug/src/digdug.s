@@ -723,18 +723,21 @@ g3_ret:
 g_sound_frame:
 	cmp.b	#2,cpu3_state
 	bne	.no_nmi3
+	; The shared RAM the sound CPU uses: the flags of the game it reads ($8401, $8646, $8657, $87CF) and $9A80-$9B7F (the
+	; commands the main CPU writes, $9B1B / $9B33 / $9B3D among them, and the sound CPU's own state), 256 bytes each way
+	; with movem.l.  (Of $8A00-$8A47 the sound CPU only writes $8A40-$8A47 at its boot and the main CPU reads none of those:
+	; ref/sndtrace.py lists what a scripted game of 6000 frames touches.)
+	move.b	g_ram+$0401,g3_ram+$0401
+	move.b	g_ram+$0646,g3_ram+$0646
 	move.b	g_ram+$0657,g3_ram+$0657
 	move.b	g_ram+$07CF,g3_ram+$07CF
-	lea	g_ram+$0A00,a0
-	lea	g3_ram+$0A00,a1
-	moveq	#72/4-1,d0
-.in1:	move.l	(a0)+,(a1)+
-	dbf	d0,.in1
 	lea	g_ram+$1A80,a0
 	lea	g3_ram+$1A80,a1
-	moveq	#256/4-1,d0
-.in2:	move.l	(a0)+,(a1)+
-	dbf	d0,.in2
+	moveq	#8-1,d6
+.in:	movem.l	(a0)+,d0-d5/a2-a3
+	movem.l	d0-d5/a2-a3,(a1)
+	lea	32(a1),a1
+	dbf	d6,.in
 	move.b	#2,nmi3_left
 .nmi3:	btst	#0,g3_block+$6822
 	bne.s	.nmi3_done
@@ -749,14 +752,11 @@ g_sound_frame:
 .nmi3_done:
 	lea	g3_ram+$1A80,a0
 	lea	g_ram+$1A80,a1
-	moveq	#256/4-1,d0
-.out2:	move.l	(a0)+,(a1)+
-	dbf	d0,.out2
-	lea	g3_ram+$0A00,a0
-	lea	g_ram+$0A00,a1
-	moveq	#72/4-1,d0
-.out1:	move.l	(a0)+,(a1)+
-	dbf	d0,.out1
+	moveq	#8-1,d6
+.out:	movem.l	(a0)+,d0-d5/a2-a3
+	movem.l	d0-d5/a2-a3,(a1)
+	lea	32(a1),a1
+	dbf	d6,.out
 .no_nmi3:
 	bra	snd_update
 

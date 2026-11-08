@@ -87,6 +87,9 @@ def main():
     frames = [int(a) for a in sys.argv[1:]] or [1500, 2500, 3500, 5000]
     pmap = assets.build_palette(Gfx())[1]
     bad = sum(1 for n in frames if check(n, pmap))
+    # (the FREEZEAT builds wrote build/digdug/digdug.map: the tests that follow read the plain --sim build's)
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "build.py"), "--sim"],
+                   check=True, stdout=subprocess.DEVNULL)
     return 1 if bad else 0
 
 
