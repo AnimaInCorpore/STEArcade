@@ -957,7 +957,11 @@ dbg_name4:
 	even
 	endc
 
+	ifd REN_HSCROLL			; (the experiment: the fine scroll in the video hardware; README, "Picture")
+	include	"render_hscroll.s"
+	else
 	include	"render.s"
+	endc
 	include	"sound.s"			; (NOSOUND: the chips' writes are kept, nothing plays)
 
 ; ------------------------------------------------------------------------------

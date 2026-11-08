@@ -28,7 +28,7 @@ import cover
 
 BUILD = build_dir('jailbrek')
 PCS = __import__('os').environ.get('PCS')   # (a routine: its sampled cycles by offset, with --prof)
-LB, PIC_TOP, LINES, LEFT, PICW = 160, 20, 224, 48, 240
+LB, PIC_TOP, LINES, LEFT, PICW = 160, 20, 224, 48, 240      # (PICW: the arcade's picture; the buffer's groups are 256 wide)
 AREAS = ((0x0000, 0x2040),)
 
 
@@ -41,11 +41,24 @@ def planes_to_idx(words):
     return out
 
 
-def ste_picture(mem, base):
-    """[224, 320] indices of the buffer's picture lines"""
-    raw = bytes(mem.r_block(base + PIC_TOP * LB, LINES * LB))
-    arr = np.frombuffer(raw, '>u2').reshape(LINES, 20, 4).astype(np.int64)
-    return planes_to_idx(arr).reshape(LINES, 320)
+def fine_of(mem, sym, base):
+    """the hardware scroll's fine offset the buffer at base is shown with (buf_fine)"""
+    if 'buf_fine' not in sym:
+        return 0
+    for i in range(3):
+        if mem.r32(sym['buf_base'] + 4 * i) == base:
+            return mem.r16(sym['buf_fine'] + 2 * i)
+    raise RuntimeError('no buffer at %x' % base)
+
+
+def ste_picture(mem, base, fine=0):
+    """[224, 320] indices of the buffer's picture lines as the shifter shows them: the video address at the buffer's line,
+    the fine scroll `fine` (HSCROLL: the line starts `fine` pixels in; with it the shifter reads a group more, the next
+    line's first)"""
+    raw = bytes(mem.r_block(base + PIC_TOP * LB, LINES * LB + 8))
+    arr = np.frombuffer(raw, '>u2')
+    rows = np.stack([arr[y * (LB // 2):y * (LB // 2) + 84] for y in range(LINES)]).reshape(LINES, 21, 4).astype(np.int64)
+    return planes_to_idx(rows).reshape(LINES, 336)[:, fine:fine + 320]
 
 
 def expected(v, m, pmap):
@@ -178,7 +191,7 @@ def main():
         base = h.frame()
         if base is None or f < args.start or (f - args.start) % args.every:
             continue
-        got = ste_picture(h.mem, base)
+        got = ste_picture(h.mem, base, fine_of(h.mem, h.sym, base))
         if h.m.ctrl[4] & 8:
             continue                              # (the cocktail flip: not in the reference renderer)
         exp = expected(v, h.m, pmap)

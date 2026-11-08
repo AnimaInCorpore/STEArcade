@@ -24,7 +24,7 @@ from machine68k import Register as R
 from sim import Sim, TRAP1
 from machine import Video
 from paths import ROOT, build_dir
-from render_test import ste_picture, LB, PIC_TOP, LEFT, PICW
+from render_test import ste_picture, fine_of, LB, PIC_TOP, LEFT, PICW
 
 BUILD = build_dir('jailbrek')
 SLOTS = list(range(0, 0xC0, 4))
@@ -96,7 +96,8 @@ class Harness:
         return mem.r32(sym['buf_base'] + 4 * (ready - 1))
 
     def check(self, label):
-        got = ste_picture(self.mem, self.render())
+        base = self.render()
+        got = ste_picture(self.mem, base, fine_of(self.mem, self.sym, base))
         full = self.v.render_raw(self.tmem)[16:240, 8:248]
         exp = self.pmap[full]
         self.sprite_pixels += int((full >= 256).sum())

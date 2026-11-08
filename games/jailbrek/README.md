@@ -97,7 +97,7 @@ its 1698 (the first speech comes at frame 1570 in MAME, 1568 in the reference); 
 main CPU's local time in cycles; compared with the reference's own vector reads:
 * the IRQ and NMI are first enabled at frame 248: until then nothing differs, so nothing could show a difference;
 * the 0.248 binary raises the NMI every 32 lines (3072 cycles) from power-on, free-running and not tied to the frame
-  (the NMIs' line in the frame goes 160, 88, 16, 208, ... : minus 8 lines a frame), and the IRQ at the frame's end
+  (its phase against the frame moves every frame), and the IRQ at the frame's end
   (its time origin is the vblank start); the 0.286 source (`k005849.cpp`, the reference) raises the NMI at the lines 16, 48,
   ..., 240 of every frame (a 40-line gap at the frame's wrap) and the IRQ at line 240 -- the same rate, 8 a frame, but a
   different phase against the game's tick, which is why the speech and the tick drift apart after 1550 where the game has no
