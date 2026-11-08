@@ -2,9 +2,9 @@
 # recorded (Hatari's AVI, the emulated screen with its borders), the counters printed (COUNTERS.BIN: VBLs, pictures,
 # arcade frames, the border fallbacks and late events), stills extracted every -Every VBLs (ffmpeg).  Outputs in
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Mario Bros.'s hatari.ps1.
-#   powershell -File games/rocnrope/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name rocnrope_hatari] [-Avi 1]
+#   powershell -File games/rocnrope/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name rocnrope_hatari] [-Avi 1] [-Sound 1: Hatari's sound on at 44.1 kHz, its audio saved to rocnrope.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rocnrope_hatari", [int]$Avi = 1,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rocnrope_hatari", [int]$Avi = 1, [int]$Sound = 0,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
@@ -23,7 +23,7 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'RATE.BIN', 'rocnrope.avi')) {
 }
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$(if ($Sound) { '44100' } else { 'off' }),'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
 if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\rocnrope.avi") }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `
@@ -40,6 +40,10 @@ if (Test-Path "$out/COUNTERS.BIN") {
     "VBLs {0}, arcade frames {1} ({2:N1} a second), pictures {3} ({4:N1} a second); border fallbacks {5}, late top/on/low/off {6}/{7}/{8}/{9}" -f `
         $w[0], $w[2], (50*$w[2]/$w[0]), $w[1], (50*$w[1]/$w[0]), $w[3], $w[4], $w[5], $w[6], $w[7]
 } else { "no COUNTERS.BIN (the program did not reach its end)" }
+if ($Sound -and $Avi -and (Test-Path "$out/rocnrope.avi")) {      # (the YM's output the AVI recorded: rocnrope.wav)
+    & ffmpeg -y -v error -i "$out/rocnrope.avi" -vn -ac 1 -ar 44100 "$out/rocnrope.wav"
+    "audio: " + (Get-Item "$out/rocnrope.wav").Length + " bytes"
+}
 if ($Avi -and (Test-Path "$out/rocnrope.avi")) {
     & ffmpeg -v error -i "$out/rocnrope.avi" -vf "select=not(mod(n\,$Every))" -fps_mode passthrough "$out/still_%03d.png"
     "stills: " + ((Get-ChildItem -LiteralPath $out -Filter 'still_*.png').Count)

@@ -24,7 +24,7 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ = 0x6000, RocnRopePort.IRQ
 DP = 0x50                           # the direct page register after the boot ($60CC TFR A,DP); other sites: dp_sites
-SEEDS = [int(x) for x in os.environ.get("RR_SEEDS", "").split(",") if x] or range(1, 16)
+SEEDS = [int(x) for x in os.environ.get("RR_SEEDS", "").split(",") if x] or range(1, 20)
 NATIVES = {RocnRopePort.IDLE: "rr_idle"}
 TASKS = 0x6074                      # the foreground's task table ($6065 JSR [A,X]): 16 handlers; $67FE no seed ran
 TASK_COUNT = 16
@@ -95,6 +95,7 @@ def program(cover):
     prog.fast_forms = True
     prog.ret_weights = dict(returns) or dict(exec_)
     prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)
+    prog.video_push = (0x4800, 0x5000)               # PSHU fills the video RAM too (stage 3's pillar): its cells listed
     prog.video_inline = (0x4800, 0x5000, set(io))   # (m6809x: video RAM byte stores inline, main_io_w outside)
     return prog
 

@@ -7,7 +7,7 @@ ROM's reads, the video RAM's stores), dps: the DP values each pc ran with; pens:
 sprites: Counter of (code, colour, flip x, flip y) entries.
 
 Seeds: 1-3 attract, coin, start, random play to the game over and again (the game ends after 3 lives); 4-9 infinite
-lives ($50C0 kept at 2) with random play (4-6) and the same with the stage poked (7-9, STAGE_POKES: see below);
+lives ($50C0 kept at 2) with random play (4-6) and the same with the stage poked (7-9, STAGE_POKES: see below); 16-19 the cheats with stages 2, 3, 4 and 8 poked;
 10 two players; 12-15 MAME's cheats (infinite lives $50C0 = 10, invincibility $51C0 = 2 / $51DE = 0, infinite bonus
 $509B = $99) with random play for 60000 frames; 11 the DIP switches' other settings (5 lives, difficulty 1 / 16 alternating, bonus 80000, no repeated
 bonus, no demo sounds).
@@ -27,7 +27,8 @@ from paths import build_dir
 
 LIVES1 = 0x50C0
 LEFT, RIGHT, UP, DOWN, B1, B2 = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20     # IN0 / IN1 bits (active low)
-STAGE_POKES = {7: (0x50C3, 2), 8: (0x50C3, 5), 9: (0x50C3, 7)}    # $50C3 (0-7, changes with the scene): what the exploration found
+STAGE_POKES = {7: 1, 8: 2, 9: 3, 16: 1, 17: 2, 18: 3, 19: 7}   # the stage index $50C1 (0-based: the HUD shows +1; the scenery repeats every 4), poked 450 frames after each play start, before the HUD draws it
+STAGE = 0x50C1
 
 
 def dsw(seed):
@@ -79,9 +80,8 @@ def cheats(seed, frame, m, state):
     if 4 <= seed <= 9 and state.get('phase') == 'play':
         if mem[LIVES1] < 2:
             mem[LIVES1] = 2
-        poke = STAGE_POKES.get(seed)
-        if poke and frame % 2500 == 2400:
-            mem[poke[0]] = poke[1]
+    if seed in STAGE_POKES and state.get('phase') == 'play' and frame == state['t0'] + 450:
+        mem[STAGE] = STAGE_POKES[seed]
 
 
 def io(a, rw):

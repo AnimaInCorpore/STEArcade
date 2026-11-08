@@ -199,6 +199,10 @@ class Program:
         # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
         # stores still call io_w.
         self.video_inline = None
+        # video_push (set after construction): (lo, hi): a PSHU whose bytes land in lo .. hi - 1 (the game fills the
+        # video RAM with the user stack pointer) lists their cells: `bsr <name>_vlist` with d7.w = the lowest address
+        # and d6.w = the byte count - 1 (the cells as video_store lists them; the other addresses are left out)
+        self.video_push = None
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -1687,6 +1691,8 @@ class Emitter:
     STACK_REGS = [(0x80, "pc"), (0x40, "us"), (0x20, "y"), (0x10, "x"), (0x08, "dp"), (0x04, "b"), (0x02, "a"),
                   (0x01, "cc")]
 
+    STACK_SIZE = {"pc": 2, "us": 2, "y": 2, "x": 2}      # (the others: one byte)
+
     def stack_ptr(self, mn):
         """(68000 operand prefix: a5 for S, else a1 loaded from U)"""
         return "a5" if mn.endswith("s") else "a1"
@@ -1739,6 +1745,19 @@ class Emitter:
                 self.e("move.b d7,-(%s)" % sp)
         if user:
             self.a1_to_u()
+            vp = self.p.video_push
+            if vp:
+                n = sum(self.STACK_SIZE.get(r, 1) for bit, r in self.STACK_REGS if mask & bit)
+                skip = self.new_label()
+                self.e("cmp.w #$%04X,d4" % max(vp[0] - n + 1, 0))
+                self.e("blo.s %s" % skip)
+                self.e("cmp.w #$%04X,d4" % vp[1])
+                self.e("bhs.s %s" % skip)
+                self.e("move.w d4,d7")
+                self.e("moveq #%d,d6" % (n - 1))
+                self.e("bsr %s_vlist" % self.p.name)
+                self.lines.append(skip + ":")
+                self._a0 = None
         if live:
             self.e("move.w d5,ccr")
 

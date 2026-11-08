@@ -26,6 +26,7 @@ from paths import ROOT, build_dir
 import cover
 
 BUILD = build_dir('rocnrope')
+PROFWHAT = __import__('os').environ.get('PROF', 'render')   # (PROF=logic: the logic's routines instead of the renderer's)
 PCS = __import__('os').environ.get('PCS')   # (a routine: its sampled cycles by offset, with --prof)
 LB, PIC_TOP, LINES, LEFT, WIDTH = 160, 10, 256, 48, 224
 AREAS = ((0x4000, 0x6000), (0xFFF2, 0xFFFE))
@@ -88,7 +89,7 @@ class Harness:
     def run_to(self, targets, count=None):
         cpu, s = self.cpu, self.s
         total = 0
-        chunk = 64 if (self.prof is not None and count == 'render' and self.f >= self.prof_start) else 2000
+        chunk = 64 if (self.prof is not None and count == PROFWHAT and self.f >= self.prof_start) else 2000
         while total < 2_000_000_000:
             n = cpu.execute(chunk).cycles
             total += n

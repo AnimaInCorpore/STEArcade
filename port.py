@@ -39,8 +39,9 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
-    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives, 10 two players, 11 DIPs
+    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives (7-9 stages 2-4), 10 two players, 11 DIPs
                  ("ref/cover.py", list(range(12, 16)), 60000),    # 12-15 MAME's cheats: lives, invincibility, bonus
+                 ("ref/cover.py", list(range(16, 20)), 20000),    # 16-19 the cheats with stages 2, 3, 4, 8 poked ($50C1)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
@@ -94,8 +95,15 @@ TESTS = {
                  ("tools/logic_test.py", ["3000", "--seed", "4"], None),    # infinite lives
                  ("tools/logic_test.py", ["3000", "--seed", "10"], None),   # two players
                  ("tools/logic_test.py", ["6000", "--seed", "12"], None),   # MAME's cheats: invincible, deeper play
+                 ("tools/logic_test.py", ["3000", "--seed", "17"], None),   # stage 3 (the waterfall)
+                 ("tools/logic_test.py", ["3000", "--seed", "18"], None),   # stage 4 (the cave)
+                 ("tools/logic_test.py", ["3000", "--seed", "19"], None),   # stage 8
                  ("tools/render_test.py", ["3000", "--seed", "4", "--start", "900", "--every", "3"], None),
-                 ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/render_test.py", ["4000", "--seed", "17", "--start", "1000", "--every", "3"], None),   # stage 3: PSHU into the video RAM
+                 ("tools/render_test.py", ["4000", "--seed", "18", "--start", "1000", "--every", "3"], None),   # stage 4
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/build.py", ["--sim", "--tag", "rocnrope_snd"], None),
+                 ("tools/sound_test.py", ["3000", "--seed", "4", "--tag", "rocnrope_snd"], None)],   # the translated driver, AYs and YM against sound.py
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),

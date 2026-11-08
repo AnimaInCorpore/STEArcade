@@ -9,18 +9,25 @@ on the STE, its two AYs are register files, their six channels go to the YM2149 
 borders open, drawn by `src/render.s` (tile cache, sprite cache, generated Blitter code from `engine/sprite_programs.py`);
 one flat 16-colour palette (the arcade's lookup PROMs use palette entries 0-15 only, so the fit is near exact: mean
 error 0.9 a channel).  Status: **Incomplete** (sound checked only as register streams in the simulator, never heard; no
-full-game verification: the later stages are not reached).
+full-game verification: stages 2-4 and 8 are reached by a poked stage index only, no stage is completed).
 Speed (Hatari, STE, 4 MB, TOS 2.06, DEBUG build with `AUTOPLAY=1` and the sound, 3000 VBLs, 2026-11-08): after the
 boot test, 54 arcade frames (90% of the arcade's speed) and 28 pictures a second (108 frames and 56 pictures per 100
 VBLs), no late border events; without the sound (`-D NOSOUND=1`, 2026-11-07) 60 frames and 48 pictures a second.
+Per docs/speed.md's checklist (Musashi, sound off in the tests): no parallax, no colour cycling, one tile layer, so the
+costs are the logic and the changing cells.  Stage 1: logic ~58k cycles a frame, a picture ~55k; stage 3: logic 68-74k
+(of which `main_vlist`, the PSHU fills' cell lists, 6% and the sound's YM mix-down 4%), a picture 58-67k (tile_changed
+17%, copy_cells 14%, sprites 13%, render_tiles 12%: the cells the pillar, the waterfall and the cross change each
+frame).  Hoisting the constant addresses out of render_tiles' loop saved 0.4%; nothing larger was tried (the logic's
+28% in one translated block `main_pb_05` is the next place to look: natives need a per-routine profile).  Hatari
+stage 1 play: 55 arcade frames and 29 pictures a second; stages 2-4 were not run in Hatari (it cannot poke the stage).
 Started 2026-11-07 from Track & Field's runtime and logic tests and Time Pilot's vertical renderer.
 
 ## Build and run
 
 ```sh
-python port.py cover rocnrope               # coverage: ref/cover.py seeds 1-15 (60000 frames for 12-15), ref/cover_sound.py
+python port.py cover rocnrope               # coverage: ref/cover.py seeds 1-19 (60000 frames for 12-15), ref/cover_sound.py
 python port.py build rocnrope               # -> run/rocnrope/ROCNROPE.PRG
-python port.py test rocnrope                # lock-step (seeds 1, 4, 10), render (seed 4), sprite edges, sound
+python port.py test rocnrope                # lock-step (seeds 1, 4, 10, 12, 17-19), render (seeds 4, 17, 18), sprite edges, sound
 python port.py mame rocnrope                # the reference against MAME (set MAME to a binary that knows rocnrope)
 python games/rocnrope/tools/prepare.py      # verify assets/roms/rocnrope.zip, unpack to assets/roms/extracted/rocnrope/
 python games/rocnrope/tools/build.py --sim  # -> run/rocnrope_sim (Musashi, for the tests); --debug, --frames N, -D AUTOPLAY=1
@@ -50,7 +57,7 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
   and 300 (the boot's RAM test) the pictures differ (not investigated: the test fills the RAM pseudo-randomly) and
   the RAM differs in two bytes at frame 60.
 * **Logic**: exact against the reference's port schedule: `tools/logic_test.py`, seeds 1, 4, 7, 9, 10 for 3000 frames
-  each (attract, coin, start, play, deaths; infinite lives; the stage byte $50C3 poked; two players): RAM $4000-$5FFF,
+  each (attract, coin, start, play, deaths; infinite lives; stages poked via $50C1; two players): RAM $4000-$5FFF,
   the RAM vectors, latch Q0 / Q7 and the sound commands, every frame.  About 40-55 K 68000 cycles a frame (Musashi).
 * **Picture**: exact in the shown colours: `tools/render_test.py`, 0 differences in 2100 pictures each of seeds 1, 4, 7
   and 9 (frames 900-3000); `tools/sprite_test.py`: 154 made-up pictures exact (both side edges at every shift, flips,
@@ -63,16 +70,25 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
   choice (`tools/sound_test.py`, seeds 1, 4 and 10, 3000 frames each: 220 / 225 / 142 commands).  The STE's tick schedule
   against the reference board (the sound CPU at its clock, commands at the main CPU's instants):
   99.25% of the audible channel states equal over 4000 frames (`ref/sound_cmp.py`; the rest: an effect that starts up
-  to a frame later, or in another free slot).  Never heard: Hatari ran with its sound off, and the AY mix-down onto
-  three YM voices is lossy by design (loudest three of six).  The model is not compared with MAME's audio.
-* **Later stages** (2026-11-08): MAME's cheat pack has infinite lives ($50C0), invincibility ($51C0 = 2, $51DE = 0) and
-  infinite bonus ($509B); no stage select.  Coverage seeds 12-15 play 60000 frames with them (312 more pcs than seeds
-  1-11, among them the XNC at $B610, now translated); the lock-step runs of seeds 12 and 13 (12000 frames each) and
-  the render test of seed 12 (frames 3000-9000, every 3rd) are exact.  But random play never completes stage 1
-  (the screens stay on STAGE 1 at 60000 frames), so the later stages' code and tiles are not covered; the stage
-  variable was not found (`$50C3` is not it; pokes of $5000-$51FF changed no HUD digit).
-* **Not done / not verified**: the cocktail flip; the Mega STE; the full game (random play and the poked stage
-  byte reach the first stages only; the later screens' code is covered only as far as the seeds got); a real controller
+  to a frame later, or in another free slot).  Heard only as a recording: Hatari with its sound on (`hatari.ps1 -Sound 1`) saved
+  44.1 kHz audio of an AUTOPLAY run: silent before the coin, then the intro's tune (peaks change between 220 and 1170 Hz),
+  then a steady low tone (peak 84-93 Hz, RMS about 1500) for the 18 s of play; nobody listened to it.  The AY mix-down
+  onto three YM voices is lossy by design (loudest three of six).  The model is not compared with MAME's audio.
+* **Later stages** (2026-11-08): the stage index is **$50C1** (0-based; the HUD prints it + 1 at the start of a game, a
+  few hundred frames after the coin: poked later it is reset).  Poked before the HUD draws it, the game plays that stage:
+  the scenery repeats every four stages (1: the cliffs, 2: the waterfall, 3: the rotating cross, 4: the cave), and
+  stage 8 plays like 4.  Coverage seeds 7-9 (stages 2-4, lives kept) and 16-19 (MAME's cheats: lives $50C0,
+  invincibility $51C0 = 2 / $51DE = 0, bonus $509B; stages 2, 3, 4 and 8) add 920 pcs to those of seeds 1-15; seeds
+  12-15 alone play 60000 frames of stage 1 with the cheats (XNC at $B610 translated).  Lock-step (`logic_test.py`):
+  seeds 17, 18 (3000 frames) and 19 (12000 frames) exact.  The render test found a real bug in stage 3: the game fills
+  the pillar's tiles with `PSHU` (U pointing into the video RAM), whose stores the translation did not list as changed
+  cells (stale tiles, 400-700 differing pixels from frame 3820); `Program.video_push` / `main_vlist` list them now
+  (engine/m6809x.py, backwards compatible), and the render tests of seeds 16-19 (1667 pictures each) and 17 (1000)
+  are exact.  Not reached: the stage *completing* (random play never gets the player to the top: the exit, the
+  bonus count and the stage change happen only by the poke), so the code after a stage's end, and a stage poked above 8
+  (the indexes' tables), are covered only as far as the pokes got.  MAME was not run with the poke: the reference's
+  pictures of stages 2-4 are the reference machine's, whose rendering equals MAME's only where stage 1 shows it.
+* **Not done / not verified**: the cocktail flip; the Mega STE; the full game (no stage is completed; stages above 8 and the code after a stage's end are not covered); a real controller
   run; `docs/sprite-preparation.md`'s reordered-source measurements (the sprite code is the shared generator's
   output, not measured against alternatives here); the speed in busy scenes; release packing (`tools/release.py` lists it).
 

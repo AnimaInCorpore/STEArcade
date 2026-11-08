@@ -258,14 +258,14 @@ render_tiles:
 	cmp.l	a3,a4
 	beq.s	.out
 	move.l	a3,cell_ptr
+	lea	rr_mem+$4800,a5		; (kept: tile_changed uses d0-d6 a0-a2 only)
+	lea	tile_copy,a6
 .cell:	move.w	(a3)+,d7		; a written cell (colour RAM 0-$3FF, video RAM $400-$7FF): changed?
 	lea	cell_dirty,a2
 	clr.b	(a2,d7.w)
 	and.w	#$3FF,d7
-	lea	rr_mem+$4800,a5
-	lea	rr_mem+$4C00,a0
-	lea	tile_copy,a6
-	lea	tile_copy+$400,a1
+	lea	$400(a5),a0
+	lea	$400(a6),a1
 	move.b	(a5,d7.w),d0		; colour
 	move.b	(a0,d7.w),d1		; code
 	cmp.b	(a6,d7.w),d0
