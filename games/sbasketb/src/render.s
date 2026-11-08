@@ -550,7 +550,7 @@ compose:
 	lea	B_DST.w,a4
 	lea	B_YC.w,a5
 	lea	B_CTRL.w,a6
-	moveq	#8,d3			; (the row's 8 lines a pass: 14 + 14 words a line, 232 bus cycles)
+	moveq	#4,d3			; (4 lines a pass, two passes a plane: 14 + 14 words a line, 116 bus cycles; the addresses run on)
 	moveq	#-$40,d4		; ($C0: start, HOG)
 	move.l	pf_base,a2
 	move.l	draw_base,a0
@@ -562,10 +562,14 @@ compose:
 	move.l	a0,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	lea	2(a2),a1
 	move.l	a1,(a3)
 	lea	2(a0),a1
 	move.l	a1,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
 	lea	4(a2),a1
@@ -574,10 +578,14 @@ compose:
 	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	lea	6(a2),a1
 	move.l	a1,(a3)
 	lea	6(a0),a1
 	move.l	a1,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
 .fnx:	lea	8*PF_LB(a2),a2
@@ -603,10 +611,14 @@ compose:
 	move.l	a0,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	lea	2(a1),a1
 	move.l	a1,(a3)
 	lea	2(a0),a1
 	move.l	a1,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
 	lea	(a2,d0.w),a1
@@ -616,11 +628,15 @@ compose:
 	move.l	a1,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	lea	(a2,d0.w),a1
 	lea	6(a1),a1
 	move.l	a1,(a3)
 	lea	6(a0),a1
 	move.l	a1,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
 .snx:	lea	8*PF_LB(a2),a2
