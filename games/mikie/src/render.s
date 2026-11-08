@@ -91,8 +91,8 @@ init_render:
 	st	tiles_full
 	clr.b	cur_bank
 	move.l	#cell_list,cell_ptr
-	bsr	cache_flush
-	bsr	tcache_flush
+	bsr	cache_clear
+	bsr	tcache_clear
 	lea	mk_pal,a0		; the palettes: the picture's, black around it
 	lea	shown_pal,a1
 	lea	black_pal,a2
@@ -184,7 +184,37 @@ init_render:
 	addq.l	#4,sp
 	rts
 
+; cache_flush / tcache_flush: only the entries used (the key lists), not the 128 / 64 KB of the indexes (cache_clear /
+; tcache_clear: all, at the start when the memory is not known to be zero)
 cache_flush:
+	lea	sc_index,a0
+	lea	sc_keys,a1
+	move.w	sc_used,d0
+	beq.s	.e
+	subq.w	#1,d0
+
+.l:	moveq	#0,d1
+	move.w	(a1)+,d1
+	lsl.l	#2,d1
+	clr.l	(a0,d1.l)
+	dbf	d0,.l
+.e:	clr.w	sc_used
+	rts
+
+tcache_flush:
+	lea	tc_index,a0
+	lea	tc_keys,a1
+	move.w	tc_used,d0
+	beq.s	.e
+	subq.w	#1,d0
+	moveq	#0,d1
+.l:	move.w	(a1)+,d1
+	clr.w	(a0,d1.l)
+	dbf	d0,.l
+.e:	clr.w	tc_used
+	rts
+
+cache_clear:
 	lea	sc_index,a0
 	move.w	#32768/4-1,d0
 .c:	clr.l	(a0)+
@@ -195,7 +225,7 @@ cache_flush:
 	clr.w	sc_used
 	rts
 
-tcache_flush:
+tcache_clear:
 	lea	tc_index,a0
 	move.w	#32768/8-1,d0
 .c:	clr.l	(a0)+
@@ -442,6 +472,10 @@ tile_convert:
 	moveq	#0,d4
 .room:	addq.w	#1,d4
 	move.w	d4,tc_used
+	lea	tc_keys,a0
+	move.w	d4,d0
+	add.w	d0,d0
+	move.w	d3,-2(a0,d0.w)	; (the key list for the flush)
 	lea	tc_index,a0
 	move.w	d4,(a0,d3.l)
 	move.w	d4,-(sp)
@@ -1080,6 +1114,10 @@ sprite_baked:
 	movem.l	(sp)+,d0/d2/d5-d7
 	moveq	#0,d1
 .room:	addq.w	#1,sc_used
+	move.w	d1,d3		; (the key list for the flush)
+	add.w	d3,d3
+	lea	sc_keys,a1
+	move.w	d2,(a1,d3.w)
 	mulu	#SC_SIZE,d1
 	lea	sc_data,a0
 	add.l	d1,a0
@@ -1312,6 +1350,8 @@ bake_seen:	ds.b	16
 	even
 tc_index:	ds.w	32768			; per tile key: its slot + 1 (0: not converted)
 tc_data:	ds.b	TC_SLOTS*32
+tc_keys:	ds.w	TC_SLOTS
+sc_keys:	ds.w	SC_SLOTS
 sc_index:	ds.l	32768			; per sprite key: its slot (0: not baked)
 sc_data:	ds.b	SC_SLOTS*SC_SIZE
 	cnop	0,256
