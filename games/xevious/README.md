@@ -157,7 +157,7 @@ frames and 5.4 pictures a second, `MAX_SKIP` 3):
 | Register maps (`z80x.FAST` / `FAST_LONG`) | applied | - |
 | Writer marks for tile RAM (`vwriters`, scroll latch writers) | applied | no RAM comparisons |
 | Window guards only at coverage sites | applied (shared RAM windows copied at the stops) | - |
-| Leaves in place (`inline_leaves=16`, rst, jumps) | tried, not kept: the lock-step test is no longer exact (the Z80 stack residue at `$CFFC` differs, frame 0); needs the test to ignore dead stack words first | logic unchanged (reverted) |
+| Leaves in place (`inline_leaves=16`, rst, jumps) | applied (2026-11-08): the logic test treats the return words of inlined calls as dead stack words; exact over 3000 (seed 1) and 6000 frames (seed 3) | logic 181.8k -> 176.0k cycles a frame (-3.2%); Hatari attract 21.5 -> 21.6-23.6 arcade frames, 5.4-6.0 pictures a second (little change: the picture dominates) |
 | Natives at hot routines, `flags_at` at the idle hook | not tried (no routine profile yet) | - |
 | Sprite cache of converted tiles | tried, rejected | no change |
 | `sprite_programs` / Blitter masked passes (`AGENTS.md`) | **not done: the main gain** | `blit_row` ~560 cycles a row, 480k a busy picture |
@@ -166,6 +166,12 @@ frames and 5.4 pictures a second, `MAX_SKIP` 3):
 | Palette stamps / colour cycling | n.a. (one fixed 16-colour set, no cycling) | - |
 | Pictures-per-second schedule (`MAX_SKIP`) | applied; trade is the user's call | 1: 14 / 7, 3: 22 / 5.4, 7: 27 / 3.5 |
 | Dropping effects (ground sprites / foreground every second picture) | proposed, not done | ~1/3 of the CPU drawing |
+
+Vertical hardware scroll (virtual screens at the scroll position by video address, as Commando / Gun.Smoke) was **not
+implemented**: it needs the ring at the screen's stride (160 bytes, now 112 and a Blitter copy to stride 256), sprites drawn
+into the ring and restored from a clean ring or a second ring each picture, and a rewrite of `render.s` with its exact tests;
+it would remove the 37k CPU + 130k Blitter bus cycles of the picture copy (about 15-20% of a busy picture), while the sprites
+(480k) stay. The Blitter masked sprite passes come first.
 
 ## Tests and tools
 
