@@ -745,6 +745,13 @@ key_table:
 	dc.b	$2c,$00,$10,$00		; Z = button 1
 	dc.b	$2d,$00,$20,$00		; X = button 2 (pass)
 	dc.b	$2e,$00,$40,$00		; C = button 3
+	dc.b	$6a,$00,$00,$01		; keypad 4 = player 2 left
+	dc.b	$6c,$00,$00,$02		; keypad 6 = right
+	dc.b	$68,$00,$00,$04		; keypad 8 = up
+	dc.b	$6e,$00,$00,$08		; keypad 2 = down
+	dc.b	$70,$00,$00,$10		; keypad 0 = button 1
+	dc.b	$71,$00,$00,$20		; keypad . = button 2
+	dc.b	$72,$00,$00,$40		; keypad enter = button 3
 	dc.b	$02,$08,$00,$00		; 1 = start 1
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
@@ -884,6 +891,13 @@ dbg_counters:
 	lea	dbg_pcs,a2
 	move.l	#1024,d0
 	bsr	dbg_write
+	ifnd NOSOUND
+	lea	dbg_name5,a1
+	lea	snd_log,a2
+	move.l	snd_log_p,d0
+	sub.l	a2,d0
+	bsr	dbg_write
+	endc
 	rts
 dbg_write:				; a1 = the name, a2 = the data, d0.l = its length
 	movem.l	d0/a2,-(sp)
@@ -911,6 +925,8 @@ dbg_name3:
 	dc.b	"RATE.BIN",0
 dbg_name4:
 	dc.b	"PCS.BIN",0
+dbg_name5:
+	dc.b	"SNDLOG.BIN",0
 	even
 	endc
 
@@ -1011,6 +1027,8 @@ pb_p2:		ds.b	1
 	ifd DEBUG
 dbg_tl_n:	ds.w	1
 dbg_tl_p:	ds.l	1
+snd_log_p:	ds.l	1
+snd_log:	ds.b	4096
 dbg_tl:		ds.l	400		; (40000 VBLs)
 dbg_tl_end:
 dbg_buf:	ds.l	16

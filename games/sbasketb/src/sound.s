@@ -46,6 +46,9 @@ snd_init:
 	endc
 	clr.b	snd_tail
 	clr.b	snd_pend
+	ifd DEBUG
+	move.l	#snd_log,snd_log_p
+	endc
 	move.b	#7,$ffff8800.w		; the YM silent (tones and noise off, volumes 0)
 	move.b	$ffff8800.w,d0
 	and.b	#$c0,d0
@@ -89,6 +92,15 @@ snd_frame:
 	moveq	#0,d0
 	move.b	(a1,d3.w),d0
 	addq.b	#1,d3
+	ifd DEBUG			; SNDLOG.BIN: (the VBL, the command) words
+	move.l	snd_log_p,a0
+	cmp.l	#snd_log+4096,a0
+	bhs.s	.nolog
+	move.w	frame_counter+2,(a0)+
+	move.w	d0,(a0)+
+	move.l	a0,snd_log_p
+.nolog:
+	endc
 	move.w	d3,-(sp)
 	bsr.s	snd_cmd
 	move.w	(sp)+,d3

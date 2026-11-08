@@ -11,10 +11,14 @@ Bros. does).  The picture
 is MAME's ROT90 picture, 224 x 256 (portrait, not the 256 x 224 of the other Konami sports games), centred in the
 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
 against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  Status:
-**Incomplete** (sound by recordings, one clip at a time, heard in Hatari's audio capture for one phrase; ~83-90% of the
-arcade's speed and 19-31 pictures a second in Hatari; no full-game verification).
-Speed: 49.6 arcade frames a second (83%), 19.4 pictures a second over 5,000 VBLs of the AUTOPLAY script, 54.0 (90%) and
-30.6 over 9,000 VBLs (Hatari, `tools/hatari.ps1 -Frames N`, sound build with its audio off, DEBUG build, 4 MB, 2026-11-08).
+**Incomplete** (sound by recordings, one clip at a time, its timing and levels checked against MAME's in Hatari's audio
+capture, never listened to; the logic at 100% of the arcade's speed and 20-27 pictures a second in play in Hatari; the
+games of the scripted runs end at the first game over, no later stage was reached).
+Speed: 20,000 VBLs of the AUTOPLAY script in Hatari without a crash or a late border event: 57.1 arcade frames a second
+(95%) and 32.4 pictures a second over the whole run (the attract and game-over screens are drawn at 50 a second); in
+play (VBL 3,000-5,000 and the later games) the logic is 100% (120 frames per 100 VBLs) and the pictures 20-27 a second,
+busy stretches (many sprites, the court scrolling) 15-20 (Hatari, `tools/hatari.ps1 -Frames N`, sound build with its audio
+off, DEBUG build, 4 MB, 2026-11-08).
 
 ## Build and run
 
@@ -42,8 +46,9 @@ are the repository's.
 
 ## Controls
 
-**5/6** coin 1 / 2, **1/2** start, **arrow keys** move, **Space / Control / Z** button 1 (shoot, jump), **X** button 2
-(pass), **C** button 3, **Esc** quits.  Joystick port 1 player 1, port 0 player 2 (fire = button 1).  Jaguar pad / PowerPad:
+**5/6** coin 1 / 2, **1/2** start, player 1: **arrow keys** move, **Space / Control / Z** button 1 (shoot, jump), **X**
+button 2 (pass), **C** button 3; player 2 on the keypad: **4 6 8 2** move, **0** button 1, **.** button 2, **Enter**
+button 3; **Esc** quits.  Joystick port 1 player 1, port 0 player 2 (fire = button 1).  Jaguar pad / PowerPad:
 pad A player 1, pad B player 2, the D-pad moves, **A** button 1, **B** button 2, **C** button 3, **Option** coin,
 **Pause** start.  DIP switches: the 0.286 source's defaults (60 s game, upright, starting score 100-115, ranking data
 kept, easy, demo sounds on).
@@ -71,14 +76,25 @@ kept, easy, demo sounds on).
   116 bus cycles.  The reference equals MAME (How it works).
 * **Sound**: `tools/sound_test.py`: the DMA frame start and control registers of the simulator name the clip the game's
   commands call for after every frame (seeds 1, 4, 6 6,000 frames, seed 21 5,000: 84-195 clip starts each, 0 mismatches).
-  Hatari with its audio on (`hatari.ps1 -Sound 44100`: SDL's dummy audio driver, the audio is in the AVI, extracted with
-  ffmpeg; 1,200 VBLs, the AUTOPLAY script): 4 sound bursts at the times of the game's four phrases ($AD, $A8, $A7, $A8);
-  the first burst's 100 ms level envelope follows clip $AD's shape (9 7 5 2 5 1 1 10 9 against 794 735 671 177 489 267 19
-  764 1131), its waveform correlates 0.39 (the clip is resampled and filtered by Hatari).  The other three bursts were
-  not matched to their clips individually, the sound was never heard by a person, and nothing was compared to MAME's
-  mix.
+  Hatari with its audio on (`hatari.ps1 -Sound 44100`: SDL's dummy audio driver, the audio is in the AVI) against MAME
+  (`tools/sound_hatari.py`: the program logs its sound commands with the VBL (SNDLOG.BIN, DEBUG builds), MAME is given the
+  same 334 commands at the same times (4,200 VBLs of the AUTOPLAY script, the game from VBL ~2,400), and the RMS of the
+  first 0.25 s of each command is compared, DC removed): $03 (123 times) Hatari/MAME 0.98, $01 1.08, $12 (21) 0.83, the
+  speech $FF (13) 0.71, $0D 0.64, $20 0.55, $A7 and $0B 0.19; every command MAME makes audible was audible in Hatari but
+  $AD (a phrase, queued, spoken by the next $FF; 1 of 1 silent in the window).  The clips' common scale was raised by
+  1.4 for this (the two loudest effects limited to 0.34 of full scale).  What differs by design: one clip at a time (MAME
+  mixes overlapping effects; $03 every 16 frames restarts its clip), and MAME's window includes the tail of earlier
+  commands.  **Nobody listened to it**, and the whole sound is the recordings of single commands: effects $41-$7F and
+  phrases not in the clip set never play.
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, sound off): boot, attract, coin, start, the AUTOPLAY player's games
-  (two starts); no crash, 3 border fallbacks and no late border event in 5,000 VBLs.
+  (five games in 20,000 VBLs, each ending at its game over); no crash, 2 border fallbacks and no late border event in
+  20,000 VBLs (2026-11-08).  The AUTOPLAY script never wins a game; cheating the score ($20A1-$20A2, BCD: 29,990 points)
+  in the reference does not change the ending either, so no later stage, round or opponent has been run: what the
+  translation covers there is the coverage seeds, the 22 jump tables and the data roots.
+* **Controls**: SYSTEM (coins, starts), P1 and P2 (stick, three buttons) reach the game through the IKBD keyboard table,
+  the two joysticks and the pads (`key_table`, `compose_inputs`); player 2's keys (keypad 4 6 8 2, 0, ., Enter) are new
+  (2026-11-08).  Not tested in Hatari (no input injection here): the table was read, the game's input ports are the
+  simulator's `io_sys` / `io_p1` / `io_p2` that the logic test drives.
 * Not done, most important first: a full-game playthrough and any playtest beyond the AUTOPLAY script; the sound's
   fidelity (Sound); speed (Speed); the cocktail flip (`flip_screen` raises `NotImplementedError` in the reference renderer, the runtime
   ignores latch Q0); the arcade's self-test is not run.

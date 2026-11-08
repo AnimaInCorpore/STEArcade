@@ -89,6 +89,11 @@ def build(rate=12517, verbose=False):
         if got:
             clips["say_%02x" % p] = got[0]
             report["say_%02x" % p] = dict(length_s=round(got[1], 3))
+    CAP = 0.34                       # (the loudest effects, $40 and $12, peak at 0.48 and 0.40: limited to 0.34 so the rest, 0.06-0.32,
+    for k in clips:                  # is 1.4 times louder than one scale for the loudest gave; MAME's level was matched in Hatari's audio)
+        pk = np.abs(clips[k]).max()
+        if pk > CAP:
+            clips[k] = clips[k] * (CAP / pk)
     peak = max(np.abs(c).max() for c in clips.values())
     scale = 127.0 / peak
     pcm_dir = SRC / "pcm"
