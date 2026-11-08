@@ -27,7 +27,7 @@ import cover
 
 BUILD = build_dir('sbasketb')
 PCS = __import__('os').environ.get('PCS')   # (a routine: its sampled cycles by offset, with --prof)
-LB, PIC_TOP, LINES, LEFT, PICW = 160, 10, 256, 48, 224
+LB, PIC_TOP, LINES, LEFT, PICW = 296, 10, 256, 48, 224       # (a ring line: 37 groups)
 
 
 def planes_to_idx(words):
@@ -39,11 +39,22 @@ def planes_to_idx(words):
     return out
 
 
-def ste_picture(mem, base):
-    """[256, 320] indices of the buffer's picture lines"""
+def ste_picture(mem, base, r):
+    """[256, 320] indices of the buffer's picture lines as the Shifter shows them: the window starts at the ring x r - 48
+    (the video address by groups, the fine scroll by pixels)"""
     raw = bytes(mem.r_block(base + PIC_TOP * LB, LINES * LB))
-    arr = np.frombuffer(raw, '>u2').reshape(LINES, 20, 4).astype(np.int64)
-    return planes_to_idx(arr).reshape(LINES, 320)
+    arr = np.frombuffer(raw, '>u2').reshape(LINES, LB // 8, 4).astype(np.int64)
+    ring = planes_to_idx(arr).reshape(LINES, LB * 2)
+    wx = r - LEFT
+    g0, fine = wx >> 4, wx & 15
+    return ring[:, g0 * 16 + fine:g0 * 16 + fine + 320]
+
+
+def band_bad(got, r):
+    """non-black band pixels, except the sprite overhang in the partial words at the picture's edges"""
+    lo = LEFT - (r & 15)
+    hi = LEFT + PICW + ((-(r + PICW)) & 15)
+    return int((got[:, :lo] != 0).sum() + (got[:, hi:] != 0).sum())
 
 
 def expected(v, m, pmap):
@@ -139,6 +150,7 @@ class Harness:
             mem.w8(sym['frame_ready'], 0)
             mem.w16(sym['shown_idx'], ready - 1)
         base = mem.r32(sym['buf_base'] + 4 * (ready - 1)) if ready else None
+        self.r = mem.r16(sym['pub_r'] + 2 * (ready - 1)) if ready else None
         self.resume()
         self.run_to({sym['sim_wait']})
         self.f += 1
@@ -165,11 +177,11 @@ def main():
         base = h.frame()
         if base is None or f < args.start or (f - args.start) % args.every:
             continue
-        got = ste_picture(h.mem, base)
+        got = ste_picture(h.mem, base, h.r)
         exp = expected(v, h.m, pmap)
         diff = got[:, LEFT:LEFT + PICW] != exp
         n = int(diff.sum())
-        nb = int((got[:, :LEFT] != 0).sum() + (got[:, LEFT + PICW:] != 0).sum())
+        nb = band_bad(got, h.r)
         checked += 1
         if n or nb:
             bad_frames += 1
