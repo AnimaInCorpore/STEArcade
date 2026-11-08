@@ -841,6 +841,26 @@ crash_common:
 	dbf	d2,.stack
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
+	move	isr_count,d1		; the arcade frame, then the 6809's stack (32 words from its pointer) and $16C0 (16 words)
+	bsr	hex_word
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	move.l	crash_regs+52,a1
+	moveq	#31,d2
+.s9:	move	(a1)+,d1
+	bsr	hex_word
+	move.b	#' ',(a0)+
+	dbf	d2,.s9
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	lea	jb_mem+$1340,a1
+	moveq	#31,d2
+.s8:	move	(a1)+,d1
+	bsr	hex_word
+	move.b	#' ',(a0)+
+	dbf	d2,.s8
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
 	lea	own_stack_top,sp
 	move.l	a0,d7
 	sub.l	#crash_text,d7
@@ -1071,7 +1091,7 @@ dbg_pcs:	ds.l	256
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16
-crash_text:	ds.b	512
+crash_text:	ds.b	1536
 frame_counter:	ds.l	1
 	ds.l	1024
 own_stack_top:

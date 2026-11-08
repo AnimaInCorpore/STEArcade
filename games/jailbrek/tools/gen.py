@@ -30,6 +30,11 @@ NATIVES = {JailBreakPort.IDLE: "jb_idle",
 # a read-modify-write of the video RAM (m6809x cannot send one through the runtime): `dec $0830` runs on the memory and
 # lists the cell (the video RAM's $0830 is cell $030) itself afterwards
 RMW_VIDEO = {0x907B: 0x0830}
+# the jump tables of the indirect JSR / JMP [A|B,X|Y|U] sites (found in the translation): every entry is code the coverage
+# may not have run (a state the random play did not reach crashed Hatari at arcade frame 3176: $AA2A); the entries
+# (words >= $8100 from each table's start, up to 24, until one is not a code address) are roots too
+JUMP_TABLES = (0xc1be, 0xc244, 0xc24c, 0xc3f6, 0xc400, 0xc412, 0xe7ac, 0xe67b, 0xe7b2, 0xe832, 0xe9b2, 0xeb98, 0xebe5,
+               0xeba0, 0xec27, 0xec31, 0xec75, 0xf955, 0xfd25)
 ROM_FILES = ("507p03.11d", "507p02.9d")
 
 
@@ -39,6 +44,43 @@ def image():
     for i, n in enumerate(ROM_FILES):
         mem[0x8000 + i * 0x4000:0xC000 + i * 0x4000] = load(n)
     return bytes(mem)
+
+
+def table_roots(mem):
+    """the jump tables' entries that decode to code the translator accepts (a few instructions' worth of flow from each:
+    tables run into data, and junk raises m6809x.Unsupported)"""
+    rd = lambda a: mem[a & 0xFFFF]
+    rd_op = konami1_opcode(rd)
+
+    def ok(root):
+        seen, work = set(), [root]
+        while work and len(seen) < 400:
+            v = work.pop()
+            while v not in seen:
+                if not 0x8000 <= v < 0x10000:
+                    return False
+                seen.add(v)
+                try:
+                    ins = m6809x.decode(rd, v, 0x15, rd_op=rd_op)
+                    m6809x.defs_uses(ins)
+                except Exception:
+                    return False
+                if ins.target is not None and ins.flow in ('jmp', 'jcc', 'call'):
+                    work.append(ins.target)
+                if ins.flow in ('seq', 'jcc', 'call', 'icall'):
+                    v += ins.length
+                    continue
+                break
+        return True
+
+    roots = set()
+    for b in JUMP_TABLES:
+        for i in range(24):
+            w = mem[b + 2 * i] << 8 | mem[b + 2 * i + 1]
+            if not 0x8100 <= w < 0xFFE0:
+                break
+            roots.add(w)
+    return sorted(r for r in roots if ok(r))
 
 
 def page_addr(p):
@@ -82,7 +124,7 @@ def program(cover):
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 1, 1, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(4, 8)},
-                          roots=[RESET, IRQ, NMI] + sorted(NATIVES), exec_cover=set(exec_), acc_cover=flat, targets=tg,
+                          roots=[RESET, IRQ, NMI] + sorted(NATIVES) + ([] if os.environ.get('JB_NO_TABLE_ROOTS') else table_roots(mem)), exec_cover=set(exec_), acc_cover=flat, targets=tg,
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x15, a3_slot=0, a4_slot=1,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('JB_NO_NATIVES', '')},
