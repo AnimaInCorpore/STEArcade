@@ -8,12 +8,12 @@ here both draw into the planar STE picture directly.  The sound board is transla
 the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
 offline to PCM for the DMA sound.  Status: **Experimental / deferred** (root README): logic, picture and the sound board's state are exact against
 their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
-the program runs at about 61% speed in Hatari (MAX_SKIP 6), and the sound has never been compared with MAME's audio or listened to.
+the program runs at about 58% speed in Hatari (MAX_SKIP 2, 16 pictures a second: not yet playable by the 90% / 20 pictures target), and the sound has never been compared with MAME's audio or listened to.
 
 ![Juno First on the STE (Hatari)](docs/screenshot.png)
 
-Speed (Hatari, STE, 4 MB, `hatari.ps1 -Frames 4000`, `MAX_SKIP` 6, 2026-11-08, after the speed audit): 37.1 arcade frames
-a second (61% of 60.6) and 8.1 pictures a second.
+Speed (Hatari, STE, 4 MB, `hatari.ps1 -Frames 4000`, `MAX_SKIP` 2, 2026-11-08, dirty-cell picture): 34.8 arcade frames
+a second (58% of 60.6) and 16.4 pictures a second.
 
 ## Build and run
 
@@ -36,9 +36,9 @@ Layout: `tools/` (prepare, machine, gen, assets, build, logic_test, render_test,
 
 ## Controls
 
-**Arrow keys** move the ship, **Space / Control / Z** fire (X: the second button), **5/6** coin 1 / 2, **1/2** start,
+**Arrow keys** move the ship, **Space / Control / Z** fire (X: the second button, C: the third), **5/6** coin 1 / 2, **1/2** start,
 **Esc** quits.  Joystick port 1 player 1, port 0 player 2; Jaguar pads: D-pad and A / B / C, **Option** coin,
-**Pause** start.  Player 2 on the keyboard: R F A D move, G fires.  DIP switches: MAME's defaults (3 lives, difficulty 1,
+**Pause** start.  Player 2 on the keyboard: R F A D move, G fires (H: the second button, J: the third).  DIP switches: MAME's defaults (3 lives, difficulty 1,
 1 coin 1 credit, demo sounds on).
 
 ## State
@@ -76,8 +76,12 @@ Layout: `tools/` (prepare, machine, gen, assets, build, logic_test, render_test,
 
 ## Speed
 
-**Current (2026-11-08, after the audit below): `MAX_SKIP` 6, 37.1 arcade frames a second (61% of 60.6) and 8.1 pictures
-a second** (`hatari.ps1 -Frames 4000`; `MAX_SKIP` 12: 38.2 / 6.7, not taken); see the audit table.
+**Current (2026-11-08, dirty-cell picture copy): `MAX_SKIP` 2, 34.8 arcade frames a second (58% of 60.6) and 16.4
+pictures a second** (`hatari.ps1 -Frames 4000`, AUTOPLAY, no AVI).  `MAX_SKIP` 6: 35.6 / 12.2; 3: 34.4 / 13.9;
+1: 32.8 (55%) / 19.6.  A 20,001-VBL run (13,595 arcade frames, 34.0 a second, 15.6 pictures a second) shows the same
+rates over five games.  Not reached: 90% logic and 20 pictures a second together.  The background dots (the dotted grid
+and stars, ~98% of the CPU's video writes) are the biggest remaining cost: `--nobg` (build option) drops them, logic
+-21%, RAM exact; kept on pending the user's decision.  The figures below this paragraph are older.
 
 **With the sound (2026-11-08, `MAX_SKIP` 3, before the audit; older than the current figures above)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
 60.6) and 765 pictures (9.6 a second), no crash, no late border event.  The sound cost 11% of the speed first (31.5 a
@@ -202,9 +206,14 @@ render tests; what each one checked is in State.
 
 ## Verification
 
-* **Not done / not verified**: the flip (cocktail) screen; coverage is random play only (12 seeds,
-  ~13,700 translated instructions): later waves, the high-score entry and other rarely reached code may run into
-  `main_badpc`; no PPO / Go-Explore profile; no recorded-play comparison; the compare with MAME has no input.
+* **2026-11-08 long runs**: Hatari `hatari.ps1 -Frames 20000 -Avi 0` (AUTOPLAY): 20,001 VBLs, no crash, no bad pc, no
+  late border event; again with `-D WAVECHEAT=1` (the autoplay raises the wave number at set VBLs of each game; that the
+  waves really advanced was not looked at in Hatari).  The logic tests over seeds 13-16 (wave pokes, 12,000 frames each,
+  with the sound) were exact before the dirty-cell change; the dirty-cell picture is exact in render_test (3000 frames,
+  seeds 1 and 5) and sprite_test (600).
+* **Not done / not verified**: the flip (cocktail) screen; coverage is random play plus wave pokes (16 seeds); the
+  high-score entry and other rarely reached code may run into `main_badpc`; no PPO / Go-Explore profile; no
+  recorded-play comparison; the compare with MAME has no input; Hatari's audio capture was not compared with MAME's.
 * Evidence: the reference against MAME 0.248, lock-step logic and sound-driver tests over 12 seeds, the render test, a
   Hatari run looked at by eye (no sound).  No recorded or PPO play, the audio never compared or heard: see the
   [status policy](../../docs/port-status.md); the port is **Experimental / deferred**.
