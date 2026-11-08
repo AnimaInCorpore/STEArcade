@@ -62,6 +62,8 @@ class Harness:
     def poke(self, a, data):
         self.tmem[a:a + len(data)] = data
         self.mem.w_block(self.base + a, bytes(data))
+        if 0x5800 <= a < 0x6000:
+            self.mem.w8(self.sym['vram_w'], 1)          # (the translated writers' mark: render_tiles scans after it)
 
     def sprites(self, ents):
         """ents: {offset: (attributes, y, x, code low byte)}"""

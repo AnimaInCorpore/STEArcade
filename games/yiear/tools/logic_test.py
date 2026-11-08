@@ -76,6 +76,7 @@ def main():
     snd = [0]
     sn, ym = S.SN(), S.YM()
     has_sound = 'snd_sn' in sym
+    marks = [0]
     vst, vdata, phrases = 0, 0, [0]
 
     def compare(f):
@@ -217,10 +218,21 @@ def main():
             continue
         m.run_frame_port()
         m.frame = f
+        snap = bytes(mem.r_block(base + 0x5800, 0x800))      # (the writer marks: a change of the video RAM needs `st vram_w`)
+        mem.w8(sym['vram_w'], 0)
+        mem.w8(sym['vram_n'], 0)
         resume()
         if run_to({done, sym['sim_render_start']}) != done:
             resume()
             run_to({done})
+        now = bytes(mem.r_block(base + 0x5800, 0x800))
+        if now != snap and not mem.r8(sym['vram_w']):
+            for i in range(0x800):
+                if now[i] != snap[i] and not (0x180 <= i < 0x1C0 and mem.r8(sym['vram_n'])):
+                    raise RuntimeError('frame %d: video RAM byte $%04X changed without its writer mark (vram_w / vram_n)' % (
+                        f, 0x5800 + i))
+        if now == snap and mem.r8(sym['vram_w']):
+            marks[0] += 1                                    # (written, not changed: fine)
         compare(f)
         resume()
         run_to({wait})

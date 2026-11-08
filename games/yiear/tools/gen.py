@@ -24,9 +24,16 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ, NMI = YieArPort.ENTRY, YieArPort.IRQ, YieArPort.NMI
 SEEDS = [int(x) for x in os.environ.get("YA_SEEDS", "").split(",") if x] or range(1, 27)
-NATIVES = {YieArPort.IDLE: "ya_idle"}
+NATIVES = {YieArPort.IDLE: "ya_idle", 0x8B30: "nat_8B30"}
 ROM_FILES = ("407_i08.10d", "407_i07.8d")
 
+
+# the video RAM writers that store the same text every frame (a score / credit line, $598C-$59B1): they mark vram_n, which
+# render.s answers with a scan of $5980-$59BF; every other writer marks vram_w (a scan of all 2 KB).  logic_test.py checks
+# every change against its marks.
+NOISY = {0xA695, 0xA6D3, 0xA6F4, 0xA6AC, 0xA6BC, 0xA6EB, 0xA6B3}
+
+STATIC_WRITE = {0x4000: "main_w4000", 0x4800: "main_w4800", 0x4900: "main_w4900"}      # (m6809x static_write: the sound's and the control latch's stores go straight to their routines)
 
 DIPS = ()                       # (DSW1, DSW2, DSW3) of a build with other DIP switches (build.py --dsw2 / --dsw3): the
                                 # self-test leaves RAM that depends on them
@@ -58,6 +65,7 @@ def load_cover():
     tg = collections.defaultdict(set)
     wraps, io = set(), set()
     returns = collections.Counter()
+    vsites = set()
     for s in SEEDS:
         d = pickle.loads((build_dir("yiear") / ("cover%d.pkl" % s)).read_bytes())
         exec_.update(d["exec"])
@@ -68,11 +76,12 @@ def load_cover():
         wraps |= d["wraps"]
         io |= {pc for pc, a, rw in d["io"]}
         returns.update(d.get("returns", {}))
-    return exec_, acc, tg, wraps, io, returns
+        vsites |= d.get("vsites", set())
+    return exec_, acc, tg, wraps, io, returns, vsites
 
 
 def program(cover):
-    exec_, acc, tg, wraps, io, returns = cover
+    exec_, acc, tg, wraps, io, returns, vsites = cover
     mem, _ = image()
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 0, 0, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
@@ -81,7 +90,7 @@ def program(cover):
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x51, a3_slot=2, a4_slot=0,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('YA_NO_NATIVES', '')},
-                          opcode_reader=None)
+                          static_write=STATIC_WRITE, opcode_reader=None, after=lambda v, ins: [("st vram_n" if v in NOISY else "st vram_w")] if v in vsites else None)
     # flat: every slot holds one page for good, so jumps, calls and returns need no page check; the 68030 forms the
     # 68000 runs too (m6809x Program.fast_forms: flags fixed through d7, returns compared most frequent first by the
     # coverage's counts of the returns to each point)

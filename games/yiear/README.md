@@ -11,7 +11,7 @@ the 320-pixel screen with the top and bottom borders open, sprites by generated 
 exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.
 Status: **Incomplete** (logic and picture exact in lock-step with the reference; short Hatari checks only; no
 full-game verification, cocktail flip not done).
-Speed: 96% of the arcade's rate (58.2 arcade frames a second), 36.4 pictures a second, with the sound (Hatari,
+Speed: 96% of the arcade's rate (58.2 arcade frames a second), 37.7 pictures a second, with the sound (Hatari,
 `tools/hatari.ps1 -Sound 1`, 3,000 VBLs of the AUTOPLAY script, DEBUG build, 4 MB, 2026-11-07).
 
 ## Build and run
@@ -167,10 +167,38 @@ length in arcade frames, not the chip's cycle-exact time.
 
 The logic is cheap (the whole IRQ handler plus eight NMIs is ~4,100 + 8 x 240 6809 cycles of 25,344); a picture is the
 cost.  What went into it: the playfield compare scans the 2 KB of video RAM every picture (512 longs); a screen change
-converts and draws its changed tiles once (first use per tile and flips).  The compare was 33k of the picture's 79k CPU cycles (64 cycles a long); eight `cmpm.l` + `bne.s` pairs a block (Duff's device, re-entered after a change) make it ~14k: the picture 79.1k -> 62.2k CPU, 34.2 -> 36.4 pictures a second in Hatari, exact in `render_test.py` (seeds 1, 2, 24) and `sprite_test.py`. Nothing else was optimized beyond what Mario Bros.' and
+converts and draws its changed tiles once (first use per tile and flips).  The compare was 33k of the picture's 79k CPU cycles (64 cycles a long); eight `cmpm.l` + `bne.s` pairs a block (Duff's device, re-entered after a change) make it ~14k: the picture 79.1k -> 62.2k CPU, 34.2 -> 37.7 pictures a second in Hatari, exact in `render_test.py` (seeds 1, 2, 24) and `sprite_test.py`. Nothing else was optimized beyond what Mario Bros.' and
 Track & Field's renderer already do; the pictures a second are the 50 Hz VBLs' share left after the logic.
 
 Measured, not kept: nothing. Not tried: writer marks for the video RAM (its stores are plain `move.b` into the flat block, not I/O sites, so `video_inline` does not apply), dropping the arcade's own effects (none is costly: one layer, no scrolling, no colour cycling).
+
+### Speed audit (2026-11-08)
+
+Profile (Musashi, seed 1): logic 49.1k cycles an arcade frame, of which the sound NMIs (8 a frame, `$C7xx`/`$C8xx`) ~15k,
+the sprite-RAM builder `$8B30` 7.7k, runtime (`main_io_w` 3k, dispatch 2.9k, `push_state` 2.5k, `snd_sn_w`/`snd_ym` 2.2k);
+a picture 52-59k CPU + 21-27k Blitter bus cycles: row restores (`draw_rows`) ~12k, sprites (`draw_cell`, `draw_sprites`,
+baking) ~16k, the video RAM scan ~7k. No background effect is costly (one non-scrolling tile layer, no colour cycling), so
+nothing is proposed for dropping.
+
+| Technique | Status | Before -> after |
+|---|---|---|
+| Unrolled `cmpm.l` scan of the video RAM | applied | picture 79.1k -> 62.2k CPU |
+| Writer marks (`st vram_w` after the 36 coverage-recorded store sites; `vram_n` for the 7 sites that rewrite one text line every frame, a scan of 64 bytes; full scan every 64th picture; `logic_test.py` checks every change against its mark) | applied | picture 62.2k -> 52.6k (seed 1), 59.7k -> 50.5k (seed 2) |
+| `static_write` for `$4000`/`$4800`/`$4900` | applied | logic 54.7k -> 52.8k (`logic_test.py`) |
+| Native `$8B30` (sprite RAM builder, lock-step checked, falls back to the translation for the not-covered cocktail case) | applied | logic 52.8k -> 50.8k (`logic_test.py`); render_test logic 49.1k -> 45.1k |
+| `call_summaries`, `fast_forms`, `ret_weights`, `fixed_slots`, flat window (no guards) | applied before | - |
+| Sprite programs (reordered-source passes), per-slot sprite cache, damage only on drawn groups (sprite-only row restore), guard rows | applied before | - |
+| `video_inline` | n/a: video RAM stores are plain RAM stores, marked by `after` instead | - |
+| Idle flags dropped | n/a: the idle point is a native | - |
+| Tile row restore with 2- and 4-line passes (fewer register pokes) | rejected | 4 lines = 512 bus cycles (over the 256 rule); 2 lines 54.8k vs 52.6k: the old one-line pass already pokes the addresses once per four planes |
+| Hardware scroll, twin lines, palette stamps, frozen colour cycling, smaller layer as pieces, HUD image, contour restores | n/a: no scrolling, one layer, no cycling | - |
+| Native sound tick, `push_state`, `main_dispatch` | not done: ~15k + 5k spread over many instructions; no single hot routine | - |
+| Spreading redraws, MAX_SKIPS | n/a: the redraw is small after the marks | - |
+
+Hatari (`hatari.ps1 -Frames 3000 -Sound 1`): logic 58.3 arcade frames a second (96%, as before: the logic is not what
+limits it), **37.7 pictures a second** (2,264 of 3,001 VBLs; was 34.2 at the start of the audit). Exact in
+`logic_test.py` (seeds 1, 3, 9, 14, 19, 21, 22, 23, 24, 26 over 16,000 frames), `render_test.py` (seeds 1, 2, 24) and
+`sprite_test.py`.
 
 Techniques other ports use that may apply:
 [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).

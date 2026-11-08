@@ -111,10 +111,15 @@ def cheats(seed, frame, m, state):
         mem[0x508A] = 0                              # finish this stage now
 
 
+VRAM_W = [False]                   # set by io() when an instruction writes the video RAM ($5800-$5FFF): the writer sites
+
+
 def io(a, rw):
     """the accesses the translation sends through the runtime: the I/O ($0000, $4000-$4FFF), the unmapped space and
     stores to the ROM; RAM ($5000-$5FFF, the video RAM too: render.s compares it with what it drew) and the ROM's
     reads are plain memory"""
+    if rw == 'w' and 0x5800 <= a < 0x6000:
+        VRAM_W[0] = True
     return not (0x5000 <= a < 0x6000 or a >= 0x8000 and rw == 'r')
 
 
@@ -125,6 +130,17 @@ def main():
     m = YieArPort(*dsws(seed))
     m.boot()                                         # (the self-test is not covered)
     cov = Cover6809(m.cpu, io=io)
+    vsites = set()                                   # the instructions that write the video RAM (gen.py: a mark after each)
+    step0 = cov.step
+
+    def step():
+        pc = m.cpu.pc
+        VRAM_W[0] = False
+        n = step0()
+        if VRAM_W[0]:
+            vsites.add(pc)
+        return n
+    cov.step = m.cpu.step = step
     m.run_to_idle()                                  # (the init from $8000 is)
     m.booted = True
     video = Video()
@@ -157,7 +173,7 @@ def main():
             if st and not v & 2:
                 phrases[data] += 1
             st = v >> 1 & 1
-    d.update({'pens': pens, 'sprites': sprites, 'phrases': phrases, 'seed': seed, 'frames': frames})
+    d.update({'vsites': vsites, 'pens': pens, 'sprites': sprites, 'phrases': phrases, 'seed': seed, 'frames': frames})
     out.write_bytes(pickle.dumps(d))
     print(out, len(cov.exec), 'pcs')
 

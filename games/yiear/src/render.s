@@ -242,9 +242,28 @@ render_tiles:
 .cp:	move.l	(a0)+,(a1)+
 	dbf	d5,.cp
 	bra	.done
-.diff:	lea	VRAM,a0
+.diff:	; scanned only after a write to the video RAM: `st vram_w` after each writer site; the sites that rewrite the same text
+	; every frame (gen.py NOISY: bytes $598C-$59B1) set vram_n and cost a scan of $5980-$59BF only; every 64th picture a
+	; full scan in case a writer is missing
+	lea	VRAM,a0
 	lea	tile_vram,a1
-	moveq	#64-1,d5		; the scan: eight CMPMs a block (Duff's device: re-entered at the long after a change)
+	move.l	#VRAM+2048,scan_end
+	moveq	#64-1,d5
+	subq.b	#1,vram_chk
+	beq.s	.full
+	tst.b	vram_w
+	bne.s	.full
+	tst.b	vram_n
+	beq	.done
+	sf	vram_n
+	lea	$180(a0),a0
+	lea	$180(a1),a1
+	move.l	#VRAM+$1C0,scan_end
+	moveq	#2-1,d5
+	bra.s	.blk
+.full:	move.b	#64,vram_chk
+	sf	vram_w
+	sf	vram_n
 .blk:
 	rept	8
 	cmpm.l	(a0)+,(a1)+
@@ -276,7 +295,7 @@ render_tiles:
 .wd:	movem.l	(sp)+,d5/d7/a0-a1
 	addq.l	#4,a0
 	addq.l	#4,a1
-	move.l	#VRAM+2048,d0
+	move.l	scan_end,d0
 	sub.l	a0,d0
 	lsr.l	#2,d0			; the longs left
 	beq.s	.done
@@ -1184,6 +1203,11 @@ guard_dirty:	ds.b	4			; per buffer: bit 0 the top guard lines, bit 1 the bottom 
 spr_guard:	ds.b	1
 frame_ready:	ds.b	1
 	even
+vram_w:	ds.b	1			; set by the translated writers of the video RAM, cleared by the scan
+vram_chk:	ds.b	1
+vram_n:	ds.b	1			; the noisy writers' mark ($5980-$59BF)
+	even
+scan_end:	ds.l	1
 tile_mode:	ds.w	1			; -1: no picture drawn yet (every cell is drawn)
 row_off:	ds.w	1			; the picture's line 0 in the playfield (render_tiles)
 tile_vram:	ds.b	2048			; the video RAM the playfield was drawn from

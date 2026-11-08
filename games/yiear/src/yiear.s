@@ -599,6 +599,82 @@ main_io_r:
 	move.l	(sp)+,a0
 	rts
 
+; the stores with a static address that gen.py STATIC_WRITE sends here (d5 = the byte): no address compare chain
+; ----------------------------------------------------------------------------------------------------------------------
+; nat_8B30 (tools/gen.py NATIVES): the routine that builds the sprite RAM from the 22 objects at $5030-$51AF, 16 bytes
+; each, called every IRQ ($3000 cycles of 6809 time, 7.7k 68000 cycles translated):
+;   CLRB; LDU #$5030; LDX #$5000; LDA <$C1; ASRA; BCS $8B8A (the cocktail table: not covered, the translation takes it)
+;   loop: [$5400+X] = [U+4]; [$5401+X] = [U+$E]; [X++] = [U+$F]; A = [U+6]; if X < $5026: A += 1 (A -= 1 when <$C1 bit 0)
+;         (pushing and pulling A on the stack); [X++] = A; U += $10; U < $5050: loop; U = $5050 with B = 0 and [$5222] <> 0:
+;         U += $40; X < $5030: RTS; U < $51B0: loop; else U = $5050, B++, loop
+; A B X U, the sprite RAM and the flags (CMPX #$5030's, C clear) at the RTS as the 6809 leaves them (the byte pushed
+; below S is not written).
+; ----------------------------------------------------------------------------------------------------------------------
+nat_8B30:
+	btst	#0,ya_mem+$51C1
+	bne	M008B30_t
+	moveq	#0,d1
+	move.l	#$5030,d4
+	move.l	#$5000,d2
+	lea	ya_mem,a4
+	lea	ya_mem+$400,a1
+	bra.s	.loop
+.l5050:	move.l	#$5050,d4
+	addq.b	#1,d1
+.loop:	move.b	4(a4,d4.w),d0
+	move.b	d0,(a1,d2.w)
+	move.b	$E(a4,d4.w),1(a1,d2.w)
+	move.b	$F(a4,d4.w),(a4,d2.w)
+	addq.w	#1,d2
+	move.b	6(a4,d4.w),d0
+	cmp.w	#$5026,d2
+	bhs.s	.st
+	btst	#0,$51C1(a4)
+	beq.s	.inc
+	subq.b	#1,d0
+	bra.s	.st
+.inc:	addq.b	#1,d0
+.st:	move.b	d0,(a4,d2.w)
+	addq.w	#1,d2
+	add.w	#$10,d4
+	cmp.w	#$5050,d4
+	blo.s	.loop
+	bne.s	.c78
+	tst.b	d1
+	bne.s	.c78
+	move.b	$5222(a4),d0
+	beq.s	.c78
+	add.w	#$40,d4
+.c78:	cmp.w	#$5030,d2
+	bhs.s	.exit
+	cmp.w	#$51B0,d4
+	blo.s	.loop
+	bra.s	.l5050
+.exit:	jmp	M008B89
+
+main_w4000:
+	move.b	d5,ya_ctl
+	rts
+main_w4800:
+	move.b	d5,sn_latch
+	rts
+main_w4900:
+	move.b	sn_latch,d5
+	bsr	snd_sn_w
+	move.l	a0,-(sp)		; (main_io_w's .log: the ring word kind 0 << 8 | value)
+	lea	snd_ring,a0
+	move.l	d6,-(sp)
+	moveq	#0,d6
+	move.b	snd_head,d6
+	add.w	d6,d6
+	moveq	#0,d7
+	move.b	d5,d7
+	move.w	d7,(a0,d6.w)
+	addq.b	#1,snd_head
+	move.l	(sp)+,d6
+	move.l	(sp)+,a0
+	rts
+
 main_io_w:
 	cmp.w	#$5000,d7
 	bhs.s	.ram
