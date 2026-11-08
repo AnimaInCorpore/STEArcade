@@ -217,3 +217,33 @@ Assisted coverage and tests only (random scripted play, MAME's cheats); no natur
 playtest of the picture, no listening test; no PPO profile.  The speed figures are Hatari fast-forward benchmarks
 (autoplay loses its ship often), not a play session.  The 5.4 pictures a second of the 2026-11-07 figures are superseded
 by the 6.8-8.0 of 2026-11-08.  See the [status policy](../../docs/port-status.md); the port is **Experimental / deferred**.
+
+### Playable? Profile and budget (2026-11-08)
+
+Measured in Hatari (4 MB STE, TOS 2.06, `tools/bench.ps1`, invincible build, `AUTOPLAY`, `MAX_SKIP` 3): 25-29 arcade frames a
+second (42-48% of the arcade's 60.6) and 6-7.4 pictures a second, steady over 20,000 VBLs; no CRASH.TXT.  The autoplay is a
+crude scripted pattern (coin, start, moves, fire) with the ship invincible; how far into the game it got was not read out
+(no stage counter in the harness), so "later stages reached" is **not** shown.
+
+The goal of 90% logic and 20 pictures a second is out of reach on an 8 MHz STE for this board, by arithmetic: the three
+translated Z80s cost 165-178k cycles a frame (Musashi, `logic_test.py --prof`); at 60.6 frames that is 10-10.8M cycles a
+second against 8M available, with no picture drawn at all (at most ~45 frames a second, 75%).  A picture costs ~440k
+(of which ~130k is the Blitter copy of the ring), so 20 a second would add 8.8M.
+
+Logic per frame by program (seed 1, 600 frames; the start-up dispatch fill and cache flushes are in these averages):
+main CPU ~57k, sub CPU ~36k, sound CPU ~22k, runtime ~29k in steady state (`sync_copy` of the shared RAM 18k, latch and
+06XX handlers ~6k, the 51XX ~2.5k).  Hot translated regions: the main task dispatcher at `$0460` (12k, `jp (hl)` over 32
+tasks, three times a frame), the sub CPU's sprite-table conversion `$04ED-$0558` (15k), the scroll row copy `$04D1`.
+
+Tried this session and **not** kept:
+* leaves in place (kept: -3.2%);
+* a narrower shared-RAM copy (only the 640 bytes the sub touched over 3 seeds x 3000 frames): -6.4% in Musashi, exact in
+  the lock-step test, but 5% *slower* in Hatari's play (28.8 -> 26.8 arcade frames a second), which means the sub reads or
+  writes more in play than the sampled seeds showed; reverted.  A proper fix is to let the sub CPU address the main CPU's
+  `$7900-$7FFF` directly (one copy of the bytes), which needs the emitter's long mode to take two bases.
+
+Still open for speed: natives for the sprite-table conversion and the task dispatcher (about -10% of the logic, lock-step
+checked), a measured prototype of the vertical hardware scroll (estimated -100k a picture, not built), and the user's
+decision on `MAX_SKIP` (7 gives ~38 arcade frames and ~4.5 pictures a second).  Sound: the WSG's three voices and the player's
+explosion are on the YM, lock-stepped against the reference's registers; the other 54XX noises are not modelled; **nobody
+listened, and no Hatari audio capture was compared with MAME's output.**
