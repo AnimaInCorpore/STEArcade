@@ -25,6 +25,7 @@ TABLE_ENTRIES = 0xFFFF             # (z80_init_dispatch compares words: no pc $F
 IO_REDIRECT = {0x7C00: 0x7A00, 0x7C80: 0x7A80, 0x7D00: 0x7B00, 0x7D80: 0x7B80}      # IN0, IN1, DSW0, DSW1 (the write sides keep their addresses)
 COVER_SEEDS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 COVER = ["cover_%d.pkl" % s for s in COVER_SEEDS]
+INLINE = int(os.environ.get('DK3_INLINE', '8'))   # calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves)
 DMA_BYTES = 0x1A0                   # the chip transfers the block length ($19F) plus one byte
 
 NATIVES = {0x00DD: "nat_otir"}           # src/natives.s
@@ -65,7 +66,7 @@ def load_rom():
 
 def config():
     return z80x.Config(io_read_redirect=IO_REDIRECT, write_hooks=((0x7E85, 0x7E85, "dk3_dma", 0),),
-                       nmi_token=TOKEN, table_entries=TABLE_ENTRIES, block=0x10000, **z80x.FAST)
+                       nmi_token=TOKEN, table_entries=TABLE_ENTRIES, block=0x10000, inline_leaves=INLINE, inline_limit=0xA000, inline_rst=True, inline_jumps=True, **z80x.FAST)
 
 
 def translate_image():

@@ -35,7 +35,7 @@ snd_init:
 	moveq	#snd_lmc_end-snd_lmc-1,d1
 	lsr	#1,d1
 .mw:	move	(a0)+,d0
-	bsr.s	microwire
+	bsr	microwire
 	dbf	d1,.mw
 	endc
 	lea	snd_vars,a0		; the state: voices stopped, queues empty

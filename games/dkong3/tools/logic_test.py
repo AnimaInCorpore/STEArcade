@@ -167,11 +167,13 @@ def main():
     ap.add_argument("--visits", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--dsw0", type=lambda x: int(x, 0), default=0, help="DSW0: coinage, service, cabinet")
+    ap.add_argument("--dsw1", type=lambda x: int(x, 0), default=0, help="DSW1: lives, bonus, difficulty")
     a = ap.parse_args()
     L = Lock()
     print("code instructions:", L.rep["instructions"], "unsupported:", len(L.rep["unsupported"]))
     rnd = random.Random(a.seed)
-    L.set_inputs(0, 0, 0, 0)
+    L.set_inputs(0, 0, a.dsw0, a.dsw1)
     visits = 0
     frame = 0
     joy = 0
@@ -192,7 +194,7 @@ def main():
                 joy = rnd.choice([0, 0, 1, 2, 4, 8, 16, 17, 18, 5, 9])
             in0 = joy | (0x20 if 40 <= frame < 44 else 0)
             in1 = 0x20 if 20 <= frame < 24 else 0                    # coin
-            L.set_inputs(in0, in1, 0, 0)
+            L.set_inputs(in0, in1, a.dsw0, a.dsw1)
             # reference NMI
             cpu = L.ref.cpu
             sp0, pc0 = cpu.sp, cpu.pc
