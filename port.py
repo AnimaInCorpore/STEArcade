@@ -43,10 +43,11 @@ COVER = {
               ("ref/cover.py", [10, 11, 12], 30000),              # 10-12 the rooms 0-6 started by hand in turn (ref/cover.py cheats)
               ("ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
     "yiear": [("ref/cover.py", list(range(1, 12)), 20000),        # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
-              ("ref/cover.py", list(range(12, 27)), 30000),
-              ("ref/cover.py", [27, 28], 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
+              ("ref/cover.py", list(range(12, 27)), 30000),      # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
+              ("ref/cover.py", [27, 28], 30000)],
     "dkong3": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-6 and 11 play, 7 two players, 8-9 DIPs, 10 test mode (service DIP), 12 service button
-               ("ref/cover_pens.py", [1, 2, 3, 4, 5, 6], 12000)],  # the pens the colour fit is trained on
+               ("ref/cover.py", list(range(13, 25)), 30000),       # 13-24: MAME's cheats (credits, lives) and the stage byte $601B poked at each start
+               ("ref/cover_pens.py", list(range(1, 13)), 12000)],  # the pens the colour fit is trained on (7-12: later stages)
     "junofrst": [("ref/cover.py", list(range(1, 17)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play, 13-16 256 lives + wave pokes
                  ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
@@ -124,6 +125,8 @@ TESTS = {
                ("tools/build.py", ["--sim"], None),
                ("tools/logic_test.py", ["{n}"], 3000),
                ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+               ("tools/logic_test.py", ["8000", "--seed", "2", "--cheat", "--quiet"], None),   # credits, lives and the stages 0-2 poked
+               ("tools/render_test.py", ["4000", "--seed", "1", "--cheat", "--start", "100", "--every", "3"], None),
                ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
                ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
                ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, guards, 64 KB crossings, both orientations

@@ -10,7 +10,7 @@
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 3				; arcade frames in a row that are not drawn while the game is behind
+MAX_SKIP = 5				; arcade frames in a row that are not drawn while the game is behind (2026-11-08, Hatari AUTOPLAY: 3 -> 53.0, 5 -> 56.2 arcade frames a second, pictures 26.9 -> 28.1)
 	endc
 	ifnd FRAMES
 FRAMES = 0
@@ -284,11 +284,17 @@ vbl:
 	ifnd NOSOUND
 	bsr	snd_mix			; (the sound ring brought up to the DMA's position)
 	endc
+	ifd SNDTEST
+	bsr	snd_script_step
+	endc
 	ifnd PLAYBACK
 	bsr	jagpad_poll
 	move.b	in0_low,d0		; (active high on the Z80 side: the keyboard's and joysticks' bits inverted, the pads or'd)
 	not.b	d0
 	or.b	jp_in,d0
+	move.b	jp_in+1,d1		; (the second pad's directions and fire move the same Stanley: not its coins)
+	and.b	#$1F,d1
+	or.b	d1,d0
 	move.b	d0,IO_IN0
 	move.b	in1_low,d0
 	not.b	d0
@@ -300,6 +306,21 @@ vbl:
 	moveq	#0,d0
 	move.w	isr_count,d0
 	divu	#4000,d0
+	ifd CHEAT				; (-D CHEAT=1: MAME's cheats for a long run: lives $601A, and the stage byte $601B poked while a game starts,
+	moveq	#0,d1				;  the stage = the period's number mod 3; the play is the same)
+	move.w	d0,d1
+	move.b	#6,G_Z80+$601A
+	move.b	#$63,G_Z80+$6BF1
+	swap	d0
+	cmp.w	#764,d0
+	blo.s	.nch
+	cmp.w	#900,d0
+	bhs.s	.nch
+	divu	#3,d1
+	swap	d1
+	move.b	d1,G_Z80+$601B
+.nch:	swap	d0
+	endc
 	swap	d0
 	cmp.w	#700,d0
 	blo.s	.ap1
@@ -483,6 +504,7 @@ acia_isr:
 compose_inputs:
 	move.b	in0_kbd,d0
 	or.b	p1_joy,d0
+	or.b	p2_joy,d0		; (an upright cabinet has one set of controls: player 2's joystick moves the same Stanley; IN1 gets them too)
 	not.b	d0
 	move.b	d0,in0_low
 	move.b	in1_kbd,d0
@@ -641,6 +663,16 @@ dbg_counters:
 	lea	dbg_buf,a2
 	moveq	#20,d0
 	bsr	dbg_write
+	ifd SNDDBG
+	lea	dbg_name4,a1
+	lea	snd_dbg,a2
+	move.l	#4096,d0
+	bsr	dbg_write
+	lea	dbg_name5,a1
+	lea	snd_dbg_ring,a2
+	move.l	#2048,d0
+	bsr	dbg_write
+	endc
 	rts
 dbg_write:				; a1 = the name, a2 = the data, d0.l = its length
 	movem.l	d0/a2,-(sp)
@@ -666,6 +698,10 @@ dbg_name2:
 	dc.b	"COUNTERS.BIN",0
 dbg_name3:
 	dc.b	"RATE.BIN",0
+dbg_name4:
+	dc.b	"SNDDBG.BIN",0
+dbg_name5:
+	dc.b	"SNDRING.BIN",0
 	even
 	endc
 

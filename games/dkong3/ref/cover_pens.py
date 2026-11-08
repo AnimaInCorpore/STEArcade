@@ -21,6 +21,11 @@ for f in range(nframes):
     if jleft == 0:
         joy = rnd.choice([0, 0, 1, 2, 4, 8, 16, 17, 18, 5, 9, 1, 2, 0]); jleft = rnd.randint(3, 40)
     jleft -= 1
+    if seed >= 7:                                       # later stages: the stage byte $601B poked at each start, lives and credits
+        m.ram[0x6BF1 - 0x6000] = 0x63
+        m.ram[0x601A - 0x6000] = 6
+        if f % 500 in range(63, 200):
+            m.ram[0x601B - 0x6000] = (seed + f // 500) % 3
     m.set_inputs(p1=joy, p2=joy if seed % 5 == 0 else 0, coin=f % 400 == 30, start1=f % 500 in (60, 61, 62), start2=seed % 5 == 0 and f % 500 in (200, 201))
     m.run_frame()
     if f % 10 == 0 and f > 60:

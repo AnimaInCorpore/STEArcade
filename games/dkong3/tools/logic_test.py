@@ -167,6 +167,7 @@ def main():
     ap.add_argument("--visits", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--cheat", action="store_true", help="MAME's cheats on both sides: credits, lives, and the stage poked while a game starts")
     ap.add_argument("--dsw0", type=lambda x: int(x, 0), default=0, help="DSW0: coinage, service, cabinet")
     ap.add_argument("--dsw1", type=lambda x: int(x, 0), default=0, help="DSW1: lives, bonus, difficulty")
     a = ap.parse_args()
@@ -192,8 +193,15 @@ def main():
             frame += 1
             if frame % 7 == 0:
                 joy = rnd.choice([0, 0, 1, 2, 4, 8, 16, 17, 18, 5, 9])
-            in0 = joy | (0x20 if 40 <= frame < 44 else 0)
-            in1 = 0x20 if 20 <= frame < 24 else 0                    # coin
+            in0 = joy | (0x20 if (40 <= frame < 44 or (a.cheat and frame % 500 in (60, 61, 62))) else 0)
+            in1 = 0x20 if (20 <= frame < 24 or (a.cheat and frame % 500 in (30, 31))) else 0                    # coin
+            if a.cheat:
+                pokes = {0x6BF1: 0x63, 0x601A: 6}
+                if frame % 500 in range(63, 200):
+                    pokes[0x601B] = (a.seed + frame // 500) % 3
+                for ad, v in pokes.items():
+                    L.ref.ram[ad - 0x6000] = v
+                    L.mem.w8(BLOCK + ad, v)
             L.set_inputs(in0, in1, a.dsw0, a.dsw1)
             # reference NMI
             cpu = L.ref.cpu

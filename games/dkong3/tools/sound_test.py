@@ -41,7 +41,6 @@ def mix_test(h, clips, pcm, nclips):
     loops at its end, an effect ends); wrapping at the ring's end included.  -> the number of failures"""
     mem, sym = h.mem, h.sym
     ring, mixbuf = sym['snd_ring'], sym['snd_mixbuf']
-    io = h.s.io
     rng = np.random.RandomState(5)
     bad = 0
     loops = [c for c in range(1, nclips + 1) if clips[c][2]]
@@ -64,26 +63,26 @@ def mix_test(h, clips, pcm, nclips):
                 c, pos = voices[v]
                 mem.w32(base, pos)
                 mem.w32(base + 4, clips[c][1])
-                mem.w32(base + 8, clips[c][0] if clips[c][2] else 0)
+                mem.w32(base + 8, clips[c][2])
             else:
                 mem.w32(base, 0)
         wp = int(rng.randint(0, 512)) * 4
-        po = (wp + int(rng.randint(100, 400)) * 4 - 384) & 2047 if trial % 3 else (wp - 128) & 2047
+        dv = int(rng.randint(0, 11))                          # (the VBLs since the last call; more than 8 count as 8)
+        acc = int(rng.randint(0, 200))
         mem.w16(sym['snd_wp'], wp)
-        a = ring + po
-        for off, v in ((0x909, (a >> 16) & 255), (0x90B, (a >> 8) & 255), (0x90D, a & 255)):      # (the DMA's address counter)
-            io[off] = v
-            mem.w8(0xFF8000 + off, v)
+        mem.w16(sym['snd_fc'], (mem.r16(sym['frame_counter'] + 2) - dv) & 0xFFFF)
+        mem.w32(sym['snd_acc'], acc)
+        tot = 6258 * min(dv, 8) + acc
+        n = 4 * (tot // 200)
         before = bytes(mem.r_block(ring, 2048))
         call(h, 'snd_mix')
         after = bytes(mem.r_block(ring, 2048))
-        target = ((po + 384) & 2044)
-        n = (target - wp) & 2044
-        if n > 1024:
-            wp, n = (target - 384) & 2044, 384
+        if mem.r16(sym['snd_wp']) != (wp + n) & 2044 or mem.r32(sym['snd_acc']) != tot % 200:
+            bad += 1
+            print('mix trial %d: wp %d (expected %d), acc %d (expected %d)' % (trial, mem.r16(sym['snd_wp']), (wp + n) & 2044, mem.r32(sym['snd_acc']), tot % 200))
         want = np.zeros(n, int)
         for v, (c, pos) in voices.items():
-            ptr, end, lp = pos, clips[c][1], clips[c][0] if clips[c][2] else 0
+            ptr, end, lp = pos, clips[c][1], clips[c][2]
             data = []
             while len(data) < n and ptr is not None:
                 m = min(n - len(data), end - ptr)
@@ -99,7 +98,7 @@ def mix_test(h, clips, pcm, nclips):
             bad += 1
             d = [i for i in range(2048) if exp[i] != after[i]]
             print('mix trial %d: %d ring bytes differ (first %s), wp %d n %d' % (trial, len(d), d[:4], wp, n))
-    print('snd_mix: 40 trials of the voices added (saturating, loops, ends, the ring wrapping), %d differ' % bad)
+    print('snd_mix: 40 trials of the sample clock and the voices added (saturating, loops, ends, the ring wrapping), %d differ' % bad)
     return bad
 
 
@@ -115,7 +114,9 @@ def main():
     tabs = {k: {int(v): n for v, n in t.items()} for k, t in rep['tabs'].items()}
     nclips = len(rep['clips'])
     clips = [(mem.r32(sym['snd_clips'] + 12 * n) + sym['dk_sound'], mem.r32(sym['snd_clips'] + 12 * n + 4) + sym['dk_sound'],
-              mem.r32(sym['snd_clips'] + 12 * n + 8)) for n in range(nclips + 1)]
+              (mem.r32(sym['snd_clips'] + 12 * n + 8) + sym['dk_sound']) if mem.r32(sym['snd_clips'] + 12 * n + 8) else 0)
+             for n in range(nclips + 1)]
+    ckind = [mem.r8(sym['snd_clipkind'] + n) for n in range(nclips + 1)]
     pcm = (BUILD / 'dkong3_sound.bin').read_bytes()
     # the driver's own tables must be the converter's
     for k, a_ in enumerate(LATCHES):
@@ -141,12 +142,12 @@ def main():
                 eff = tabs['%04x_eff' % LATCHES[k]].get(v, 0)
                 if hold != lh[k]:
                     lh[k] = hold
-                    want[2 * k] = hold
+                    want[3 * (k // 2)] = hold
                     starts += bool(hold)
                 if eff != le[k]:
                     le[k] = eff
                     if eff:
-                        want[2 * k + 1] = eff
+                        want[3 * (k // 2) + 1 + ckind[eff]] = eff
                         starts += 1
         prev_vals = tuple(h.m.snd[a_] for a_ in LATCHES)
         call(h, 'snd_mix')

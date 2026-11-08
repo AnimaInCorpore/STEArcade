@@ -42,7 +42,8 @@ def ste_picture(mem, base):
 
 
 class Harness:
-    def __init__(self, seed, tag='dkong3_sim'):
+    def __init__(self, seed, tag='dkong3_sim', cheat=False):
+        self.cheat = cheat
         run = ROOT / 'run' / tag
         self.s = s = Sim(str(run / 'DKONG3.PRG'), run_dir=run, ram_kib=16384)
         self.sym = sym = {k: v + s.base for k, v in s.symbols(BUILD / (tag + '.map')).items()}
@@ -105,6 +106,14 @@ class Harness:
         """one arcade frame and its picture -> the published buffer's base"""
         m, mem, sym, f = self.m, self.mem, self.sym, self.f
         p1, p2, coin, st1, st2 = self.inputs(f)
+        if self.cheat:                                  # MAME's cheats (credits, lives) and the stage poked while a game starts
+            pokes = {0x6BF1: 0x63, 0x601A: 6}
+            if f % 500 in range(63, 200):
+                pokes[0x601B] = (self.seed + f // 500) % 3
+            for a_, v_ in pokes.items():
+                m.ram[a_ - 0x6000] = v_
+                mem.w8(self.a6 + a_, v_)
+            coin, st1 = coin or f % 500 == 30, st1 or f % 500 in (60, 61, 62)
         m.set_inputs(p1=p1, p2=p2, coin=coin, start1=st1, start2=st2)
         mem.w8(self.a6 + 0x7A00, m.in0)
         mem.w8(self.a6 + 0x7A80, m.in1)
@@ -150,11 +159,12 @@ def main():
     ap.add_argument('--start', type=int, default=0, help='compare from this frame on')
     ap.add_argument('--every', type=int, default=1)
     ap.add_argument('--shots', default=None)
+    ap.add_argument('--cheat', action='store_true', help='credits, lives and the stage by RAM pokes (tools/logic_test.py --cheat)')
     ap.add_argument('--stop', action='store_true', help='stop at the first difference')
     ap.add_argument('--tag', default='dkong3_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     pmap = np.frombuffer((BUILD / 'tm_penmap.bin').read_bytes(), np.uint8)
-    h = Harness(args.seed, args.tag)
+    h = Harness(args.seed, args.tag, args.cheat)
     bad_frames = checked = 0
     for f in range(args.frames):
         base = h.frame()

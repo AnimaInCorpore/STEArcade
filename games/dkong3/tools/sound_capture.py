@@ -57,7 +57,7 @@ def jobs():
     for a, vals in obs.items():
         holds = sorted(v for v, h in vals.items() if h >= 30)
         for v in sorted(vals):
-            out["P_%04x_%02x" % (a, v)] = ("0:%04x=%d 3:%04x=0" % (a, v, a), 4.0)
+            out["P_%04x_%02x" % (a, v)] = ("0:%04x=%d 3:%04x=0" % (a, v, a), 14.0)
         for h in holds:
             out["H_%04x_%02x" % (a, h)] = ("0:%04x=%d %d:%04x=0" % (a, h, f(5.0), a), 7.0)
             for v in sorted(vals):
