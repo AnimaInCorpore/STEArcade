@@ -71,7 +71,7 @@ def main():
         o.writeframes((np.clip(ste, -1, 1) * 32767).astype(np.int16).tobytes())
     om, os_ = onset(mame), onset(ste)
     print("first sound: MAME %.2f s, Hatari %.2f s (audio of %.1f s)" % (om / RATE, os_ / RATE, len(ste) / RATE))
-    print("%-4s %-10s %-10s %7s %7s %7s" % ("id", "MAME", "Hatari", "cents", "cosine", "chroma"))
+    print("%-4s %-10s %-10s %7s %7s %7s %8s" % ("id", "MAME", "Hatari", "cents", "cosine", "chroma", "rms dB"))
     good = 0
     k0 = int(round((om / RATE * sm.FPS - sm.START) / sm.STEP))      # (the piece the first sound belongs to: the same one in Hatari)
     print("the first sound is the piece of id %d" % IDS[k0])
@@ -87,7 +87,8 @@ def main():
             continue
         c0, ch = sm.cosine(s1, s2), sm.cosine(sm.chroma(s1), sm.chroma(s2))
         cents = 1200 * np.log2(ps / pm) if pm and ps else float("nan")
-        print("%-4d %7.0f Hz %7.0f Hz %7.0f %7.2f %7.2f" % (i, pm, ps, cents, c0, ch))
+        rms = lambda x: float(np.sqrt((x ** 2).mean())) + 1e-9
+        print("%-4d %7.0f Hz %7.0f Hz %7.0f %7.2f %7.2f %8.1f" % (i, pm, ps, cents, c0, ch, 20 * np.log10(rms(xs) / rms(xm))))
         good += bool(pm and ps and c0 > 0.7)
     print("%d pieces alike (semitone spectra cosine > 0.7); the pieces of ids that are silent in both are not listed" % good)
 

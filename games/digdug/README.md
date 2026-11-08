@@ -8,13 +8,11 @@ programs (`namco51.zip`, `namco53.zip`; never blank stand-ins): the 51XX as in G
 Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles and the 1-bit characters of the tile RAM
 (the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
 
-Status: **Incomplete** (root README): the game boots, runs its attract mode and plays in the simulator (a
-scripted game of 8000 frames) and in Hatari (the screenshot above: a scripted game, `-D AUTOPLAY`, 3600 VBLs
-without a crash; the STE shows 277 of the 288 lines, so the lives and the round line at the bottom are cut); no full natural playthrough, speed see below, the program
-loads 3.66 MB and runs in Hatari with 4 MB.
-
-Speed (Hatari, STE, 4 MB, `tools/bench.ps1`, `-D RATE=500 -D AUTOPLAY=1400`, 6000 VBLs of the scripted game; 2026-11-08, the date of the speed-audit commit): the logic runs at every VBL (82% of the arcade's 60.6 Hz) and 32.6 pictures a
-second on average (17.9-49).
+Status: **Incomplete** (root README): plays in Hatari (STE, 4 MB, TOS 2.06) with the arcade's logic at 83-103% (about 90% on
+average) and 20-34 pictures a second (25 on average) in a 13,600-VBL run of the chasing bot (2026-11-08, below); no crash in
+two such runs (24,600 and 13,600 VBLs, several games); the bot reaches round 1-2 only, so the later rounds are not run
+natively (the reference machine's bot reached round 2 in 14,000 frames); the STE shows 277 of the 288 lines, so the lives and
+the round line at the bottom are cut; the program loads 3.66 MB.
 
 ![Dig Dug on the STE](docs/screenshot.png)
 
@@ -35,7 +33,9 @@ Hatari runs it with 4 MB (`--memsize 4`, what `tools/windows/run.ps1` passes); t
 ## Controls
 
 Cursor keys (or a joystick / pad): move (four directions); Space, Control, Alternate, joystick fire, pad A/B/C: pump;
-1 / 2: start; 5: coin; Esc quits.  The DIP switches are the factory settings (`dswa` / `dswb` in `src/digdug.s`: three
+1 / 2: start (player 2 plays on the same controls: the cabinet is upright); 5 / 6: coin 1 / 2 (the same coinage);
+Esc quits.  Every input the arcade has reaches the game except the second player's own stick and button (a cocktail
+cabinet's: `dswb` bit 2 is set for an upright one) and the service switch.  The DIP switches are the factory settings (`dswa` / `dswb` in `src/digdug.s`: three
 lives, bonus at 20K and 60K, one coin a credit, easy, upright); the cocktail cabinet's screen flip is not drawn.
 
 ## State
@@ -124,14 +124,21 @@ The WSG's three voices become the YM2149's square waves through Galaga's mapping
 
 Current figures first (see the top for the headline); then the audit of 2026-11-08 (partial) and the older measurements.
 
-* **Speed** (Hatari with 14 MB (an earlier run) and with 4 MB gave the same figures, `tools/bench.ps1`: `-D RATE=500 -D AUTOPLAY=1400`, fast forward,
-  6000 VBLs of the scripted game): the game's logic runs at every VBL (one arcade frame a VBL: 82% of the arcade's 60.6
-  Hz); **pictures a second per 500 VBLs 28.9 on average at the start (12-48; 12 in the busiest windows), now 32.6 (17.9-49)**.
-  The scripted moves follow the CPU budget, so windows are comparable as ranges only.  Where the time goes (simulator,
-  `tools/profile.py`, a frame of 160,000 cycles in play): the game's interrupts 92-100k (sound CPU 19.8k + copies 6k,
-  main CPU 25k, 51XX/53XX + the 06XX glue 19k, sub CPU 10k), a picture ~40k per frame (sprites 28k: draw_sprites, Blitter,
-  entry loop, draw_part; the tile scan 4k), the rest idle spin.  Still short of 25 pictures a second in the busiest
-  windows (17.9, 18.7).
+* **Speed, 2026-11-08** (Hatari 2.6.1 pinned build, STE, 4 MB, TOS 2.06, fast forward, `tools/bench.ps1`: `-D RATE=500`
+  counters every 500 VBLs): **the chasing bot** (`-D AUTOPLAY=1400 -D BOTCHASE=1`: a coin and a start every 3000 VBLs, then
+  `bot_chase` walks to the nearest Pooka / Fygar and pumps; 24,600 VBLs, 8 games of 2 lives each round, score ~900, rounds 1-2,
+  no crash): the arcade's frames a second as % of 60.6 per 500 VBLs 83-103, average 90 (83 = one game frame a VBL: the
+  sixth frame of five VBLs is dropped when the VBL is late); pictures a second 20-34, **average 24.9, busy stretches 20-22**
+  (the same 13 windows repeat: the bot's game is deterministic).  The scripted game (`-D AUTOPLAY=1400`, 6000 VBLs): logic
+  83-103%, pictures 19.8-34, average 27.7.  Before today: logic 82% (one frame a VBL), pictures 28.9 / 32.6 on average (12-17.9 busy).
+  What changed (simulator cycles in the game's interrupts a frame, scripted play): leaves in place 102.4k -> 96.8k, the sub
+  CPU's sprite copy native 6.3k -> 2.0k, the sound sequencer native (`nat_x04d5`, $04D5: 15% of the interrupts) 100.8k -> 89.8k,
+  the sound CPU's RAM copies with movem 6.0k -> 3.6k; **six game frames in five VBLs** (`round5`: every fifth VBL runs a second
+  round of the interrupts, the sound CPU, the 51XX's frame; the YM is written after the later one): the logic from 82% to 90%.
+  The sound pitches did not change; the tune tempo is the arcade's now.  A frame of 160,000 cycles: interrupts 90-100k a round
+  (sound CPU 19-22k + copies and YM 8k, main CPU 25k, 51XX/53XX + 06XX glue 19k, sub CPU 10k), a picture ~44k (sprites 28k).
+  `NOSIXFIVE=1` builds the one-round schedule (the reference machine's: `schedule_test` needs it).  Still open: the 53XX's
+  fixed answer could be cached (5-6k), the sprites' reordered-source passes (not tried), 25 pictures a second in the busy stretches.
 * **Memory**: the program loads 3.66 MB (text + data + BSS + 256 bytes; `tools/release.py` MAX_LOAD is 3.7 MB) and runs in
   Hatari with `--memsize 4` (the newer statement than the 14 MB above), the bench's figures identical.  It was 4.27 MB: the three CPUs' 256 KB dispatch tables
   (byte-swapped pc index, sparse) now share one in columns (the sub CPU at +$41, the sound CPU at +$82) and the sub / sound
@@ -167,6 +174,8 @@ Simulator cycles in the game's interrupts, scripted play (`tools/profile.py`; Ha
 | `tools/schedule_test.py` | the STE's tile / sprite RAM against the reference's schedule |
 | `tools/render_test.py` | the shown screen against the reference renderer at frozen moments |
 | `tools/sprite_test.py` | the sprites at the edges, 16 shifts, flips, sizes, holes, 64 KB crossings |
+| `tools/bot.py`, `tools/ramshot.py` | the chasing bot (reference machine; `decide`), a RAM.BIN of a Hatari run drawn by the reference renderer |
+| `tools/profile.py`, `callcount.py`, `native_test.py`, `sound_mame.py`, `sound_hatari.py`, `bench.ps1` | the sampling profiler, call counts, the natives against the Z80, the sound against MAME and in Hatari, the Hatari rate bench |
 | `tools/sound_test.py` | snd_ym (the 68000) against `sound.py` (the model) every frame |
 
 ## Lessons
@@ -194,7 +203,13 @@ Simulator cycles in the game's interrupts, scripted play (`tools/profile.py`; Ha
 
 ## Verification
 
-The checks above are independent logic / render checks; no natural playthrough has been recorded and `port.py ppo` has no Dig Dug
-profile.  Hatari: looked at in AVI captures only (no sound, no keyboard session, no timing); sound never listened to over a
-whole game; the reordered-source sprite method not tried.  Dig Dug stays in `NOT_RELEASED` until the user decides.  See the
-[status policy](../../docs/port-status.md); the port is **Incomplete**.
+Dated 2026-11-08.  Independent checks: the reference machine against MAME (pens, picture), the translation's schedule against
+the reference (`schedule_test`), the picture against the reference renderer (`render_test`, 0 differing pixels at four frozen
+moments of play, `sprite_test` 2664 cases), the natives against the Z80 (`native_test`: 300 + 1200 random cases), the YM
+registers against `sound.py` (`sound_test`), and the sound's pitches against MAME's audio (`sound_mame.py`) and in Hatari
+(`sound_hatari.py`: ids 10-13 and 15 alike, levels 4-7 dB above MAME's, which is not comparable: different mixers).  Coverage:
+18 seeds, the chasing bot among them (17-19: 8 games each, 122 new main-CPU pcs over the others in the first one).
+Played in Hatari: the bot, 24,600 VBLs, no crash.  **Not done**: a long run that reaches rounds 3 and later (the bot dies
+or stalls in rounds 1-2; no RAM cheat for the round number was found: `$840F` is not the displayed round); no human
+playthrough; nobody has listened to a whole game; no RAM lock-step test; the reordered-source sprite method.  Dig Dug stays in
+`NOT_RELEASED` until the user decides.  See the [status policy](../../docs/port-status.md); the port is **Incomplete**.
