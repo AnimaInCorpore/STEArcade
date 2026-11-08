@@ -694,6 +694,10 @@ class RthunderPort(Rthunder):
 
     def run_frame_port(self):
         self.run_others()
+        self.run_cpus()
+
+    def run_cpus(self):
+        """the two 6809 CPUs' part of a frame (the vertical blank, the MCU and the sound CPU: run_others)"""
         for i in (0, 1):
             c = self.cpus[i]
             assert self.idle(i), "cpu %d not idle (pc %04X)" % (i + 1, c.pc)
@@ -770,7 +774,7 @@ class RthunderRule(RthunderPort):
     """RthunderPort with a rule for who runs first: cpu1 when `$1604 != $1605` (cpu1 has counted a sub-step that cpu2
     has not taken yet), else cpu2.  One flip at port frame 2168 (found by search with rollback) is what the attract
     mode needed to run 12000 frames."""
-    def run_frame_port(self):
+    def run_cpus(self):
         s = self.shared
         self.ORDER = (0, 1) if s[0x1604] != s[0x1605] else (1, 0)
-        super().run_frame_port()
+        super().run_cpus()
