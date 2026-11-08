@@ -524,6 +524,41 @@ mk_inc1u:
 .ram:	addq.b	#1,(a3,d7.w)
 	jmp	M00C9D0
 
+	ifd AUTOPLAY
+; ap_rooms: between two arcade frames (mk_wait's delivery): player 1's lives kept; from frame 900 of each 4000 every 500 frames
+; the next room (0-6) is started by hand (ref/cover.py seeds 10-12: ROOM $2971, STATE $2908 = 1)
+ap_rooms:
+	moveq	#0,d0
+	move.w	isr_count,d0
+	divu	#4000,d0
+	swap	d0
+	cmp.b	#2,mk_mem+$2970			; lives kept (ref/cover.py seeds 10-12)
+	bhs.s	.ar8
+	move.b	#3,mk_mem+$2970
+.ar8:	cmp.w	#900,d0				; from frame 900 every 500 frames the next room (0-6) is started by hand
+	blo.s	.ar3
+	ifd AP_ROOM				; (-D AP_ROOM=k: only room k, once, for a rate per room)
+	cmp.w	#900,d0
+	bne.s	.ar3
+	move.b	#AP_ROOM,mk_mem+$2971
+	move.b	#1,mk_mem+$2908
+	rts
+	endc
+	move.w	d0,d1
+	sub.w	#900,d1
+	and.l	#$FFFF,d1
+	divu	#500,d1
+	swap	d1
+	tst.w	d1
+	bne.s	.ar3
+	swap	d1
+	cmp.w	#7,d1
+	bhs.s	.ar3
+	move.b	d1,mk_mem+$2971
+	move.b	#1,mk_mem+$2908
+.ar3:	rts
+	endc
+
 mk_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7
@@ -587,6 +622,9 @@ mk_wait:
 	subq.b	#1,vbl_pending
 	st	frame_dirty
 	addq.w	#1,isr_count
+	ifd AUTOPLAY
+	bsr	ap_rooms
+	endc
 	movem.l	(sp)+,d0-d4/a2-a6
 	tst.b	mk_latch+7		; the IRQ enable
 	beq.s	.none
@@ -965,6 +1003,14 @@ crash_common:
 	bsr	hex_word
 	move.b	#' ',(a0)+
 	dbf	d2,.stack
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	move.l	crash_regs+13*4,a1	; the 6809's stack (a5): 40 bytes
+	moveq	#39,d2
+.s6:	moveq	#0,d1
+	move.b	(a1)+,d1
+	bsr	hex_byte
+	dbf	d2,.s6
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
 	lea	own_stack_top,sp
