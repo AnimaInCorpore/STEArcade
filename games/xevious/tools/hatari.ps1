@@ -4,7 +4,7 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Pac-Man's.
 #   powershell -File games/xevious/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name xevious_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 600, [int]$Every = 100, [string]$Name = "xevious_hatari", [int]$Avi = 1,
+param([int]$Frames = 600, [int]$Every = 100, [string]$Name = "xevious_hatari", [int]$Avi = 1, [string]$Sound = "off", [string]$Codec = "bmp", [int]$AviFps = 0,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1', '-D', 'RATE=250'))
 $ErrorActionPreference = "Stop"
 # (the uncompressed AVI is ~1.3 MB a frame and the SSD has no DRAM cache: stills of short runs only; long runs: bench.ps1)
@@ -24,9 +24,9 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'RATE.BIN', 'xevious.avi')) {
 }
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$Sound,'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
-if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\xevious.avi") }
+if ($Avi) { $args += @('--avirecord','true','--avi-vcodec',$Codec,'--avi-file',"$out\xevious.avi"); if ($AviFps) { $args += @('--avi-fps',"$AviFps") } }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `
     -WorkingDirectory $out -ArgumentList ($args + "$out\XEVIOUS.PRG")
 try {
@@ -37,7 +37,7 @@ try {
 if (Test-Path "$out/CRASH.TXT") { "--- CRASH.TXT"; Get-Content "$out/CRASH.TXT" }
 if (Test-Path "$out/RATE.BIN") {
     $b = [IO.File]::ReadAllBytes("$out/RATE.BIN")
-    for ($i = 0; $i -lt $b.Length; $i += 6) { "VBL {0}: pictures {1}, arcade frames {2}" -f ($b[$i]*256+$b[$i+1]), ($b[$i+2]*256+$b[$i+3]), ($b[$i+4]*256+$b[$i+5]) }
+    for ($i = 0; $i -lt $b.Length; $i += 8) { "VBL {0}: pictures {1}, arcade frames {2}, area {3}" -f ($b[$i]*256+$b[$i+1]), ($b[$i+2]*256+$b[$i+3]), ($b[$i+4]*256+$b[$i+5]), ($b[$i+6]*256+$b[$i+7]) }
 } else { "no RATE.BIN (the program did not reach its end)" }
 if ($Avi -and (Test-Path "$out/xevious.avi")) {
     & ffmpeg -v error -i "$out/xevious.avi" -vf "select=not(mod(n\,$Every))" -fps_mode passthrough "$out/still_%03d.png"

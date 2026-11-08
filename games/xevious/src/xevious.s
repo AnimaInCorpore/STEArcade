@@ -391,6 +391,12 @@ hbl:
 	rte
 
 	ifd AUTOPLAY
+	ifnd AP_COIN
+AP_COIN = 300				; the VBL of the coin (-D AP_COIN=n / AP_START=n for the sound capture)
+	endc
+	ifnd AP_START
+AP_START = AP_COIN+100
+	endc
 ap_dirs:	dc.b	$02,$03,$01,$09,$08,$0c,$04,$06	; right, up-right, up, up-left, left, down-left, down, down-right
 	endc
 
@@ -423,18 +429,18 @@ vbl:
 	clr.b	in1_kbd
 	clr.b	in0_kbd
 	clr.b	in2_kbd
-	cmp.l	#300,d0
+	cmp.l	#AP_COIN,d0
 	blo.s	.ap_done
-	cmp.l	#304,d0
+	cmp.l	#AP_COIN+4,d0
 	bhs.s	.ap1
 	move.b	#$10,in1_kbd		; coin 1
-.ap1:	cmp.l	#400,d0
+.ap1:	cmp.l	#AP_START,d0
 	blo.s	.ap_done
-	cmp.l	#404,d0
+	cmp.l	#AP_START+4,d0
 	bhs.s	.ap2
 	move.b	#$04,in1_kbd		; start 1
 	bra.s	.ap_done
-.ap2:	cmp.l	#460,d0
+.ap2:	cmp.l	#AP_START+60,d0
 	blo.s	.ap_done
 	move.l	d0,d1
 	lsr.l	#4,d1
