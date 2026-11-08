@@ -112,6 +112,11 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
+    ("jailbrek", "JAILBREK.PRG", "Jail Break (Konami 1986)",
+     "work in progress, no sound yet: exact logic, the 240 x 224 picture in 16 fitted colours",
+     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,
+"
+     "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
      "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
