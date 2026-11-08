@@ -4,9 +4,11 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Pac-Man's.
 #   powershell -File games/xevious/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name xevious_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "xevious_hatari", [int]$Avi = 1,
+param([int]$Frames = 600, [int]$Every = 100, [string]$Name = "xevious_hatari", [int]$Avi = 1,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1', '-D', 'RATE=250'))
 $ErrorActionPreference = "Stop"
+# (the uncompressed AVI is ~1.3 MB a frame and the SSD has no DRAM cache: stills of short runs only; long runs: bench.ps1)
+if ($Avi -and $Frames -gt 800) { throw "AVI recording only for short runs (-Frames <= 800); use bench.ps1 for long ones" }
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
 $arcade = if ($env:F030ARCADE) { $env:F030ARCADE } else { "C:/Arbeit/F030Arcade" }
