@@ -23,13 +23,15 @@ def fingerprint(data):
 def extract(game, archive, derived=None):
     manifest = json.loads((game_dir(game) / "docs" / "rom_manifest.json").read_text())
     files = {}
-    with zipfile.ZipFile(ROMS / archive) as z:
-        for entry in manifest:
-            data = z.read(entry.get("member", entry["name"]))     # member: its path in a merged archive (Pac-Man)
-            got = fingerprint(data)
-            if any(got[k] != entry[k] for k in ("size", "crc32", "sha1")):
-                sys.exit("%s: %s does not match the manifest (%s, expected %s)" % (archive, entry["name"], got, entry))
-            files[entry["name"]] = data
+    for entry in manifest:
+        # member: its path in a merged archive (Pac-Man); archive: another archive (Dig Dug's Namco MCU sets)
+        arch = entry.get("archive", archive)
+        with zipfile.ZipFile(ROMS / arch) as z:
+            data = z.read(entry.get("member", entry["name"]))
+        got = fingerprint(data)
+        if any(got[k] != entry[k] for k in ("size", "crc32", "sha1")):
+            sys.exit("%s: %s does not match the manifest (%s, expected %s)" % (arch, entry["name"], got, entry))
+        files[entry["name"]] = data
     for name, parts in (derived or {}).items():
         files[name] = b"".join(files[p] for p in parts)
     out = EXTRACTED / game

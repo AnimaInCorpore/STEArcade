@@ -1,0 +1,130 @@
+[
+ {
+  "name": "dd1a.1",
+  "size": 4096,
+  "crc32": "a80ec984",
+  "sha1": "86689980410b9429cd7582c7a76342721c87d030"
+ },
+ {
+  "name": "dd1a.2",
+  "size": 4096,
+  "crc32": "559f00bd",
+  "sha1": "fde17785df21956d6fd06bcfe675c392dadb1524"
+ },
+ {
+  "name": "dd1a.3",
+  "size": 4096,
+  "crc32": "8cbc6fe1",
+  "sha1": "57b8a5777f8bb9773caf0cafe5408c8b9768cb25"
+ },
+ {
+  "name": "dd1a.4",
+  "size": 4096,
+  "crc32": "d066f830",
+  "sha1": "b0a615fe4a5c8742c1e4ef234ef34c369d2723b9"
+ },
+ {
+  "name": "dd1a.5",
+  "size": 4096,
+  "crc32": "6687933b",
+  "sha1": "c16144de7633595ddc1450ddce379f48e7b2195a"
+ },
+ {
+  "name": "dd1a.6",
+  "size": 4096,
+  "crc32": "843d857f",
+  "sha1": "89b2ead7e478e119d33bfd67376cdf28f83de67a"
+ },
+ {
+  "name": "dd1.7",
+  "size": 4096,
+  "crc32": "a41bce72",
+  "sha1": "2b9b74f56aa7939d9d47cf29497ae11f10d78598"
+ },
+ {
+  "name": "dd1.9",
+  "size": 2048,
+  "crc32": "f14a6fe1",
+  "sha1": "0aa63300c2cb887196de590aceb98f3cf06fead4"
+ },
+ {
+  "name": "dd1.15",
+  "size": 4096,
+  "crc32": "e22957c8",
+  "sha1": "4700c63f4f680cb8ab8c44e6f3e1712aabd5daa4"
+ },
+ {
+  "name": "dd1.14",
+  "size": 4096,
+  "crc32": "2829ec99",
+  "sha1": "3e435c1afb2e44487cd7ba28a93ada2e5ccbb86d"
+ },
+ {
+  "name": "dd1.13",
+  "size": 4096,
+  "crc32": "458499e9",
+  "sha1": "578bd839f9218c3cf4feee1223a461144e455df8"
+ },
+ {
+  "name": "dd1.12",
+  "size": 4096,
+  "crc32": "c58252a0",
+  "sha1": "bd79e39e8a572d2b5c205e6de27ca23e43ec9f51"
+ },
+ {
+  "name": "dd1.11",
+  "size": 4096,
+  "crc32": "7b383983",
+  "sha1": "57f1e8f5171d13f9f76bd091d81b4423b59f6b42"
+ },
+ {
+  "name": "dd1.10b",
+  "size": 4096,
+  "crc32": "2cf399c2",
+  "sha1": "317c48818992f757b1bd0e3997fa99937f81b52c"
+ },
+ {
+  "name": "136007.113",
+  "size": 32,
+  "crc32": "4cb9da99",
+  "sha1": "91a5852a15d4672c29fdcbae75921794651f960c"
+ },
+ {
+  "name": "136007.111",
+  "size": 256,
+  "crc32": "00c7c419",
+  "sha1": "7ea149e8eb36920c3b84984b5ce623729d492fd3"
+ },
+ {
+  "name": "136007.112",
+  "size": 256,
+  "crc32": "e9b3e08e",
+  "sha1": "a294cc4da846eb702d61678396bfcbc87d30ea95"
+ },
+ {
+  "name": "136007.110",
+  "size": 256,
+  "crc32": "7a2815b4",
+  "sha1": "085ada18c498fdb18ecedef0ea8fe9217edb7b46"
+ },
+ {
+  "name": "136007.109",
+  "size": 256,
+  "crc32": "77245b66",
+  "sha1": "0c4d0bee858b97632411c440bea6948a74759746"
+ },
+ {
+  "name": "51xx.bin",
+  "size": 1024,
+  "crc32": "c2f57ef8",
+  "sha1": "50de79e0d6a76bda95ffb02fcce369a79e6abfec",
+  "archive": "namco51.zip"
+ },
+ {
+  "name": "53xx.bin",
+  "size": 1024,
+  "crc32": "b326fecb",
+  "sha1": "758d8583d658e4f1df93184009d86c3eb8713899",
+  "archive": "namco53.zip"
+ }
+]

@@ -295,6 +295,7 @@ not been re-measured in Hatari since).
 | Port | Rate (Hatari) | Window guards | Leaves in place | Flag summaries / fast forms | Natives | Writer marks | Idle flags |
 |---|---|---|---|---|---|---|---|
 | Donkey Kong, DK Junior | 83% (one round a VBL) / 50 | n/a | - | n/a | - | - (compare) | n/a (VBL-locked) |
+| Dig Dug | 82% (one round a VBL) / 32.6 scripted play (17.9-49) | n/a | 32 + rst + jumps | n/a | sub CPU sprite copy, 53XX/51XX event model | cells (movep rows) | n/a (VBL-locked) |
 | Galaga | ~82% / 31.1 attract | n/a | - | n/a | 51XX read, sound boot | 32-byte blocks | n/a (VBL-locked) |
 | Jail Break | ~67% (40.5 of 60 arcade frames; 3 of 4 pictures skipped while behind) / 15.4 pictures a second, AUTOPLAY, sound on | video_inline | 6809 inline_calls (the SN write) | call_summaries, fast_forms, ret_weights, fixed_slots | SN write (`$AF96`), sprite-RAM copy (`$9272`) | cells + tile column spans | kept |
 | Pac-Man | 100% / 49.8 attract | n/a | 16 + rst + jumps | n/a | - | cells | kept |
