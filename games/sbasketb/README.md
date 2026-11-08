@@ -259,7 +259,7 @@ Measured, not kept: nothing yet.  Techniques other ports use that may apply:
   figures; `-D REN_GEN=0` builds put every sprite on the row path.
 * `tools/sprite_test.py`: made-up pictures (edges, 16 shifts, holes, flips, overlaps, both banks, palette banks, guards,
   64 KB).
-* `tools/hatari.ps1`: the F030Arcade Hatari hidden, the AVI's stills and the counters (`-Frames`, `-Every`; `-Sound 44100`
+* `tools/hatari.ps1`: the F030Arcade Hatari hidden, the AVI's stills and the counters (`-Frames`, `-Every`; `-Avi 1` records the AVI (off by default: an SSD without a DRAM cache; use it for short runs and delete it); `-Sound 44100`
   records its audio into the AVI, with SDL's dummy driver; the AVI is large (2 GB for 1,200 VBLs): delete it).
 * `PROF=<frame> tools/logic_test.py N`: the logic's cycles by symbol.
 * `ref/cover.py N`: the coverage (seeds in its header); `ref/mame_cmp_sbasketb.py`: the reference against MAME.
