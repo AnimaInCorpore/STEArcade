@@ -2,11 +2,13 @@
 # recorded (Hatari's AVI, the emulated screen with its borders), the counters printed (COUNTERS.BIN: VBLs, pictures,
 # arcade frames, the border fallbacks and late events), stills extracted every -Every VBLs (ffmpeg).  Outputs in
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Mario Bros.'s.
-#   powershell -File games/mikie/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name mikie_hatari] [-Avi 1] [-Sound 0]
+#   powershell -File games/mikie/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name mikie_hatari] [-Avi 1: only for short runs (the SSD rule: no AVI for long ones)] [-Sound 0]
+#     -Room k: only room k (0-6) from frame 900 of the play (a rate per room)
 #     -Sound 1: Hatari's sound on (44100 Hz), the AVI carries it: run/<Name>/mikie.wav is extracted from it
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "mikie_hatari", [int]$Avi = 1, [int]$Sound = 0,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "mikie_hatari", [int]$Avi = 0, [int]$Sound = 0, [int]$Room = -1,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
+if ($Room -ge 0) { $Extra += @('-D', "AP_ROOM=$Room") }
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }

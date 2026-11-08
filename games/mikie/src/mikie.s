@@ -501,6 +501,64 @@ mk_emit:
 	addq.w	#4,d4
 	rts
 
+; mk_inc1u: the native at $C9CE (INC 1,U with U in the colour RAM: read-modify-write of the video area, which the
+; translation does not do): the byte incremented, its cell listed for the renderer once; flags dead (LDA ,U follows).
+mk_inc1u:
+	moveq	#0,d7
+	move.w	d4,d7
+	addq.w	#1,d7
+	cmp.w	#$3800,d7
+	blo.s	.ram
+	cmp.w	#$4000,d7
+	bhs.s	.ram
+	addq.b	#1,(a3,d7.w)
+	and.w	#$7FF,d7
+	lea	cell_dirty,a0
+	tst.b	(a0,d7.w)
+	bne.s	.d
+	st	(a0,d7.w)
+	move.l	cell_ptr,a0
+	move.w	d7,(a0)+
+	move.l	a0,cell_ptr
+.d:	jmp	M00C9D0
+.ram:	addq.b	#1,(a3,d7.w)
+	jmp	M00C9D0
+
+	ifd AUTOPLAY
+; ap_rooms: between two arcade frames (mk_wait's delivery): player 1's lives kept; from frame 900 of each 4000 every 500 frames
+; the next room (0-6) is started by hand (ref/cover.py seeds 10-12: ROOM $2971, STATE $2908 = 1)
+ap_rooms:
+	moveq	#0,d0
+	move.w	isr_count,d0
+	divu	#4000,d0
+	swap	d0
+	cmp.b	#2,mk_mem+$2970			; lives kept (ref/cover.py seeds 10-12)
+	bhs.s	.ar8
+	move.b	#3,mk_mem+$2970
+.ar8:	cmp.w	#900,d0				; from frame 900 every 500 frames the next room (0-6) is started by hand
+	blo.s	.ar3
+	ifd AP_ROOM				; (-D AP_ROOM=k: only room k, once, for a rate per room)
+	cmp.w	#900,d0
+	bne.s	.ar3
+	move.b	#AP_ROOM,mk_mem+$2971
+	move.b	#1,mk_mem+$2908
+	rts
+	endc
+	move.w	d0,d1
+	sub.w	#900,d1
+	and.l	#$FFFF,d1
+	divu	#500,d1
+	swap	d1
+	tst.w	d1
+	bne.s	.ar3
+	swap	d1
+	cmp.w	#7,d1
+	bhs.s	.ar3
+	move.b	d1,mk_mem+$2971
+	move.b	#1,mk_mem+$2908
+.ar3:	rts
+	endc
+
 mk_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7
@@ -564,6 +622,9 @@ mk_wait:
 	subq.b	#1,vbl_pending
 	st	frame_dirty
 	addq.w	#1,isr_count
+	ifd AUTOPLAY
+	bsr	ap_rooms
+	endc
 	movem.l	(sp)+,d0-d4/a2-a6
 	tst.b	mk_latch+7		; the IRQ enable
 	beq.s	.none
@@ -895,6 +956,12 @@ key_table:
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
 	dc.b	$07,$02,$00,$00		; 6 = coin 2
+	dc.b	$6a,$00,$00,$01		; keypad 4 = player 2 left
+	dc.b	$6c,$00,$00,$02		; keypad 6 = right
+	dc.b	$68,$00,$00,$04		; keypad 8 = up
+	dc.b	$6e,$00,$00,$08		; keypad 2 = down
+	dc.b	$70,$00,$00,$10		; keypad 0 = player 2 button 1
+	dc.b	$71,$00,$00,$20		; keypad . = player 2 button 2
 	dc.b	0,0,0,0
 	even
 
@@ -942,6 +1009,14 @@ crash_common:
 	bsr	hex_word
 	move.b	#' ',(a0)+
 	dbf	d2,.stack
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	move.l	crash_regs+13*4,a1	; the 6809's stack (a5): 40 bytes
+	moveq	#39,d2
+.s6:	moveq	#0,d1
+	move.b	(a1)+,d1
+	bsr	hex_byte
+	dbf	d2,.s6
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
 	lea	own_stack_top,sp

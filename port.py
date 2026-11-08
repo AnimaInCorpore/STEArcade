@@ -40,7 +40,8 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
     "mikie": [("ref/cover.py", list(range(1, 10)), 30000),        # 1-3 play, 4-6 lives kept, 7-8 two players, 9 DIPs
-              ("ref/cover_sound.py", list(range(1, 10)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
+              ("ref/cover.py", [10, 11, 12], 30000),              # 10-12 the rooms 0-6 started by hand in turn (ref/cover.py cheats)
+              ("ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
     "yiear": [("ref/cover.py", list(range(1, 12)), 20000),        # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
               ("ref/cover.py", list(range(12, 27)), 30000),
               ("ref/cover.py", [27, 28], 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
@@ -209,8 +210,12 @@ TESTS = {
               ("tools/logic_test.py", ["{n}"], 3000),
               ("tools/logic_test.py", ["20000", "--seed", "4"], None),    # lives kept: later rooms
               ("tools/logic_test.py", ["8000", "--seed", "7"], None),     # two players
+              ("tools/logic_test.py", ["20000", "--seed", "10"], None),   # the rooms 0-6 started by hand in turn
+              ("tools/logic_test.py", ["20000", "--seed", "12"], None),
               ("tools/render_test.py", ["3000", "--seed", "4", "--start", "500", "--every", "3"], None),
+              ("tools/render_test.py", ["6000", "--seed", "10", "--start", "500", "--every", "7"], None),   # all rooms
               ("tools/sprite_test.py", [], None),             # edges, 16 shifts, holes, guards, 64 KB crossings
+              ("tools/input_test.py", [], None),              # every key of both players, coins, starts, both joysticks (the IKBD handler)
               ("tools/sound_test.py", ["3000"], None),                # the translated sound driver and the YM against sound.py
               ("tools/sound_test.py", ["3000", "--seed", "2", "--random"], None)],   # the same with random commands
     "jailbrek": [("tools/prepare.py", [], None),

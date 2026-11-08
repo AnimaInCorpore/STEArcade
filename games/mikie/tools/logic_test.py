@@ -24,12 +24,41 @@ BUILD = build_dir('mikie')
 AREAS = ((0x0000, 0x0100), (0x2800, 0x4000))
 
 
+def ap_inputs(d0):
+    """src/mikie.s AUTOPLAY's inputs for the frame d0 (mod 4000): -> SYSTEM, P1, P2"""
+    system, p1 = 0xFF, 0xFF
+    if 700 <= d0 < 704:
+        system = 0xFE
+    if 760 <= d0 < 764:
+        system = 0xF7
+    if d0 >= 840:
+        p1 = (0xFE, 0xFD, 0xFB, 0xF7)[(d0 >> 6) & 3]
+        if d0 & 15 < 4:
+            p1 &= 0xEF
+    return system, p1, 0xFF
+
+
+def ap_cheat(m, d0, room):
+    """ap_rooms: lives kept; from d0 = 900 every 500 frames the next room (ROOM -1) or only room `room` at 900"""
+    if m.mem[cover.LIVES1] < 2:
+        m.mem[cover.LIVES1] = 3
+    if d0 >= 900:
+        if room >= 0:
+            if d0 == 900:
+                m.mem[cover.ROOM], m.mem[cover.STATE] = room, 1
+        elif (d0 - 900) % 500 == 0 and (d0 - 900) // 500 < 7:
+            m.mem[cover.ROOM], m.mem[cover.STATE] = (d0 - 900) // 500, 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('frames', nargs='?', type=int, default=3000)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--profile', action='store_true', help='step every instruction, print the cycles by 6809 block (slow)')
+    ap.add_argument('--ap', type=int, default=None, metavar='ROOM',
+                    help='the benchmark build play (src/mikie.s AUTOPLAY: coin, start, walking; the build starts the rooms itself: '
+                    '-D AUTOPLAY=1 -D AP_ROOM=k, ROOM -1: all in turn) instead of ref/cover.py; the reference mirrors it')
     ap.add_argument('--tag', default='mikie_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -39,7 +68,7 @@ def main():
     mem, cpu = s.mem, s.cpu
     mem.w16(sym['render_frame'], 0x4e75)
     wait, done = sym['sim_wait'], sym['sim_frame_done']
-    bad = {sym['main_badpc'], sym['main_badpc'] + 4}
+    bad = set(range(sym['main_badpc'], sym['main_badpc'] + 16, 2))
     base = sym['mk_mem']
 
     m = MikiePort(*cover.dsw(args.seed))
@@ -56,6 +85,7 @@ def main():
     labels = sorted((v, k) for k, v in sym.items())
     lab_addr = [v for v, _ in labels]
     prof = collections.Counter()
+    last = collections.deque(maxlen=60)
 
     def charge(pc, cyc):
         name = labels[bisect.bisect_right(lab_addr, pc) - 1][1]
@@ -68,6 +98,7 @@ def main():
                 pc0 = cpu.r_pc()
                 c = cpu.execute(1).cycles
                 charge(pc0, c)
+                last.append(labels[bisect.bisect_right(lab_addr, pc0) - 1][1])
                 total += c
             else:
                 total += cpu.execute(2000).cycles
@@ -75,6 +106,8 @@ def main():
             if pc in targets:
                 cycles[0] += total
                 return pc
+            if (pc in bad or s.terminated) and last:
+                print('last labels:', list(last))
             if pc in bad or s.terminated:
                 raise RuntimeError('CPU stopped at %06x, d7=%08x (badpc %04x), log=%s' % (
                     pc - s.base, cpu.r_reg(R.D7), mem.r16(sym['badpc']), s.log[-3:]))
@@ -118,16 +151,22 @@ def main():
     cycles[0] = 0
     for f in range(args.frames):
         m.frame = f
-        m.system, m.in0, m.in1 = cover.inputs(f, rnd, state)
+        if args.ap is not None:
+            m.system, m.in0, m.in1 = ap_inputs(f % 4000)
+        else:
+            m.system, m.in0, m.in1 = cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_p1', m.in0), ('io_p2', m.in1)):
             mem.w8(sym[n], v)
-        before = bytes(m.mem)
-        cover.cheats(args.seed, f, m, state)
-        after = bytes(m.mem)
-        for lo, hi in AREAS:
-            for a in range(lo, hi):
-                if before[a] != after[a]:
-                    mem.w8(base + a, after[a])
+        if args.ap is not None:
+            ap_cheat(m, (f + 1) % 4000, args.ap)         # (the build does the same at its delivery: isr_count is f + 1 then)
+        else:
+            before = bytes(m.mem)
+            cover.cheats(args.seed, f, m, state)
+            after = bytes(m.mem)
+            for lo, hi in AREAS:
+                for a in range(lo, hi):
+                    if before[a] != after[a]:
+                        mem.w8(base + a, after[a])
         mem.w8(sym['vbl_pending'], 1)
         m.run_frame_port()
         m.frame = f

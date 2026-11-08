@@ -21,11 +21,11 @@ from machine import MikiePort, load
 from paths import build_dir, require_coverage
 
 RESET, IRQ = MikiePort.START, MikiePort.IRQ
-SEEDS = [int(x) for x in os.environ.get("MK_SEEDS", "").split(",") if x] or range(1, 10)
+SEEDS = [int(x) for x in os.environ.get("MK_SEEDS", "").split(",") if x] or range(1, 13)
 DEAD = {0x6E80: "main_dead"}               # LBRA $D791 into zero padding, never run: a crash if it is
 SORT_PC = 0x9933                           # the sprite list's bubble sort (LDU #$2890 ...): mk_sort, a stable insertion sort
 COPY_PC, EMIT_PC = 0x6253, 0x998B          # the sprite list copy (mk_sprcopy); the record emitter (mk_emit: inline calls)
-NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai", SORT_PC: "mk_sort", COPY_PC: "mk_sprcopy"}
+NATIVES = {MikiePort.IDLE: "mk_idle", MikiePort.CWAI_PC: "mk_cwai", SORT_PC: "mk_sort", COPY_PC: "mk_sprcopy", 0xC9CE: "mk_inc1u"}
 CWAI_RET = MikiePort.CWAI_PC + 2           # the IRQ's return point from the CWAI native (its RTI dispatches here)
 ROM_FILES = ("n14.11c", "o13.12a", "o17.12d")
 
@@ -63,8 +63,75 @@ def load_cover():
     return exec_, acc, tg, wraps, io, returns
 
 
+def complete_tables(tg, exec_):
+    """the jump tables the coverage used in part (JMP / JSR [A,U] and its kind: a table of code addresses, its base loaded
+    by LDU / LDX / LDY #imm just before): the entries after the observed ones are targets too (a room, a state or an enemy
+    kind the coverage did not reach still finds its code), and so are the tables of the sites in that code and in the
+    executed code's unexecuted branches (a walk over the code reachable from the executed instructions).  A table runs
+    from its base while the words are code addresses: in the ROM below $FA00, within $300 of the entry before (the
+    tables of one kind list nearby handlers) and not inside an executed instruction.  Returns the number of targets added."""
+    import re
+    import m6809dis
+    from machine import DSW1, DSW2, DSW3
+    cpu = MikiePort(DSW1, DSW2, DSW3).cpu
+    rd, rdo = cpu.rd, cpu.rd_op
+    inside = set()
+    for p in exec_:
+        n = m6809dis.decode(rd, p, 0x29, rdo).length
+        inside.update(range(p + 1, p + n))
+    ldre = {r: re.compile(r"LD%s\s+#\$([0-9A-F]+)" % r) for r in "UXY"}
+    siter = re.compile(r"(JMP|JSR)\s+\[[AB],([UXY])\]")
+    added = 0
+    seen = set()
+    todo = list(exec_)
+    sites = {}                     # site -> base
+    while todo:
+        pc = todo.pop()
+        regs = {}                  # the immediate loads on the way (a walk of one path from pc: up to 14 instructions back)
+        steps = 0
+        while pc not in seen or steps == 0:
+            if not 0x6000 <= pc < 0xFFE0 or pc in inside:
+                break
+            seen.add(pc)
+            steps += 1
+            ins = m6809dis.decode(rd, pc, 0x29, rdo)
+            for r, rx in ldre.items():
+                mm = rx.match(ins.text)
+                if mm:
+                    regs[r] = int(mm.group(1), 16)
+            ms = siter.match(ins.text)
+            if ms and pc not in sites:
+                base = regs.get(ms.group(2))
+                if base is None:
+                    for q in range(pc - 1, pc - 14, -1):                # (or the executed code just before)
+                        if q in exec_:
+                            mm = ldre[ms.group(2)].match(m6809dis.decode(rd, q, 0x29, rdo).text)
+                            if mm:
+                                base = int(mm.group(1), 16)
+                                break
+                if base is not None and 0x6000 <= base < 0xFA00:
+                    sites[pc] = base
+                    prev = None
+                    for a in range(base, min(base + 96, 0xFFE0), 2):
+                        e = rd(a) << 8 | rd(a + 1)
+                        if not 0x6000 <= e < 0xFA00 or e in inside or prev is not None and abs(e - prev) > 0x300:
+                            break
+                        prev = e
+                        if e not in tg.setdefault(pc, set()):
+                            tg[pc].add(e)
+                            added += 1
+                            todo.append(e)
+            if ins.flow in ("jmp", "jcc", "call") and ins.target is not None:
+                todo.append(ins.target & 0xFFFF)
+            if ins.flow in ("jmp", "ret", "ijmp"):
+                break
+            pc += ins.length
+    return added
+
+
 def program(cover):
     exec_, acc, tg, wraps, io, returns = cover
+    complete_tables(tg, exec_)
     mem = image()
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 0, 0, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}

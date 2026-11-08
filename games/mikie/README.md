@@ -36,7 +36,7 @@ program.  Paths are relative to this folder; `engine/`, `tools/`, `port.py` and 
 ## Controls
 
 **5/6** coin 1 / 2, **1/2** start, the arrows move, **Space / Control / Z** button 1, **Alternate / X** button 2, **Esc**
-quits.  Joystick port 1 player 1, port 0 player 2 (direction, fire = button 1).  Jaguar pad / PowerPad: pad A player 1,
+quits.  Player 2 on the keypad: **4 6 8 2** move, **0** button 1, **.** button 2.  Joystick port 1 player 1, port 0 player 2 (direction, fire = button 1).  Jaguar pad / PowerPad: pad A player 1,
 pad B player 2, the D-pad, **A / C** button 1, **B** button 2, **Option** coin, **Pause** start.  DIP switches: MAME's
 defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip off).
 
@@ -54,7 +54,7 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   timing differs); only the unpatched board is.  The foreground is a task loop (`$61BC`, queue `$2A40`); its idle point
   `$61C5` and the `CWAI #$EF` of `$6FFF` (a task waiting for the frame) are natives that deliver the IRQ at the vertical
   blank (`mk_idle`, `mk_cwai` in `src/mikie.s`; the CWAI pushes its state at once as the 6809 does).
-* **Translation**: 8540 instructions, none unsupported or missing (the CWAI is the native).  One instruction that
+* **Translation** (2026-11-08): 12159 instructions, none unsupported or missing (8540 before the later rooms were covered) (the CWAI is the native).  One instruction that
   static descent reached, an `LBRA $D791` into zero padding at `$6E80` that never runs, is a `main_dead` hook
   (`gen.py` DEAD); this needed a small, backwards compatible addition to `engine/m6809x.py` (`Program.no_follow`: pcs whose
   successors discovery does not follow).
@@ -62,12 +62,18 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   RAM, RAM, video and colour RAM), the latch (Q6, Q7), the palette bank, the sound commands (Q2's rising edges).  Seeds 1-9
   20,000 frames each (attract, coin, start, random play with and without kept lives, two players, other DIP switches), all
   PASS.  (The pushed CC's H bit is ignored on the stack: the translation keeps H only where DAA reads it.)
-* **Coverage** (`ref/cover.py`, 30,000 frames x 9 seeds): 5,300+ pcs.  Random play only: it reaches the title, the first
-  room(s) and the attract mode; **later rooms, the ending, the high-score entry and a service mode were not reached on
-  purpose** and are not covered: the static descent translates what it finds, but a jump through a table that no seed used
-  would stop at `main_badpc`.
+* **Coverage** (`ref/cover.py`, 30,000 frames x 12 seeds, 2026-11-08): seeds 1-9 random play reach the title, the attract mode
+  and room 0 only (the palette bank stays 0 for 30,000 frames of play).  The later rooms are reached by hand: the room is
+  RAM `$2971` (0-6; its palette bank comes from the table at `$D1C6`) and `$2908 = 1` starts a room, so seeds 10-12 start
+  the next room every 700 / 950 / 1200 frames of play, in the orders +1 / +2 / +3 (mod 7), with player 1's lives kept.  They
+  add about 3300 executed instruction addresses (8994 in all).  Jump tables (`JMP / JSR [A,U]`, 51 sites) were only partly
+  used by random play (the first Hatari run of room 3 stopped at `main_badpc` on a direction no seed's enemy had taken): `gen.py`
+  `complete_tables` adds every entry of such a table, and the tables of the sites in that code, as targets (entries from the
+  table's base while they are ROM addresses within $300 of each other and not inside an executed instruction).  Not
+  reached by any play: the ending, the high-score entry, the service mode (their code is translated only where the tables
+  or descent found it).
 * **Picture**: exact in the shown colours.  `tools/render_test.py`: 0 differences in 280 sampled pictures of seed 1 (frames
-  100-1500) and 656 each of seeds 2, 4 and 6 (frames 100-6000); `tools/sprite_test.py`: 154 made-up pictures exact (both
+  100-1500) and 656 each of seeds 2, 4 and 6 (frames 100-6000), and 786 of seed 10 (all seven rooms, frames 500-6000); `tools/sprite_test.py`: 154 made-up pictures exact (both
   side edges at every shift, holes, flips, overlaps, the guard lines above the picture, 64 KB crossings, 60 pictures in
   sequence).
 * **Sound** (`tools/sound.py`, `tools/sndgen.py`, `src/sound.s`, after Track & Field's; the board: a Z80 at 3.58 MHz, ROM `n10.6e`,
@@ -98,10 +104,37 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   turned picture, sprites, the heart and flag HUD); 3001 VBLs with the sound on: 3290 arcade frames (54.8 a second, 91% of
   60), 2090 pictures (34.8 a second), 2 border fallbacks, no late border events (before the sound and the sort native:
   55.8 a second without sound; the cost of the sound is about 2 points of rate, the sort gained back about 1).  The game
-  does not reach the full arcade rate: **it runs at 92% in Hatari's attract and first room** (55.8 arcade frames a second, 35.4 pictures, after the speed audit below; 91% before it).  Not measured: sustained
-  play, later rooms.
+  does not reach the full arcade rate: **it runs at 92% in Hatari's attract and first room** (55.8 arcade frames a second, 35.4 pictures, after the speed audit below; 91% before it).
+* **Later rooms in Hatari (2026-11-08, no AVI, `tools/hatari.ps1 -Frames 3900 -Room k`, sound on, the room started by hand at frame 900 of
+  the play, rates over the whole 3900 VBLs, the first ~900 frames being attract)**: room 0: 57.0 arcade frames a second
+  (94%), 31.7 pictures; 1: 56.6 / 44.7; 2: 57.2 / 22.9; 3: 55.8 / 40.9; 4: 57.3 / 26.7; 5: 55.8 / 32.4; 6: 53.5 / 20.4 (room 6
+  re-measured 2026-11-08 after the table fix: 53.5 arcade frames a second, 89%, 20.4 pictures).  A **long run** of 20,001 VBLs (`-Frames 20000`, the AUTOPLAY build: coin, start,
+  walking and hitting, lives kept, a room started by hand every 500 frames from frame 900 of each 4000, rooms 0-6 five
+  times): **no crash or bad pc**, 20,553 arcade frames (**51.4 a second, 85%**), 10,550 pictures (**26.4 a second**), 2 border
+  fallbacks, no late border events.  After the cache-flush change below (the same run again, 2026-11-08): no crash, 20,830 arcade
+  frames (**52.1 a second, 87%**), 10,074 pictures (25.2 a second), 2 border fallbacks, no late events.  The 85-87% is the busy figure of this schedule (a room every 500 frames, which real play never does: a room start clears the screen over 28 frames, changes the palette bank, throws the sprite and tile caches away, redraws
+  everything and rebakes the ~100 sprites in use (bake_sprite ~6.5k cycles a picture over the 500 frames after a start); in the later rooms a picture costs ~112k CPU + 42k Blitter cycles against ~67k + 30k in room 0).  Typical play
+  in one room is the 92-94% above.  This is play by a fixed script with a room cheat, **not a played game**: nobody finished a room.
+* **Sound against MAME, Hatari's audio (2026-11-08, `ref/wav_cmp.py`, 30 s of attract, windows of 0.25 s, best alignment
+  of the two recordings)**: the SN write streams are equal (above), but the audio itself differs by design: of 34 windows with
+  a dominant pitch in both, 26% agree within 3% (the YM plays the three loudest of eight voices; MAME mixes all); Hatari's level is
+  about 6.6 dB higher than MAME's; both show the same pitches (782, 700, 590, 528, 132 Hz).  **Nobody has listened to it.**
+* **Controls** (the IKBD scan codes and `compose_inputs`; tested key by key on Musashi, not on a machine or in Hatari: `tools/input_test.py` feeds IKBD byte streams through a fake ACIA to the real `acia_isr` and checks `in_sys / in_p1 / in_p2` for all 19 keys of both players (make and break), all keys together, P1 with P2, and both joysticks: PASS, 2026-11-08; Hatari's own keyboard path (key to IKBD to ACIA) was not driven):
+  coin 1 / 2 on 5 / 6, start 1 / 2 on 1 / 2, player 1 on the arrows with Space / Control / Z and Alternate / X, player 2
+  on the keypad (4 6 8 2, 0, .) or joystick port 0 (one fire button = button 1), pads A / B.
+* **Play to the later rooms (2026-11-08)**: `ref/explore.py` is a Go-Explore on the reference machine (cell archive over `ref/snap.py`'s
+  snapshots: room, mode, play state, the player's position `$295A / $295C` in 16-pixel buckets, three counters; random 12-frame
+  segments from the archive's rarest cells; lives kept).  Runs of 5 minutes (92 cells) and 25 minutes (2293 cells, 17212 rounds, only play states 4 and 6) **did not leave room 0**:
+  nobody, random or searched, has cleared a classroom by play yet; the rooms are reached by the cheat only.
+* **Service mode and the boot tests**: not ported by design: the port starts at the game's own initialisation `$6093`, past the
+  reset path (`$CD91`: RAM and ROM checks, the test grid, the START1 + START2 service check).  A seed that held both starts at reset
+  executed 3 new 6809 instructions only; the service tests are not translated.  The ending and the high-score entry are not
+  known to be covered (seeds 1-3 play to the game over, nothing shows the entry screen ran).
+* **Cache flushes (2026-11-08)**: a palette bank change (a new room) flushed the sprite and tile caches by clearing their 128 and 64 KB
+  indexes (~700k cycles, 5 frames); now only the entries used are cleared (key lists `sc_keys` / `tc_keys`).  Picture exact
+  (`render_test` seeds 4 and 10, `sprite_test`), CPU of the room-cycling picture about -2%, the Hatari long run +0.7 arcade frames a second.
 * **Not done / not verified**: the cocktail cabinet and the flip screen (`render_raw` raises `NotImplementedError` for the flip
-  latch; the STE renderer ignores it); the service mode; a full game; the other sets (`mikiej`, `mikiek`, `mikiehs` share the
+  latch; the STE renderer ignores it); the service mode, the ending and the high-score entry; a game played to the end by a person; the other sets (`mikiej`, `mikiek`, `mikiehs` share the
   main program: the graphics ROMs differ); the driver's paths no seed's commands reached (random commands 0-$7F reach most
   of the effect range; a jump through a table entry nothing used would stop at `snd_badpc`); sprite preparation
   measurements against the other methods (`docs/sprite-preparation.md`: this port uses the shared generated code as Track
