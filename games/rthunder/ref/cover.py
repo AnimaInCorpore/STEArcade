@@ -152,7 +152,7 @@ def run(seed, frames, port=False, out=None):
                     continue
                 oddw = prev is not None and prev[0] == rw and a == ((prev[1] + 1) & 0xFFFF) and prev[1] & 1
                 acc[i][key].add((rw, a >> 13, virt(i, a) >> 13, bool(oddw)))
-                if (rw == "w" and (a >= 0x6000 or 0x5600 <= a < 0x5700 and i == 0)) or \
+                if (rw == "w" and (a >= 0x6000 or 0x5600 <= a < 0x5700 and i == 0 or 0x4000 <= a < 0x4400 and i == 0)) or \
                         (i == 1 and 0x1600 <= a < 0x1700) or (rw == "r" and a >= 0x4000 and a < 0x4400 and i == 0):
                     if len(ioacc[i][key]) < 64:
                         ioacc[i][key].add((rw, a))

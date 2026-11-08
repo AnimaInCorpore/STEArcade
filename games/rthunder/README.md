@@ -82,3 +82,18 @@ frames with them.  `tools/gen.py` translates the main program (4689 instructions
 unsupported; the main program's `TST` / `INC` of the CUS30 mailbox needed `engine/m6809x.py` to read-modify-write I/O
 sites (TST; INC/DEC when V is dead): `m6809x_test.py` passes but does not cover this path.  NOT done: the spin-hook stubs,
 dispatch tables and `src/core.s`, so nothing of the translation has run; no lock-step, no renderer, no sound, no Hatari.
+
+### 2026-11-08: the runtime and the lock-step test
+
+`src/core.s` (contexts, the schedule of `RthunderRule` as 68000 code: both IRQs first, the CPU with `$1604 != $1605` first, a CPU
+gives way at a semaphore store (`<cpu>_sem_yield`), a taken spin branch (`hooks_<cpu>.s`) and at its idle point; the dispatcher; the
+I/O: the CUS30 mailbox, the bank selects, the scroll / tile bank / back colour registers in `hwregs`), `src/rthunder.s` (the sim
+build only), `tools/build.py` and `tools/logic_test.py` (the translated programs on Musashi against `RthunderRule`, frame by frame:
+both tile RAMs, the shared RAM with the sprite RAM, the CUS30 RAM, `hwregs`, the sprite latch, both CPUs' registers and bank pages;
+the CC bytes the IRQs push are left out; `--steplock F` compares the registers at every translated instruction of frame F,
+`--watch` adds shared RAM offsets).  **3000 frames identical for seeds 0 (attract mode) to 5 (random play), 58.8k-81.1k 68000
+cycles a frame for the two CPUs (Musashi, translation only; a 50 Hz STE frame is 160k).**  Not verified: seeds 6-9 and 11-19,
+runs past 3000 frames, the PCM writes (`$6000-$63FF`, ignored), a picture, Hatari.  Two bugs the test found: main's stores to the
+mailbox were missing from the coverage's I/O sites (`ref/cover.py` recorded reads only), and the vertical blank's sprite buffer copy
+(machine.py `vblank_begin`) is the harness' job.  Still missing for a program on the STE: the vertical blank's sprite copy, the
+renderer (hardware scroll from the start), the palette fit, input, sound, `port.py` / `tools/release.py` registration.
