@@ -90,7 +90,7 @@ def table_roots(mem):
     return roots
 
 
-NATIVES = {SBasketPort.IDLE: "sb_idle", 0x8DD8: "nat_div_8DD8", 0x64F7: "nat_list_64F7"}   # (src/natives.s)
+NATIVES = {SBasketPort.IDLE: "sb_idle", 0x8DD8: "nat_div_8DD8", 0x64F7: "nat_list_64F7", 0x6000: "nat_boot_6000"}   # (src/natives.s)
 
 
 def image():
@@ -178,6 +178,7 @@ def program(cover):
     # 68000 runs too (m6809x Program.fast_forms: flags fixed through d7, returns compared most frequent first by the
     # coverage's counts of the returns to each point)
     prog.fixed_slots = tuple(range(8))
+    prog.watchdog = (0x3C00, 0x3C01)           # (a store to the watchdog only sets the flags: the boot's delay loops kick it 330,000 times)
     prog.fast_forms = True
     prog.ret_weights = dict(returns) or dict(exec_)
     prog.call_summaries = True                  # (m6809x: a call's live flags from its callees' summaries)

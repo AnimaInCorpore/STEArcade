@@ -2184,7 +2184,8 @@ class Emitter:
         raise Unsupported(ins.text)
 
     def is_watchdog(self, a):
-        return 0xF200 <= a < 0xF400
+        lo, hi = getattr(self.p, 'watchdog', (0xF200, 0xF400))      # (a port may name its own: Super Basketball $3C00)
+        return lo <= a < hi
 
     def d_to(self, reg):
         self.d_compose(reg)
