@@ -34,6 +34,8 @@ Arrows, space / Z attack, Alternate / X jump, 1 start, 5 / 6 coin, Esc quits (wr
 
 ## State
 
+* In Hatari the attract mode stops at an untranslated main CPU address after about 110 s (2026-11-07: CRASH.TXT
+  "BADPC M PAGE 3FA PC 80DC"), part of the coverage gap below.
 * Coverage gap (2026-11-02): `build/splatter` holds only `cover_1/4/5.pkl` (the seeds 6, 7, 11-17 and the play
   coverage are gone). `logic_test.py 9000 --play` (the recorded play) stops at frame 1482 at a main CPU badpc $4AE8
   and seed 15 at frame 527 at a main CPU badpc $2D08, both with and without the 2026-11-02 switches (seed 4: 2500
