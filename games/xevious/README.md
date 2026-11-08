@@ -160,8 +160,10 @@ frames and 5.4 pictures a second, `MAX_SKIP` 3):
 | Leaves in place (`inline_leaves=16`, rst, jumps) | applied (2026-11-08): the logic test treats the return words of inlined calls as dead stack words; exact over 3000 (seed 1) and 6000 frames (seed 3) | logic 181.8k -> 176.0k cycles a frame (-3.2%); Hatari attract 21.5 -> 21.6-23.6 arcade frames, 5.4-6.0 pictures a second (little change: the picture dominates) |
 | Natives at hot routines, `flags_at` at the idle hook | not tried (no routine profile yet) | - |
 | Sprite cache of converted tiles | tried, rejected | no change |
-| `sprite_programs` / Blitter masked passes (`AGENTS.md`) | **not done: the main gain** | `blit_row` ~560 cycles a row, 480k a busy picture |
-| Hardware scroll with twin lines | not done (redesign; saves ~130k bus cycles + most ring work) | - |
+| Blitter masked sprite passes (`AGENTS.md`) | **applied (2026-11-08)**: each (tile, flips, palette) is baked on first use into a 2048-slot cache (16 masks + 16 rows of 4 plane words); a HOG pass a row (HOP 2 / OP 3, X count 2 with NFSR and the shift in the pass, 1 at shift 0, end masks = the shifted opaque mask, the outer words clipped by a zero end mask); the foreground characters are the same images (8 rows) | `blit_row` ~560 cycles a row -> a pass ~200 CPU + ~80 bus cycles; `render_test` exact (seeds 1, 4, 33) |
+| Converted background tiles cached | applied: (tile, flip, colour) keyed, 3000 slots; a cell costs ~300 instead of ~3000 cycles | draw_bg_cell 318k -> 87k a picture (render_test, every 4th frame) |
+| Block compare in `update_bg`, foreground list only when its RAM differs from a shadow | applied | update_bg 343k -> 107k (render_test marks every block; less in play) |
+| Hardware scroll with twin lines | **not done**, measured estimate: it saves the picture copy (~130k Blitter bus cycles of ~440k a picture) but needs three rings (the displayed one, the one drawn into, a clean one), the sprites' damage restored by rectangle copies (~30k) and sprites drawn into the ring's twin lines: ~100k a picture net, 9% of the whole time (the logic, ~4.9M of 8M cycles a second, dominates) | - |
 | Damage only drawn rows, per-slot cache, contour restores | n.a. today (sprites are drawn from the ring and the picture is copied whole) | - |
 | Palette stamps / colour cycling | n.a. (one fixed 16-colour set, no cycling) | - |
 | Pictures-per-second schedule (`MAX_SKIP`) | applied; trade is the user's call | 1: 14 / 7, 3: 22 / 5.4, 7: 27 / 3.5 |
@@ -199,3 +201,11 @@ it would remove the 37k CPU + 130k Blitter bus cycles of the picture copy (about
 
 Assisted coverage and tests only (random scripted play, MAME's cheats); no natural full-game playthrough, no Hatari
 playtest of the picture, no listening test: see the [status policy](../../docs/port-status.md).  No PPO profile.
+
+### Speed after the sprite passes (2026-11-08)
+
+Hatari (`tools/bench.ps1`, `MAX_SKIP` 3): attract and autoplay now 27-32 arcade frames a second (of 60.6) and 6.8-8.0
+pictures a second, against 21.5 and 5.4 before.  The logic (176k cycles a frame, ~4.9M of the 8M a second) now takes more
+than the pictures (~440k each, of which the picture copy is ~130k Blitter bus cycles).  Further gains: natives at the hot
+logic routines (no routine profile yet), a higher `MAX_SKIP` (the user's call), the picture copy (hardware scroll, see the
+table).  Not verified: a long natural playthrough; the autoplay loses its ship often.

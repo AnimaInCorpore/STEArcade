@@ -346,7 +346,7 @@ not been re-measured in Hatari since).
 | Splatterhouse | H (twin columns) | converted per colour, a pass a line | rectangles from the twins | bar images | chooser per scene |
 | Galaga '88 | - (fixed buffers) | a pass a line (X count 3) | rectangles from clean | composed into cells | chooser per scene |
 | Dragon Spirit | H + V (twin lines and columns) | Galaga '88's | row spans | OP 3 passes per fine shift | chooser + flash |
-| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | a row loop (`blit_row` ~560 a row; Blitter passes to do) | redrawn from the ring | CPU tiles | fitted 16, flat |
+| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
 
 ## Techniques that look applicable elsewhere (2026-11-07)
 
