@@ -340,7 +340,7 @@ not been re-measured in Hatari since).
 | Gyruss | - | `sprite_programs` | drawn lines from clean | tiles | default fitter flat |
 | Track & Field, Hyper Sports | per row | `sprite_programs` | sprite-only rows: their groups | tiles | default fitter flat |
 | Double Dragon | H | a row loop, rows sorted by mask | cells invalidated | pairs, fills | checker pairs |
-| Super Basketball | H, recomposed (hardware scroll not used yet) | `sprite_programs` (348 shapes, per-slot cache) | sprite-only rows and changed cells | tiles | default fitter flat |
+| Super Basketball | H, recomposed (hardware scroll tried: exact, slower) | `sprite_programs` (348 shapes, per-slot cache) | sprite-only rows and changed cells | tiles | default fitter flat |
 | Gauntlet | H + V (torus) | baked 32-pixel strips, a pass a row | rectangles from clean | runs; CPU masks for transparent ones | checker pairs + player colours |
 | R-Type | H (twin columns) | `sprite_programs` (streams) | contour from clean; clears over black | status bar image | checker pairs per scene |
 | Mr. HELI | fine H (`m72render`) | per-code line routines | rows | **AND + OR (to convert)** | scene palettes |
