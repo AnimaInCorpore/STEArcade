@@ -126,8 +126,8 @@ Current figures first (see the top for the headline); then the audit of 2026-11-
 
 * **Speed, 2026-11-08** (Hatari 2.6.1 pinned build, STE, 4 MB, TOS 2.06, fast forward, `tools/bench.ps1`: `-D RATE=500`
   counters every 500 VBLs): **the chasing bot** (`-D AUTOPLAY=1400 -D BOTCHASE=1`: a coin and a start every 3000 VBLs, then
-  `bot_chase` walks to the nearest Pooka / Fygar and pumps; 24,600 VBLs, 8 games of 2 lives each round, score ~900, rounds 1-2,
-  no crash): the arcade's frames a second as % of 60.6 per 500 VBLs 83-103, average 90 (83 = one game frame a VBL: the
+  `bot_chase` walks to the nearest Pooka / Fygar and pumps; 24,600 VBLs: the game repeats every ~6500 VBLs, game over and a new game; the screen at the end of an earlier
+  24,600-VBL run (RAM.BIN, `ramshot.py`): score 870, round 1; no crash): the arcade's frames a second as % of 60.6 per 500 VBLs 83-103, average 90 (83 = one game frame a VBL: the
   sixth frame of five VBLs is dropped when the VBL is late); pictures a second 20-34, **average 24.9, busy stretches 20-22**
   (the same 13 windows repeat: the bot's game is deterministic).  The scripted game (`-D AUTOPLAY=1400`, 6000 VBLs): logic
   83-103%, pictures 19.8-34, average 27.7.  Before today: logic 82% (one frame a VBL), pictures 28.9 / 32.6 on average (12-17.9 busy).
