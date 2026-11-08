@@ -138,3 +138,17 @@ renderer (hardware scroll from the start), the palette fit, input, sound, `port.
 * **Sprite plan**: parts (code, sub-rectangle, flips, colour row) converted on first use to rows of an opaque mask and four
   plane longs (left justified), drawn as one HOP 2 / OP 3 Blitter pass a row (3 destination words, the end masks the opaque
   mask shifted, Y count 4 for the four planes, skew = the shift), no AND + OR pass.
+
+### 2026-11-08: the background follows the game (R-Type's layout)
+
+* `ren_bg` is now R-Type's layout: the map twice across (twin columns, x and x + 512 pixels) and rows 0-27 twice down (twin lines), so
+  the 320 x 224 display window (the picture's 288 columns with a 16 pixel band each side) is contiguous wherever the scroll puts
+  it: the Shifter would show it by video address (`ren_vaddr`) and fine scroll (`ren_fine`).  Nothing is moved to scroll.
+* `ren_update`: a tile RAM layer the translated stores marked (`tile_written + layer`, `tools/gen.py` from the coverage's `tilew`;
+  stores through the runtime mark all four) is compared with its shadow, the cells that differ are decomposed, and the cells of
+  the window not composed are composed (`cell_ok`); a change of the layer order, the back colour or the tile bank decomposes
+  all.  `logic_test.py --render` runs it after every translated frame and compares the window with the reference's map:
+  **0 pixels differ, 3000 frames, seeds 1, 3 and 5** (logic identical too).  `ren_update` mean 42-53k 68000 cycles a frame
+  including the first full composition (14.0M, once; Musashi, no Blitter yet): ~37-48k without it.
+* Still open: the fixed layer 3 (HUD, text) and the sprites over the display buffers (damage restored from the clean buffer),
+  the display buffers themselves (the margins and guard lines R-Type's `stage.s` has), the STE program, the MCU, sound.
