@@ -122,7 +122,7 @@ firmware (`tools/mcuexp*.py`-style scripts, one-off), then checked on random inp
 All figures 2026-11-08.  Musashi (`tools/perf_test.py`, translation + renderer, 68000 cycles; an STE frame is 160k, one
 arcade frame 132k): logic 55-84k (both CPUs, a stage-1 stretch 84k), the MCU model 13k, a picture 300-350k (renderer 22-26k,
 sprites + fixed layer 220-260k, Blitter 60k) in play-like frames with 8-12 sprites, ~1M with the 127-sprite title logo.
-**Hatari** (STE, 4 MB, TOS 2.06, AUTOPLAY build, 3000 VBLs): 1187 arcade frames in 3001 VBLs = **19.8 arcade frames a second (33% of the arcade's 60.6)**, 328 pictures made (5.5 a second) -- the run before the coverage seed 100 was added; the 6000-VBL run with it (and the 20,000-VBL run the brief asks for) was still running when this was written, so no figure for a long run and no statement about how far it gets.  The attract mode's 127-sprite logo screens are the slowest stretches (~1M cycles a picture)
+**Hatari** (STE, 4 MB, TOS 2.06, AUTOPLAY build, 3000 VBLs): 6001 VBLs of the AUTOPLAY script (coin, start, then moves and shots; 2026-11-08, with coverage seed 100): 3614 arcade frames = **30.1 a second (50% of 60.6)**, 930 pictures made = 7.7 a second, no crash; from VBL ~2100 to 6000 (the game running) 42 arcade frames a second (70%) and about 10.6 pictures a second.  Not yet run: the 20,000 VBLs the brief asks for.  The attract mode's 127-sprite logo screens are the slowest stretches (~1M cycles a picture)
 
 Where a picture's time goes (the profile, a stage-1 stretch): sprite passes (`spr_blit`) 35%, the sprite list (`spr_build`, 127
 entries every picture) 13%, the fixed layer 12% + 5%, the damage list and restore 8%, the tile marks and sync 10%.  What was tried

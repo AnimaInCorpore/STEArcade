@@ -329,7 +329,7 @@ not been re-measured in Hatari since).
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
 | Galaga '88 | ~20% / 6.1 BENCH | n/a | - | both | - | `tile_marks` | ? |
 | Dragon Spirit | 14% / 2.9 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
-| Rolling Thunder | 33% / 5.5 pictures a second (Hatari, AUTOPLAY, 4 MB, 2026-11-08) | n/a (flat pages, fixed slots) | - | both (`ret_weights` from the coverage's counts: 5% slower) | the MCU's mailbox (`src/mcu.s`: 13k a frame instead of the firmware's ~25k MCU cycles), no natives for the 6809 | tile-row marks (`tile_dirty`: the row from X / Y / U at the store, 128 bytes; the layer flag where the address is not named) | kept |
+| Rolling Thunder | 50% over 6000 VBLs (70% in play) / 7.7 (10.6 in play) (Hatari, AUTOPLAY, 4 MB, 2026-11-08) | n/a (flat pages, fixed slots) | - | both (`ret_weights` from the coverage's counts: 5% slower) | the MCU's mailbox (`src/mcu.s`: 13k a frame instead of the firmware's ~25k MCU cycles), no natives for the 6809 | tile-row marks (`tile_dirty`: the row from X / Y / U at the store, 128 bytes; the layer flag where the address is not named) | kept |
 
 **Pictures**
 

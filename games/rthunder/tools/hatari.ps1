@@ -41,11 +41,7 @@ if (Test-Path "$out/COUNTERS.BIN") {
     $w = @(0..7 | ForEach-Object { $b[2*$_]*256 + $b[2*$_+1] })
     "VBLs {0}, arcade frames {1} ({2:N1} a second), pictures {3} ({4:N1} a second); border fallbacks {5}, late top/on/low/off {6}/{7}/{8}/{9}" -f `
         $w[0], $w[2], (50*$w[2]/$w[0]), $w[1], (50*$w[1]/$w[0]), $w[3], $w[4], $w[5], $w[6], $w[7]
-    if (Test-Path "$out/RATE.BIN") {
-        $r = [IO.File]::ReadAllBytes("$out/RATE.BIN")
-        $pts = @(0..(($r.Length/4)-1) | ForEach-Object { @($r[4*$_]*256 + $r[4*$_+1], $r[4*$_+2]*256 + $r[4*$_+3]) })
-        "per 100 VBLs (arcade frames / pictures made): " + (($pts | ForEach-Object { "{0}/{1}" -f $_[0], $_[1] }) -join " ")
-    }
+    "RATE.BIN: pairs (arcade frames, pictures made) every 100 VBLs; read it with struct (the VBL count / 100 pairs)"
 } else { "no COUNTERS.BIN (the program did not reach its end)" }
 if ($Avi -and (Test-Path "$out/rthunder.avi")) {
     & ffmpeg -v error -i "$out/rthunder.avi" -vf "select=not(mod(n\,$Every))" -fps_mode passthrough "$out/still_%03d.png"
