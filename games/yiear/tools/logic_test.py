@@ -195,7 +195,7 @@ def main():
     ym.frame(sn)                             # (snd_init's)
     sn.dirty = False
     compare(-1)
-    state = {'two': args.seed == 9}
+    state = {'two': args.seed in (9, 28)}
     cycles[0] = 0
     for f in range(args.frames):
         m.frame = f

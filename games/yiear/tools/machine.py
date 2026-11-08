@@ -78,19 +78,23 @@ class Video:
 
     def render_raw(self, mem, flip=False):
         """The screen's pens [256 rows, 256] (rows 16-239 visible) from the main CPU's memory (64 KB image)."""
-        if flip:
-            raise NotImplementedError("flip screen (cocktail)")
         v = np.frombuffer(bytes(mem[0x5800:0x6000]), np.uint8).reshape(32, 32, 2)
         attr, low = v[:, :, 0].astype(np.int32), v[:, :, 1].astype(np.int32)
         codes = low | ((attr & 0x10) << 4)
         pix, _ = G.tile_pixmap(self.tiles, codes, np.zeros((32, 32), np.int32), attr & 0x80, attr & 0x40, 32, 32, 16, 16)
         bm = pix.astype(np.int16)
+        if flip:
+            bm = bm[::-1, ::-1].copy()                  # (the tilemap flipped: x and y)
         s1, s2 = mem[0x5000:0x5030], mem[0x5400:0x5430]
         for offs in range(0x2E, -1, -2):
             attr = s1[offs]
             code = s2[offs + 1] + 256 * (attr & 1)
             sy = 240 - s1[offs + 1] + (1 if offs < 0x26 else 0)
-            G.draw_gfx(bm, VISIBLE, self.sprites, code, 0, not attr & 0x40, attr & 0x80, s2[offs], sy,
+            fy = attr & 0x80
+            if flip:                                     # MAME: sy = 240 - sy and flip y, x and flip x as they are
+                sy = s1[offs + 1] + (1 if offs < 0x26 else 0)
+                fy = not fy
+            G.draw_gfx(bm, VISIBLE, self.sprites, code, 0, not attr & 0x40, fy, s2[offs], sy,
                        lambda s: s == 0)
         return bm
 

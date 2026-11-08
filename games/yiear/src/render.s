@@ -224,6 +224,13 @@ render_frame:
 ; from tile_vram.  The picture's line 0 is raw line 16 of the playfield (row_off, constant).
 ; ----------------------------------------------------------------------------------------------------------------------
 render_tiles:
+	move.b	ya_ctl,d0
+	and.b	#1,d0
+	cmp.b	tile_flip,d0
+	beq.s	.sameflip
+	move.b	d0,tile_flip		; the screen flip (control bit 0) changed: every cell again
+	move.w	#-1,tile_mode
+.sameflip:
 	move.w	#16,row_off
 	moveq	#0,d6			; the rows changed
 	tst.w	tile_mode
@@ -337,6 +344,12 @@ cell_draw:
 	beq.s	.ny
 	or.w	#1,d1
 .ny:	move.w	d7,d2			; the playfield cell
+	tst.b	tile_flip
+	beq.s	.nof
+	move.w	#1023,d2		; flipped screen: the cell opposite, both flips toggled
+	sub.w	d7,d2
+	eor.w	#3,d1
+.nof:
 	move.w	d1,-(sp)
 	move.w	d2,-(sp)
 	; the rows: pf line l = 8 * pfrow, screen line (l - o) & 255
@@ -681,6 +694,11 @@ draw_sprites:
 	move.b	(a0,d0.w),d5		; picture X = x
 	move.w	#224,d4
 	sub.w	d3,d4			; picture Y = 224 - y
+	tst.b	tile_flip
+	beq.s	.nfl
+	move.w	d3,d4
+	sub.w	#16,d4			; (flipped screen: MAME's sy = 240 - sy again, y flip toggled, x as it is)
+.nfl:
 	cmp.w	#$26,d0
 	bhs.s	.pos
 	addq.w	#1,d4			; (MAME: sy++ for the first entries)
@@ -698,7 +716,10 @@ draw_sprites:
 .fx:	btst	#7,d7
 	beq.s	.fy
 	or.w	#1,d6
-.fy:	move.w	d6,d2
+.fy:	tst.b	tile_flip
+	beq.s	.nf3
+	eor.w	#1,d6
+.nf3:	move.w	d6,d2
 	move.w	d5,d3			; picture X
 	bsr	draw_cell
 .n:	move.w	(sp)+,d0
@@ -1208,6 +1229,8 @@ vram_chk:	ds.b	1
 vram_n:	ds.b	1			; the noisy writers' mark ($5980-$59BF)
 	even
 scan_end:	ds.l	1
+tile_flip:	ds.b	1			; the screen flip the playfield was drawn with
+	even
 tile_mode:	ds.w	1			; -1: no picture drawn yet (every cell is drawn)
 row_off:	ds.w	1			; the picture's line 0 in the playfield (render_tiles)
 tile_vram:	ds.b	2048			; the video RAM the playfield was drawn from

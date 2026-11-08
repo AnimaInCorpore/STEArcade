@@ -42,6 +42,10 @@ def dsws(seed):
         return DSW1, 0xC2, DSW3 & ~0x02
     if seed == 11:
         return DSW1, DSW2, DSW3 & ~0x04
+    if seed == 28:
+        return DSW1, DSW2 | 0x04, DSW3 & ~0x01          # cocktail, flip screen on, two players (the board's player 2 turns: $8B30's $C1 path)
+    if seed == 27:
+        return DSW1, DSW2, DSW3 & ~0x01                  # flip screen on (the game sets the control latch's bit 0)
     return DSW1, DSW2, DSW3
 
 
@@ -146,7 +150,7 @@ def main():
     video = Video()
     pens = collections.Counter()
     sprites = collections.Counter()
-    state = {'two': seed == 9}
+    state = {'two': seed in (9, 28)}
     mem = m.mem
     for frame in range(frames):
         m.system, m.in1, m.in2 = inputs(frame, rnd, state)
