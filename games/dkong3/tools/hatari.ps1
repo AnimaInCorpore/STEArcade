@@ -4,7 +4,7 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Pooyan's.
 #   powershell -File games/dkong3/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name dkong3_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "dkong3_hatari", [int]$Avi = 1, [int]$Sound = 0,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "dkong3_hatari", [int]$Avi = 0, [int]$Sound = 0,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path

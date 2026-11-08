@@ -25,7 +25,7 @@ python games/dkong3/tools/build.py       # -> run/dkong3/DKONG3.PRG   (the first
                                          #    -D CHEAT=1 (with it: lives, credits, the stage $601B poked: a long run); -D NOSOUND=1)
 python port.py test dkong3               # the lock-step, picture, sprite and sound tests
 python games/dkong3/ref/mame_cmp_dkong3.py 300 1000 1800 3000   # the reference against MAME's picture
-powershell -ExecutionPolicy Bypass -File games/dkong3/tools/hatari.ps1 -Frames 3000   # Hatari, hidden: AVI, stills, counters (-Sound 1: the audio in the AVI)
+powershell -ExecutionPolicy Bypass -File games/dkong3/tools/hatari.ps1 -Frames 3000   # Hatari, hidden: counters (-Avi 1: an AVI for stills, only for short runs; the SSD rule) (-Sound 1: the audio in the AVI)
 python games/dkong3/tools/sound_check.py make   # then hatari, simulate, compare: the sound against MAME's for the same commands
 ```
 
