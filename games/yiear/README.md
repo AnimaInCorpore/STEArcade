@@ -11,7 +11,7 @@ the 320-pixel screen with the top and bottom borders open, sprites by generated 
 exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.
 Status: **Incomplete** (logic and picture exact in lock-step with the reference; short Hatari checks only; no
 full-game verification, cocktail flip not done).
-Speed: 96% of the arcade's rate (58.2 arcade frames a second), 34.2 pictures a second, with the sound (Hatari,
+Speed: 96% of the arcade's rate (58.2 arcade frames a second), 36.4 pictures a second, with the sound (Hatari,
 `tools/hatari.ps1 -Sound 1`, 3,000 VBLs of the AUTOPLAY script, DEBUG build, 4 MB, 2026-11-07).
 
 ## Build and run
