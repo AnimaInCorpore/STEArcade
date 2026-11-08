@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -49,6 +49,9 @@ COVER = {
                  ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
+    "xevious": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9], 20000),      # 1-3 play, 4-5 two players, 6 the attract mode, 7-9 DIPs
+                ("ref/cover.py", [11, 12, 13, 14], 60000),               # infinite lives (MAME cheat)
+                ("ref/cover.py", [31, 32, 33, 34], 60000)],              # invincible (MAME cheat, a ROM patch of the reference): the later areas
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
     "pooyan": [("ref/cover.py", list(range(1, 14)), 20000),       # 1-3 play, 4-8 lives, 9 high score, 10-11 two players,
@@ -131,6 +134,12 @@ TESTS = {
               ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, guards, 64 KB crossings, both orientations
               ("tools/sound_test.py", ["3000"], None)],              # the DMA sound driver against the game's commands
+    "xevious": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),                    # the lock-step test, seed 1
+                ("tools/logic_test.py", ["4000", "--seed", "4", "--quiet"], None),   # two players
+                ("tools/render_test.py", ["3000", "--start", "200", "--every", "97"], None),
+                ("tools/render_test.py", ["3000", "--seed", "3", "--start", "150", "--every", "131"], None)],
     "mpatrol": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
