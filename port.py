@@ -51,6 +51,7 @@ COVER = {
                  ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
     "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives (7-9 stages 2-4), 10 two players, 11 DIPs
                  ("ref/cover.py", list(range(12, 16)), 60000),    # 12-15 MAME's cheats: lives, invincibility, bonus
+                 ("ref/cover.py", list(range(20, 24)), 60000),    # 20-23 the cheats, stages finished by the state bytes (the whole game's stages in turn)
                  ("ref/cover.py", list(range(16, 20)), 20000),    # 16-19 the cheats with stages 2, 3, 4, 8 poked ($50C1)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
@@ -142,6 +143,7 @@ TESTS = {
                  ("tools/logic_test.py", ["3000", "--seed", "17"], None),   # stage 3 (the waterfall)
                  ("tools/logic_test.py", ["3000", "--seed", "18"], None),   # stage 4 (the cave)
                  ("tools/logic_test.py", ["3000", "--seed", "19"], None),   # stage 8
+                 ("tools/logic_test.py", ["12000", "--seed", "20", "--quiet"], None),   # stages finished in turn
                  ("tools/render_test.py", ["3000", "--seed", "4", "--start", "900", "--every", "3"], None),
                  ("tools/render_test.py", ["4000", "--seed", "17", "--start", "1000", "--every", "3"], None),   # stage 3: PSHU into the video RAM
                  ("tools/render_test.py", ["4000", "--seed", "18", "--start", "1000", "--every", "3"], None),   # stage 4

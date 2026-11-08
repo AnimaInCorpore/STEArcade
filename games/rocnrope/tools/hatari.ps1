@@ -2,9 +2,9 @@
 # recorded (Hatari's AVI, the emulated screen with its borders), the counters printed (COUNTERS.BIN: VBLs, pictures,
 # arcade frames, the border fallbacks and late events), stills extracted every -Every VBLs (ffmpeg).  Outputs in
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Mario Bros.'s hatari.ps1.
-#   powershell -File games/rocnrope/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name rocnrope_hatari] [-Avi 1] [-Sound 1: Hatari's sound on at 44.1 kHz, its audio saved to rocnrope.wav]
+#   powershell -File games/rocnrope/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name rocnrope_hatari] [-Avi 1: the AVI (28 GB for 20000 VBLs: short runs only)] [-Sound 1: Hatari's sound on at 44.1 kHz, its audio saved to rocnrope.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rocnrope_hatari", [int]$Avi = 1, [int]$Sound = 0,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rocnrope_hatari", [int]$Avi = 0, [int]$Sound = 0,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path

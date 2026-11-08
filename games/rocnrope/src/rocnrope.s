@@ -348,7 +348,27 @@ vbl:
 	bhs.s	.ap5
 	and.b	#$EF,d2
 .ap5:	move.b	d2,io_in0
-.ap3:	move.l	(sp)+,d2
+.ap3:
+	ifd CHEATS				; (-D CHEATS=1: MAME's cheats from the start on, and stages 2, 3, ... by the stage-clear state
+	cmp.w	#840,d0			;  bytes at three points of each period: ref/cover.py's seeds 20-23)
+	blo.s	.ch9
+	move.b	#10,rr_mem+$50C0
+	move.b	#2,rr_mem+$51C0
+	clr.b	rr_mem+$51DE
+	move.b	#$99,rr_mem+$509B
+	cmp.w	#1500,d0
+	beq.s	.chc
+	cmp.w	#2400,d0
+	beq.s	.chc
+	cmp.w	#3300,d0
+	bne.s	.ch9
+.chc:	cmp.b	#1,rr_mem+$5005
+	bne.s	.ch9
+	move.b	#3,rr_mem+$5005
+	clr.b	rr_mem+$5008
+.ch9:
+	endc
+	move.l	(sp)+,d2
 	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
@@ -781,6 +801,12 @@ key_table:
 	dc.b	$2c,$00,$10,$00		; Z = button 1
 	dc.b	$1d,$00,$20,$00		; control = button 2
 	dc.b	$2d,$00,$20,$00		; X = button 2
+	dc.b	$1e,$00,$00,$01		; A = player 2 left
+	dc.b	$20,$00,$00,$02		; D = right
+	dc.b	$11,$00,$00,$04		; W = up
+	dc.b	$1f,$00,$00,$08		; S = down
+	dc.b	$10,$00,$00,$10		; Q = button 1
+	dc.b	$12,$00,$00,$20		; E = button 2
 	dc.b	$02,$08,$00,$00		; 1 = start 1
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
