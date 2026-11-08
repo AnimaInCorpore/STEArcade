@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG", "rocnrope": "ROCNROPE.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG", "rocnrope": "ROCNROPE.PRG", "rthunder": "RTHUNDER.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -56,6 +56,8 @@ COVER = {
                  ("ref/cover.py", list(range(20, 24)), 60000),    # 20-23 the cheats, stages finished by the state bytes (the whole game's stages in turn)
                  ("ref/cover.py", list(range(16, 20)), 20000),    # 16-19 the cheats with stages 2, 3, 4, 8 poked ($50C1)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
+    "rthunder": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9], 6000, ["--port"]),       # random play (the port schedule, RthunderRule)
+                 ("ref/cover.py", [100], 12000, ["--port"])],                          # 100: the benchmark build's play (autoplay)
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "xevious": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9], 20000),      # 1-3 play, 4-5 two players, 6 the attract mode, 7-9 DIPs
                 ("ref/cover.py", [11, 12, 13, 14], 60000),               # infinite lives (MAME cheat)
@@ -154,6 +156,14 @@ TESTS = {
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
                  ("tools/build.py", ["--sim", "--tag", "rocnrope_snd"], None),
                  ("tools/sound_test.py", ["3000", "--seed", "4", "--tag", "rocnrope_snd"], None)],   # the translated driver, AYs and YM against sound.py
+    "rthunder": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}", "--render", "--mcu"], 1500),         # the translation, the tile-row marks, the MCU's mailbox
+                 ("tools/logic_test.py", ["3000", "--seed", "3", "--render"], None),
+                 ("tools/logic_test.py", ["4000", "--autoplay"], None),               # the benchmark's play
+                 ("tools/render_test.py", ["3000", "--seed", "1", "--every", "20", "--sprites"], None),   # sprites, fixed layer, window
+                 ("tools/render_test.py", ["3000", "--seed", "2", "--every", "20", "--sprites"], None),
+                 ("tools/mcu_model.py", ["3000", "--seed", "2"], None)],              # the mailbox model against the firmware
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),

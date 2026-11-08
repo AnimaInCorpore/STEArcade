@@ -329,6 +329,7 @@ not been re-measured in Hatari since).
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
 | Galaga '88 | ~20% / 6.1 BENCH | n/a | - | both | - | `tile_marks` | ? |
 | Dragon Spirit | 14% / 2.9 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
+| Rolling Thunder | 50% over 6000 VBLs (70% in play) / 7.7 (10.6 in play) (Hatari, AUTOPLAY, 4 MB, 2026-11-08) | n/a (flat pages, fixed slots) | - | both (`ret_weights` from the coverage's counts: 5% slower) | the MCU's mailbox (`src/mcu.s`: 13k a frame instead of the firmware's ~25k MCU cycles), no natives for the 6809 | tile-row marks (`tile_dirty`: the row from X / Y / U at the store, 128 bytes; the layer flag where the address is not named) | kept |
 
 **Pictures**
 
@@ -365,6 +366,7 @@ not been re-measured in Hatari since).
 | Yie Ar Kung-Fu | - | `sprite_programs` (per-slot cache) | sprite-only rows: their groups | tiles (row restores, `draw_rows`) | bounded flat fit, black and 15 |
 | Roc'n Rope | - | `sprite_programs` (per-slot cache) | drawn lines (`restore_damage`) | tiles (tile cache, cell list) | default fitter flat |
 | Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet: a build without the copy ran +18-20% fps, +20% pictures) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
+| Rolling Thunder | H + V by the Shifter (R-Type's twin columns and lines, 64 pixel / 32 line margins, three display buffers) | `sprites.s`: parts made at build time (702) or on first use, row groups of one mask, a HOP 2 / OP 3 pass a row (c + 1 words, Y count 4, NFSR) | rectangles copied back from the clean buffer | the fixed layer's cells as runs of four, parts in a 2-way cache | one fixed 16 colours (fitted to seeds 0-5) |
 
 ## Techniques that look applicable elsewhere (2026-11-07)
 
