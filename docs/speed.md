@@ -314,6 +314,7 @@ not been re-measured in Hatari since).
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
+| Xevious | ~35% (22 arcade fps) / 5.4 autoplay | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
@@ -345,6 +346,7 @@ not been re-measured in Hatari since).
 | Splatterhouse | H (twin columns) | converted per colour, a pass a line | rectangles from the twins | bar images | chooser per scene |
 | Galaga '88 | - (fixed buffers) | a pass a line (X count 3) | rectangles from clean | composed into cells | chooser per scene |
 | Dragon Spirit | H + V (twin lines and columns) | Galaga '88's | row spans | OP 3 passes per fine shift | chooser + flash |
+| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | a row loop (`blit_row` ~560 a row; Blitter passes to do) | redrawn from the ring | CPU tiles | fitted 16, flat |
 
 ## Techniques that look applicable elsewhere (2026-11-07)
 

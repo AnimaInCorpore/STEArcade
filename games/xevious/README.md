@@ -149,6 +149,24 @@ second, 3.5 pictures) is the cheapest trade and is the user's call; (4) drawing 
 every second picture would save about a third of the CPU drawing at some flicker.  The logic (175,000: the translated code,
 the copies of the shared RAM windows, the 51XX) leaves 45 arcade frames a second without any picture.
 
+Speed audit (2026-11-08, against `docs/speed.md`; logic 175-182k cycles a frame, a picture 0.85-1.1M; Hatari autoplay 22 arcade
+frames and 5.4 pictures a second, `MAX_SKIP` 3):
+
+| Technique | State | Before -> after |
+|---|---|---|
+| Register maps (`z80x.FAST` / `FAST_LONG`) | applied | - |
+| Writer marks for tile RAM (`vwriters`, scroll latch writers) | applied | no RAM comparisons |
+| Window guards only at coverage sites | applied (shared RAM windows copied at the stops) | - |
+| Leaves in place (`inline_leaves=16`, rst, jumps) | tried, not kept: the lock-step test is no longer exact (the Z80 stack residue at `$CFFC` differs, frame 0); needs the test to ignore dead stack words first | logic unchanged (reverted) |
+| Natives at hot routines, `flags_at` at the idle hook | not tried (no routine profile yet) | - |
+| Sprite cache of converted tiles | tried, rejected | no change |
+| `sprite_programs` / Blitter masked passes (`AGENTS.md`) | **not done: the main gain** | `blit_row` ~560 cycles a row, 480k a busy picture |
+| Hardware scroll with twin lines | not done (redesign; saves ~130k bus cycles + most ring work) | - |
+| Damage only drawn rows, per-slot cache, contour restores | n.a. today (sprites are drawn from the ring and the picture is copied whole) | - |
+| Palette stamps / colour cycling | n.a. (one fixed 16-colour set, no cycling) | - |
+| Pictures-per-second schedule (`MAX_SKIP`) | applied; trade is the user's call | 1: 14 / 7, 3: 22 / 5.4, 7: 27 / 3.5 |
+| Dropping effects (ground sprites / foreground every second picture) | proposed, not done | ~1/3 of the CPU drawing |
+
 ## Tests and tools
 
 `tools/machine.py` (the reference), `tools/gen.py`, `tools/assets.py`, `tools/build.py`, `tools/logic_test.py` (lock-step),
