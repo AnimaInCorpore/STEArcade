@@ -313,6 +313,7 @@ not been re-measured in Hatari since).
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
+| Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
@@ -339,6 +340,7 @@ not been re-measured in Hatari since).
 | Gyruss | - | `sprite_programs` | drawn lines from clean | tiles | default fitter flat |
 | Track & Field, Hyper Sports | per row | `sprite_programs` | sprite-only rows: their groups | tiles | default fitter flat |
 | Double Dragon | H | a row loop, rows sorted by mask | cells invalidated | pairs, fills | checker pairs |
+| Super Basketball | H, recomposed (hardware scroll not used yet) | `sprite_programs` (348 shapes, per-slot cache) | sprite-only rows and changed cells | tiles | default fitter flat |
 | Gauntlet | H + V (torus) | baked 32-pixel strips, a pass a row | rectangles from clean | runs; CPU masks for transparent ones | checker pairs + player colours |
 | R-Type | H (twin columns) | `sprite_programs` (streams) | contour from clean; clears over black | status bar image | checker pairs per scene |
 | Mr. HELI | fine H (`m72render`) | per-code line routines | rows | **AND + OR (to convert)** | scene palettes |

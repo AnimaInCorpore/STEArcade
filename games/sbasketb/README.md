@@ -199,6 +199,30 @@ covered them (a picture's Blitter 128k -> 93k bus cycles; the scroll is the same
 the play frames of seed 1); the generated sprite code (a picture 115.0k CPU + 106.8k Blitter -> 98.9k + 103.8k, seed 1
 frames 1000-1400, `-D REN_GEN=0` against the default, both exact).
 
+**Speed audit (2026-11-08, against `docs/speed.md`)**.  Profile first: logic 56k cycles an arcade frame (flat after the two
+natives; the I/O write handler 4.3%, the return dispatch 2.7%, the I/O read handler 1.9%); a picture 96-100k CPU + 98-114k
+Blitter bus cycles (render_test, seed 1 frames 1,000+): `draw_cell` 25% (the generated sprite code and its Blitter waits),
+`compose` 24% (the tile rows), `bake_sprite` 14% (cache filling, mostly warm-up: 1,024 slots), `draw_sprites` 13%, tiles 7%.
+
+| Technique | State | Before -> after |
+|---|---|---|
+| Register maps, second pass | built in (`fixed_slots`, `fast_forms`) from the first build | not A/B measured |
+| Window guards at coverage sites | n/a: one flat 64 KB block, no banks | |
+| Leaves in place (`inline_leaves`/`inline_rst`/`inline_jumps`) | n/a: the 6809 translator has `inline_calls` only, for hand-made targets; no hand-made leaf here | |
+| `call_summaries`, `ret_weights` | applied from the first build | not A/B measured |
+| `flags_at=set()` at the idle hook | n/a: the idle point is a native (`sb_idle`) | |
+| `video_inline` | applied ($3000-$37FF) | not A/B measured (the I/O write handler is still 4.3%: the other registers and the sprite RAM) |
+| Natives at the profile's top routines | applied: `$8DD8` division, `$64F7` sprite list (lock-step exact, 20 seeds + autoplay) | logic 78.6k -> 56.2k (seed 1); Hatari 44.1 -> 49.6 frames/s, 16.2 -> 19.4 pictures/s |
+| Sound work at build time | applied (MAME recordings to DMA clips) | |
+| Hardware scroll (twin lines / columns) | **not applied; the biggest candidate**: every scroll change recomposes all 26 scrolled rows (compose 24% of the CPU, most of the Blitter); the scroll differs from the last picture's in 29% of play frames.  HSCROLL needs the fixed rows 0-5 composed against the scroll (they stay on screen) and the display address and HSCROLL set per picture; the render test would have to model the hardware | |
+| Palette stamps, DEDICATED pens, frozen colour cycling | n/a: one 16-colour palette per picture, no colour cycling (the sprite palette bank is flushed with the picture) | |
+| Draw the smaller layer as pieces | n/a: one tile layer plus sprites | |
+| Erase only what can be seen | applied: sprites drawn into guard lines below the picture (the display skips them); only rows with sprite damage or a changed cell are recomposed | Blitter 128k -> 93k a picture |
+| Per-slot sprite cache, `sprite_programs` passes | applied (1,024 slots, 348 shapes) | 115.0k CPU + 106.8k Blitter -> 98.9k + 103.8k |
+| Sprite-only-row restore / writer marks | applied (`row_dirty`, `row_sdirty`: cells marked by the writers) | included above |
+| Spreading redraws, HUD as an image, skipping latch copies of skipped pictures | not tried | |
+| Pictures-per-second schedule | `MAX_SKIP` 3, `PASSES` 8; not tuned | |
+
 Measured, not kept: nothing yet.  Techniques other ports use that may apply:
 [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).
 
