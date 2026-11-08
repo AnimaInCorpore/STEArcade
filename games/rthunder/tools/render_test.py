@@ -45,6 +45,7 @@ def main():
     ap.add_argument("frames", nargs="?", type=int, default=600)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--every", type=int, default=100)
+    ap.add_argument("--update", action="store_true", help="ren_update every frame (marks set), the window compared every frame")
     args = ap.parse_args()
     run = ROOT / "run" / "rthunder_sim"
     s = Sim(str(run / "RTHUNDER.PRG"), run_dir=run)
@@ -72,19 +73,7 @@ def main():
         cpu.w_pc(sym[name])
         return run_to(sym["sim_wait"])
 
-    run_to(sym["sim_wait"])
-    d = np.load(build_dir("rthunder") / "palfit.npz")
-    flat = d["flat"]
-    dswa, dswb, inputs = cover.schedule(args.seed)
-    m = RthunderRule()
-    m.dsw = [dswa, dswb]
-    m.boot()
-    bad = 0
-    for f in range(args.frames):
-        m.in0, m.in1, m.in2 = inputs(f)
-        m.run_frame_port()
-        if f % args.every != args.every - 1:
-            continue
+    def put_state(m):
         mem.w_block(sym["vram0"], bytes(m.vram[0]))
         mem.w_block(sym["vram1"], bytes(m.vram[1]))
         hw = bytearray(0x40)
@@ -95,6 +84,47 @@ def main():
                 hw[b], hw[b + 1], hw[b + 2] = x >> 8, x & 0xFF, m.yscroll[dev][layer]
         hw[0x20], hw[0x30] = m.backcolor, m.tilebank
         mem.w_block(sym["hwregs"], bytes(hw))
+
+    run_to(sym["sim_wait"])
+    d = np.load(build_dir("rthunder") / "palfit.npz")
+    flat = d["flat"]
+    dswa, dswb, inputs = cover.schedule(args.seed)
+    m = RthunderRule()
+    m.dsw = [dswa, dswb]
+    m.boot()
+    bad = 0
+    ucyc, upic, uworst = 0, 0, 0
+    for f in range(args.frames):
+        m.in0, m.in1, m.in2 = inputs(f)
+        m.run_frame_port()
+        if args.update:
+            put_state(m)
+            for i in range(3):
+                mem.w8(sym["tile_written"] + i, 1)
+            cyc = call("ren_update")
+            ucyc += cyc
+            uworst = max(uworst, cyc)
+            upic += 1
+            buf = bytes(mem.r_block(sym["ren_bg"], 512 * 480))
+            full = planar_to_index(buf, 480, 64)
+            want = expected_bg(m, flat)
+            tiled = np.tile(want, (1, 2))
+            vaddr = mem.r32(sym["ren_vaddr"]) - sym["ren_bg"]
+            fine = mem.r16(sym["ren_fine"])
+            line0, group0 = vaddr // 512, (vaddr % 512) // 8
+            x0 = group0 * 16 + fine
+            win = np.stack([full[line0 + r, x0:x0 + 320] for r in range(224)])
+            sx = m.xscroll[0][0] & 0x1FF
+            wx, wy = (4 + sx) & 511, (25 + (m.yscroll[0][0] & 255)) & 255
+            exp = np.stack([tiled[(wy + r) & 255, wx:wx + 320] for r in range(224)])
+            d = int((win != exp).sum())
+            if d:
+                print("frame %d: ren_update, %d window pixels differ" % (m.frame, d))
+                bad += 1
+            continue
+        if f % args.every != args.every - 1:
+            continue
+        put_state(m)
         miss0 = mem.r32(sym["tc_miss"])
         cyc = call("ren_bg_all")
         miss = mem.r32(sym["tc_miss"]) - miss0
@@ -116,6 +146,8 @@ def main():
         diff += int((win != exp).sum())
         print("frame %d: ren_bg_all %d cycles (%d tile conversions), %d pixels differ" % (m.frame, cyc, miss, diff))
         bad += diff != 0
+    if args.update:
+        print("ren_update: %d frames, %d differ, mean %.0f cycles, worst %d" % (upic, bad, ucyc / max(upic, 1), uworst))
     print("bg: %d pictures differ" % bad)
     return 1 if bad else 0
 

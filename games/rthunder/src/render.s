@@ -311,10 +311,12 @@ ren_window:
 	move.b	hwregs+1,d0		; sx
 	addq.w	#4,d0
 	and.w	#511,d0			; the window's x
+	move.w	d0,ren_wx
 	moveq	#0,d1
 	move.b	hwregs+2,d1
 	add.w	#25,d1
 	and.w	#255,d1			; its first line
+	move.w	d1,ren_wy
 	move.w	d0,d2
 	and.w	#15,d2
 	move.w	d2,ren_fine
@@ -324,6 +326,136 @@ ren_window:
 	add.l	d0,d1
 	add.l	#ren_bg,d1
 	move.l	d1,ren_vaddr
+	rts
+
+; ---- ren_update: the composite follows the game: a layer the translated stores marked (tile_written + layer) is compared
+; with its shadow, the cells that differ (any of the three layers: a cell index is shared) are decomposed, a change of the
+; layer order, the back colour or the tile bank decomposes all; then the cells of the window are composed (cell_ok) ----
+ren_update:
+	bsr	ren_setup
+	move.l	lord,d0			; (the layer order: 3 words = 6 bytes; the back colour's planes; the tile bank)
+	move.w	lord+4,d1
+	move.l	bkp,d2
+	moveq	#0,d3
+	move.b	hwregs+$30,d3
+	cmp.l	sv_lord,d0
+	bne.s	.all
+	cmp.w	sv_lord+4,d1
+	bne.s	.all
+	cmp.l	sv_bkp,d2
+	bne.s	.all
+	cmp.b	sv_tb,d3
+	beq.s	.nochg
+.all:	st	rw_dirty
+	move.l	d0,sv_lord
+	move.w	d1,sv_lord+4
+	move.l	d2,sv_bkp
+	move.b	d3,sv_tb
+	lea	cell_ok,a0
+	move.w	#2048/4-1,d0
+.clr:	clr.l	(a0)+
+	dbf	d0,.clr
+.nochg:	moveq	#2,d7
+.lay:	lea	tile_written,a0
+	tst.b	(a0,d7.w)
+	beq.s	.nolay
+	clr.b	(a0,d7.w)
+	bsr	ren_scan
+.nolay:	dbf	d7,.lay
+	bsr	ren_window
+	; the window's cells: columns (x >> 3) .. (x + 319) >> 3, rows (line >> 3) .. (line + 223) >> 3 (the buffer's map twice)
+	move.w	ren_wx,d4
+	lsr.w	#3,d4			; first column
+	move.w	ren_wx,d0
+	add.w	#319,d0
+	lsr.w	#3,d0
+	sub.w	d4,d0			; columns - 1
+	move.w	ren_wy,d5
+	lsr.w	#3,d5			; first row
+	move.w	ren_wy,d1
+	add.w	#223,d1
+	lsr.w	#3,d1
+	sub.w	d5,d1			; rows - 1
+	move.w	d1,rw_rows
+	move.w	d0,rw_cols
+	move.w	d4,rw_c0
+	move.w	d5,rw_r0
+	move.l	d4,d2			; the window's cell range: unchanged and nothing decomposed: nothing to compose
+	swap	d2
+	move.w	d5,d2
+	move.w	rw_cols,d3
+	lsl.w	#8,d3
+	or.w	rw_rows,d3
+	cmp.l	rw_sig,d2
+	bne.s	.go
+	cmp.w	rw_sig2,d3
+	bne.s	.go
+	tst.b	rw_dirty
+	beq	.done
+.go:	move.l	d2,rw_sig
+	move.w	d3,rw_sig2
+	clr.b	rw_dirty
+	clr.w	rw_r
+.rr:	move.w	rw_r0,d1
+	add.w	rw_r,d1
+	and.w	#31,d1
+	clr.w	rw_c
+.cc:	move.w	rw_c0,d0
+	add.w	rw_c,d0
+	and.w	#63,d0
+	move.w	d1,d2
+	lsl.w	#6,d2
+	add.w	d0,d2
+	lea	cell_ok,a0
+	tst.b	(a0,d2.w)
+	bne.s	.ok
+	st	(a0,d2.w)
+	movem.l	d0-d2,-(sp)
+	bsr	ren_cell
+	movem.l	(sp)+,d0-d2
+.ok:	move.w	rw_c,d0
+	addq.w	#1,d0
+	move.w	d0,rw_c
+	cmp.w	rw_cols,d0
+	bls.s	.cc
+	move.w	rw_r,d0
+	addq.w	#1,d0
+	move.w	d0,rw_r
+	cmp.w	rw_rows,d0
+	bls.s	.rr
+.done:	rts
+
+; d7 = the layer 0-2: its cells against the shadow
+ren_scan:
+	lea	vram0,a0
+	move.w	d7,d0
+	lsr.w	#1,d0
+	beq.s	.d0
+	lea	vram1,a0
+.d0:	move.w	d7,d0
+	and.w	#1,d0
+	lsl.w	#8,d0
+	lsl.w	#4,d0
+	add.w	d0,a0			; the layer's 4096 bytes
+	move.l	a0,a2
+	lea	shadow,a1
+	move.w	d7,d0
+	lsl.w	#8,d0
+	lsl.w	#4,d0
+	add.w	d0,a1
+	move.w	#1024-1,d6
+.l:	cmpm.l	(a0)+,(a1)+
+	beq.s	.same
+	move.l	-4(a0),-4(a1)
+	move.l	a0,d0
+	sub.l	a2,d0
+	lsr.l	#1,d0
+	subq.w	#2,d0			; the first of the two cells
+	lea	cell_ok,a3
+	clr.b	(a3,d0.w)
+	clr.b	1(a3,d0.w)
+	st	rw_dirty
+.same:	dbf	d6,.l
 	rts
 
 ; ---- ren_bg_all: every cell of ren_bg (ren_setup first) ----
@@ -343,12 +475,31 @@ ren_bg_all:
 
 	section bss,bss
 	even
+tile_written:	ds.b	4
+cell_ok:	ds.b	2048
+shadow:		ds.b	3*4096
 tm_rows:	ds.w	1
 	even
 tc_miss:	ds.l	1
 lord:		ds.w	3
 rc_n:		ds.w	1
 ren_fine:	ds.w	1
+ren_wx:		ds.w	1
+ren_wy:		ds.w	1
+rw_rows:	ds.w	1
+rw_cols:	ds.w	1
+rw_c0:		ds.w	1
+rw_r0:		ds.w	1
+rw_r:		ds.w	1
+rw_c:		ds.w	1
+sv_lord:	ds.w	3
+sv_bkp:		ds.l	1
+sv_tb:		ds.b	1
+rw_dirty:	ds.b	1
+	even
+rw_sig:		ds.l	1
+rw_sig2:	ds.w	1
+	even
 	even
 ren_vaddr:	ds.l	1
 bkp:		ds.b	4
