@@ -40,9 +40,7 @@
 ; reaches above line 0.  Bottom: whole into the guard lines (cleared before the buffer's next picture).
 
 BL = PIC_TOP+256+16			; buffer lines
-LB = 296				; a ring line: 37 groups (the window's 21 from any group)
-HUD_LB = 160
-STRIP_MAX = 48				; a window move up to this many pixels: strips; more: the span again
+LB = 160
 BUFSZ = BL*LB
 NBUF = 3
 PIC0 = PIC_TOP*LB			; the picture's line 0 in a buffer
@@ -82,7 +80,7 @@ NFSR = $40
 ; ======================================================================================================================
 init_render:
 	lea	buffers,a0
-	move.l	#(NBUF*BUFSZ+PF_LB*256+48*HUD_LB)/16-1,d0
+	move.l	#(NBUF*BUFSZ+PF_LB*256)/16-1,d0
 .clr:	clr.l	(a0)+
 	clr.l	(a0)+
 	clr.l	(a0)+
@@ -100,7 +98,7 @@ init_render:
 	move.w	#-1,prev_idx
 	clr.b	frame_ready
 	clr.l	guard_dirty
-	lea	buf_r,a0		; (every row drawn at the first picture of each buffer)
+	lea	buf_scroll,a0		; (every row drawn at the first picture of each buffer)
 	move.l	#-1,(a0)
 	move.w	#-1,4(a0)
 	clr.l	row_dirty
@@ -152,8 +150,6 @@ init_render:
 	move.b	2(sp),$ffff8203.w
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
-	clr.b	$ffff8265.w
-	move.b	#(LB-160)/2,$ffff820f.w
 	rts
 
 cache_flush:
@@ -182,40 +178,25 @@ tcache_flush:
 ; vbl_video: the published buffer shown from the next frame on (the video base is read at the frame's start)
 ; ======================================================================================================================
 vbl_video:
-	movem.l	d0-d2/a0,-(sp)
+	movem.l	d0-d1/a0,-(sp)
 	move.w	shown_idx,prev_idx
 	moveq	#0,d1
 	move.b	frame_ready,d1
-	beq	.out
+	beq.s	.out
 	clr.b	frame_ready
 	subq.w	#1,d1
 	move.w	d1,shown_idx
 	add.w	d1,d1
-	lea	pub_r,a0
-	move.w	(a0,d1.w),d0		; R
-	sub.w	#48,d0			; the window's first pixel
 	add.w	d1,d1
 	lea	buf_base,a0
-	move.l	(a0,d1.w),d2
-	moveq	#0,d1
-	move.w	d0,d1
-	lsr.w	#4,d1
-	lsl.w	#3,d1
-	add.l	d1,d2			; the video base: the window's first group
-	and.w	#15,d0			; the fine scroll
-	move.w	#(LB-160)/2,d1		; the words to skip a line (4 less when the Shifter fetches one more group)
-	tst.w	d0
-	beq.s	.w
-	subq.w	#4,d1
-.w:	move.l	d2,-(sp)
+	move.l	(a0,d1.w),d0
+	move.l	d0,-(sp)
 	move.b	1(sp),$ffff8201.w
 	move.b	2(sp),$ffff8203.w
 	move.b	3(sp),$ffff820d.w
 	addq.l	#4,sp
-	move.b	d0,$ffff8265.w
-	move.b	d1,$ffff820f.w
 	addq.w	#1,pic_shown
-.out:	movem.l	(sp)+,d0-d2/a0
+.out:	movem.l	(sp)+,d0-d1/a0
 	rts
 
 ; ======================================================================================================================
@@ -257,13 +238,7 @@ render_frame:
 	move.l	(a0,d0.w),draw_base
 	bsr	guard_clear
 	bsr	compose
-	ifnd NOSPR
 	bsr	draw_sprites
-	endc
-	move.w	draw_idx,d0
-	add.w	d0,d0
-	lea	pub_r,a0
-	move.w	pic_r,(a0,d0.w)
 	move.w	draw_idx,d0
 	addq.b	#1,d0
 	move.b	d0,frame_ready
@@ -355,31 +330,6 @@ tile_draw:
 	cmp.w	#29,d2
 	bhi	.none
 	subq.w	#2,d4
-	addq.w	#6,d4			; (the image's cell column: the picture's 48 pixels in)
-	move.w	d3,d2
-	lsl.w	#3,d2			; the first line: 8 tx
-	mulu	#HUD_LB,d2
-	move.w	d4,d5
-	lsr.w	#1,d5
-	lsl.w	#3,d5
-	add.w	d5,d2
-	btst	#0,d4
-	beq.s	.hev
-	addq.w	#1,d2
-.hev:	lea	hud_img,a1
-	add.l	d2,a1
-	movem.l	(a0),d0-d5/a2
-	movep.l	d0,0(a1)
-	movep.l	d1,HUD_LB(a1)
-	movep.l	d2,2*HUD_LB(a1)
-	movep.l	d3,3*HUD_LB(a1)
-	movep.l	d4,4*HUD_LB(a1)
-	movep.l	d5,5*HUD_LB(a1)
-	move.l	a2,d0
-	movep.l	d0,6*HUD_LB(a1)
-	move.l	28(a0),d0
-	movep.l	d0,7*HUD_LB(a1)
-	rts
 .scr:	move.w	d3,d2
 	lsl.w	#3,d2			; the first line: 8 tx
 	mulu	#PF_LB,d2
@@ -525,27 +475,22 @@ guard_clear:
 	move.l	d2,a2
 	move.l	d2,a3
 	move.l	draw_base,a0
-	add.l	#PIC0+256*LB,a0
-	moveq	#16-1,d0		; 16 lines of 296 bytes
-.l:	rept	9
-	movem.l	d2-d7/a2-a3,(a0)
-	lea	32(a0),a0
-	endr
-	move.l	d2,(a0)+
-	move.l	d3,(a0)+
+	add.l	#PIC0+256*LB+16,a0
+	moveq	#16-1,d0		; 16 lines of 128 bytes (the picture's 14 groups and a half band group each side)
+.l:	movem.l	d2-d7/a2-a3,(a0)
+	movem.l	d2-d7/a2-a3,32(a0)
+	movem.l	d2-d7/a2-a3,64(a0)
+	movem.l	d2-d7/a2-a3,96(a0)
+	lea	LB(a0),a0
 	dbf	d0,.l
 .out:	rts
 
 ; ----------------------------------------------------------------------------------------------------------------------
-; compose: hardware scroll.  A buffer is a ring of BL lines x LB bytes (37 groups): the scrolled lines (48-255) hold the
-; playfield at its own x (twin columns: the picture's span is copied from the playfield group by group, the ring x of
-; picture X = 0 is R = P0 or P0 + 256, P0 = (16 - scroll) & 255 the playfield's x of it, so source and destination
-; are bit-aligned: no shift), the window of 320 pixels starts at Wx = R - 48 (three groups before R's: the black bands
-; of 48 pixels).  The window is shown by the video address (Wx >> 4 groups) and the fine scroll (Wx & 15).  The fixed
-; lines (0-47) are copied from hud_img (a 320-pixel image, black bands) to the window shifted right by Wx & 15.
-; What a picture redraws: when the buffer's R differs (buf_r): everything; else the rows its last sprites covered
-; (row_sdirty) or a changed cell lies in (row_dirty): the picture's span, the partial groups at its edges by masks (the
-; band bits cleared first).
+; compose: the buffer's tile rows (8 lines each: 6 fixed ones, picture lines 0-47, and 26 scrolled ones) that the buffer
+; does not hold as the picture has them, from the playfield: all rows when the scroll differs from the one the buffer
+; was composed at (buf_scroll), else the rows the buffer's last sprites covered (row_sdirty) or a changed cell lies in
+; (row_dirty).  A scrolled row is shifted by the scroll: the window's first pixel is P = (16 - scroll) & 255 (HOG passes
+; of one plane and line, 14 words, FXSR and the skew 16 - shift for a shifted line: 15 source words).
 ; ----------------------------------------------------------------------------------------------------------------------
 compose:
 	move.w	draw_idx,d2
@@ -554,20 +499,8 @@ compose:
 	move.b	sb_mem+$3F80,d0
 	neg.w	d0
 	add.w	#16,d0
-	and.w	#255,d0			; P0
+	and.w	#255,d0			; P
 	move.w	d0,cur_p
-	move.w	d0,d1
-	cmp.w	#48,d1
-	bhs.s	.r
-	add.w	#256,d1
-.r:	move.w	d1,pic_r		; R: the ring x of picture X = 0
-	move.w	d1,d3
-	and.w	#-16,d3
-	move.w	d3,clip_l
-	add.w	#224+15,d1
-	and.w	#-16,d1
-	sub.w	#16,d1
-	move.w	d1,clip_r16
 	move.w	d2,d1
 	add.w	d1,d1			; the buffer's long
 	lea	row_sdirty,a1
@@ -576,440 +509,92 @@ compose:
 	lea	row_dirty,a1
 	or.l	(a1,d1.w),d6		; the rows with a changed cell
 	clr.l	(a1,d1.w)
-	clr.w	cmp_moved
-	lea	buf_r,a0
-	move.w	pic_r,d0
-	clr.w	cmp_strip
-	clr.w	cmp_full
-	move.w	(a0,d2.w),d1		; the R it was composed at
-	ifnd FULL
-	cmp.w	d1,d0
+	lea	buf_scroll,a0
+	cmp.w	(a0,d2.w),d0
 	beq.s	.same
-	endc
 	move.w	d0,(a0,d2.w)
-	st	cmp_moved
-	move.w	d1,cmp_old
-	tst.w	d1
-	bmi.s	.full
-	ifd FULL
-	bra.s	.full
-	endc
-	sub.w	d1,d0
-	move.w	d0,d3
-	bpl.s	.ab
-	neg.w	d3
-.ab:	cmp.w	#STRIP_MAX,d3
-	bhi.s	.full
-	st	cmp_strip		; (a small move: the columns that came into the picture only, the fixed rows and the bands)
-	or.l	#$3F,d6
-	bra.s	.same
-
-.full:	moveq	#-1,d6			; (another position: every row, the bands again)
-	st	cmp_full
+	moveq	#-1,d6			; (another scroll: every row)
 .same:	tst.l	d6
-	bne.s	.go
-	lea	dmg_n,a1
-	tst.w	(a1,d2.w)
 	beq	.done
-.go:
-	; the geometry
-	move.w	pic_r,d0
-	moveq	#15,d1
-	and.w	d0,d1
-	move.w	d1,g_sh			; R & 15
-	lsr.w	#4,d0
-	move.w	d0,g_gl			; the picture's first group in the ring
-	move.w	cur_p,d1
-	lsr.w	#4,d1
-	sub.w	d1,d0
-	move.w	d0,g_dg			; ring group - playfield group (0 or 16)
-	move.w	pic_r,d0
-	add.w	#223,d0
-	moveq	#15,d1
-	and.w	d0,d1
-	move.w	d1,g_e			; (R + 223) & 15
-	lsr.w	#4,d0
-	move.w	d0,g_gr			; the last group
-	move.w	g_gl,d1
-	tst.w	g_sh
-	beq.s	.l0
-	addq.w	#1,d1
-.l0:	move.w	d1,g_gi0		; the first full group
-	move.w	g_gr,d2
-	cmp.w	#15,g_e
-	beq.s	.r0
-	subq.w	#1,d2
-.r0:	sub.w	d1,d2
-	addq.w	#1,d2
-	move.w	d2,g_ninner		; the full groups
-	move.w	g_sh,d1
-	moveq	#-1,d0
-	lsr.w	d1,d0
-	move.w	d0,g_lm			; the picture's bits in its first group
-	move.w	g_e,d1
-	moveq	#15,d2
-	sub.w	d1,d2
-	moveq	#-1,d0
-	lsl.w	d2,d0
-	move.w	d0,g_rm			; ... and in its last
-	move.w	g_gi0,sr_g0		; the full groups the runs copy
-	move.w	g_ninner,sr_gn
-	move.w	g_gi0,d0
-	add.w	g_ninner,d0
-	subq.w	#1,d0
-	move.w	d0,g_gi1		; the last full group
-	; the common Blitter state
 	move.w	#$0203,B_HOP.w		; source, OP 3
 	moveq	#-1,d0
 	move.w	d0,B_END1.w
 	move.w	d0,B_END2.w
 	move.w	d0,B_END3.w
+	move.w	#8,B_SXI.w
+	move.w	#8,B_DXI.w
+	move.w	#14,B_XC.w
+	move.w	#2-13*8,B_DYI.w
+	move.w	#2-13*8,B_SYI.w
+	clr.b	B_SKEW.w
 	lea	B_SRC.w,a3
 	lea	B_DST.w,a4
 	lea	B_YC.w,a5
 	lea	B_CTRL.w,a6
+	moveq	#1,d3
 	moveq	#-$40,d4		; ($C0: start, HOG)
-	; the fixed rows 0-5: hud_img shifted right by the fine scroll, plane by plane (4 lines a pass)
-	moveq	#0,d7
-.hud:	btst	d7,d6
-	beq	.hnx
-	move.w	d7,d0
-	lsl.w	#3,d0			; the first line
-	move.w	d0,d1
-	mulu	#HUD_LB,d1
-	lea	hud_img,a1
-	add.l	d1,a1			; the source
-	add.w	d0,d0
-	add.w	d0,d0
-	lea	line_off,a2
-	move.l	(a2,d0.w),d1
-	move.w	g_gl,d2
-	subq.w	#3,d2
-	lsl.w	#3,d2
-	ext.l	d2
-	add.l	d2,d1
-	move.l	draw_base,a2
-	add.l	d1,a2			; the destination
-	move.w	#8,B_SXI.w
-	move.w	#8,B_DXI.w
-	move.w	g_sh,d1
-	beq.s	.h0
-	move.w	#21,B_XC.w		; 20 source words, 21 destination words (NFSR)
-	move.w	#HUD_LB-19*8,B_SYI.w
-	move.w	#LB-20*8,B_DYI.w
-	or.b	#NFSR,d1
-	move.b	d1,B_SKEW.w
-	bra.s	.h1
-.h0:	move.w	#20,B_XC.w
-	move.w	#HUD_LB-19*8,B_SYI.w
-	move.w	#LB-19*8,B_DYI.w
-	clr.b	B_SKEW.w
-.h1:	moveq	#3,d5			; the planes
-.hp:	moveq	#1,d3			; two passes of 4 lines
-.hq:	move.l	a1,(a3)
-	move.l	a2,(a4)
-	move.w	#4,(a5)
-	move.b	d4,(a6)
-	lea	4*HUD_LB(a1),a1
-	lea	4*LB(a2),a2
-	dbf	d3,.hq
-	lea	-8*HUD_LB+2(a1),a1
-	lea	-8*LB+2(a2),a2
-	dbf	d5,.hp
-.hnx:	addq.w	#1,d7
-	cmp.w	#6,d7
-	bne	.hud
-	; the sprites' rectangles of this buffer's last picture (inside the full groups; the others are rows)
-	tst.w	cmp_full
-	bne	.rdone
-	move.w	draw_idx,d0
-	move.w	d0,d1
-	add.w	d1,d1
-	lea	dmg_n,a0
-	moveq	#0,d3
-	move.w	(a0,d1.w),d3
-	beq	.rdone
-	clr.w	(a0,d1.w)
-	lsl.w	#8,d0
-	add.w	d0,d0			; (64 entries of 8 bytes)
-	lea	dmg_list,a2
-	add.w	d0,a2
-	move.w	#2,B_SXI.w
-	move.w	#2,B_DXI.w
-	clr.b	B_SKEW.w
-	move.w	#$0203,B_HOP.w
-	move.l	d6,-(sp)
-	move.l	d7,-(sp)
-	subq.w	#1,d3
-	move.w	d3,d7
-.rl:	movem.w	(a2)+,d0-d3		; g0, ng, y, nl
-	move.w	d1,d5
-	lsl.w	#2,d5			; words a line
-	move.w	d5,B_XC.w
-	subq.w	#1,d5
-	add.w	d5,d5
-	move.w	#PF_LB,d6
-	sub.w	d5,d6
-	move.w	d6,B_SYI.w
-	move.w	#LB,d6
-	sub.w	d5,d6
-	move.w	d6,B_DYI.w
-	move.w	d2,d5
-	add.w	d5,d5
-	add.w	d5,d5
-	lea	line_off,a0
-	move.l	(a0,d5.w),d5
-	move.w	d0,d6
-	lsl.w	#3,d6
-	ext.l	d6
-	add.l	d6,d5
-	add.l	draw_base,d5		; the destination
-	mulu	#PF_LB,d2
-	sub.w	g_dg,d0
-	lsl.w	#3,d0
-	ext.l	d0
-	add.l	d0,d2
-	add.l	pf_base,d2		; the source
-.rc:	moveq	#8,d1
-	cmp.w	d3,d1			; (8 - the lines left)
-	bls.s	.rk
-	move.w	d3,d1			; the last chunk: the rest
-.rk:	sub.w	d1,d3
-	move.l	d2,(a3)
-	move.l	d5,(a4)
-	move.w	d1,(a5)
-	move.b	d4,(a6)
-	move.w	d1,d0
-	mulu	#PF_LB,d1
-	add.l	d1,d2
-	mulu	#LB,d0
-	add.l	d0,d5
-	tst.w	d3
-	bne.s	.rc
-	dbf	d7,.rl
-	move.l	(sp)+,d7
-	move.l	(sp)+,d6
-.rdone:
-	; the scrolled rows 6-31: runs of rows
-.run:	cmp.w	#32,d7
-	bhs	.bands
-	btst	d7,d6
-	beq.s	.rn
-	move.w	d7,d5			; the run's first row
-.re:	addq.w	#1,d7
-	cmp.w	#32,d7
-	bhs.s	.rg
-	btst	d7,d6
-	bne.s	.re
-.rg:	move.w	d7,d1
-	sub.w	d5,d1
-	lsl.w	#3,d1			; lines
-	lsl.w	#3,d5			; first line
-	movem.l	d6-d7,-(sp)
-	bsr	span_run
-	movem.l	(sp)+,d6-d7
-	bra.s	.run
-.rn:	addq.w	#1,d7
-	bra.s	.run
-.bands:	tst.w	cmp_strip
-	beq.s	.nostrip
-	bsr	strip
-.nostrip:
-	tst.w	cmp_moved
-	beq.s	.done
-	bsr	band_fill
-.done:	rts
-
-; strip: the picture's columns that came into it since this buffer was composed (cmp_old): the full groups among them and
-; the edges, the scrolled lines 48-255
-strip:
-	move.w	g_gi0,d0		; the full groups [gi0, gi0 + ninner)
-	move.w	d0,d1
-	add.w	g_ninner,d1
-	subq.w	#1,d1			; the last
-	move.w	pic_r,d2
-	sub.w	cmp_old,d2
-	bmi.s	.left
-	move.w	cmp_old,d3		; moved right: from the group of the old right edge
-	add.w	#224,d3
-	lsr.w	#4,d3
-	cmp.w	d0,d3
-	bls.s	.go
-	move.w	d3,d0
-	bra.s	.go
-.left:	move.w	cmp_old,d3		; moved left: up to the group before the old left edge
-	subq.w	#1,d3
-	lsr.w	#4,d3
-	cmp.w	d1,d3
-	bhs.s	.go
-	move.w	d3,d1
-.go:	sub.w	d0,d1
-	addq.w	#1,d1
-	move.w	d0,sr_g0
-	move.w	d1,sr_gn
-	moveq	#48,d5
-	move.w	#208,d1
-	bsr	span_run
-	move.w	g_gi0,sr_g0
-	move.w	g_ninner,sr_gn
-	rts
-
-; span_run: d5.w = the first line (48-255), d1.w = the lines: the picture's span copied from the playfield, edges by masks
-span_run:
-	move.w	d1,sr_n
-	move.w	d5,sr_y
-	moveq	#0,d0
-	move.w	d5,d0
-	move.w	d0,d2
-	mulu	#PF_LB,d0
-	move.l	pf_base,a1
-	add.l	d0,a1			; the playfield's line
-	add.w	d2,d2
-	add.w	d2,d2
-	lea	line_off,a2
-	move.l	(a2,d2.w),d0
-	move.l	draw_base,a2
-	add.l	d0,a2			; the buffer's line
-	move.l	a1,sr_src
-	move.l	a2,sr_dst
-	move.w	#$0203,B_HOP.w
-	moveq	#-1,d0
-	move.w	d0,B_END1.w
-	; --- the full groups: 2 lines a pass
-	move.w	sr_gn,d3
-	ble	.edges
-	lsl.w	#2,d3			; words a line
-	move.w	d3,B_XC.w
-	move.w	#2,B_SXI.w
-	move.w	#2,B_DXI.w
-	move.w	d3,d0
-	subq.w	#1,d0
-	add.w	d0,d0
-	move.w	#PF_LB,d1
-	sub.w	d0,d1
-	move.w	d1,B_SYI.w
-	move.w	#LB,d1
-	sub.w	d0,d1
-	move.w	d1,B_DYI.w
-	clr.b	B_SKEW.w
-	move.w	sr_g0,d0
-	move.w	d0,d1
-	sub.w	g_dg,d1
-	lsl.w	#3,d1
-	lsl.w	#3,d0
-	lea	(a1,d1.w),a0
-	lea	(a2,d0.w),a2
-	move.w	sr_n,d2
-	lsr.w	#1,d2
-	subq.w	#1,d2
-.fl:	move.l	a0,(a3)
-	move.l	a2,(a4)
-	move.w	#2,(a5)
-	move.b	d4,(a6)
-	lea	2*PF_LB(a0),a0
-	lea	2*LB(a2),a2
-	dbf	d2,.fl
-	; --- the edges: one plane of a column a pass, 56 lines a chunk
-.edges:	move.w	#1,B_XC.w
-	move.w	#PF_LB,B_SYI.w
-	move.w	#LB,B_DYI.w
-	move.w	#2,B_SXI.w
-	move.w	#2,B_DXI.w
-	tst.w	g_sh
-	beq.s	.right
-	move.w	g_gl,d0			; the left group
-	move.w	g_lm,d1
-	bsr	edge_group
-.right:	cmp.w	#15,g_e
-	beq.s	.out
-	move.w	g_gr,d0
-	move.w	g_rm,d1
-	bsr	edge_group
-.out:	move.w	#$0203,B_HOP.w
-	rts
-
-; edge_group: d0.w = the ring group, d1.w = the picture's bits in it: the other bits cleared, the picture's copied, for the
-; lines sr_y.. (sr_n lines), plane by plane (56 lines a pass)
-edge_group:
-	move.w	d1,eg_mask
-	move.l	sr_src,a0
-	move.l	sr_dst,a2
-	move.w	d0,d2
-	sub.w	g_dg,d2
-	lsl.w	#3,d2
-	lea	(a0,d2.w),a0		; the source group
-	lsl.w	#3,d0
-	lea	(a2,d0.w),a2		; the destination group
-	moveq	#3,d5
-.pl:	move.w	sr_n,d3
-	move.l	a0,a1			; source
-	move.l	a2,d6			; destination
-.ch:	moveq	#56,d2
-	cmp.w	d3,d2
-	bls.s	.cl
-	move.w	d3,d2			; the chunk: 56 lines or the rest
-.cl:	sub.w	d2,d3
-	move.w	eg_mask,d0
-	not.w	d0
-	move.w	d0,B_END1.w
-	clr.w	B_HOP.w			; OP 0: the other bits cleared
-	move.l	d6,(a4)
-	move.w	d2,(a5)
-	move.b	d4,(a6)
-	move.w	eg_mask,B_END1.w
-	move.w	#$0203,B_HOP.w		; the picture's bits copied
-	move.l	a1,(a3)
-	move.l	d6,(a4)
-	move.w	d2,(a5)
-	move.b	d4,(a6)
-	move.w	d2,d7
-	mulu	#PF_LB,d7
-	add.l	d7,a1
-	mulu	#LB,d2
-	add.l	d2,d6
-	tst.w	d3
-	bne.s	.ch
-	addq.l	#2,a0
-	addq.l	#2,a2
-	dbf	d5,.pl
-	rts
-
-; band_fill: the side bands of the scrolled lines (48-255) black: three groups each side of the picture's groups
-band_fill:
-	clr.w	B_HOP.w			; OP 0
-	moveq	#-1,d0
-	move.w	d0,B_END1.w
-	move.w	d0,B_END2.w
-	move.w	d0,B_END3.w
-	move.w	#12,B_XC.w
-	move.w	#2,B_DXI.w
-	move.w	#LB-22,B_DYI.w
-	clr.b	B_SKEW.w
-	lea	line_off,a0
-	move.l	48*4(a0),d1
-	add.l	draw_base,d1
-	move.w	g_gl,d0
-	subq.w	#3,d0
-	lsl.w	#3,d0
-	ext.l	d0
-	add.l	d1,d0			; the left band
-	move.w	g_gr,d2
-	addq.w	#1,d2
-	lsl.w	#3,d2
-	ext.l	d2
-	add.l	d1,d2			; the right band
-	moveq	#208/16-1,d3
-.bl:	move.l	d0,(a4)
-	move.w	#16,(a5)
-	move.b	d4,(a6)
+	move.l	pf_base,a2
+	move.l	draw_base,a0
+	add.l	#PIC0+LEFT/2,a0
+	moveq	#0,d7			; the row
+.fix:	btst	d7,d6
+	beq.s	.fnx
+	move.l	a2,a1
+	move.l	a0,d2
+	moveq	#8-1,d5
+.fl:	move.l	a1,(a3)
 	move.l	d2,(a4)
-	move.w	#16,(a5)
+	move.w	d3,(a5)			; four HOG passes of one plane (the addresses run on)
 	move.b	d4,(a6)
-	add.l	#16*LB,d0
-	add.l	#16*LB,d2
-	dbf	d3,.bl
-	move.w	#$0203,B_HOP.w
-	rts
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	lea	PF_LB(a1),a1
+	add.l	#LB,d2
+	dbf	d5,.fl
+.fnx:	lea	8*PF_LB(a2),a2
+	lea	8*LB(a0),a0
+	addq.w	#1,d7
+	cmp.w	#6,d7
+	bne.s	.fix
+	move.w	cur_p,d0		; the scrolled rows
+	moveq	#15,d1
+	and.w	d0,d1			; the shift
+	beq.s	.k0
+	moveq	#16,d5
+	sub.w	d1,d5			; skew 16 - shift, FXSR: 15 source words a line
+	or.b	#FXSR,d5
+	move.b	d5,B_SKEW.w
+	move.w	#2-14*8,B_SYI.w
+.k0:	lsr.w	#4,d0
+	lsl.w	#3,d0			; the window's first group
+.scr:	btst	d7,d6
+	beq.s	.snx
+	lea	(a2,d0.w),a1
+	move.l	a0,d2
+	moveq	#8-1,d5
+.sl:	move.l	a1,(a3)
+	move.l	d2,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	lea	PF_LB(a1),a1
+	add.l	#LB,d2
+	dbf	d5,.sl
+.snx:	lea	8*PF_LB(a2),a2
+	lea	8*LB(a0),a0
+	addq.w	#1,d7
+	cmp.w	#32,d7
+	bne.s	.scr
+.done:	rts
 
 ; ======================================================================================================================
 ; draw_sprites: the 64 entries of the shown bank, the first first (the last on top); the guard lines they reach noted
@@ -1018,14 +603,6 @@ band_fill:
 draw_sprites:
 	clr.b	spr_guard
 	clr.l	spr_rows
-	clr.l	spr_edge
-	clr.w	dmg_cnt
-	move.w	draw_idx,d0
-	lsl.w	#8,d0
-	add.w	d0,d0
-	lea	dmg_list,a0
-	add.w	d0,a0
-	move.l	a0,dmg_ptr
 	move.w	#-1,last_mode
 	move.w	#$0203,B_HOP.w
 	lea	sb_mem+$3800,a0
@@ -1063,7 +640,6 @@ draw_sprites:
 	move.w	d6,d2
 	move.w	d4,d3			; picture X
 	move.w	d5,d4			; picture Y
-	bsr	dmg_add
 	movem.l	d0/a0,-(sp)
 	bsr	draw_cell
 	movem.l	(sp)+,d0/a0
@@ -1073,73 +649,10 @@ draw_sprites:
 	add.w	d1,d1
 	add.w	d1,d1
 	lea	row_sdirty,a0
-	move.l	spr_rows,d2
-	and.l	#$3F,d2			; (the fixed rows: whole; the scrolled ones: the rectangles, or rows at the edges)
-	or.l	spr_edge,d2
-	move.l	d2,(a0,d1.w)
-	move.w	d0,d2
-	add.w	d2,d2
-	lea	dmg_n,a0
-	move.w	dmg_cnt,(a0,d2.w)
+	move.l	spr_rows,(a0,d1.w)
 	lea	guard_dirty,a0
 	move.b	spr_guard,d2
 	or.b	d2,(a0,d0.w)
-	rts
-
-; dmg_add: d3 = picture X, d4 = picture Y of a sprite about to be drawn: its restore rectangle (full groups of the scrolled
-; lines) noted for the buffer's next picture, or its rows (edges: the groups with band bits)
-dmg_add:
-	movem.l	d0-d3/a0,-(sp)
-	move.w	d4,d1
-	add.w	#16,d1
-	cmp.w	#256,d1
-	bls.s	.y1
-	move.w	#256,d1
-.y1:	move.w	d4,d2
-	cmp.w	#48,d2
-	bhs.s	.y0
-	moveq	#48,d2
-.y0:	sub.w	d2,d1			; the lines
-	ble	.out
-	move.w	d3,d0
-	add.w	pic_r,d0		; ring x
-	move.w	d0,-(sp)
-	lsr.w	#4,d0			; g0
-	move.w	(sp)+,d3
-	add.w	#15,d3
-	lsr.w	#4,d3
-	sub.w	d0,d3
-	addq.w	#1,d3			; ng
-	cmp.w	g_gi0,d0
-	blo.s	.rows
-	move.w	d0,-(sp)
-	add.w	d3,d0
-	subq.w	#1,d0
-	cmp.w	g_gi1,d0
-	bhi.s	.pop
-	move.w	(sp)+,d0
-	movea.l	dmg_ptr,a0
-	move.w	d0,(a0)+
-	move.w	d3,(a0)+
-	move.w	d2,(a0)+
-	move.w	d1,(a0)+
-	move.l	a0,dmg_ptr
-	addq.w	#1,dmg_cnt
-	bra.s	.out
-.pop:	addq.l	#2,sp
-.rows:	move.w	d2,d0			; the rows Y / 8 .. (Y + 15) / 8 (Y: from line 48)
-	lsr.w	#3,d0
-	add.w	d2,d1
-	subq.w	#1,d1
-	lsr.w	#3,d1
-	sub.w	d0,d1
-	addq.w	#1,d1
-	moveq	#1,d2
-	lsl.l	d1,d2
-	subq.l	#1,d2
-	lsl.l	d0,d2
-	or.l	d2,spr_edge
-.out:	movem.l	(sp)+,d0-d3/a0
 	rts
 
 ; draw_cell: d2 = the key, d3 = picture X (-15 .. 223), d4 = picture Y (0 .. 255).  Baked on a miss, clipped at the
@@ -1170,13 +683,13 @@ draw_cell:
 	move.l	(a0),d6			; the shape's record (0: no generated code)
 	beq	.rp
 	move.w	cell_x,d3
-	add.w	pic_r,d3		; ring x
+	add.w	#LEFT,d3		; screen x
 	moveq	#15,d0
 	and.w	d3,d0			; the shift
 	beq.s	.gin
-	cmp.w	clip_l,d3		; across a side edge: the clipped variants (one word)
+	cmp.w	#LEFT,d3		; across a side edge: the clipped variants (one word)
 	blt.s	.gcl
-	cmp.w	clip_r16,d3
+	cmp.w	#LEFT+224-16,d3
 	blt.s	.gin
 	add.w	#32,d0			; (right: clip 2, the first word only)
 	bra.s	.gin
@@ -1193,8 +706,7 @@ draw_cell:
 	add.w	d1,d1
 	lea	line_off,a1
 	move.l	(a1,d1.w),d1
-	and.l	#$FFFF,d3
-	add.l	d3,d1			; the offset in the buffer
+	add.w	d3,d1			; the offset in the buffer
 	move.l	draw_base,d3
 	add.l	d1,d3			; the destination
 	cmp.w	#$FFFF-15*LB-16,d3	; (the code steps the low word: no 64 KB crossing)
@@ -1227,7 +739,7 @@ draw_cell:
 	endc
 	addq.l	#8,a0			; (the slot's header: the shape record, the aligned plane words' address)
 	move.w	cell_x,d0
-	add.w	pic_r,d0		; ring x
+	add.w	#LEFT,d0		; screen x
 	moveq	#15,d5
 	and.w	d0,d5			; the shift
 	and.w	#-16,d0			; the first word's x
@@ -1236,12 +748,12 @@ draw_cell:
 	moveq	#4,d6			; one word (inside: culled already otherwise)
 	bra.s	.mode
 .sh:	moveq	#0,d6
-	cmp.w	clip_l,d0
+	cmp.w	#LEFT,d0
 	bge.s	.l
 	moveq	#8,d6			; the first word in the band: left clipped
 	add.w	#16,d0
 	bra.s	.mode
-.l:	cmp.w	clip_r16,d0
+.l:	cmp.w	#LEFT+224-16,d0
 	blt.s	.mode
 	moveq	#12,d6			; the second word in the band: right clipped
 .mode:	move.w	d6,cell_mode
@@ -1251,8 +763,7 @@ draw_cell:
 	lea	line_off,a1
 	move.l	(a1,d1.w),d1
 	lsr.w	#1,d0
-	and.l	#$FFFF,d0
-	add.l	d0,d1
+	add.w	d0,d1
 	move.l	draw_base,a1
 	add.l	d1,a1
 	move.w	(a0)+,d4		; the rows
@@ -1605,38 +1116,8 @@ tc_used:	ds.w	1
 guard_dirty:	ds.b	4			; per buffer: the bottom guard lines hold sprites
 row_dirty:	ds.l	NBUF			; per buffer: the tile rows with a changed cell (bit 31 the row 31)
 row_sdirty:	ds.l	NBUF			; per buffer: the tile rows its last sprites covered
-buf_r:		ds.w	NBUF			; per buffer: the R its rows were composed at (-1: never)
-pub_r:		ds.w	NBUF			; per buffer: the R published
+buf_scroll:	ds.w	NBUF			; per buffer: the P its scrolled rows were composed at (-1: never)
 cur_p:		ds.w	1
-pic_r:		ds.w	1			; the ring x of picture X = 0
-clip_l:		ds.w	1			; the sprites' clip words: the word boundary at or left of R
-clip_r16:	ds.w	1			; and the last word's x at or beyond the right edge less 16
-cmp_moved:	ds.w	1
-cmp_strip:	ds.w	1
-cmp_old:	ds.w	1
-sr_g0:		ds.w	1
-sr_gn:		ds.w	1
-g_sh:		ds.w	1
-g_gl:		ds.w	1
-g_dg:		ds.w	1
-g_e:		ds.w	1
-g_gr:		ds.w	1
-g_gi0:		ds.w	1
-g_ninner:	ds.w	1
-g_lm:		ds.w	1
-g_rm:		ds.w	1
-sr_n:		ds.w	1
-sr_y:		ds.w	1
-sr_src:		ds.l	1
-sr_dst:		ds.l	1
-eg_mask:	ds.w	1
-spr_edge:	ds.l	1
-dmg_cnt:	ds.w	1
-dmg_ptr:	ds.l	1
-g_gi1:		ds.w	1
-dmg_n:		ds.w	NBUF
-dmg_list:	ds.w	NBUF*64*4
-cmp_full:	ds.w	1
 spr_rows:	ds.l	1			; draw_sprites: the rows the sprites drawn now cover
 spr_guard:	ds.b	1
 last_bank:	ds.b	1			; the sprite palette bank the sprite cache was baked with
@@ -1657,6 +1138,5 @@ tc_data:	ds.b	TC_SLOTS*32
 sc_index:	ds.l	32768			; per sprite key: its slot (0: not baked)
 sc_data:	ds.b	SC_SLOTS*SC_SIZE
 	cnop	0,256
-buffers:	ds.b	NBUF*BUFSZ+PF_LB*256+48*HUD_LB
-hud_img	equ	buffers+NBUF*BUFSZ+PF_LB*256
+buffers:	ds.b	NBUF*BUFSZ+PF_LB*256
 	section text,code

@@ -100,7 +100,7 @@ def sprite_programs(v):
     """-> (assembler lines: the generated code and records; the streams)"""
     keys, n = coverage_shapes()
     shapes = {shape_id(code, fx, fy): shape_masks(v, code, fx, fy) for code, fx, fy in keys}
-    progs, stream, st = sp.programs(shapes, CODES * 4, table=PREFIX + '_shapes', stream_sym=PREFIX + '_sstream', line=296)
+    progs, stream, st = sp.programs(shapes, CODES * 4, table=PREFIX + '_shapes', stream_sym=PREFIX + '_sstream')
     print('generated code: %(routines)d routines (%(code_lines)d lines) for %(shapes)d shapes x 16 shifts x 3 clips; '
           'stream blocks %(stream_blocks)d, %(stream_bytes)d bytes' % st)
     return progs + ['	section data,data'], stream

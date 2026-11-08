@@ -14,7 +14,6 @@ map) and the side bands (black: the edges lie on 16-pixel groups, clipping is ex
   * consecutive pictures: the sprites and the scrolls move and tiles change, all three buffers in turn.
 """
 from pathlib import Path
-import os
 import argparse
 import random
 import sys
@@ -24,7 +23,7 @@ from machine68k import Register as R
 from sim import Sim, TRAP1
 from machine import Video
 from paths import ROOT, build_dir
-from render_test import ste_picture, band_bad, LB, PIC_TOP, LEFT, PICW
+from render_test import ste_picture, LB, PIC_TOP, LEFT, PICW
 
 BUILD = build_dir('sbasketb')
 SLOTS = list(range(0, 0x100, 4))
@@ -95,23 +94,19 @@ class Harness:
         mem.w16(sym['prev_idx'], mem.r16(sym['shown_idx']))
         mem.w8(sym['frame_ready'], 0)
         mem.w16(sym['shown_idx'], ready - 1)
-        self.r = mem.r16(sym['pub_r'] + 2 * (ready - 1))
         return mem.r32(sym['buf_base'] + 4 * (ready - 1))
 
     def check(self, label):
-        base = self.render()
-        got = ste_picture(self.mem, base, self.r)
+        got = ste_picture(self.mem, self.render())
         full = self.v.render_raw(self.tmem, select=self.mem.r8(self.sym['sb_latch'] + 5))[16:240]
         exp = self.pmap[np.ascontiguousarray(np.rot90(full, -1))]
         self.sprite_pixels += int((full >= 256).sum())
         n = int((got[:, LEFT:LEFT + PICW] != exp).sum())
-        nb = band_bad(got, self.r)
+        nb = int((got[:, :LEFT] != 0).sum() + (got[:, LEFT + PICW:] != 0).sum())
         if n or nb:
             ys, xs = np.nonzero(got[:, LEFT:LEFT + PICW] != exp)
             print('%s: %d pixels differ, %d band pixels, first (y, x) %s' % (label, n, nb,
                                                                           list(zip(ys[:4].tolist(), xs[:4].tolist()))))
-            if os.environ.get('DBG'):
-                print('   rows', sorted(set(ys.tolist())), 'x', sorted(set(xs.tolist()))[:12], 'R', self.r, 'sc', self.tmem[0x3F80], 'bank', self.mem.r8(self.sym['sb_latch'] + 5))
             return False
         return True
 
@@ -157,27 +152,24 @@ def main():
     tiles()
     scrolls()
     steps = range(-18, 3) if not args.quick else (-17, -9, -1, 0)
-    # the window's edges anywhere in a word: every position of R & 15 (the scroll P0 = (16 - scroll) & 255, R = P0 or P0 + 256)
-    for scr in ((0, 3, 8, 13, 16, 29, 200, 233) if not args.quick else (0, 7, 200)):
-        h.poke(0x3F80, bytes((scr,)))
-        for edge in ('left', 'right'):
-            for dx in steps:
-                X = dx if edge == 'left' else PICW - 16 - dx
-                ents = {}
-                for k, (Y, fx, fy) in enumerate(((20, 0, 0), (60, 1, 0), (100, 0, 1), (140, 1, 1))):
-                    c, col = pick()
-                    ents[4 * k] = entry(c, col, X, Y, bool(fx), bool(fy))
+    for edge in ('left', 'right'):
+        for dx in steps:
+            X = dx if edge == 'left' else PICW - 16 - dx
+            ents = {}
+            for k, (Y, fx, fy) in enumerate(((20, 0, 0), (60, 1, 0), (100, 0, 1), (140, 1, 1))):
                 c, col = pick()
-                ents[0x20] = entry(c, col, X + (4 if edge == 'left' else -4), 180, flipy=bool(dx & 1))
-                c, col = pick()
-                ents[0x24] = entry(c, col, 100 + dx, 80, flipx=bool(dx & 2))
-                c, col = pick()
-                ents[0x28] = entry(c, col, 103 + dx, 84)          # (under the one before)
-                h.sprites(ents, bank=dx & 1)
-                if h.check('%s edge, X %d, scroll %d' % (edge, X, scr)):
-                    ok += 1
-                else:
-                    bad += 1
+                ents[4 * k] = entry(c, col, X, Y, bool(fx), bool(fy))
+            c, col = pick()
+            ents[0x20] = entry(c, col, X + (4 if edge == 'left' else -4), 180, flipy=bool(dx & 1))
+            c, col = pick()
+            ents[0x24] = entry(c, col, 100 + dx, 80, flipx=bool(dx & 2))
+            c, col = pick()
+            ents[0x28] = entry(c, col, 103 + dx, 84)          # (under the one before)
+            h.sprites(ents, bank=dx & 1)
+            if h.check('%s edge, X %d' % (edge, X)):
+                ok += 1
+            else:
+                bad += 1
     # the guard lines: sprites across the bottom edge (none reaches above line 0)
     for step in range(16 if not args.quick else 4):
         ents = {}
