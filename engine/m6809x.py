@@ -128,6 +128,8 @@ def defs_uses(ins):
     if stem in ("neg", "com", "asl", "lsl", "clr") or mn in ("nega", "negb", "coma", "comb", "asla", "aslb", "lsla",
                                                              "lslb", "clra", "clrb"):
         return NZVC, 0
+    if mn == "nc":                        # (KONAMI-1 / 6809 $x2: COM when C is set, else NEG; only liveness: not emitted)
+        return NZVC, C
     if stem in ("rol",) or mn in ("rola", "rolb"):
         return NZVC, C
     if stem in ("inc", "dec") or mn in ("inca", "incb", "deca", "decb"):
@@ -205,6 +207,10 @@ class Program:
         # indirect_io (set after construction, Juno First): the pointer of an indirect operand at an I/O site is read
         # through <cpu>_io_r (the pointer lives in a bank window's data)
         self.indirect_io = False
+        # video_push (set after construction): (lo, hi): a PSHU whose bytes land in lo .. hi - 1 (the game fills the
+        # video RAM with the user stack pointer) lists their cells: `bsr <name>_vlist` with d7.w = the lowest address
+        # and d6.w = the byte count - 1 (the cells as video_store lists them; the other addresses are left out)
+        self.video_push = None
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -1308,7 +1314,7 @@ class Emitter:
     def emit(self, v, ins):
         self.cur_v = v
         mn = ins.mn
-        if mn.startswith("x") and mn not in ("xdec",):
+        if mn.startswith("x") and mn not in ("xdec", "xnc"):
             raise Unsupported("undocumented " + mn)
         bm = base_mn(mn)
         fl = ins.flow
@@ -1714,6 +1720,8 @@ class Emitter:
     STACK_REGS = [(0x80, "pc"), (0x40, "us"), (0x20, "y"), (0x10, "x"), (0x08, "dp"), (0x04, "b"), (0x02, "a"),
                   (0x01, "cc")]
 
+    STACK_SIZE = {"pc": 2, "us": 2, "y": 2, "x": 2}      # (the others: one byte)
+
     def stack_ptr(self, mn):
         """(68000 operand prefix: a5 for S, else a1 loaded from U)"""
         return "a5" if mn.endswith("s") else "a1"
@@ -1766,6 +1774,19 @@ class Emitter:
                 self.e("move.b d7,-(%s)" % sp)
         if user:
             self.a1_to_u()
+            vp = self.p.video_push
+            if vp:
+                n = sum(self.STACK_SIZE.get(r, 1) for bit, r in self.STACK_REGS if mask & bit)
+                skip = self.new_label()
+                self.e("cmp.w #$%04X,d4" % max(vp[0] - n + 1, 0))
+                self.e("blo.s %s" % skip)
+                self.e("cmp.w #$%04X,d4" % vp[1])
+                self.e("bhs.s %s" % skip)
+                self.e("move.w d4,d7")
+                self.e("moveq #%d,d6" % (n - 1))
+                self.e("bsr %s_vlist" % self.p.name)
+                self.lines.append(skip + ":")
+                self._a0 = None
         if live:
             self.e("move.w d5,ccr")
 
@@ -2095,7 +2116,7 @@ class Emitter:
                   "lsla", "lslb", "lsra", "lsrb", "asra", "asrb", "rola", "rolb", "rora", "rorb"):
             self.unary(v, ins, mn[:-1], REG8[mn[-1]])
             return
-        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror"):
+        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror", "xnc"):
             if self.io_site(v, ins):
                 raise Unsupported("read-modify-write of I/O: " + ins.text)
             self.unary(v, ins, mn, None)
@@ -2225,7 +2246,22 @@ class Emitter:
         runs inside the flag wrapper (it may spoil the CCR: increments, slot lookups); ROL / ROR take C first."""
         def opnd():
             return r if r else self.ea(v, ins)
-        if op == "neg":
+        if op == "xnc":
+            # KONAMI-1 / 6809 $x2 (undocumented): COM when C is set, else NEG (memory forms; Roc'n Rope's $B610).  C is
+            # saved around the operand's address code, which may spoil the CCR.
+            lc, ld = self.new_label(), self.new_label()
+            self.e("move.w sr,-(sp)")
+            ea = opnd()
+            self.e("move.w (sp)+,d6")
+            self.e("btst #0,d6")
+            self.e("bne.s %s" % lc)
+            self.e("neg.b %s" % ea)
+            self.e("bra.s %s" % ld)
+            self.lines.append(lc + ":")
+            self.e("not.b %s" % ea)
+            self.e("or.b #1,ccr")
+            self.lines.append(ld + ":")
+        elif op == "neg":
             self.e("neg.b %s" % opnd())
         elif op == "com":
             self.wrap(v, N | Z | V, lambda: self.e("not.b %s" % opnd()), const_set=C)

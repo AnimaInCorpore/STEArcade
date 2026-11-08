@@ -34,7 +34,7 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG", "rocnrope": "ROCNROPE.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
@@ -48,6 +48,10 @@ COVER = {
     "junofrst": [("ref/cover.py", list(range(1, 13)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play
                  ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
                  ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
+    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives (7-9 stages 2-4), 10 two players, 11 DIPs
+                 ("ref/cover.py", list(range(12, 16)), 60000),    # 12-15 MAME's cheats: lives, invincibility, bonus
+                 ("ref/cover.py", list(range(16, 20)), 20000),    # 16-19 the cheats with stages 2, 3, 4, 8 poked ($50C1)
+                 ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "xevious": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9], 20000),      # 1-3 play, 4-5 two players, 6 the attract mode, 7-9 DIPs
                 ("ref/cover.py", [11, 12, 13, 14], 60000),               # infinite lives (MAME cheat)
@@ -126,6 +130,21 @@ TESTS = {
                  ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet", "--sound"], None),   # two players
                  ("tools/render_test.py", ["3000", "--seed", "1", "--quiet"], None),
                  ("tools/sprite_test.py", ["400"], None)],            # the fast blit against the reference blit
+    "rocnrope": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["3000", "--seed", "4"], None),    # infinite lives
+                 ("tools/logic_test.py", ["3000", "--seed", "10"], None),   # two players
+                 ("tools/logic_test.py", ["6000", "--seed", "12"], None),   # MAME's cheats: invincible, deeper play
+                 ("tools/logic_test.py", ["3000", "--seed", "17"], None),   # stage 3 (the waterfall)
+                 ("tools/logic_test.py", ["3000", "--seed", "18"], None),   # stage 4 (the cave)
+                 ("tools/logic_test.py", ["3000", "--seed", "19"], None),   # stage 8
+                 ("tools/render_test.py", ["3000", "--seed", "4", "--start", "900", "--every", "3"], None),
+                 ("tools/render_test.py", ["4000", "--seed", "17", "--start", "1000", "--every", "3"], None),   # stage 3: PSHU into the video RAM
+                 ("tools/render_test.py", ["4000", "--seed", "18", "--start", "1000", "--every", "3"], None),   # stage 4
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/build.py", ["--sim", "--tag", "rocnrope_snd"], None),
+                 ("tools/sound_test.py", ["3000", "--seed", "4", "--tag", "rocnrope_snd"], None)],   # the translated driver, AYs and YM against sound.py
     "mario": [("tools/prepare.py", [], None),
               ("tools/build.py", ["--sim"], None),
               ("tools/logic_test.py", ["{n}"], 3000),

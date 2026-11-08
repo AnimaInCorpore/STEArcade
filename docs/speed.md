@@ -319,6 +319,7 @@ not been re-measured in Hatari since).
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Yie Ar Kung-Fu | 96% / 37.7 autoplay | flat | - | both | sprite RAM builder, idle | `st vram_w` / `vram_n` after coverage-recorded store sites, `static_write` for the sound ports | n/a (idle native) |
 | Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
+| Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | Xevious | ~35% (22 arcade fps) / 5.4 autoplay | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |

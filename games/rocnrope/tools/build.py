@@ -1,0 +1,65 @@
+"""Build ROCNROPE.PRG for a 4 MB Atari STE (--sim: the Musashi build for the tests).
+
+    python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
+
+-D NOSOUND=1: without the sound driver (tools/sndgen.py, src/sound.s; it needs ref/cover_sound.py's coverage).
+"""
+from pathlib import Path
+import argparse
+import json
+import subprocess
+import sys
+sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[3] / 'engine')]
+import gen
+from paths import build_dir, ROOT, EXTRACTED
+import palette_native as pn
+from toolchain import assemble_link
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--sim', action='store_true')
+    ap.add_argument('--debug', action='store_true')
+    ap.add_argument('--assets', action='store_true', help='make the graphics and colours again')
+    ap.add_argument('--frames', type=int, default=0)
+    ap.add_argument('-D', dest='defines', action='append', default=[])
+    ap.add_argument('--tag', help='another run/<tag> folder (default rocnrope / rocnrope_sim)')
+    args = ap.parse_args()
+    build = build_dir('rocnrope')
+    if not (EXTRACTED / 'rocnrope' / 'rr1.1h').exists():
+        subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'prepare.py')], check=True)
+    (build / 'rocnrope.img').write_bytes(gen.image())
+    try:
+        import assets
+    except ImportError:
+        assets = None
+    if assets and (args.assets or pn.changed('rocnrope') or not (build / 'rr_assets.s').exists()):
+        assets.build()
+        pn.stamp('rocnrope')
+    report = gen.generate()
+    (build / 'translation.json').write_text(json.dumps({k: v for k, v in report.items() if k != 'missing'},
+                                                       indent=1, default=str) + '\n')
+    print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
+    defs = list(args.defines)
+    if not any(d.startswith('NOSOUND') for d in defs):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))     # (assets put Gyruss' tools first)
+        for m in ('sndgen', 'sound'):
+            sys.modules.pop(m, None)
+        import sndgen                         # (the sound: games/rocnrope/ref/cover_sound.py's coverage)
+        (build / 'snd.rom').write_bytes(sndgen.image()[:0x2000])
+        stext, srep = sndgen.generate()
+        (build / 'snd_code.s').write_text(stext)
+        print('sound: instructions', srep['instructions'], 'unsupported', len(srep['unsupported']), 'missing',
+              len(srep['missing']), 'helpers', srep['helpers'])
+    tag = args.tag or ('rocnrope_sim' if args.sim else 'rocnrope')
+    out = ROOT / 'run' / tag / 'ROCNROPE.PRG'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    defs += (['SIM=1'] if args.sim else []) + (['DEBUG=1'] if args.debug else [])
+    if args.frames:
+        defs.append('FRAMES=%d' % args.frames)
+    assemble_link('rocnrope', 'rocnrope.s', tag, str(out), defs)
+    print('built %s, %d bytes' % (out, out.stat().st_size))
+
+
+if __name__ == '__main__':
+    main()
