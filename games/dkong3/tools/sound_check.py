@@ -78,6 +78,43 @@ def hatari(extra=()):
     print('Hatari audio:', wav)
 
 
+def simulate():
+    """The driver itself on Musashi (the SIM build, no Hatari): the script's latch values into the Z80 block each VBL, snd_frame
+    and snd_mix called, the VBL counter advanced, the bytes the driver put into the ring
+    collected: the stream the DMA would play.  -> build/dkong3/sound/check_sim.wav (6258 Hz, scaled to 16 bit)"""
+    import render_test as rt
+    from sound_test import call
+    import re
+    text = (BUILD / 'sndtest.s').read_text()
+    rows = []
+    for l in text.splitlines():
+        if l.strip().startswith('dc.b'):
+            v = [int(x) for x in l.split('dc.b')[1].split(',')]
+            rows += [tuple(v[i:i + 3]) for i in range(0, len(v), 3)]
+    h = rt.Harness(1, 'dkong3_sim')
+    mem, sym = h.mem, h.sym
+    ring = sym['snd_ring']
+    out = bytearray()
+    wp_prev = mem.r16(sym['snd_wp'])
+    for k, r in enumerate(rows + [(0, 0, 0)] * 100):
+        for a, v in zip((0x7C00, 0x7C80, 0x7D00), r):
+            mem.w8(h.a6 + a, v)
+        call(h, 'snd_frame')
+        mem.w32(sym['frame_counter'], k + 1)
+        call(h, 'snd_mix')
+        wp = mem.r16(sym['snd_wp'])
+        n = (wp - wp_prev) & 2047
+        data = bytes(mem.r_block(ring, 2048))
+        out += bytes(data[(wp_prev + i) & 2047] for i in range(n))
+        wp_prev = wp
+    x = np.frombuffer(bytes(out), np.int8).astype(np.int16) * 256
+    OUT.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(OUT / 'check_sim.wav'), 'wb') as o:
+        o.setnchannels(1); o.setsampwidth(2); o.setframerate(6258)
+        o.writeframes(x.tobytes())
+    print('driver stream: %.1f s' % (len(x) / 6258))
+
+
 def load(path):
     w = wave.open(str(path))
     x = np.frombuffer(w.readframes(w.getnframes()), np.int16).reshape(-1, w.getnchannels())[:, 0].astype(float) / 32768
@@ -85,15 +122,16 @@ def load(path):
 
 
 def envelope(x, r, win=0.05):
+    from scipy.signal import butter, sosfiltfilt
+    x = sosfiltfilt(butter(2, 40, 'high', fs=r, output='sos'), x)         # (a DC offset is not heard: the arcade's mix has one, Hatari's output blocks it)
     n = int(win * r)
     k = len(x) // n
     return np.sqrt((x[:k * n].reshape(k, n) ** 2).mean(1))
 
 
-def compare():
+def compare(other='check_hatari'):
     a, ra = load(OUT / 'check_mame.wav')
-    b, rb = load(OUT / 'check_hatari.wav')
-    assert ra == rb, (ra, rb)
+    b, rb = load(OUT / (other + '.wav'))
     ea, eb = envelope(a, ra), envelope(b, rb)
     # align: the Hatari recording has the program's start and the script's START VBLs before the first command
     best = (-2, 0)
@@ -120,8 +158,9 @@ def compare():
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=('make', 'hatari', 'compare'))
+    ap.add_argument('cmd', choices=('make', 'hatari', 'compare', 'simulate'))
     ap.add_argument('--frames', type=int, default=2400)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--other', default='check_hatari', help='compare: the recording to compare with MAME (check_hatari, check_sim)')
     a = ap.parse_args()
-    {'make': lambda: make(a.frames, a.seed), 'hatari': hatari, 'compare': compare}[a.cmd]()
+    {'make': lambda: make(a.frames, a.seed), 'hatari': hatari, 'compare': lambda: compare(a.other), 'simulate': simulate}[a.cmd]()

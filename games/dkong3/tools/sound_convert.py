@@ -25,7 +25,7 @@ from sound_capture import spans
 BUILD = build_dir("dkong3")
 SRC = BUILD / "sound"
 LATCHES = sc.LATCHES
-PEAK = 56
+PEAK = 40
 SOUND_THRESH = 0.004                          # a recording with a peak below this is silent
 
 

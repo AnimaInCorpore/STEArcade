@@ -659,6 +659,16 @@ dbg_counters:
 	lea	dbg_buf,a2
 	moveq	#20,d0
 	bsr	dbg_write
+	ifd SNDDBG
+	lea	dbg_name4,a1
+	lea	snd_dbg,a2
+	move.l	#4096,d0
+	bsr	dbg_write
+	lea	dbg_name5,a1
+	lea	snd_dbg_ring,a2
+	move.l	#2048,d0
+	bsr	dbg_write
+	endc
 	rts
 dbg_write:				; a1 = the name, a2 = the data, d0.l = its length
 	movem.l	d0/a2,-(sp)
@@ -684,6 +694,10 @@ dbg_name2:
 	dc.b	"COUNTERS.BIN",0
 dbg_name3:
 	dc.b	"RATE.BIN",0
+dbg_name4:
+	dc.b	"SNDDBG.BIN",0
+dbg_name5:
+	dc.b	"SNDRING.BIN",0
 	even
 	endc
 

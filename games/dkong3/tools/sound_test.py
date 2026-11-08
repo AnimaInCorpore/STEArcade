@@ -41,7 +41,6 @@ def mix_test(h, clips, pcm, nclips):
     loops at its end, an effect ends); wrapping at the ring's end included.  -> the number of failures"""
     mem, sym = h.mem, h.sym
     ring, mixbuf = sym['snd_ring'], sym['snd_mixbuf']
-    io = h.s.io
     rng = np.random.RandomState(5)
     bad = 0
     loops = [c for c in range(1, nclips + 1) if clips[c][2]]
@@ -49,7 +48,7 @@ def mix_test(h, clips, pcm, nclips):
     short = min(shots, key=lambda c: clips[c][1] - clips[c][0])
     for trial in range(40):
         voices = {}
-        for v in range(9):
+        for v in range(6):
             kind = rng.randint(4)
             if kind == 0:
                 continue
@@ -58,7 +57,7 @@ def mix_test(h, clips, pcm, nclips):
             if kind == 3:
                 pos = clips[c][1] - int(rng.randint(2, 200)) // 2 * 2         # (about to end)
             voices[v] = [c, pos]
-        for v in range(9):
+        for v in range(6):
             base = sym['snd_voices'] + 12 * v
             if v in voices:
                 c, pos = voices[v]
@@ -68,19 +67,19 @@ def mix_test(h, clips, pcm, nclips):
             else:
                 mem.w32(base, 0)
         wp = int(rng.randint(0, 512)) * 4
-        po = (wp + int(rng.randint(100, 400)) * 4 - 384) & 2047 if trial % 3 else (wp - 128) & 2047
+        dv = int(rng.randint(0, 11))                          # (the VBLs since the last call; more than 8 count as 8)
+        acc = int(rng.randint(0, 200))
         mem.w16(sym['snd_wp'], wp)
-        a = ring + po
-        for off, v in ((0x909, (a >> 16) & 255), (0x90B, (a >> 8) & 255), (0x90D, a & 255)):      # (the DMA's address counter)
-            io[off] = v
-            mem.w8(0xFF8000 + off, v)
+        mem.w16(sym['snd_fc'], (mem.r16(sym['frame_counter'] + 2) - dv) & 0xFFFF)
+        mem.w32(sym['snd_acc'], acc)
+        tot = 6258 * min(dv, 8) + acc
+        n = 4 * (tot // 200)
         before = bytes(mem.r_block(ring, 2048))
         call(h, 'snd_mix')
         after = bytes(mem.r_block(ring, 2048))
-        target = ((po + 384) & 2044)
-        n = (target - wp) & 2044
-        if n > 1024:
-            wp, n = (target - 384) & 2044, 384
+        if mem.r16(sym['snd_wp']) != (wp + n) & 2044 or mem.r32(sym['snd_acc']) != tot % 200:
+            bad += 1
+            print('mix trial %d: wp %d (expected %d), acc %d (expected %d)' % (trial, mem.r16(sym['snd_wp']), (wp + n) & 2044, mem.r32(sym['snd_acc']), tot % 200))
         want = np.zeros(n, int)
         for v, (c, pos) in voices.items():
             ptr, end, lp = pos, clips[c][1], clips[c][2]
@@ -99,7 +98,7 @@ def mix_test(h, clips, pcm, nclips):
             bad += 1
             d = [i for i in range(2048) if exp[i] != after[i]]
             print('mix trial %d: %d ring bytes differ (first %s), wp %d n %d' % (trial, len(d), d[:4], wp, n))
-    print('snd_mix: 40 trials of the voices added (saturating, loops, ends, the ring wrapping), %d differ' % bad)
+    print('snd_mix: 40 trials of the sample clock and the voices added (saturating, loops, ends, the ring wrapping), %d differ' % bad)
     return bad
 
 
@@ -128,7 +127,7 @@ def main():
                 assert mem.r8(base + v) == want.get(v, 0), (kind, k, v)
     last = [0, 0, 0]
     lh, le = [0, 0, 0], [0, 0, 0]
-    want = [0] * 9
+    want = [0] * 6
     prev_vals = (0, 0, 0)
     checked = starts = bad = 0
     voices = sym['snd_voices']
@@ -143,16 +142,16 @@ def main():
                 eff = tabs['%04x_eff' % LATCHES[k]].get(v, 0)
                 if hold != lh[k]:
                     lh[k] = hold
-                    want[3 * k] = hold
+                    want[3 * (k // 2)] = hold
                     starts += bool(hold)
                 if eff != le[k]:
                     le[k] = eff
                     if eff:
-                        want[3 * k + 1 + ckind[eff]] = eff
+                        want[3 * (k // 2) + 1 + ckind[eff]] = eff
                         starts += 1
         prev_vals = tuple(h.m.snd[a_] for a_ in LATCHES)
         call(h, 'snd_mix')
-        for n in range(9):
+        for n in range(6):
             ptr = mem.r32(voices + 12 * n)
             got = 0
             if ptr:

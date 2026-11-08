@@ -12,21 +12,17 @@
 ;     stops when the latch changes to a value without a clip, 0 in practice; the other clips play to their end.
 ;
 ; The two voices are added (the clips are scaled for it: 6 dB of headroom) into a ring buffer that the DMA plays
-; (6258 Hz mono, repeating); every VBL snd_mix brings the ring up to the DMA's position plus SND_LEAD bytes.  snd_frame
+; (6258 Hz mono, repeating); every VBL snd_mix adds the VBL's share of samples (6258 a second) to the ring, SND_LEAD ahead of the DMA's start.  snd_frame
 ; runs once per arcade frame, before its NMI (the hook), reading the Z80 block the previous NMI wrote, and queues the
 ; commands for snd_mix (the VBL).
 ;
 ; ------------------------------------------------------------------------------
-
 	include	"dkong3_sound.s"
-
 SND_RING = 2048				; the ring (bytes: 327 ms)
 SND_LEAD = 384				; the samples ready ahead of the DMA's position (61 ms; the VBL comes every 20 ms)
 SND_QLEN = 16				; commands queued
-SND_VOICES = 9				; a tune, an effect and a sound that goes on, for each latch
-
+SND_VOICES = 6				; a tune, an effect and a sound that goes on, for each CPU (the first N2A03: latches 1 and 2)
 	section text,code
-
 snd_init:
 	clr.b	$ffff8901.w
 	move.b	#SOUND_MODE,$ffff8921.w
@@ -46,6 +42,17 @@ snd_init:
 	move.w	#SND_RING/4-1,d0
 .rg:	clr.l	(a0)+
 	dbf	d0,.rg
+	ifd SNDTONE				; (a square wave of 7 samples a half period, 447 Hz, in the whole ring: the DMA path alone)
+	lea	snd_ring,a0
+	move.w	#SND_RING/14-1,d0
+.tn:	moveq	#6,d1
+.t1:	move.b	#100,(a0)+
+	dbf	d1,.t1
+	moveq	#6,d1
+.t2:	move.b	#-100,(a0)+
+	dbf	d1,.t2
+	dbf	d0,.tn
+	endc
 	move.l	#snd_ring,d0
 	move.l	d0,-(sp)
 	move.b	1(sp),$ffff8903.w
@@ -58,7 +65,7 @@ snd_init:
 	move.b	3(sp),$ffff8913.w
 	addq.l	#4,sp
 	move.w	#SND_LEAD,snd_wp
-	move.b	#3,$ffff8901.w		; play, repeating
+	move.w	frame_counter+2,snd_fc
 	move.b	#7,$ffff8800.w		; the YM silent (tones and noise off, volumes 0)
 	move.b	$ffff8800.w,d0
 	and.b	#$c0,d0
@@ -72,6 +79,8 @@ snd_init:
 	blo.s	.ym
 	rts
 
+
+
 snd_lmc:	dc.w	%10011101000		; master volume 0 dB
 	dc.w	%10101010100		; left 0 dB
 	dc.w	%10100010100		; right 0 dB
@@ -80,8 +89,12 @@ snd_lmc:	dc.w	%10011101000		; master volume 0 dB
 	dc.w	%10000000001		; mix: YM + DMA
 snd_lmc_end:
 
+
+
 ; d0 = one LMC1992 command (11 bits).  The mask register rotates while the 16 bits shift out (16 us) and reads $07FF
 ; again when done; its value before the first write is not defined, so the wait is after the write, and bounded.
+
+
 
 microwire:
 	move	#$07ff,$ffff8924.w
@@ -91,12 +104,16 @@ microwire:
 	dbeq	d2,.busy
 	rts
 
+
+
 ; ------------------------------------------------------------------------------
 ; snd_frame, once an arcade frame (the hook): the latches' changes into commands for the voices (d0-d3/a0-a1 used).
 ; A command is a word, voice << 8 | clip (0: stop the voice): voice 2k the tune of latch k + 1, 2k + 1 its effect.
 ; ------------------------------------------------------------------------------
 
-snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tune / effect tables
+
+
+snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tune / effect tables, \5 = its CPU's first voice (0, 3)
 	moveq	#0,d0
 	ifd SNDTEST
 	move.b	snd_inbuf+\1,d0		; (the script's, not the game's)
@@ -111,7 +128,7 @@ snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tu
 	cmp.b	snd_lh+\1,d1
 	beq.s	.eff\@
 	move.b	d1,snd_lh+\1
-	move.w	#(\1*3)<<8,d2
+	move.w	#(\5)<<8,d2
 	or.b	d1,d2
 	bsr	snd_queue
 .eff\@:	lea	\4,a0
@@ -123,20 +140,24 @@ snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tu
 	tst.b	d1
 	beq.s	.same\@
 	lea	snd_clipkind,a0
-	move.w	#((\1*3)+1)<<8,d2
+	move.w	#(\5+1)<<8,d2
 	tst.b	(a0,d1.w)		; a sound that goes on (a loop until the next one) has a voice of its own
 	beq.s	.os\@
-	move.w	#((\1*3)+2)<<8,d2
+	move.w	#(\5+2)<<8,d2
 .os\@:	or.b	d1,d2
 	bsr	snd_queue
 .same\@:
 	endm
 
+
+
 snd_frame:
-	snd_latch 0,$7C00,snd_hold1,snd_eff1
-	snd_latch 1,$7C80,snd_hold2,snd_eff2
-	snd_latch 2,$7D00,snd_hold3,snd_eff3
+	snd_latch 0,$7C00,snd_hold1,snd_eff1,0
+	snd_latch 1,$7C80,snd_hold2,snd_eff2,0
+	snd_latch 2,$7D00,snd_hold3,snd_eff3,3
 	rts
+
+
 
 snd_queue:				; d2 = the command
 	moveq	#0,d3
@@ -148,13 +169,44 @@ snd_queue:				; d2 = the command
 	move.b	d3,snd_qt		; (the VBL sees the command once the tail moved)
 	rts
 
+
+
 ; ------------------------------------------------------------------------------
 ; snd_mix, every VBL: the queued commands start and stop voices; the ring is filled up to the DMA's position plus SND_LEAD
 ; with the voices added (saturating); the voices' pointers advance (a tune loops, an effect ends).
 ; ------------------------------------------------------------------------------
 
+
+
 snd_mix:
+	ifd SNDTONE
+	rts
+	endc
 	movem.l	d0-d7/a0-a5,-(sp)
+	ifd SNDDBG				; (a trace of the first 512 VBLs: the script's latch bytes, which voices play, the VBL count, wp: SNDDBG.BIN)
+	move.w	snd_dbg_n,d7
+	cmp.w	#512,d7
+	bhs.s	.nodbg
+	lea	snd_dbg,a0
+	lsl.w	#3,d7
+	move.b	snd_inbuf,(a0,d7.w)
+	move.b	snd_inbuf+1,1(a0,d7.w)
+	move.b	snd_inbuf+2,2(a0,d7.w)
+	moveq	#0,d0
+	lea	snd_voices,a1
+	moveq	#5,d1
+.dm:	lsl.b	#1,d0
+	tst.l	(a1)
+	beq.s	.dn
+	addq.b	#1,d0
+.dn:	lea	12(a1),a1
+	dbf	d1,.dm
+	move.b	d0,3(a0,d7.w)
+	move.w	frame_counter+2,4(a0,d7.w)
+	move.w	snd_wp,6(a0,d7.w)
+	addq.w	#1,snd_dbg_n
+.nodbg:
+	endc
 	lea	snd_q,a1
 	moveq	#0,d3
 	move.b	snd_qh,d3
@@ -191,36 +243,33 @@ snd_mix:
 .stop:	clr.l	(a0)
 	bra.s	.cmd
 .cmds:	move.b	d3,snd_qh
-.rd:	moveq	#0,d0			; the DMA's address, read twice until it is stable
-	move.b	$ffff8909.w,d0
-	lsl.l	#8,d0
-	move.b	$ffff890b.w,d0
-	lsl.l	#8,d0
-	move.b	$ffff890d.w,d0
-	moveq	#0,d1
-	move.b	$ffff8909.w,d1
-	lsl.l	#8,d1
-	move.b	$ffff890b.w,d1
-	lsl.l	#8,d1
-	move.b	$ffff890d.w,d1
-	cmp.l	d0,d1
-	bne.s	.rd
-	sub.l	#snd_ring,d0
-	add.w	#SND_LEAD,d0
-	and.w	#SND_RING-4,d0		; the target: the DMA's position + the lead
+	tst.b	snd_started		; the DMA starts at the first call, when the ring's write position is its lead ahead
+	bne.s	.run
+	st	snd_started
+	move.b	#3,$ffff8901.w		; play, repeating
+.run:	moveq	#0,d1			; the samples to mix: 6258 a second against the VBL's 50 (the DMA is not read: Hatari's
+	move.w	frame_counter+2,d1	; counter stands still), four at a time, the rest kept
+	move.w	d1,d2
+	sub.w	snd_fc,d2		; the VBLs since the last call
+	move.w	d1,snd_fc
+	cmp.w	#8,d2
+	bls.s	.dv
+	moveq	#8,d2			; (a stall: no more than 8 VBLs' worth)
+.dv:	mulu	#6258,d2
+	add.l	snd_acc,d2
+	divu	#200,d2			; four samples are 200 units
+	move.l	d2,d3
+	swap	d3
+	move.w	d3,snd_acc+2		; (the remainder; the word before it stays 0)
+	and.l	#$ffff,d2
+	lsl.w	#2,d2			; the bytes to mix
 	move.w	snd_wp,d1
-	move.w	d0,d2
-	sub.w	d1,d2
-	and.w	#SND_RING-4,d2		; the bytes to mix
-	cmp.w	#SND_RING/2,d2
-	bls.s	.n_ok
-	move.w	d0,d1			; (behind, or the DMA passed us: the lead again)
-	sub.w	#SND_LEAD,d1
-	and.w	#SND_RING-4,d1
-	move.w	#SND_LEAD,d2
-.n_ok:	move.w	d0,snd_wp
 	tst.w	d2
 	beq	.out
+	move.w	d1,d0
+	add.w	d2,d0
+	and.w	#SND_RING-4,d0
+	move.w	d0,snd_wp
 	lea	snd_mixbuf,a4		; the voices added into a silent buffer
 	move.w	d2,d0
 	lsr.w	#2,d0
@@ -292,13 +341,30 @@ snd_mix:
 	bmi.s	.out
 .c2:	move.l	(a4)+,(a1)+
 	dbf	d0,.c2
-.out:	movem.l	(sp)+,d0-d7/a0-a5
+.out:
+	ifd SNDDBG
+	cmp.w	#401,snd_dbg_n		; (the ring after the 400th call: SNDRING.BIN, to compare with the simulator's)
+	bne.s	.nr
+	lea	snd_ring,a0
+	lea	snd_dbg_ring,a1
+	move.w	#SND_RING/4-1,d0
+.cr:	move.l	(a0)+,(a1)+
+	dbf	d0,.cr
+.nr:
+	endc
+	movem.l	(sp)+,d0-d7/a0-a5
 	rts
+
+
 
 	section bss,bss
 	even
 snd_vars:
 snd_wp:		ds.w	1
+snd_started:	ds.b	1
+	even
+snd_fc:		ds.w	1		; the VBL count at the last snd_mix
+snd_acc:	ds.l	1		; the sample clock's remainder
 snd_last:	ds.b	4		; the latches' last values
 snd_lh:		ds.b	4		; the tune clip each latch holds
 snd_le:		ds.b	4		; the effect clip its value started last
@@ -308,9 +374,16 @@ snd_q:		ds.w	SND_QLEN
 snd_voices:	ds.l	3*SND_VOICES	; per voice: pointer (0: silent), end, loop start (0: none)
 snd_vars_end:
 	even
+	ifd SNDDBG
+snd_dbg_n:	ds.w	1
+snd_dbg:	ds.b	4096
+snd_dbg_ring:	ds.b	2048
+	endc
 snd_mixbuf:	ds.b	SND_RING/2
 snd_ring:	ds.b	SND_RING
 	section text,code
+
+
 
 	ifd SNDTEST
 ; -D SNDTEST=1 (tools/sound_check.py): the three sound latches are written every VBL from a script (one entry of 3 bytes per
@@ -341,3 +414,4 @@ snd_script_step:
 snd_inbuf:	ds.b	4
 	section text,code
 	endc
+
