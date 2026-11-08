@@ -107,20 +107,32 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   does not reach the full arcade rate: **it runs at 92% in Hatari's attract and first room** (55.8 arcade frames a second, 35.4 pictures, after the speed audit below; 91% before it).
 * **Later rooms in Hatari (2026-11-08, no AVI, `tools/hatari.ps1 -Frames 3900 -Room k`, sound on, the room started by hand at frame 900 of
   the play, rates over the whole 3900 VBLs, the first ~900 frames being attract)**: room 0: 57.0 arcade frames a second
-  (94%), 31.7 pictures; 1: 56.6 / 44.7; 2: 57.2 / 22.9; 3: 55.8 / 40.9; 4: 57.3 / 26.7; 5: 55.8 / 32.4; 6: 53.5 / 20.5 (room 6
-  before the table fix, not re-measured).  A **long run** of 20,001 VBLs (`-Frames 20000`, the AUTOPLAY build: coin, start,
+  (94%), 31.7 pictures; 1: 56.6 / 44.7; 2: 57.2 / 22.9; 3: 55.8 / 40.9; 4: 57.3 / 26.7; 5: 55.8 / 32.4; 6: 53.5 / 20.4 (room 6
+  re-measured 2026-11-08 after the table fix: 53.5 arcade frames a second, 89%, 20.4 pictures).  A **long run** of 20,001 VBLs (`-Frames 20000`, the AUTOPLAY build: coin, start,
   walking and hitting, lives kept, a room started by hand every 500 frames from frame 900 of each 4000, rooms 0-6 five
   times): **no crash or bad pc**, 20,553 arcade frames (**51.4 a second, 85%**), 10,550 pictures (**26.4 a second**), 2 border
-  fallbacks, no late border events.  The 85% is the busy figure (a room start clears the screen over 28 frames and redraws
-  everything; in the later rooms a picture costs ~112k CPU + 42k Blitter cycles against ~67k + 30k in room 0).  Typical play
+  fallbacks, no late border events.  After the cache-flush change below (the same run again, 2026-11-08): no crash, 20,830 arcade
+  frames (**52.1 a second, 87%**), 10,074 pictures (25.2 a second), 2 border fallbacks, no late events.  The 85-87% is the busy figure of this schedule (a room every 500 frames, which real play never does: a room start clears the screen over 28 frames, changes the palette bank, throws the sprite and tile caches away, redraws
+  everything and rebakes the ~100 sprites in use (bake_sprite ~6.5k cycles a picture over the 500 frames after a start); in the later rooms a picture costs ~112k CPU + 42k Blitter cycles against ~67k + 30k in room 0).  Typical play
   in one room is the 92-94% above.  This is play by a fixed script with a room cheat, **not a played game**: nobody finished a room.
 * **Sound against MAME, Hatari's audio (2026-11-08, `ref/wav_cmp.py`, 30 s of attract, windows of 0.25 s, best alignment
   of the two recordings)**: the SN write streams are equal (above), but the audio itself differs by design: of 34 windows with
   a dominant pitch in both, 26% agree within 3% (the YM plays the three loudest of eight voices; MAME mixes all); Hatari's level is
   about 6.6 dB higher than MAME's; both show the same pitches (782, 700, 590, 528, 132 Hz).  **Nobody has listened to it.**
-* **Controls** (the IKBD scan codes and `compose_inputs`, checked against the table; not tested key by key on a machine):
+* **Controls** (the IKBD scan codes and `compose_inputs`; tested key by key on Musashi, not on a machine or in Hatari: `tools/input_test.py` feeds IKBD byte streams through a fake ACIA to the real `acia_isr` and checks `in_sys / in_p1 / in_p2` for all 19 keys of both players (make and break), all keys together, P1 with P2, and both joysticks: PASS, 2026-11-08; Hatari's own keyboard path (key to IKBD to ACIA) was not driven):
   coin 1 / 2 on 5 / 6, start 1 / 2 on 1 / 2, player 1 on the arrows with Space / Control / Z and Alternate / X, player 2
   on the keypad (4 6 8 2, 0, .) or joystick port 0 (one fire button = button 1), pads A / B.
+* **Play to the later rooms (2026-11-08)**: `ref/explore.py` is a Go-Explore on the reference machine (cell archive over `ref/snap.py`'s
+  snapshots: room, mode, play state, the player's position `$295A / $295C` in 16-pixel buckets, three counters; random 12-frame
+  segments from the archive's rarest cells; lives kept).  Runs of 5 minutes (92 cells) and 25 minutes (2293 cells, 17212 rounds, only play states 4 and 6) **did not leave room 0**:
+  nobody, random or searched, has cleared a classroom by play yet; the rooms are reached by the cheat only.
+* **Service mode and the boot tests**: not ported by design: the port starts at the game's own initialisation `$6093`, past the
+  reset path (`$CD91`: RAM and ROM checks, the test grid, the START1 + START2 service check).  A seed that held both starts at reset
+  executed 3 new 6809 instructions only; the service tests are not translated.  The ending and the high-score entry are not
+  known to be covered (seeds 1-3 play to the game over, nothing shows the entry screen ran).
+* **Cache flushes (2026-11-08)**: a palette bank change (a new room) flushed the sprite and tile caches by clearing their 128 and 64 KB
+  indexes (~700k cycles, 5 frames); now only the entries used are cleared (key lists `sc_keys` / `tc_keys`).  Picture exact
+  (`render_test` seeds 4 and 10, `sprite_test`), CPU of the room-cycling picture about -2%, the Hatari long run +0.7 arcade frames a second.
 * **Not done / not verified**: the cocktail cabinet and the flip screen (`render_raw` raises `NotImplementedError` for the flip
   latch; the STE renderer ignores it); the service mode, the ending and the high-score entry; a game played to the end by a person; the other sets (`mikiej`, `mikiek`, `mikiehs` share the
   main program: the graphics ROMs differ); the driver's paths no seed's commands reached (random commands 0-$7F reach most
