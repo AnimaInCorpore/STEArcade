@@ -281,6 +281,9 @@ vbl:
 	tst.b	quit_flag
 	bne	quit
 	bsr	vbl_video
+	ifnd NOSOUND
+	bsr	snd_mix			; (the sound ring brought up to the DMA's position)
+	endc
 	ifnd PLAYBACK
 	bsr	jagpad_poll
 	move.b	in0_low,d0		; (active high on the Z80 side: the keyboard's and joysticks' bits inverted, the pads or'd)
@@ -741,9 +744,6 @@ vbl_pending:	ds.b	1		; arcade frames that have come (the VBL adds, the hook take
 vbl_phase:	ds.b	1
 render_skips:	ds.b	1
 frame_dirty:	ds.b	1		; an arcade frame ran since the last picture
-snd_head:	ds.b	1
-	even
-snd_ring:	ds.b	256		; the sound commands (the last 256)
 	ikbd_vars
 joy0_state:	ds.b	1
 joy1_state:	ds.b	1
