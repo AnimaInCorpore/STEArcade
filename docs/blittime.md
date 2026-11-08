@@ -35,9 +35,10 @@ Using the original DLTEST kernels, this moves cached timings to:
 
 All drawing checks pass. The remaining 1–2 ticks in cached mode are much smaller
 than the old discrepancy. This is evidence for the register-access hypothesis,
-not a hardware measurement of the register bus handshake. The authoritative
-Hatari remains on the confirmed Blitter bus-clock fix; the additional MMIO
-change stays private pending Darklord's independent controls.
+not by itself a hardware measurement of the register bus handshake. The MMIO
+change initially stayed private pending Darklord's independent controls. The
+return below confirms the access cost; it is now installed in the authoritative
+Hatari, narrowly restricted to the Blitter register aperture at 16 MHz.
 
 The canonical emulator finding and its status are recorded in F030Arcade's
 `third_party/hatari/doc/megaste-blitter-timing.txt`. The probe's design and
@@ -178,3 +179,69 @@ a duplicate profile and a wrong build ID. ZIP CRCs, all manifest hashes,
 checked. The private source/object/emulator experiment is temporary; the
 candidate patch and compact results are retained under
 `build/blittime-investigation/`.
+
+## Darklord's focused hardware return, 2026-11-08
+
+`BLIT.ZIP` contains `BLITTIME.TXT` and `BUILD.JSN`. Build metadata exactly matches
+the delivered `ecea4b1a94d50645` build. All 390 rows are present in order, both
+repetitions complete, all destination/guard/control checks pass, and each CPU
+mode retains its speed/cache bits. The final bad-word count is zero.
+
+The three one-second calibrations report 200 TOS ticks and 60 VBLs each;
+the display was therefore approximately 60 Hz. BLITTIME deliberately retains
+the desktop display mode. The original host analyser incorrectly required
+50 Hz; it now infers a consistent 50/60/71 Hz rate from the independent MFP
+calibrations. This is an analyser correction; the delivered native executable
+and this hardware run remain valid. Every measurement's MFP/TOS difference is
+below one 200 Hz tick (maximum 4.727 ms).
+
+Cached 16 MHz means, microseconds per pass:
+
+| Minimal-IRQ control | Hardware | Bus-clock-only Hatari | Eight-cycle-MMIO candidate |
+|---|---:|---:|---:|
+| Idle Blitter-register stores | 4.3834 | 3.3776 | 4.3809 |
+| Same stores to ordinary RAM | 5.0068 | 5.0068 | 5.0068 |
+| Masked 80-cycle payload, destination writes | 18.0354 | 17.0221 | 18.0279 |
+| Masked 80-cycle payload, immediate RMW | 17.5362 | 17.0221 | 17.5262 |
+
+The extra idle-MMIO time is about 1.006 us/pass; four word/byte bus transfers
+per loop each need four more 16 MHz CPU cycles. That directly supports the
+missing peripheral-clock wait cost without involving a Blitter transfer.
+The unchanged RAM control rules out a general CPU slowdown as the explanation.
+
+Across all minimal-IRQ profiles and both repeats, the MMIO candidate differs
+from hardware by at most 0.153% at uncached 16 MHz and 0.142% at cached 16 MHz.
+At 8 MHz all profiles are within 0.374% (minimal IRQ within 0.073%). These are
+observed elapsed-time agreements, not a claim of isolated cycle exactness.
+The hardware repeat spread is at most 0.01987 us/pass.
+
+The cached normal-IRQ profiles remain about 0.6% slower than the candidate on
+average by percentage, with a maximum 0.715%. The reference was recorded at
+50 Hz and the hardware at 60 Hz. Normal handler/OS work and the video-rate
+difference must be controlled before attributing that smaller remainder to
+arbitration. Minimal handlers reduce the discrepancy substantially; the
+return does not establish that refresh rate alone accounts for all of it.
+
+The authoritative Hatari now uses eight CPU cycles for uncached FAST16 accesses
+to `$FF8A00-$FF8A3F` in its Mega STE 16 MHz wrappers. Cache hits, ROM/cartridge,
+other IO regions, 8 MHz mode, other machines and the start countdown retain
+their existing costs. Only eight uncached read/write paths change. The new
+code is equivalent on the tested paths to the private candidate; the latter's
+redundant cache-hit condition was omitted.
+
+Raw returns, summaries, comparisons and regression artifacts are preserved in
+`build/darklord-blittime-2026-11-08/`. The original ZIP and returned files are
+unchanged. No additional hardware run is needed to establish this correction.
+
+After promotion, the rebuilt authoritative emulator passes the exact delivered
+390-row executable, the full DLTEST (94,176 matrix cases and all CPU/RAM/file/
+palette/scene checks), and all six independent CPU BMP comparisons. Blitter and
+cycle-exact CTests pass. The cache-on border regression (five seconds idle,
+five loaded) has zero missing callbacks, both scanout captures match, and CPU
+control writes remain `[0,3,0]`. The selected binary hash is retained in the
+regression JSON and F030Arcade's local `hatari.md`.
+
+`venv/bin/python tools/test_blittime.py` covers the actual returned 60 Hz
+calibrations, 50/71 Hz support, and rejection of bad clocks or inconsistent
+video rates. Existing native archives retain their original source/hash
+identities; the analyser correction requires no replacement hardware package.
