@@ -12,6 +12,7 @@ The idle point $8073 is a native (jb_idle): it delivers the NMIs and the IRQ (ma
 """
 import collections
 import os
+import re
 import pickle
 import sys
 from pathlib import Path
@@ -23,13 +24,18 @@ from machine import JailBreakPort, load
 from paths import build_dir, require_coverage
 
 RESET, IRQ, NMI = 0x81A6, JailBreakPort.IRQ, JailBreakPort.NMI
-SEEDS = [int(x) for x in os.environ.get("JB_SEEDS", "").split(",") if x] or range(1, 13)
+SEEDS = [int(x) for x in os.environ.get("JB_SEEDS", "").split(",") if x] or range(1, 14)
 NATIVES = {JailBreakPort.IDLE: "jb_idle",
            0xAF96: "nat_sn_AF96",                     # the SN76489A write (src/sound.s)
            0x9272: "nat_9272"}                        # the sprite RAM from the objects (src/natives.s)
 # a read-modify-write of the video RAM (m6809x cannot send one through the runtime): `dec $0830` runs on the memory and
 # lists the cell (the video RAM's $0830 is cell $030) itself afterwards
 RMW_VIDEO = {0x907B: 0x0830}
+# the jump tables of the indirect JSR / JMP [A|B,X|Y|U] sites (found in the translation): every entry is code the coverage
+# may not have run (a state the random play did not reach crashed Hatari at arcade frame 3176: $AA2A); the entries
+# (words >= $8100 from each table's start, up to 24, until one is not a code address) are roots too
+JUMP_TABLES = (0xc1be, 0xc244, 0xc24c, 0xc3f6, 0xc400, 0xc412, 0xe7ac, 0xe67b, 0xe7b2, 0xe832, 0xe9b2, 0xeb98, 0xebe5,
+               0xeba0, 0xec27, 0xec31, 0xec75, 0xf955, 0xfd25)
 ROM_FILES = ("507p03.11d", "507p02.9d")
 
 
@@ -39,6 +45,43 @@ def image():
     for i, n in enumerate(ROM_FILES):
         mem[0x8000 + i * 0x4000:0xC000 + i * 0x4000] = load(n)
     return bytes(mem)
+
+
+def table_roots(mem):
+    """the jump tables' entries that decode to code the translator accepts (a few instructions' worth of flow from each:
+    tables run into data, and junk raises m6809x.Unsupported)"""
+    rd = lambda a: mem[a & 0xFFFF]
+    rd_op = konami1_opcode(rd)
+
+    def ok(root):
+        seen, work = set(), [root]
+        while work and len(seen) < 400:
+            v = work.pop()
+            while v not in seen:
+                if not 0x8000 <= v < 0x10000:
+                    return False
+                seen.add(v)
+                try:
+                    ins = m6809x.decode(rd, v, 0x15, rd_op=rd_op)
+                    m6809x.defs_uses(ins)
+                except Exception:
+                    return False
+                if ins.target is not None and ins.flow in ('jmp', 'jcc', 'call'):
+                    work.append(ins.target)
+                if ins.flow in ('seq', 'jcc', 'call', 'icall'):
+                    v += ins.length
+                    continue
+                break
+        return True
+
+    roots = set()
+    for b in JUMP_TABLES:
+        for i in range(24):
+            w = mem[b + 2 * i] << 8 | mem[b + 2 * i + 1]
+            if not 0x8100 <= w < 0xFFE0:
+                break
+            roots.add(w)
+    return sorted(r for r in roots if ok(r))
 
 
 def page_addr(p):
@@ -61,7 +104,9 @@ def load_cover():
             tg[v] |= x
         wraps |= d["wraps"]
         io |= {pc for pc, a, rw in d["io"]}
-        returns.update(d.get("returns", {}))
+        w = int(os.environ.get("JB_RET_PLAY", "20")) if s == 13 else 1     # (the recorded play's returns count more: the attract's must not order the chains)
+        for k, v in d.get("returns", {}).items():
+            returns[k] += v * w
     return exec_, acc, tg, wraps, io, returns
 
 
@@ -82,7 +127,7 @@ def program(cover):
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 1, 1, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(4, 8)},
-                          roots=[RESET, IRQ, NMI] + sorted(NATIVES), exec_cover=set(exec_), acc_cover=flat, targets=tg,
+                          roots=[RESET, IRQ, NMI] + sorted(NATIVES) + ([] if os.environ.get('JB_NO_TABLE_ROOTS') else table_roots(mem)), exec_cover=set(exec_), acc_cover=flat, targets=tg,
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x15, a3_slot=0, a4_slot=1,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('JB_NO_NATIVES', '')},
@@ -133,6 +178,60 @@ def page_bases(lines, prog, code):
     return out
 
 
+SITE_MIN = int(os.environ.get("JB_SITE_MIN", "20000"))     # (a site's returns in the recorded play's 60,000 ticks: ~ 1 every 3 frames)
+
+
+def load_sites():
+    """the recorded play's {site pc: {target: count}} of its returns, RTIs and indirect jumps (cover13.pkl), or {}"""
+    f = build_dir("jailbrek") / "cover13.pkl"
+    if not f.exists():
+        return {}
+    return pickle.loads(f.read_bytes()).get("sites", {})
+
+
+def site_chains(lines, sites):
+    """The returns, RTIs and indirect jumps of the recorded play (ref/cover.py seed 13, SiteCover): each site whose
+    translation ends in the dispatcher (`jmp main_dispatch`, d7 = the target) compares its common targets inline first
+    (the translator's chains are by the targets' counts overall, the same for every RTS; a miss costs ~100 cycles in the
+    dispatcher, a hit here ~25).  The flags are in d5 where the translation restores them just before the jump: restored
+    there too.  The targets that are labels of the translation, the most common first, up to 5 a site."""
+    text = "\n".join(lines)
+    labels = set(re.findall(r"^(M00[0-9A-F]{4}):", text, re.M))
+    done = 0
+    for pc, tg in sorted(sites.items(), key=lambda kv: -sum(kv[1].values())):
+        if sum(tg.values()) < SITE_MIN:
+            break
+        lab = "M00%04X:" % pc
+        i = text.find("\n" + lab)
+        if i < 0:
+            continue
+        i += 1
+        nxt = re.search(r"^M00[0-9A-F]{4}:", text[i + 1:], re.M)
+        end = i + 1 + nxt.start() if nxt else len(text)
+        block = text[i:end]
+        k = block.rfind("\tjmp main_dispatch")
+        if k < 0:
+            continue
+        flags = block[:k].endswith("\tmove.w d5,ccr\n")
+        at = i + (k - len("\tmove.w d5,ccr\n") if flags else k)
+        add = ""
+        n = 0
+        for t, c in sorted(tg.items(), key=lambda kv: -kv[1]):
+            if n == 5 or c < SITE_MIN // 10:
+                break
+            if "M00%04X" % t not in labels or ("#$%04X,d7" % t) in block:
+                continue
+            n += 1
+            if flags:
+                add += "\tcmp.w #$%04X,d7\n\tbne.s Ls%04X_%d\n\tmove.w d5,ccr\n\tjmp M00%04X\nLs%04X_%d:\n" % (t, pc, n, t, pc, n)
+            else:
+                add += "\tcmp.w #$%04X,d7\n\tbeq M00%04X\n" % (t, t)
+        if add:
+            text = text[:at] + add + text[at:]
+            done += 1
+    return text.split("\n"), done
+
+
 def generate():
     build = build_dir("jailbrek")
     prog = program(load_cover())
@@ -141,6 +240,9 @@ def generate():
     if seen:
         raise RuntimeError("observed instructions cannot be translated: %s" % seen)
     lines = page_bases(lines, prog, code)
+    if not os.environ.get("JB_NO_SITE_CHAINS"):
+        lines, n = site_chains(lines, load_sites())
+        print("site chains: %d sites" % n)
     head = ["; generated by games/jailbrek/tools/gen.py (engine/m6809x.py): the main CPU", "\tsection text,code"]
     (build / "code_main.s").write_text("\n".join(head + lines) + "\n")
     (build / "tables_main.s").write_text("\n".join(dispatch_tables(prog, code)) + "\n")

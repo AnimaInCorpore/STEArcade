@@ -24,6 +24,7 @@ import numpy as np
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / 'tools'), str(Path(__file__).resolve().parents[3] / 'engine')]
 from machine import JailBreakPort, Video, DSW1, DSW2, DSW3
 from m6809cover import Cover6809
+from m6809dis import decode
 from paths import build_dir
 
 LIVES1, LIVES2, WEAPONS = 0x15CE, 0x15FE, 0x1598
@@ -87,22 +88,69 @@ def io(a, rw):
     return not (0x1000 <= a < 0x2040 or a < 0x1000 and rw == 'r' or a >= 0x8000 and rw == 'r')
 
 
+class SiteCover(Cover6809):
+    """Cover6809 that also counts, per site, where the returns, RTIs and indirect jumps go (pickle key 'sites': {pc: {target:
+    count}}): gen.py compares the common ones inline before the dispatcher."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.sites = collections.defaultdict(collections.Counter)
+        self._flow = {}
+
+    def step(self):
+        pc = self.c.pc
+        n = super().step()
+        fl = self._flow.get(pc)
+        if fl is None:
+            fl = self._flow[pc] = decode(self._rd0, pc, self.c.dp, rd_op=self.c.rd_op).flow in ('ret', 'rti', 'ijmp')
+        if fl:
+            self.sites[pc][self.c.pc] += 1
+        return n
+
+    def data(self):
+        d = super().data()
+        d['sites'] = {k: dict(v) for k, v in self.sites.items()}
+        return d
+
+
+def replay_ticks():
+    """build/jailbrek/play_inputs.bin (runs of count, SYSTEM, P1; a count of 0 ends it) -> [(SYSTEM, P1)] a tick"""
+    f = build_dir('jailbrek') / 'play_inputs.bin'
+    if not f.exists():
+        raise SystemExit('%s is missing: python games/jailbrek/tools/play_search.py 60000 makes it (~17 min)' % f)
+    data = f.read_bytes()
+    out, i = [], 0
+    while i + 2 < len(data) and data[i]:
+        out += [(data[i + 1], data[i + 2])] * data[i]
+        i += 3
+    return out
+
+
 def main():
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     frames = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
     rnd = random.Random(seed)
     m = JailBreakPort(*dsw(seed))
-    cov = Cover6809(m.cpu, io=io)
+    cov = (SiteCover if seed == 13 else Cover6809)(m.cpu, io=io)
     video = Video()
     pens = collections.Counter()
     sprites = collections.Counter()
     scrolls = collections.Counter()
     state = {'two': seed in (4, 6)}
     mem = m.mem
+    replay = None
+    if seed == 13:
+        replay = replay_ticks()
+        frames = len(replay)
     for frame in range(frames):
         m.frame = frame
-        m.system, m.p1, m.p2 = inputs(frame, rnd, state)
-        cheats(seed, frame, m, state)
+        if replay:
+            m.system, m.p1, m.p2 = replay[frame][0], replay[frame][1], 0xFF
+            if frame >= 420:
+                mem[LIVES1] = 8
+        else:
+            m.system, m.p1, m.p2 = inputs(frame, rnd, state)
+            cheats(seed, frame, m, state)
         m.run_frame_port()
         for o in range(0, 0xC0, 4):
             attr = mem[0x1001 + o]

@@ -5,8 +5,9 @@
 #   powershell -File games/jailbrek/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name jailbrek_hatari] [-Avi 1] [-Sound 1: the
 #     AVI holds Hatari's audio too, extracted to sound.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
+#     [-AviCodec png: the video as PNG frames (a sound-only capture: the frames are mostly black, the file small; bmp is GBs)]
 param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "jailbrek_hatari", [int]$Avi = 1, [int]$Sound = 0,
-      [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
+      [string[]]$Extra = @('-D', 'AUTOPLAY=1'), [string]$AviCodec = 'bmp')
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
@@ -26,7 +27,7 @@ Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
     '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$(if ($Sound) { '44100' } else { 'off' }),'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
-if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\jailbrek.avi") }
+if ($Avi) { $args += @('--avirecord','true','--avi-vcodec',$AviCodec,'--avi-file',"$out\jailbrek.avi") }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `
     -WorkingDirectory $out -ArgumentList ($args + "$out\JAILBREK.PRG")
 try {

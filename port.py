@@ -71,7 +71,7 @@ COVER = {
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
     "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
               ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
-    "jailbrek": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles
+    "jailbrek": [("ref/cover.py", list(range(1, 14)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles, 13 the recorded play (tools/play_search.py)
     "trackfld": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
               ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
     "sbasketb": [("ref/cover.py", list(range(1, 22)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script
@@ -216,6 +216,7 @@ TESTS = {
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/logic_test.py", ["20000", "--seed", "3"], None),   # play, lives and weapons cheats
                  ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # the other DIP switches, two players
+                 ("tools/logic_test.py", ["20000", "--seed", "13"], None),  # the recorded play (tools/play_search.py 60000 first)
                  ("tools/render_test.py", ["3000", "--seed", "3", "--start", "700", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
                  ("tools/native_test.py", ["600"], None)],        # nat_sn_AF96 against the 6809

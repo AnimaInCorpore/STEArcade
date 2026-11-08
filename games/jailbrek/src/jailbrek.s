@@ -390,9 +390,7 @@ vbl:
 jb_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7
-	move.b	jb_mem+$153C,d7
-	lsl.w	#8,d7
-	move.b	jb_mem+$153D,d7
+	move.w	jb_mem+$153C,d7		; (the queue's read pointer: an even address in the long-aligned image)
 	tst.b	(a4,d7.l)
 	bmi.s	.wait
 	move	d5,ccr
@@ -463,10 +461,8 @@ jb_idle:
 	move.b	#$90,jb_or		; E I
 	lea	MAIN_IRQ,a0
 .push:	move.l	a0,-(sp)		; (the vector's code: jumped to after the state is pushed)
-	move.w	#IDLE_PC,d7
-	move.b	d7,-(a5)		; PC
-	lsr.w	#8,d7
-	move.b	d7,-(a5)
+	move.b	#IDLE_PC&$FF,-(a5)	; PC
+	move.b	#IDLE_PC>>8,-(a5)
 	move.b	d4,-(a5)		; U
 	move.w	d4,d7
 	lsr.w	#8,d7
@@ -497,6 +493,34 @@ jb_idle:
 .none:	move.w	idle_sr,d5
 	move	d5,ccr
 	jmp	MAIN_IDLE_T
+
+	ifd PLAYBACK
+; The recorded play (build/jailbrek/play_inputs.bin; tools/play_search.py, engine/playbot.py: runs of count, SYSTEM, P1, a count
+; of 0 at the end): the inputs of the arcade frame about to run.  P1's lives ($15CE) are set to 8 from frame 420 on, as
+; the recording's reference machine does.  Uses a0, d7 only.
+pb_inputs:
+	tst.b	pb_left
+	bne.s	.same
+	move.l	pb_ptr,a0
+	cmp.w	#0,a0
+	bne.s	.next
+	lea	pb_data,a0
+.next:	move.b	(a0)+,pb_left
+	bne.s	.run
+	st	quit_flag		; (the recording is over)
+	rts
+.run:	move.b	(a0)+,pb_sys
+	move.b	(a0)+,pb_in0
+	move.l	a0,pb_ptr
+.same:	subq.b	#1,pb_left
+	move.b	pb_sys,io_sys
+	move.b	pb_in0,io_p1
+	move.b	#$FF,io_p2
+	cmp.w	#420,isr_count
+	blo.s	.out
+	move.b	#8,jb_mem+$15CE
+.out:	rts
+	endc
 
 ; ---- the dispatcher: d7.w = a 6809 pc, through the table of the page in its slot; the CCR kept ----
 main_dispatch:
@@ -792,6 +816,7 @@ key_table:
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
 	dc.b	$07,$02,$00,$00		; 6 = coin 2
+	dc.b	$0a,$04,$00,$00		; 9 = service
 	dc.b	0,0,0,0
 	even
 
@@ -839,6 +864,26 @@ crash_common:
 	bsr	hex_word
 	move.b	#' ',(a0)+
 	dbf	d2,.stack
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	move	isr_count,d1		; the arcade frame, then the 6809's stack (32 words from its pointer) and $16C0 (16 words)
+	bsr	hex_word
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	move.l	crash_regs+52,a1
+	moveq	#31,d2
+.s9:	move	(a1)+,d1
+	bsr	hex_word
+	move.b	#' ',(a0)+
+	dbf	d2,.s9
+	move.b	#13,(a0)+
+	move.b	#10,(a0)+
+	lea	jb_mem+$1340,a1
+	moveq	#31,d2
+.s8:	move	(a1)+,d1
+	bsr	hex_word
+	move.b	#' ',(a0)+
+	dbf	d2,.s8
 	move.b	#13,(a0)+
 	move.b	#10,(a0)+
 	lea	own_stack_top,sp
@@ -1071,7 +1116,7 @@ dbg_pcs:	ds.l	256
 crash_vector:	ds.w	1
 crash_sp:	ds.l	1
 crash_regs:	ds.l	16
-crash_text:	ds.b	512
+crash_text:	ds.b	1536
 frame_counter:	ds.l	1
 	ds.l	1024
 own_stack_top:

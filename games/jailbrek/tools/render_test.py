@@ -133,9 +133,19 @@ class Harness:
         """one arcade frame and its picture -> the published buffer's base"""
         m, mem, sym, f = self.m, self.mem, self.sym, self.f
         if inputs is None:
-            m.system, m.p1, m.p2 = cover.inputs(f, self.rnd, self.state)
+            if self.seed == 13:                  # (the search bot's recorded play: tools/play_search.py, lives cheat from 420)
+                if not hasattr(self, 'replay'):
+                    self.replay = cover.replay_ticks()
+                m.system, m.p1 = self.replay[f % len(self.replay)]
+                m.p2 = 0xFF
+            else:
+                m.system, m.p1, m.p2 = cover.inputs(f, self.rnd, self.state)
             before = bytes(m.mem)
-            cover.cheats(self.seed, f, m, self.state)
+            if self.seed == 13:
+                if f >= 420:
+                    m.mem[cover.LIVES1] = 8
+            else:
+                cover.cheats(self.seed, f, m, self.state)
             after = bytes(m.mem)
             for lo, hi in AREAS:
                 for a in range(lo, hi):
