@@ -12,9 +12,12 @@ for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (e
 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
 the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
 three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental / deferred** (root README): the logic is exact in lock-step and the picture is exact against the
-reference renderer, which equals MAME's picture, but only one explosion sound exists, the picture is drawn by the CPU, and the speed is
-low.  Latest speed (Hatari, 4 MB STE, `tools/bench.ps1 3000`, attract mode, 2026-11-07): about 21.5 arcade frames a second
-(35% of the arcade's 60.6) and 5.4 pictures a second.
+reference renderer, which equals MAME's picture, but only one explosion sound exists and the speed is low (the picture was drawn by the CPU at the time of this status
+line; the sprites and the foreground are Blitter passes since 2026-11-08, see Speed).
+
+Speed (Hatari, 4 MB STE, `tools/bench.ps1`, `MAX_SKIP` 3, 2026-11-08, after the sprite passes): attract and autoplay 27-32 arcade
+frames a second (of 60.6) and 6.8-8.0 pictures a second.  Before the sprite passes (2026-11-07, attract mode, `bench.ps1 3000`):
+about 21.5 arcade frames a second (35% of 60.6) and 5.4 pictures a second.
 
 ## Build and run
 
@@ -71,7 +74,7 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   (`--sound off`), the pitch not compared with MAME's audio.
 * Missing, most important first: the 54XX's other noises (only the player's explosion, commands $1x / $2x, is a noise burst, as in Galaga's port; MAME's
   discrete circuit and the ground-target explosions are not modelled); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
-  `AGENTS.md` (sprites and the foreground are merged by the CPU: `render.s`, `blit_row`); the cocktail flip, a foreground
+  `AGENTS.md` (older statement: sprites and the foreground were merged by the CPU: `render.s`, `blit_row`; done 2026-11-08, see Speed); the cocktail flip, a foreground
   scroll and a vertical background scroll other than 0 (the game uses none: `ref/pens.py` saw one value of registers 1-3);
   per-area palettes (one 16-colour fit for all areas); the 54XX's program; the 50XX's own program (translating it needs
   `mb88x` for the MB8842's 128 nibbles of RAM).
@@ -120,7 +123,7 @@ Xevious sends the 50XX only `$10` (reset the scores), `$80` (+5) and `$E5` (+90)
 the chip: the real program's flags depend on time (MAME's cycle-exact reference reads `$E0` where the reference's schedule
 reads `$F0`) and on state the game never reaches.
 
-### The picture
+### Picture
 
 `tools/assets.py`: the arcade raster is shown rotated 90 degrees (display x = 223 - raw y, display line = raw x), 224
 pixels wide (chunk 3 of the 320 pixel line), 288 lines; one 16-colour palette fitted to the colours seen
@@ -130,9 +133,20 @@ pixels wide (chunk 3 of the 320 pixel line), 288 lines; one 16-colour palette fi
 sprites and the foreground are drawn by the CPU row by row (pens' masks from the three bit planes, shifted, merged,
 clipped at the picture's edges), the foreground from a list of cells with pixels.
 
+### Sound
+
+The Namco WSG's three voices are the YM2149's square waves and the player's explosion is noise (as in Galaga); the 54XX's other
+noises are not modelled.  The checks are in State ("Sound").
+
 ## Speed
 
-Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1`, 2026-11-07; attract mode `MAX_SKIP` 3: 21.5 arcade frames a
+**Current (2026-11-08, after the sprite passes)**: Hatari (`tools/bench.ps1`, `MAX_SKIP` 3): attract and autoplay now 27-32 arcade frames a second (of 60.6) and 6.8-8.0
+pictures a second, against 21.5 and 5.4 before.  The logic (176k cycles a frame, ~4.9M of the 8M a second) now takes more
+than the pictures (~440k each, of which the picture copy is ~130k Blitter bus cycles).  Further gains: natives at the hot
+logic routines (no routine profile yet), a higher `MAX_SKIP` (the user's call), the picture copy (hardware scroll, see the
+table).  Not verified: a long natural playthrough; the autoplay loses its ship often.
+
+Before the sprite passes (older, 2026-11-07): Hatari (4 MB, cycle-exact, fast-forward, `tools/bench.ps1`, 2026-11-07; attract mode `MAX_SKIP` 3: 21.5 arcade frames a
 second, 5.4 pictures a second).  In the autoplay (play, 2,000 VBLs): `MAX_SKIP` 1: 14 arcade frames, 7 pictures a second; 3:
 about 22 and 5.4; 7: 27 and 3.5 (a picture is skipped while a VBL waits, up to `MAX_SKIP` in a row).  The arcade runs 60.6.
 Musashi (`render_test.py --entry`): the logic about 175,000 cycles a frame; a picture 0.85-1.1 million: the sprites 480,000
@@ -141,7 +155,7 @@ the shifting and merging of five words into two groups of four planes is), the b
 (a scroll step rewrites a row of tiles, a new area all of them; 12 million for the first picture), the picture copy 37,000 CPU
 cycles plus about 130,000 Blitter bus cycles, the foreground about 50,000.  A cache of converted sprite tiles (tag, mask and
 four planes a row) was tried and not kept: no change.
-Proposals (nothing was dropped silently): (1) the Blitter's masked sprite passes with shared rows (`AGENTS.md`,
+Proposals of that time (nothing was dropped silently; (1) was done on 2026-11-08, see above and the table): (1) the Blitter's masked sprite passes with shared rows (`AGENTS.md`,
 `docs/sprite-preparation.md`) would replace `blit_row` and are the main gain, maybe 2x on the sprites; (2) hardware scrolling
 of the ring (no copy, the background shown from the ring itself, sprites drawn into it and restored from a clean ring) saves
 the 130,000 bus cycles and most of the ring work but is a redesign; (3) a lower picture rate (`MAX_SKIP` 7: 27 arcade frames a
@@ -149,8 +163,8 @@ second, 3.5 pictures) is the cheapest trade and is the user's call; (4) drawing 
 every second picture would save about a third of the CPU drawing at some flicker.  The logic (175,000: the translated code,
 the copies of the shared RAM windows, the 51XX) leaves 45 arcade frames a second without any picture.
 
-Speed audit (2026-11-08, against `docs/speed.md`; logic 175-182k cycles a frame, a picture 0.85-1.1M; Hatari autoplay 22 arcade
-frames and 5.4 pictures a second, `MAX_SKIP` 3):
+#### Speed audit (2026-11-08, against `docs/speed.md`; logic 175-182k cycles a frame, a picture 0.85-1.1M; Hatari autoplay 22 arcade
+frames and 5.4 pictures a second before the sprite passes, `MAX_SKIP` 3):
 
 | Technique | State | Before -> after |
 |---|---|---|
@@ -200,12 +214,6 @@ it would remove the 37k CPU + 130k Blitter bus cycles of the picture copy (about
 ## Verification
 
 Assisted coverage and tests only (random scripted play, MAME's cheats); no natural full-game playthrough, no Hatari
-playtest of the picture, no listening test: see the [status policy](../../docs/port-status.md).  No PPO profile.
-
-### Speed after the sprite passes (2026-11-08)
-
-Hatari (`tools/bench.ps1`, `MAX_SKIP` 3): attract and autoplay now 27-32 arcade frames a second (of 60.6) and 6.8-8.0
-pictures a second, against 21.5 and 5.4 before.  The logic (176k cycles a frame, ~4.9M of the 8M a second) now takes more
-than the pictures (~440k each, of which the picture copy is ~130k Blitter bus cycles).  Further gains: natives at the hot
-logic routines (no routine profile yet), a higher `MAX_SKIP` (the user's call), the picture copy (hardware scroll, see the
-table).  Not verified: a long natural playthrough; the autoplay loses its ship often.
+playtest of the picture, no listening test; no PPO profile.  The speed figures are Hatari fast-forward benchmarks
+(autoplay loses its ship often), not a play session.  The 5.4 pictures a second of the 2026-11-07 figures are superseded
+by the 6.8-8.0 of 2026-11-08.  See the [status policy](../../docs/port-status.md); the port is **Experimental / deferred**.

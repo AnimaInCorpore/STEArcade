@@ -1,8 +1,11 @@
 # Standard PPO exploration workflow
 
-PPO is the standard **supplemental input generator** for new port exploration. The shared entry point covers
-all games registered by `port.py` but Galaga: its real Namco 51xx/54xx MCU ROMs are in since 2026-10-22, its
-RAM/input profile is not written yet. Unregistered work-in-progress boards are not silently treated as finished ports.
+PPO is the standard **supplemental input generator** for new port exploration. The shared entry point works for
+the games that have a profile in `engine/ppo_profiles.py` (2026-11-08: Donkey Kong, Bubble Bobble, 1942, 1943, Black
+Tiger, Commando, Gun.Smoke, R-Type, Kung-Fu Master, Trojan, Double Dragon). Galaga (its real Namco 51xx/54xx MCU ROMs
+are in since 2026-10-22) and Pac-Man are marked deferred (no RAM/input profile yet); every other port, including the
+newer ones, has no profile and `engine/ppo_profiles.py` refuses it ("No PPO contract") until one is written.
+Unregistered work-in-progress boards are not silently treated as finished ports.
 
 Keep the curated `port.py cover` runs, scripted stage/boss/ending tests and existing search recordings. A short
 PPO campaign does not replace their coverage. The Kung-Fu Master pilot passed independent port-reference and
@@ -20,7 +23,7 @@ build/ppo-venv/bin/python -m pip install -r engine/ppo-requirements.txt
 venv/bin/python engine/ppo_test.py
 ```
 
-Prepare/build the port normally first. Then use the same commands for every registered game:
+Prepare/build the port normally first. Then use the same commands for every game with a profile:
 
 ```sh
 venv/bin/python port.py ppo kungfum train --steps 4096
@@ -31,8 +34,8 @@ venv/bin/python port.py ppo all test --steps 256 --frames 2100
 ```
 
 `test` trains, saves/reloads the model, records, repeats the recording in a fresh native MAME process, and runs
-an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips Galaga
-(no profile yet). A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
+an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips Galaga and Pac-Man
+(deferred); a port without a profile counts as failed. A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
 the optional interpreter and emulator paths. MAME 0.289 and the project's pinned Hatari build are used locally.
 `--steps` counts 12-frame decisions and rounds up to a 256-decision PPO rollout. `--frames` includes bootstrap;
 it must extend beyond the profile's boot interval. No pretrained universal game-playing model is assumed.

@@ -89,7 +89,7 @@ prepared stefastbobs2's way.  Check every port with two tile layers, palette eff
   joins only (`porting-guide.md`, "Translation").
 * **Guard only the coverage's window sites, and audit the rest** (Bubble Bobble, Black Tiger 2026-10-11): a check at
   every indirect access costs a quarter of the translated cycles.  Record the sites in the coverage runs (reads of the
-  window and the banked RAM, writes of the latter), keep them in `docs/window-sites.json`, and trace a simulator run
+  window and the banked RAM, writes of the latter), keep them in the port's `docs/window-sites.json`, and trace a simulator run
   for accesses to the unused image of the window (`logic_test.py --audit`).  Black Tiger's play logic 80.7k -> 65.3k a
   tick; 1943 69.8k -> 61.0k; 1942 26.6k -> 23.8k; Bubble Bobble's main CPU 67.7k -> 62.4k; Gun.Smoke 40.5k -> 37.3k (229
   of 1479 sites).  `W_GUARD_ALL=1` builds the old way for comparison.  Guard every block copy regardless (MARP,
@@ -323,7 +323,7 @@ not been re-measured in Hatari since).
 | Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
 | Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
-| Xevious | ~35% (22 arcade fps) / 5.4 autoplay | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
+| Xevious | 45-53% (27-32 arcade fps) / 6.8-8.0 attract and autoplay (2026-11-08, after the sprite passes; 35% / 5.4 before) | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
@@ -359,6 +359,11 @@ not been re-measured in Hatari since).
 | Splatterhouse | H (twin columns) | converted per colour, a pass a line | rectangles from the twins | bar images | chooser per scene |
 | Galaga '88 | - (fixed buffers) | a pass a line (X count 3) | rectangles from clean | composed into cells | chooser per scene |
 | Dragon Spirit | H + V (twin lines and columns) | Galaga '88's | row spans | OP 3 passes per fine shift | chooser + flash |
+| Dig Dug | - | Galaga's renderer: generated code per shape (not `sprite_programs`, not tried) | as Galaga (see its README) | tiles and characters composed into one background screen | fitted 16 (23 PROM colours) |
+| Jail Break | H (Shifter fine scroll, 16-pixel Blitter steps; `render_rows.s` before) | `sprite_programs` (per-slot cache) | rows / 16-pixel groups from clean | tiles | default fitter flat |
+| Juno First | - | none: the arcade's CPU and 16 x 16 blitter draw into the planar picture directly | n/a (no sprite layer) | n/a | 16 fixed pens |
+| Yie Ar Kung-Fu | - | `sprite_programs` (per-slot cache) | sprite-only rows: their groups | tiles (row restores, `draw_rows`) | bounded flat fit, black and 15 |
+| Roc'n Rope | - | `sprite_programs` (per-slot cache) | drawn lines (`restore_damage`) | tiles (tile cache, cell list) | default fitter flat |
 | Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
 
 ## Techniques that look applicable elsewhere (2026-11-07)

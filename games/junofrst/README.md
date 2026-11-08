@@ -1,16 +1,19 @@
 # Juno First (Konami, 1983) on the Atari STE
 
-![Juno First on the STE (Hatari)](docs/screenshot.png)
-
 MAME set `junofrst` (Konami GX310, `konami/junofrst.cpp` with `tutankhm_v.cpp`).  The main CPU, a KONAMI-1 (an MC6809
 with encrypted opcodes: ROM $A000-$FFFF and sixteen 4 KB banks in a window at $9000-$9FFF, nine of them with code) is
 statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitmap of 4 bpp turned as MAME's ROT90
 turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
 here both draw into the planar STE picture directly.  The sound board is translated too: its Z80 driver runs on
 the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
-offline to PCM for the DMA sound.  Status **Experimental / deferred** (root README): logic, picture and the sound board's state are exact against
+offline to PCM for the DMA sound.  Status: **Experimental / deferred** (root README): logic, picture and the sound board's state are exact against
 their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
 the program runs at about 61% speed in Hatari (MAX_SKIP 6), and the sound has never been compared with MAME's audio or listened to.
+
+![Juno First on the STE (Hatari)](docs/screenshot.png)
+
+Speed (Hatari, STE, 4 MB, `hatari.ps1 -Frames 4000`, `MAX_SKIP` 6, 2026-11-08, after the speed audit): 37.1 arcade frames
+a second (61% of 60.6) and 8.1 pictures a second.
 
 ## Build and run
 
@@ -27,6 +30,9 @@ powershell -File games/junofrst/tools/hatari.ps1 -Frames 4000 -Every 400    # hi
 Supply `assets/roms/junofrst.zip` (MAME's 14 files under MAME's names; `docs/rom_manifest.json` has their sizes, CRCs
 and SHA-1s).  Nothing ROM-derived is in git.  Paths are relative to this folder; `engine/`, `tools/`, `port.py` and
 `docs/` at the top are the repository's.
+
+Layout: `tools/` (prepare, machine, gen, assets, build, logic_test, render_test, hatari.ps1), `ref/` (cover, mame_cmp_junofrst),
+`src/` (junofrst.s the runtime, render.s), `docs/` (rom_manifest.json, screenshot.png).
 
 ## Controls
 
@@ -67,13 +73,13 @@ and SHA-1s).  Nothing ROM-derived is in git.  Paths are relative to this folder;
   program, not compared with MAME's DAC writes (Gyruss's equivalent check was against a private MAME build);
   the peak of effect 3 sets the scale so the others are quiet; (4) the effects' timing against the music is the
   frame's, not the board's; (5) commands $59-$5B run the driver into garbage (the game never sends them).
-* **Not done / not verified**: the flip (cocktail) screen; coverage is random play only (12 seeds,
-  ~13,700 translated instructions): later waves, the high-score entry and other rarely reached code may run into
-  `main_badpc`; no PPO / Go-Explore profile; no recorded-play comparison; the compare with MAME has no input.
 
 ## Speed
 
-**With the sound (2026-11-08, MAX_SKIP 3, before the audit: the current figures, MAX_SKIP 6, are in the header and the audit table)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
+**Current (2026-11-08, after the audit below): `MAX_SKIP` 6, 37.1 arcade frames a second (61% of 60.6) and 8.1 pictures
+a second** (`hatari.ps1 -Frames 4000`; `MAX_SKIP` 12: 38.2 / 6.7, not taken); see the audit table.
+
+**With the sound (2026-11-08, `MAX_SKIP` 3, before the audit; older than the current figures above)**: Hatari `hatari.ps1 -Frames 4000`: 2,694 arcade frames in 4,001 VBLs (33.7 a second, 55.6% of
 60.6) and 765 pictures (9.6 a second), no crash, no late border event.  The sound cost 11% of the speed first (31.5 a
 second: the driver's 14.4 ticks an arcade frame, ~28,000 Musashi cycles a frame, 17% of the logic's average); then
 `vram_wr` was rewritten (one table lookup for the plane byte and the pixel row, the pixel values' bit patterns in
@@ -87,7 +93,7 @@ dot routines $B380-$B4C0), the title screens' $98EA copy loop, the 5,193 "wrappe
 per-write cost has no big cut left (4 `movep` + the table lookups ~ 330 cycles): the gain must come from natives that
 draw whole shapes.
 
-(The earlier measurement below, 2026-11-07, is without sound.)
+(The earlier measurement below, 2026-11-07, is without sound and older still.)
 
 Hatari 2026-11-07 (before the sound and the audit), `hatari.ps1 -Frames 4000` (AUTOPLAY: coin, start, move, the ship dies and the game plays on): 2,822
 arcade frames in 4,001 VBLs (35.3 a second, 58% of the arcade's 60.6; 13.2 before the work below) and 935 pictures
@@ -174,7 +180,31 @@ Logic = Musashi cycles a frame (seed 1, 3,000 frames, with sound); Hatari = `hat
   and is published for the next VBL (as Gyruss).
 * Not optimised (see "Speed").
 
-## Layout
+### Sound
 
-`tools/` (prepare, machine, gen, assets, build, logic_test, render_test, hatari.ps1), `ref/` (cover, mame_cmp_junofrst),
-`src/` (junofrst.s the runtime, render.s), `docs/` (rom_manifest.json, screenshot.png).
+The sound board is translated too: its Z80 driver runs on the 68000 (`tools/sndgen.py`, `src/sound.s`) against an emulated
+AY-3-8910 whose three channels are the YM2149's; the i8039's effects (1-8) were rendered offline to PCM (6,258 Hz) for the
+DMA sound.  What was checked and the known gaps: the State section ("Sound").
+
+## Tests and tools
+
+`tools/` (prepare, machine, gen, assets, build, logic_test with `--sound`, render_test, sprite_test, sound, sndgen,
+hatari.ps1), `ref/` (cover, cover_sound, sound_log, mame_cmp_junofrst).  `python port.py test junofrst` runs the logic and
+render tests; what each one checked is in State.
+
+## Lessons
+
+* The logic is video stores, not translated code: switching off `fast_forms`, `call_summaries`, `ret_weights`,
+  `fixed_slots` and `slot_ctx` cost only +0.9% / +0.3% / +0.08% (speed audit); the gain must come from natives that draw
+  whole shapes.
+* The sound cost 11% of the speed first (the driver's 14.4 ticks an arcade frame); running the tick loop inside the
+  driver's hook without saving the registers between ticks took 6,000 cycles a frame back.
+
+## Verification
+
+* **Not done / not verified**: the flip (cocktail) screen; coverage is random play only (12 seeds,
+  ~13,700 translated instructions): later waves, the high-score entry and other rarely reached code may run into
+  `main_badpc`; no PPO / Go-Explore profile; no recorded-play comparison; the compare with MAME has no input.
+* Evidence: the reference against MAME 0.248, lock-step logic and sound-driver tests over 12 seeds, the render test, a
+  Hatari run looked at by eye (no sound).  No recorded or PPO play, the audio never compared or heard: see the
+  [status policy](../../docs/port-status.md); the port is **Experimental / deferred**.
