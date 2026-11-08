@@ -36,8 +36,25 @@ def charge(pc, c):
     hist[k] = hist.get(k, 0) + c
 
 
+def autoplay(f):
+    """digdug.s's AUTOPLAY=1400 script (active-low bytes like render_test.script)"""
+    in0 = in1 = 0xff
+    g = f - 1400
+    if g < 0:
+        return in0, in1
+    if g < 6: in1 &= ~0x10
+    if 40 <= g < 46: in1 &= ~0x04
+    if g >= 400:
+        in0 &= ~(0x02, 0x04, 0x08, 0x01)[(g // 32) % 4]
+        if g % 16 < 4: in1 &= ~0x01
+    return in0, in1
+
+
+SCRIPT = autoplay if os.environ.get("AUTOPLAY") else rt.script
+
+
 def on_frame(sim):
-    in0, in1 = rt.script(sim.frames)
+    in0, in1 = SCRIPT(sim.frames)
     sim.mem.w8(syms["in0_kbd"] + s.base, (~in0) & 0xff)
     sim.mem.w8(syms["in1_kbd"] + s.base, (~in1) & 0xff)
 

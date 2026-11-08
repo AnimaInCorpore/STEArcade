@@ -123,18 +123,20 @@ start:
 	bsr	init_video
 	bsr	init_render
 
-	lea	g1_dispatch,a0		; the dispatch tables in the order the code uses them
-	lea	g1_dispatch_sw,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
+	lea	g1_dispatch,a0		; the dispatch tables in the order the code uses them: one table of 65536 longs for the
+	lea	g1_dispatch_sw,a1	; three CPUs (the index is the pc with its bytes swapped: the main CPU's pcs $0000-$3FFF and
+	move	#TABLE_ENTRIES,d0	; its token $4001 take the columns $00-$40, the sub CPU's $0000-$1FFF and token the columns
+	bsr	z80_init_dispatch	; $41-$60 and $81, the sound CPU's $0000-$0FFF and token $82-$91 and $C2: 256 KB, not 768)
 	lea	g2_dispatch,a0
 	lea	g2_dispatch_sw,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
+	move	#DISPATCH_ENTRIES2,d0
+	bsr	dd_init_dispatch
+	move.l	#g2_ret,TOKEN*4(a1)	; (the compact tables of these two end with their ROM)
 	lea	g3_dispatch,a0
 	lea	g3_dispatch_sw,a1
-	move	#TABLE_ENTRIES,d0
-	bsr	z80_init_dispatch
+	move	#DISPATCH_ENTRIES3,d0
+	bsr	dd_init_dispatch
+	move.l	#g3_ret,TOKEN*4(a1)
 	ifd RESETTRAP
 	move.l	#reset_trap1,g1_dispatch_sw	; (-D RESETTRAP=1: a computed jump to $0000, the program restarting
 	move.l	#reset_trap2,g2_dispatch_sw	; itself, ends in CRASH.TXT: vector 97 / 96, its stack the Z80's)
@@ -1187,6 +1189,27 @@ nat_y0e4c:
 	clr.b	d1
 	bra	Y0E73
 
+; Scatters the entries of a compact dispatch table (pc order, a0, d0 entries) that are code into the shared table at a1
+; (z80_init_dispatch of the main CPU filled it with z80_badpc): the other CPUs' unused entries must not overwrite the columns
+; of the CPU before.
+
+dd_init_dispatch:
+	move.l	#z80_badpc,d3
+	moveq	#0,d1			; pc
+.scatter:
+	move.l	(a0)+,d4
+	cmp.l	d3,d4
+	beq.s	.skip
+	move	d1,d2
+	ror	#8,d2
+	and.l	#$ffff,d2
+	lsl.l	#2,d2
+	move.l	d4,(a1,d2.l)
+.skip:	addq	#1,d1
+	cmp	d0,d1
+	blo.s	.scatter
+	rts
+
 ; A plain data write ($7000, hooked): into the 51XX's latch if the transfer is a write to it.
 
 g_data06:
@@ -1737,9 +1760,10 @@ g_ram = g_block+$8000
 g3_block:	ds.b	$10000		; the sound CPU: its ROM, its I/O cells (the WSG at $6800), its RAM at + $8000
 g3_rom = g3_block
 g3_ram = g3_block+$8000
-g3_dispatch_sw:	ds.l	65536
-g1_dispatch_sw:	ds.l	65536
-g2_dispatch_sw:	ds.l	65536
+g_dispatch_sw:	ds.l	65536			; (see the start: the three CPUs' dispatch tables side by side, in columns)
+g1_dispatch_sw = g_dispatch_sw
+g2_dispatch_sw = g_dispatch_sw+4*$41
+g3_dispatch_sw = g_dispatch_sw+4*$82
 
 	ds.b	2048
 own_stack_top:

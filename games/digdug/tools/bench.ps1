@@ -2,11 +2,11 @@
 # (a coin and a start at VBL 1400, then moves and pumps) and writes RATE.BIN (VBL and render counters every 500 VBLs);
 # renders per VBL x 50 = pictures a second.
 #
-#   games\digdug\tools\bench.ps1 [-Frames 6000] [-Name digdug_bench] [-Extra '-D','NOSOUND=1']
+#   games\digdug\tools\bench.ps1 [-Frames 6000] [-Name digdug_bench] [-Extra '-D','NOSOUND=1'] [-MemSize 4]
 #
 # The game's course follows the CPU budget (the scripted moves are not the same moves at another speed): the windows of
 # two builds compare as ranges, not frame by frame.
-param([int]$Frames = 6000, [string]$Name = "digdug_bench", [string[]]$Extra = @())
+param([int]$Frames = 6000, [string]$Name = "digdug_bench", [string[]]$Extra = @(), [int]$MemSize = 14)
 $root = (Resolve-Path "$PSScriptRoot\..\..\..").Path
 $run = "$root\run\$Name"
 New-Item -ItemType Directory -Force $run | Out-Null
@@ -15,7 +15,7 @@ Remove-Item "$run\RATE.BIN", "$run\CRASH.TXT" -ErrorAction SilentlyContinue
 $env:PATH = "C:\msys64\ucrt64\bin;" + $env:PATH
 $arcade = "C:\Arbeit\F030Arcade"
 $h = "$arcade\third_party\hatari\build-ucrt64\src\hatari.exe"
-$a = @("--machine", "ste", "--memsize", "14", "--tos", "$arcade\third_party\tos\tos206de.img", "--fast-boot", "true", "--cpu-exact", "true",
+$a = @("--machine", "ste", "--memsize", $MemSize, "--tos", "$arcade\third_party\tos\tos206de.img", "--fast-boot", "true", "--cpu-exact", "true",
        "--compatible", "true", "--sound", "off", "--confirm-quit", "off", "--statusbar", "false", "--fast-forward", "true",
        "--run-vbls", ($Frames + 600), "--log-file", "$run\hatari.log", "$run\DIGDUG.PRG")
 $p = Start-Process $h -ArgumentList $a -WorkingDirectory $run -PassThru

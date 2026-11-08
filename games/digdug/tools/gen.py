@@ -164,6 +164,12 @@ def generate(hooks=((), (), ()), skip_tests=True):
                                                       natives=NATIVES[n])
         lines.append("; ---------------- CPU%d" % (n + 1))
         lines += code_lines
+        if n:
+            # the sub and sound CPUs' tables: their ROM's entries only (the token's entry is set by the runtime: digdug.s
+            # dd_init_dispatch), 8 per line
+            keep = len(roms[n]) // 8
+            table = table[:1 + keep]
+            tables += ["DISPATCH_ENTRIES%d = %d" % (n + 1, len(roms[n]))]
         tables += table
         reports.append(rep)
         ems.append(em)
