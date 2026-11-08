@@ -316,6 +316,9 @@ vbl:
 .ap5:	move.b	d1,IO_IN0
 .ap3:	move.l	(sp)+,d2
 	endc
+	ifd CHEAT				; (long runs: MAME's lives cheat, as ref/cover.py and render_test.py use it)
+	move.b	#7,G_Z80+$6116
+	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
 	bpl.s	.ph
