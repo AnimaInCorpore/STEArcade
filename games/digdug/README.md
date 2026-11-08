@@ -210,6 +210,6 @@ registers against `sound.py` (`sound_test`), and the sound's pitches against MAM
 (`sound_hatari.py`: ids 10-13 and 15 alike, levels 4-7 dB above MAME's, which is not comparable: different mixers).  Coverage:
 18 seeds, the chasing bot among them (17-19: 8 games each, 122 new main-CPU pcs over the others in the first one).
 Played in Hatari: the bot, 24,600 VBLs, no crash.  **Not done**: a long run that reaches rounds 3 and later (the bot dies
-or stalls in rounds 1-2; no RAM cheat for the round number was found: `$840F` is not the displayed round); no human
+or stalls in rounds 1-2; no RAM cheat for the round number was found: `$840F` is not the displayed round; 2026-11-08: the bot's RAM snapshots show `$8987` going 0 -> 2 -> 4 at the first two round changes (frames 7400, 15600) and `$87A9` 1 -> 2 at 7400, but pokes of `$8987`, `$87A9` and `$89E1` before or during the game start (frames 700-900, held) leave round 1 and its layout unchanged: the start code seems to rebuild them from elsewhere; the Z80 code writing `$8987` (`$32FA`) was not traced); no human
 playthrough; nobody has listened to a whole game; no RAM lock-step test; the reordered-source sprite method.  Dig Dug stays in
 `NOT_RELEASED` until the user decides.  See the [status policy](../../docs/port-status.md); the port is **Incomplete**.
