@@ -1,5 +1,5 @@
 # Repeatable Xevious rate samples (Hatari fast-forward, 4 MB STE, hidden window); outputs stay in run/<Name>.
-# Reads RATE.BIN: per sample the VBL count, the pictures and the arcade (logic) frames since the start.
+# Reads RATE.BIN: per sample the VBL count, the pictures and the arcade (logic) frames since the start, and the area ($8181).
 param([int]$Frames = 3000, [string]$Name = "xevious_bench", [string[]]$Extra = @())
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
@@ -26,9 +26,10 @@ try {
 }
 if (Test-Path "$bench/CRASH.TXT") { throw (Get-Content "$bench/CRASH.TXT" -Raw) }
 $b = [IO.File]::ReadAllBytes("$bench/RATE.BIN")
-$pv = 0; $pr = 0; $pl = 0
-for ($i = 0; $i -lt $b.Length; $i += 6) {
-    $v = $pv + 250; $r = $b[$i+2]*256+$b[$i+3]; $l = $b[$i+4]*256+$b[$i+5]
-    "VBL {0}-{1}: {2:N1} pictures/s, {3:N1} arcade frames/s" -f $pv, $v, (50*($r-$pr)/250), (50*($l-$pl)/250)
+$pv = 0; $pr = 0; $pl = 0; $maxArea = 0
+for ($i = 0; $i -lt $b.Length; $i += 8) {
+    $v = $pv + 250; $r = $b[$i+2]*256+$b[$i+3]; $l = $b[$i+4]*256+$b[$i+5]; $a = $b[$i+6]*256+$b[$i+7]; if ($a -gt $maxArea) { $maxArea = $a }
+    "VBL {0}-{1}: {2:N1} pictures/s, {3:N1} arcade frames/s, area {4}" -f $pv, $v, (50*($r-$pr)/250), (50*($l-$pl)/250), $a
     $pv = $v; $pr = $r; $pl = $l
 }
+'highest area reached (the main CPU''s byte $8181): ' + $maxArea

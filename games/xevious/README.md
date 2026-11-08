@@ -15,9 +15,9 @@ three voices as the YM2149's square waves and the player's explosion as noise (a
 reference renderer, which equals MAME's picture, but only one explosion sound exists and the speed is low (the picture was drawn by the CPU at the time of this status
 line; the sprites and the foreground are Blitter passes since 2026-11-08, see Speed).
 
-Speed (Hatari, 4 MB STE, `tools/bench.ps1`, `MAX_SKIP` 3, 2026-11-08, after the sprite passes): attract and autoplay 27-32 arcade
-frames a second (of 60.6) and 6.8-8.0 pictures a second.  Before the sprite passes (2026-11-07, attract mode, `bench.ps1 3000`):
-about 21.5 arcade frames a second (35% of 60.6) and 5.4 pictures a second.
+Speed (Hatari, 4 MB STE, `tools/bench.ps1`, invincible build, `AUTOPLAY`, `MAX_SKIP` 3, 2026-11-08, after the natives): 26-32
+arcade frames a second (mean 28.8 over 20,000 VBLs, 47% of the arcade's 60.6) and 6.6-8.0 pictures a second (mean 7.2).  After the
+sprite passes alone (same day): 27-29 and 6.6-7.4; before them (2026-11-07, attract mode): about 21.5 and 5.4.
 
 ## Build and run
 
@@ -43,10 +43,10 @@ crc c2f57ef8) and `namco54.zip` (`54xx.bin`, crc ee7357e0).
 
 ## Controls
 
-**5** coin, **1/2** start, **cursor keys** move (8 directions), **Space/Ctrl** zapper (fire), **Alt** blaster (bomb),
+**5** coin (**6** the second coin slot), **1/2** start, **cursor keys** move (8 directions), **Space/Ctrl** zapper (fire), **Alt** blaster (bomb),
 **Esc** quits.  Jaguar pad / PowerPad (STE enhanced ports, [architecture](../../docs/architecture.md#input-all-ports)): the
 D-pad moves, **A / C** fire, **B** bomb, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#**
-quit.  The second button reaches the program through the DIP switch bank ($6800 bit 0), as on the board.
+quit.  The second button reaches the program through the DIP switch bank ($6800 bit 0), as on the board.  Both players use the one joystick and button (the upright cabinet; the cocktail inputs are not wired).
 
 ## State
 
@@ -70,8 +70,14 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   ONE / TWO READY), so a long Hatari play with the ship alive and shooting was not looked at.
 * Coverage (`ref/cover.py`): CPU1 7,187 translated instructions, CPU2 762, CPU3 555; no unsupported, no missing target.
 * Sound (`tools/logic_test.py`): every frame the sound CPU's WSG registers equal the reference's and the YM2149's registers
-  equal `tools/sound.py`'s image of them (the model of Galaga's port with Xevious's waveform PROM); not listened to in Hatari
-  (`--sound off`), the pitch not compared with MAME's audio.
+  equal `tools/sound.py`'s image of them (the model of Galaga's port with Xevious's waveform PROM).  Against MAME's audio
+  (`tools/sound_mame.py`, 2026-11-08: MAME's `sxevious` with a coin and start at frames 1200 / 1300, `-wavwrite`; Hatari with
+  `--sound 44100`, the AVI's audio, the AUTOPLAY build with `AP_COIN=60`): the start jingle's dominant notes are the same ones in
+  both, F3 175 Hz, A4 440 Hz and A#4 466 Hz first (STE 20 / 17 / 10 of 72 windows of 0.2 s, MAME 3 / 16 / 8 of 36); the STE
+  plays it in about twice the time (the arcade runs at half speed there).  Differences: **level** (the median RMS is 0.187 on the
+  STE, 0.103 in MAME: 1.8 times louder), **timbre** (MAME's PROM waveforms have strong 7th harmonics, 3.1 and 3.3 kHz; the STE has plain
+  squares), and the 54XX's effects (shots, explosions other than the player's, the tone under the play) are missing.  The
+  in-game part of the capture was not compared (a 24 s Hatari AVI is 1.5 GB: the SSD rule).  **Nobody listened.**
 * Missing, most important first: the 54XX's other noises (only the player's explosion, commands $1x / $2x, is a noise burst, as in Galaga's port; MAME's
   discrete circuit and the ground-target explosions are not modelled); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
   `AGENTS.md` (older statement: sprites and the foreground were merged by the CPU: `render.s`, `blit_row`; done 2026-11-08, see Speed); the cocktail flip, a foreground
@@ -217,3 +223,46 @@ Assisted coverage and tests only (random scripted play, MAME's cheats); no natur
 playtest of the picture, no listening test; no PPO profile.  The speed figures are Hatari fast-forward benchmarks
 (autoplay loses its ship often), not a play session.  The 5.4 pictures a second of the 2026-11-07 figures are superseded
 by the 6.8-8.0 of 2026-11-08.  See the [status policy](../../docs/port-status.md); the port is **Experimental / deferred**.
+
+### Playable? Profile and budget (2026-11-08)
+
+Measured in Hatari (4 MB STE, TOS 2.06, `tools/bench.ps1`, invincible build, `AUTOPLAY`, `MAX_SKIP` 3), 20,000 VBLs, no
+CRASH.TXT: 26.4-32.2 arcade frames a second (mean 28.8, 47% of the arcade's 60.6) and 6.6-8.0 pictures a second (mean 7.2); the
+slowest stretches (VBL 14,000-15,000 and 18,000-19,000, many objects) 26 and 6.4-6.8.  How far it got: `RATE.BIN` now records the
+main CPU's byte `$8181` (it counts 0, 1, 2, ... as the ground scrolls; in a reference run of 14,000 frames it went 1 to 8 at
+about every 1,500-2,500 frames): in the Hatari run it reached **6** (from VBL 5,500 to 19,500: 1, 2, 3, 4, 5, 6 at VBL
+5,500 / 10,500 / 14,000 / 14,750 / 18,500 / 19,500).  Whether that byte is the area number of the game's display was not checked
+against a screenshot.  The autoplay is a crude scripted pattern with the ship invincible; it is not a play session.
+
+Where the 90% logic and 20 pictures a second stand: out of reach on an 8 MHz STE for this board, by arithmetic.  The logic went
+171.8k -> 140.9k cycles a frame (Musashi) with the natives below, i.e. 8.5M cycles a second at 60.6 frames against 8M available
+with no picture drawn (at most ~57 frames a second, 94%); a picture costs ~440-510k (about 130-160k of it the Blitter copy of
+the ring), so 20 a second would add 9-10M.
+
+Natives (`src/natives.s`, `tools/gen.py` NATIVES; `XEV_NO_NATIVES=1` builds the translation alone), each lock-step exact (seeds 1-4,
+31, 32, 3000 frames; `logic_test.py --tasks` histogram of the task handlers):
+* the sub CPU's sprite-table conversion `$04ED-$0500` (64 entries, 22k cycles a frame -> 5k);
+* the main CPU's task loop: the dispatch at `$0469`, and at the slot calls `$045C`, `$305E`, `$306D` the two quick handlers
+  (`$001F` is a `ret`; `$307A` returns at once when the byte at `$7F00 + IXL` is 0) are skipped without the call (about 100
+  dispatches a frame, 70 of them quick).
+Together -18% of the logic (171.8k -> 140.9k); Hatari 27-29 -> 29-30 arcade frames a second.
+
+Tried and **not** kept:
+* a narrower shared-RAM copy (only the 640 bytes the sub touched over 3 seeds x 3000 frames): -6.4% in Musashi, exact in
+  the lock-step test, but 5% *slower* in Hatari's play (28.8 -> 26.8 arcade frames a second), which means the sub reads or
+  writes more in play than the sampled seeds showed; reverted.  `sync_copy` (18k a frame, 13% of the logic) is within 27% of the
+  memory-bus floor (two copies of 1,792 bytes); the Blitter would not be faster than `movem.l`.  A proper fix is to let the
+  sub CPU address the main CPU's `$7900-$7FFF` directly, which needs the emitter's long mode to take two bases.
+
+Vertical hardware scroll (measured bound, **not built**): a build without the ring-to-screen copy (`-D NOCOMPOSE=1`, a broken
+picture) runs 34-37 arcade frames and 8.4-9.2 pictures a second (against 29.6 and 7.4 the same hour): the copy costs ~160k
+cycles a picture (the HOG copy and its register setup).  Drawing the sprites and characters into a persistent buffer that is
+displayed with a moved start address would remove it, but needs each buffer's drawn sprites and characters erased from the clean
+ring before the next picture (the Blitter copy of each rectangle: ~30 sprites x (250 CPU + 600 bus cycles) and ~50 character cells,
+~50-65k) and the changed cells applied to both buffers: a net saving of ~100k a picture (about +10-12% arcade frames a second,
+estimated), for a rewrite of `update_bg`, the sprite and character paths and the double buffering.  The targets of 27-32 arcade
+frames and 7-8 pictures a second are met without it, so it was left for the user's decision, as was `MAX_SKIP` (7 gives ~38
+arcade frames and ~4.5 pictures a second).
+
+Not done: the 54XX's other noises; a Hatari audio capture of the in-game part; a natural play session; Hatari stills after the
+natives (the natives change no pixel: `render_test` PASS, 27 pictures, 0 pixels differ, after them); `sprite_test`.

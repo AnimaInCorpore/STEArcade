@@ -417,6 +417,9 @@ bgc_flush:
 ; ------------------------------------------------------------------------------
 
 compose_bg:
+	ifd NOCOMPOSE
+	rts				; (measurement build: the cost of the copy)
+	endc
 	moveq	#0,d0
 	move.w	scroll,d0
 	add.w	#20,d0
