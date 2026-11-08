@@ -129,8 +129,8 @@ GAMES = [
      "fire: Space, Control, Z, joystick fire, pad A.  jump: Up, Alternate, X, pad B.  Left / right: slower / faster.\n"
      "  coins: 5 / 6."),
     ("junofrst", "JUNOFRST.PRG", "Juno First (Konami 1983)",
-     "experimental: about 58% of the arcade's speed, 11 pictures a second (Hatari); exact logic and picture (\n"
-     "  224 x 256, the screen turned as the arcade's); no sound yet",
+     "experimental: about 56% of the arcade's speed, 9-10 pictures a second (Hatari); exact logic and picture (\n"
+     "  224 x 256, the screen turned as the arcade's); sound (YM + DMA effects), not compared with the arcade's audio",
      "Left / Right / Up / Down, the joystick or a pad move the ship; Space, Control, Z or the stick's fire shoot\n"
      "  (X: the second button).  5 / 6 coin, 1 / 2 start."),
 ]
