@@ -311,6 +311,7 @@ not been re-measured in Hatari since).
 | Moon Patrol | 95% / 27.0 autoplay | flat | - | n/a | - | - (text compare 14k) | kept |
 | Gyruss | 55% / 12.7 autoplay | n/a | yes (main, sound) | sub: summaries | sub: copies, scans, projections | cells | kept |
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
+| Mikie | 92% / 35.4 attract + first room (with sound) | n/a (flat) | n/a | both | idle, CWAI, sort, sprite copy, `inline_calls` emitter, sound | `video_inline` | n/a (idle native) |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
@@ -338,6 +339,7 @@ not been re-measured in Hatari since).
 | Moon Patrol | - (layers per line) | a row loop | dirty 16-pixel groups redrawn | `movep` panel; pieces | PROM per picture |
 | Gyruss | - | `sprite_programs` | drawn lines from clean | tiles | default fitter flat |
 | Track & Field, Hyper Sports | per row | `sprite_programs` | sprite-only rows: their groups | tiles | default fitter flat |
+| Mikie | - | `sprite_programs` (key tables, row table per Y) | drawn lines from clean | tiles | PROM (4096 pens fitted to 16) |
 | Double Dragon | H | a row loop, rows sorted by mask | cells invalidated | pairs, fills | checker pairs |
 | Gauntlet | H + V (torus) | baked 32-pixel strips, a pass a row | rectangles from clean | runs; CPU masks for transparent ones | checker pairs + player colours |
 | R-Type | H (twin columns) | `sprite_programs` (streams) | contour from clean; clears over black | status bar image | checker pairs per scene |

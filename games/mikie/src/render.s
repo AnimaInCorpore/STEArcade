@@ -137,6 +137,43 @@ init_render:
 .lo:	move.l	d0,(a0)+
 	add.l	#LB,d0
 	dbf	d1,.lo
+	; the sprite key's two halves, per code byte and per attribute byte (draw_sprites: key = key_a[code] | key_b[attr])
+	lea	key_a,a0
+	lea	key_b,a1
+	moveq	#0,d7
+.kt:	move.w	d7,d0
+	and.w	#$3F,d0
+	btst	#7,d7
+	beq.s	.a1
+	or.w	#$40,d0
+.a1:	btst	#6,d7
+	beq.s	.a2
+	or.w	#$100,d0
+.a2:	lsl.w	#6,d0
+	move.w	d0,(a0)+
+	move.w	d7,d0
+	and.w	#15,d0
+	lsl.w	#2,d0
+	btst	#6,d7
+	beq.s	.b1
+	or.w	#$2000,d0
+.b1:	btst	#5,d7
+	beq.s	.b2
+	or.w	#2,d0
+.b2:	btst	#4,d7
+	bne.s	.b3
+	or.w	#1,d0
+.b3:	move.w	d0,(a1)+
+	addq.b	#1,d7
+	bne.s	.kt
+	lea	rowm_y,a1		; the cell rows a sprite at picture Y (-15 .. 240) touches, per Y (draw_one)
+	moveq	#-15,d6
+.ry:	move.w	d6,d0
+	bsr	row_mask
+	move.l	d0,(a1)+
+	addq.w	#1,d6
+	cmp.w	#241,d6
+	bne.s	.ry
 	; the video base: buffer 0, the guard lines above it hidden
 	move.l	buf_base,d0
 	add.l	#TOPG*LB,d0
@@ -640,30 +677,13 @@ draw_sprites:
 	cmp.w	#-16,d0
 	ble	.n
 	move.w	d0,d5
-	moveq	#0,d0			; the key: code << 6 | colour << 2 | flip x << 1 | flip y
-	move.b	d6,d0
-	and.w	#$3F,d0
-	btst	#7,d6
-	beq.s	.k1
-	or.w	#$40,d0
-.k1:	btst	#6,d7
-	beq.s	.k2
-	or.w	#$80,d0
-.k2:	btst	#6,d6			; the graphics bank
-	beq.s	.k3
-	or.w	#$100,d0
-.k3:	lsl.w	#6,d0
-	moveq	#15,d6
-	and.w	d7,d6
-	lsl.w	#2,d6
-	or.w	d6,d0
-	btst	#5,d7			; raw flip y: the picture's columns
-	beq.s	.k4
-	or.w	#2,d0
-.k4:	btst	#4,d7			; raw flip x (attribute bit 4 clear): the picture's rows
-	bne.s	.k5
-	or.w	#1,d0
-.k5:	move.w	d0,d6
+	add.w	d6,d6			; the key: code << 6 | colour << 2 | flip x << 1 | flip y (key_a, key_b: init_render)
+	lea	key_a,a0
+	move.w	(a0,d6.w),d0
+	add.w	d7,d7
+	lea	key_b,a0
+	or.w	(a0,d7.w),d0
+	move.w	d0,d6
 	bsr	draw_one
 .n:	addq.w	#4,spr_offs
 	cmp.w	#$90,spr_offs
@@ -780,7 +800,10 @@ draw_one:
 	move.l	front_any,d0		; front tiles under it?  (its cell rows)
 	beq.s	.draw
 	move.w	cell_y,d0
-	bsr	row_mask
+	add.w	d0,d0
+	add.w	d0,d0
+	lea	rowm_y+15*4,a0		; (the table from Y = -15)
+	move.l	(a0,d0.w),d0
 	and.l	front_any,d0
 	bne	.front
 .draw:	move.l	d3,B_DST.w		; (the high word; the code writes the low word)
@@ -1243,6 +1266,9 @@ mk_sstream:	incbin	"mk_sstream.bin"
 
 	section bss,bss
 	even
+rowm_y:	ds.l	256
+key_a:		ds.w	256
+key_b:		ds.w	256
 buf_base:	ds.l	NBUF+1
 draw_base:	ds.l	1
 dmg_ptr:	ds.l	1

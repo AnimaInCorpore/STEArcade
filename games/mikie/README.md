@@ -98,7 +98,7 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   turned picture, sprites, the heart and flag HUD); 3001 VBLs with the sound on: 3290 arcade frames (54.8 a second, 91% of
   60), 2090 pictures (34.8 a second), 2 border fallbacks, no late border events (before the sound and the sort native:
   55.8 a second without sound; the cost of the sound is about 2 points of rate, the sort gained back about 1).  The game
-  does not reach the full arcade rate: **it runs at 91% in Hatari's attract and first room**.  Not measured: sustained
+  does not reach the full arcade rate: **it runs at 92% in Hatari's attract and first room** (55.8 arcade frames a second, 35.4 pictures, after the speed audit below; 91% before it).  Not measured: sustained
   play, later rooms.
 * **Not done / not verified**: the cocktail cabinet and the flip screen (`render_raw` raises `NotImplementedError` for the flip
   latch; the STE renderer ignores it); the service mode; a full game; the other sets (`mikiej`, `mikiek`, `mikiehs` share the
@@ -106,6 +106,33 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   of the effect range; a jump through a table entry nothing used would stop at `snd_badpc`); sprite preparation
   measurements against the other methods (`docs/sprite-preparation.md`: this port uses the shared generated code as Track
   & Field does, not measured separately); the Mega STE; hearing the result on real hardware or an emulator by a person.
+
+## Speed audit (2026-11-08; docs/speed.md checklist)
+
+Profiles (`tools/logic_test.py N --seed S --profile`: every 68000 instruction charged to its 6809 block or runtime label;
+`tools/render_test.py ... --prof`): the logic is flat (largest blocks: the sprite list's copy 7%, the record emitter 8%,
+the sound 8%, the sort 4%); a picture (CPU 74.3k + Blitter 29.8k cycles before) spends 21% in `draw_one`, 17% in
+`draw_sprites`, 9% restoring damage, 6% baking, 5% each in `copy_cells` / `tile_convert`.
+
+| Technique | State | Before -> after |
+|---|---|---|
+| Register maps, second pass, `fixed_slots`, `fast_forms`, `ret_weights`, `call_summaries` | applied (gen.py) | - |
+| `video_inline` writer marks (cell list), no RAM comparisons | applied | - |
+| Window guards, leaves in place (Z80 side), `flags_at` at the idle hook | n/a (flat 6809 map; the idle point is a native) | - |
+| Natives at hot routines | applied: sort (`mk_sort`), sprite-list copy (`mk_sprcopy`, $6253), idle, CWAI | the translated copy loop ~5k cycles a frame -> 2.8k (profile of seed 4) |
+| 6809 `inline_calls` | applied to the record emitter $998B (`mk_emit`, 20 calls a frame; flags dead at all three sites) | emitter ~3.4k a frame in its inline form; with the copy: seed 4 logic 71670 -> 65459 cycles a frame (-8.7%); logic lock-step exact on seeds 1, 2, 4, 5, 7, 9 (3000-20000 frames; seeds 3, 6, 8 not rerun) |
+| Sound work at build time | partly: the driver is translated, the ticks of idle channels are skipped by natives; recordings per effect not tried (the effects depend on the game's commands in time) | sound ~6k cycles a frame |
+| Sprite key by two table lookups (code, attribute) instead of bit tests | applied | `draw_sprites` 12.5k -> 10.2k cycles a picture |
+| Cell rows a sprite touches by a table per Y (front-tile test) | applied | `row_mask` 3.2k per picture -> a lookup; a picture CPU 74.3k -> 68.8k (-7.4%) |
+| `sprite_programs` reordered-source passes, end masks = opaque pixels, no AND + OR | applied (shared generated code) | - |
+| Drawn-lines damage, clean-screen restore | applied (damage list per sprite) | - |
+| Per-slot sprite cache, palette epochs / stamps, scroll, parallax, colour cycling | n/a (no scroll or parallax; one palette bank; no cycling) | - |
+| HUD as its own image, spreading big redraws, picture schedule | not tried (no profile shows them) | - |
+| Fill of the video RAM at a room start ($6FE8, 28 rows x 32 cells, one row a frame) as a native | rejected: only the 28 frames of a room start, not in play | - |
+
+Hatari (`tools/hatari.ps1 -Frames 3000 -Sound 1`, attract, coin, first room): 54.8 -> **55.8** arcade frames a second
+(92% of 60), 34.8 -> 35.4 pictures a second.  Logic and picture are exact as before (see State); the remaining cost is
+spread over sprites (36 entries a picture), the sound and the damage restore.
 
 ## How it works
 

@@ -429,21 +429,18 @@ mk_sprcopy:
 	lea	$36D0(a3),a0
 	lea	$2800(a3),a1
 	moveq	#$26-1,d6
-.l:	move.b	(a0)+,d0
-	move.b	(a0)+,d1
-	cmp.b	#$FC,d1
+.l:	move.w	(a0)+,d7		; (A:B; every pair is word aligned)
+	cmp.b	#$FC,d7
 	beq.s	.skip
-	move.b	d0,(a1)+
-	move.b	d1,(a1)+
-	move.b	(a0)+,d0
-	move.b	(a0)+,d1
-	move.b	d0,(a1)+
-	move.b	d1,(a1)+
+	move.w	d7,(a1)+
+	move.w	(a0)+,d7
+	move.w	d7,(a1)+
 	dbf	d6,.l
 	bra.s	.e
 .skip:	addq.l	#2,a0
 	dbf	d6,.l
-.e:	clr.b	$2950(a3)
+.e:	move.b	d7,d1			; B = the last byte read
+	clr.b	$2950(a3)
 	move.l	a0,d7
 	sub.l	a3,d7
 	move.w	d7,d2			; X
