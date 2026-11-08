@@ -65,6 +65,33 @@ must not be represented as new 8 MHz coverage or as physical-hardware evidence.
 
 ## Reproduce
 
+### Physical return and emulator clock correction, 2026-11-08
+
+Darklord's DLTEST 4 return (4 MB Mega STE, TOS 2.06) has zero drawing errors;
+all six fixed bob/open-border BMPs match Hatari and the independent CPU
+renders. At 16 MHz/cache on, its 300-VBL border test has two startup fallbacks,
+zero late counters and zero missing post-picture callbacks after warmup. The
+8 MHz and uncached 16 MHz paths have four and five missing callbacks. Input
+devices were not exercised; framebuffer captures do not establish monitor
+stability.
+
+The return also exposed missing conversion from 8 MHz Blitter bus cycles to
+16 MHz CPU cycles in the authoritative F030Arcade Hatari's
+`Blitter_AddCycles()`. That checkout is now corrected and rebuilt. Most of
+the setup-time discrepancy disappears, but a remaining short-pass difference
+is unresolved. Its canonical evidence and limits are in F030Arcade's
+`third_party/hatari/doc/megaste-blitter-timing.txt` and the corresponding
+`DEBUGGING.md` section. The historical verification table above predates this
+emulator correction; it must not be used as a calibrated hardware timing model.
+
+`tools/dltest_setup_timing.py --hatari PATH --out DIR --hardware DLTEST.TXT`
+builds a focused `SETUP_ONLY` launcher using the original kernels, runs all
+30 profiles, checks drawing results and saves timings with build hashes.
+Ordinary DLTEST builds do not enable that launcher. Returned files and
+before/after results are retained in `build/darklord-setup-investigation/`.
+
+### Commands
+
 ```sh
 venv/bin/python tools/dltest_timing.py --mode 2 --seconds 50 --check-control
 venv/bin/python tools/dltest_timing.py --mode 2 --pad 3424
