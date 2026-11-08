@@ -100,34 +100,18 @@ GAMES = [
      "  288 lines (the never or hardly drawn ones left out); the WSG's voices on the YM",
      "the arrows, the joystick or a pad move Pac-Man; no buttons.  One player at a time: both joysticks and both\n"
      "  pads move him."),
-    ("mikie", "MIKIE.PRG", "Mikie (Konami 1984)",
-     "work in progress: exact logic (lock-step) and picture (224 x 256, turned as the arcade's monitor), 16 fitted\n"
-     "  colours; the two SN76489s' voices on the YM (three of the eight at a time); speed measured in Hatari (see the\n"
-     "  game's README)",
-     "move: the arrows, the joystick or a pad; kick / hit: Space, Control, Z, joystick fire, pad A / C;\n"
-     "  second button: Alternate, X, pad B.  Coins 5 / 6, start 1 / 2."),
     ("trackfld", "TRACKFLD.PRG", "Track & Field (Konami 1983)",
      "work in progress: the arcade's full speed, 20-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
      "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
-    ("jailbrek", "JAILBREK.PRG", "Jail Break (Konami 1986)",
-     "work in progress, no sound yet: exact logic, the 240 x 224 picture in 16 fitted colours",
-     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,
-"
-     "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
      "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
      "  the tunes on the DMA sound",
      "run / left button: Left, Z, joystick left, pad A.  right button: Right, C, joystick right, pad C.  action:\n"
      "  Up, Space, Control, X, joystick up / fire, pad B."),
-    ("sbasketb", "SBASKETB.PRG", "Super Basketball (Konami 1984)",
-     "work in progress: about 83-90% of the arcade's speed, 19-31 pictures a second (Hatari); exact logic and picture,\n"
-     "  the turned 224 x 256 picture in 16 fitted colours; the sound board's output recorded in MAME, on the DMA sound",
-     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):\n"
-     "  X, pad B.  button 3: C, pad C.  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
     ("pooyan", "POOYAN.PRG", "Pooyan (Konami 1982)",
      "the arcade's full speed, 40-50 pictures a second in play (Hatari); exact logic and picture, the turned\n"
      "  224 x 256 picture; the sound board's Z80 translated, its two AYs on the YM",
@@ -144,10 +128,29 @@ GAMES = [
      "  DMA sound",
      "fire: Space, Control, Z, joystick fire, pad A.  jump: Up, Alternate, X, pad B.  Left / right: slower / faster.\n"
      "  coins: 5 / 6."),
+    ("mario", "MARIO.PRG", "Mario Bros. (Nintendo 1983)",
+     "work in progress: exact logic (lock-step) and picture (256 x 224 in 16 fitted colours), about 98% of the arcade's speed\n"
+     "  and 30 pictures a second (Hatari); the music and effects as recordings of MAME on the DMA sound (not listened to)",
+     "move: the arrows, joystick, pad D-pad.  jump: Space, Control, joystick fire, pad A / C.  coins: 5 / 6, start: 1 / 2."),
+    ("mikie", "MIKIE.PRG", "Mikie (Konami 1984)",
+     "work in progress: exact logic (lock-step) and picture (224 x 256, turned as the arcade's monitor), 16 fitted\n"
+     "  colours; the two SN76489s' voices on the YM (three of the eight at a time); speed measured in Hatari (see the\n"
+     "  game's README)",
+     "move: the arrows, the joystick or a pad; kick / hit: Space, Control, Z, joystick fire, pad A / C;\n"
+     "  second button: Alternate, X, pad B.  Coins 5 / 6, start 1 / 2."),
     ("yiear", "YIEAR.PRG", "Yie Ar Kung-Fu (Konami 1985)",
-     "work in progress: exact logic and picture (256 x 224 in 16 fitted colours); no sound yet",
+     "work in progress: exact logic and picture (256 x 224 in 16 fitted colours), 96% speed and 37 pictures a second (Hatari), with sound",
      "move: the arrows, joystick, pad A.  kick: Z, Space, Control, joystick fire, pad A.  punch: X, Alternate, pad B.\n"
      "  coins: 5 / 6, start 1 / 2."),
+    ("sbasketb", "SBASKETB.PRG", "Super Basketball (Konami 1984)",
+     "work in progress: about 83-90% of the arcade's speed, 19-31 pictures a second (Hatari); exact logic and picture,\n"
+     "  the turned 224 x 256 picture in 16 fitted colours; the sound board's output recorded in MAME, on the DMA sound",
+     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):\n"
+     "  X, pad B.  button 3: C, pad C.  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
+    ("jailbrek", "JAILBREK.PRG", "Jail Break (Konami 1986)",
+     "work in progress: exact logic, the 240 x 224 picture in 16 fitted colours, sound (see the game's README)",
+     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,\n"
+     "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again
