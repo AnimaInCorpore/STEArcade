@@ -314,6 +314,8 @@ not been re-measured in Hatari since).
 | Gyruss | 55% / 12.7 autoplay | n/a | yes (main, sound) | sub: summaries | sub: copies, scans, projections | cells | kept |
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
 | Mikie | 92% / 35.4 attract + first room (with sound) | n/a (flat) | n/a | both | idle, CWAI, sort, sprite copy, `inline_calls` emitter, sound | `video_inline` | n/a (idle native) |
+| Mario Bros. | 98% / 29.9 autoplay | n/a | - (translated with leaves off) | n/a | - | - (video RAM compared as longs) | kept |
+| Donkey Kong 3 | 84% / 26.9 autoplay (sound, 4 MB) | n/a | leaves in place | n/a | - | - | kept |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
 | Juno First | 61% / 8.1 play (MAX_SKIP 6) | n/a | - | both (+1% only) | clears, blit passes | - (planar `vram_wr`) | custom |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
@@ -347,6 +349,8 @@ not been re-measured in Hatari since).
 | Gyruss | - | `sprite_programs` | drawn lines from clean | tiles | default fitter flat |
 | Track & Field, Hyper Sports | per row | `sprite_programs` | sprite-only rows: their groups | tiles | default fitter flat |
 | Mikie | - | `sprite_programs` (key tables, row table per Y) | drawn lines from clean | tiles | PROM (4096 pens fitted to 16) |
+| Mario Bros. | - | `sprite_programs` (shapes by coverage) | opaque rows from the playfield; unused entries skipped fast | tiles (playfield, cell cache) | fitted flat, 16 colours |
+| Donkey Kong 3 | - | Mario's renderer turned to portrait | as Mario | tiles | fitted flat |
 | Double Dragon | H | a row loop, rows sorted by mask | cells invalidated | pairs, fills | checker pairs |
 | Super Basketball | H, recomposed (hardware scroll tried: exact, slower) | `sprite_programs` (348 shapes, per-slot cache) | sprite-only rows and changed cells | tiles | default fitter flat |
 | Gauntlet | H + V (torus) | baked 32-pixel strips, a pass a row | rectangles from clean | runs; CPU masks for transparent ones | checker pairs + player colours |

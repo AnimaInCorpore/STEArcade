@@ -38,9 +38,6 @@ GAMES = [
     ("1942", "1942.PRG", "1942 (Capcom 1984)",
      "the arcade's speed (60 ticks a second), 34-43 frames a second; music and effects on the YM (three of the six channels)",
      "fire: Space, Control, joystick fire, pad A.  loop: Alternate, pad B."),
-    ("xevious", "XEVIOUS.PRG", "Super Xevious (Namco 1984)",
-     "logic exact against the reference (lock-step); the picture is drawn by the CPU, 5.4 pictures a second; sound: the WSG voices on the YM (no explosions); 16 colours fitted",
-     "fire: Space, Control, joystick fire, pad A/C.  bomb: Alternate, pad B.  8 directions.  One coin key (5, Option)."),
     ("galaga", "GALAGA.PRG", "Galaga (Namco 1981)",
      "a game frame per VBL; the real 51XX MCU's program (translated), the 54XX's explosion simulated; 31 frames a second\n"
      "  drawn on average in the attract mode (Hatari); sound on the YM (square waves)",
@@ -109,10 +106,6 @@ GAMES = [
      "  the tunes on the DMA sound",
      "run: Left / Right, Z / C, joystick left / right, pad A / C (in turn: the faster, the better).  action\n"
      "  (jump, throw, the angle): Up, Space, Control, X, joystick up / fire, pad B."),
-    ("rocnrope", "ROCNROPE.PRG", "Roc'n Rope (Konami 1983)",
-     "work in progress: the arcade's logic exact, the 224 x 256 picture in 16 colours; no sound yet",
-     "left / right / up / down: the arrows, joystick, pad.  Button 1 (Space, Z, fire, pad A / C), button 2\n"
-     "  (Control, X, pad B).  1/2 start, 5/6 coins."),
     ("hyperspt", "HYPERSPT.PRG", "Hyper Sports (Konami 1984)",
      "work in progress: 83% of the arcade's speed, 5-50 pictures a second (Hatari); exact logic, all 256 x 224\n"
      "  pixels in 16 fitted colours; the sound board's Z80 translated, its SN76489A on the YM, the speech and\n"
@@ -158,11 +151,26 @@ GAMES = [
      "work in progress: exact logic, the 240 x 224 picture in 16 fitted colours, sound (see the game's README)",
      "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,\n"
      "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
+    ("dkong3", "DKONG3.PRG", "Donkey Kong 3 (Nintendo 1983)",
+     "work in progress: about 84% of the arcade's speed and 27 pictures a second (Hatari); exact logic, picture\n"
+     "  and sprites; the sound as recordings of MAME on the DMA (not listened to)",
+     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  coins: 5 / 6,\n"
+     "  start: 1 / 2."),
     ("junofrst", "JUNOFRST.PRG", "Juno First (Konami 1983)",
-     "experimental: about 56% of the arcade's speed, 9-10 pictures a second (Hatari); exact logic and picture (\n"
-     "  224 x 256, the screen turned as the arcade's); sound (YM + DMA effects), not compared with the arcade's audio",
+     "experimental: about 61% of the arcade's speed, 8 pictures a second (Hatari); exact logic and picture\n"
+     "  (224 x 256, the screen turned as the arcade's); sound (YM + DMA effects), not compared with the arcade's audio",
      "Left / Right / Up / Down, the joystick or a pad move the ship; Space, Control, Z or the stick's fire shoot\n"
      "  (X: the second button).  5 / 6 coin, 1 / 2 start."),
+    ("xevious", "XEVIOUS.PRG", "Super Xevious (Namco 1984)",
+     "experimental: slow (about 22 arcade frames a second, a few pictures a second in Hatari); exact logic\n"
+     "  (three Z80s) and picture; the explosion noise only",
+     "move: the arrows, joystick, pad D-pad.  zapper: Space, Control, fire, pad A / C.  blaster (bomb): Alternate,\n"
+     "  pad B.  coin 5, start 1 / 2."),
+    ("rocnrope", "ROCNROPE.PRG", "Roc'n Rope (Konami 1983)",
+     "work in progress: the arcade's logic exact, the 224 x 256 picture in 16 colours; sound (the sound Z80\n"
+     "  translated, two AYs); later stages not reached",
+     "left / right / up / down: the arrows, joystick, pad.  Button 1 (Space, Z, fire, pad A / C), button 2\n"
+     "  (Control, X, pad B).  1/2 start, 5/6 coins."),
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again
