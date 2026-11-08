@@ -10,7 +10,7 @@ here both draw into the planar STE picture directly.  The sound board is transla
 the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
 offline to PCM for the DMA sound.  Status **Experimental**: logic, picture and the sound board's state are exact against
 their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
-the program runs at about 56% speed in Hatari, and the sound has never been compared with MAME's audio or listened to.
+the program runs at about 61% speed in Hatari (MAX_SKIP 6), and the sound has never been compared with MAME's audio or listened to.
 
 ## Build and run
 
@@ -114,6 +114,23 @@ $98EA that draws the title's image from ROM: a native that converts whole rows w
 translation's indexed accesses (`wrapped` in the translation report: 5,193 sites, not examined); the full-picture
 Blitter copy of `render_frame` (40 KB, ~80,000 bus cycles a picture: a dirty-column copy would cut it).  Nothing
 had to be dropped from the game so far.
+
+### Speed audit (2026-11-08, docs/speed.md checklist)
+
+Logic = Musashi cycles a frame (seed 1, 3,000 frames, with sound); Hatari = `hatari.ps1 -Frames 4000` autoplay.
+
+| Technique | Status | Before -> after |
+|---|---|---|
+| `fast_forms`, `call_summaries`, `ret_weights`, `fixed_slots`, `slot_ctx` (6809) | applied from the start | switched off: +0.9%, +0.3%, +0.08% (169,941 / 168,952 / 168,604 vs 168,473): the logic is video stores, not translated code |
+| `vram_wr` rewrite (tables, erase path) | applied | 532 -> 462 cycles a write; logic 185.7k -> 168.5k |
+| sound tick loop in the hook | applied | -6k cycles a frame |
+| natives: video clears, blit passes | applied | see Speed above |
+| picture schedule `MAX_SKIP` | changed 3 -> 6 | 33.7 / 9.6 pictures a s -> 37.1 (61%) / 8.1; MAX_SKIP 12: 38.2 / 6.7 (not taken) |
+| `video_inline` / writer marks | rejected (est.) | picture is the planar truth, no RAM compare; an inline range check saves ~18 of ~460 cycles a write |
+| skip idle sound ticks / sound as recordings | rejected | silent frames still run 787 Z80 instructions (active 1,079): the sequencers keep counting |
+| dirty-line picture copy (40 KB Blitter copy ~1 VBL) | rejected (not measured) | the starfield dirties every line in play |
+| inline_calls, flags_at=set(), hardware scroll, palette epochs, sprite_programs for CPU drawing | n/a | no leaf calls worth it found; custom idle hook; no scroll; 16 fixed pens; CPU drawing is single bytes |
+| whole-shape natives ($9EE0, $B3xx, $98EA, $CA00) | not done | next lever: `vram_wr` is ~40% of play |
 
 ## How it works
 

@@ -108,9 +108,9 @@ def program(cover):
     prog.a3_pb = True                           # (m6809x: DP and the stack are in slot 4, above $7FFF: a3 = jf_mem + $8000)
     prog.fixed_slots = (0, 1, 2, 3, 5, 6, 7)
     prog.slot_ctx = bank_ctx
-    prog.fast_forms = True
-    prog.ret_weights = dict(returns) or dict(exec_)
-    prog.call_summaries = True
+    prog.fast_forms = 'JF_NO_FAST' not in os.environ       # (the env switches are for the A/B in the README's table)
+    prog.ret_weights = None if 'JF_NO_RET' in os.environ else dict(returns) or dict(exec_)
+    prog.call_summaries = 'JF_NO_SUM' not in os.environ
     return prog
 
 

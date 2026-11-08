@@ -16,7 +16,7 @@
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 3				; arcade frames in a row that are not drawn while the game is behind
+MAX_SKIP = 6				; arcade frames in a row that are not drawn while the game is behind
 	endc
 	ifnd FRAMES
 FRAMES = 0
