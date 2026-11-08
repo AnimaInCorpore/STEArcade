@@ -181,6 +181,25 @@ cycles an arcade frame (108,000 before the SN native), a picture 78,000 CPU cycl
   sprite geometry and the playfield cache; to propose to the user.  Merging equal-scroll rows in `draw_rows` would save
   only the per-row setup (~250 cycles x 24, 7% of a picture's CPU).  Two-line HOG passes (~240 bus cycles) would save
   ~30% of the CPU time of the row copies.
+* **Speed audit (2026-11-08)**: logic 108k (before the SN native) -> 98k -> 88k cycles an arcade frame (Musashi);
+  Hatari, 3,001 VBLs AUTOPLAY, sound on: 2,362 frames / 825 pictures (13.7 a second) -> **2,429 frames (40.5 a second) /
+  926 pictures (15.4 a second)**.  The game is CPU-bound: pictures are drawn every fourth arcade frame while behind
+  (`MAX_SKIP`), so pictures a second follow the arcade frame rate, and a logic cycle is worth ~3x a picture cycle.
+
+  | Technique | Status | Before -> after |
+  |---|---|---|
+  | Natives at hot routines | applied: SN write `$AF96`, sprite-RAM copy `$9272` (`src/natives.s`, `native_test.py`, lock-step 8000 frames x 4 seeds) | 108k -> 98k (SN); 98k -> 88k (copy; the 8 x 8 priority loop ~15k -> 5k) |
+  | 6809 inline_calls | applied for the 5 direct `JSR $AF96` sites (`_nf` forms); the `JMP $AF96` tail calls cannot | 93.8k -> 92.2k |
+  | call_summaries, fast_forms, ret_weights, fixed_slots, video_inline | applied (translation settings) | - |
+  | Window guards at coverage sites only | n/a (one flat 64 KB block) | - |
+  | Hardware scroll (video address + HSCROLL, groups copied unshifted, side slivers cleared: `-D REN_HSCROLL=1`, `src/render_hscroll.s`) | built, exact (render_test, sprite_test), **rejected as default** | picture 78k CPU + 75k Blitter -> 80k + 55k Musashi; Hatari with a picture every arcade frame 927 -> 936 frames in 2,000 VBLs (+1%); needs an STE fine-scroll check on hardware |
+  | Tile column spans instead of whole-row redraws on a tile write | applied (in the option only) | whole rows 6.3 a picture -> spans |
+  | Sprite programs (reordered-source passes), per-slot sprite cache, guard rows, damage by rows/groups | applied (before this audit) | - |
+  | Palette stamps, colour cycling, parallax, two layers | n/a (one 16-colour palette, one scrolling layer) | - |
+  | HUD as its own image (BD_VSWITCH) | not tried: the four HUD rows are 14k Blitter cycles only on scroll steps | - |
+  | Spreading redraws, pictures-per-second schedule | `MAX_SKIP` 3 kept; 0 gives 23 pictures a second at 23 arcade frames | - |
+  | Remaining logic | NMI handler's three sound interpreters (`$B0C6`, 8 a frame, ~25k), `main_dispatch` 8.6k, `jb_idle` 6.7k, the sound RTS dispatch | not done |
+
 * Candidates not done: the NMI handler's random generators and sound sequencing as natives (the handler is ~5k cycles an NMI
   and eight NMIs come a frame: all writes the game repeats unchanged), a cheaper return for the 42 return points of
   $AF96's RTS (six compared, the rest through `main_dispatch`).

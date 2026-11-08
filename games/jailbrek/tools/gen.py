@@ -25,7 +25,8 @@ from paths import build_dir, require_coverage
 RESET, IRQ, NMI = 0x81A6, JailBreakPort.IRQ, JailBreakPort.NMI
 SEEDS = [int(x) for x in os.environ.get("JB_SEEDS", "").split(",") if x] or range(1, 13)
 NATIVES = {JailBreakPort.IDLE: "jb_idle",
-           0xAF96: "nat_sn_AF96"}                      # the SN76489A write (src/sound.s)
+           0xAF96: "nat_sn_AF96",                     # the SN76489A write (src/sound.s)
+           0x9272: "nat_9272"}                        # the sprite RAM from the objects (src/natives.s)
 # a read-modify-write of the video RAM (m6809x cannot send one through the runtime): `dec $0830` runs on the memory and
 # lists the cell (the video RAM's $0830 is cell $030) itself afterwards
 RMW_VIDEO = {0x907B: 0x0830}
@@ -85,7 +86,8 @@ def program(cover):
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x15, a3_slot=0, a4_slot=1,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('JB_NO_NATIVES', '')},
-                          opcode_reader=lambda rd: konami1_opcode(rd), after=rmw_after)
+                          opcode_reader=lambda rd: konami1_opcode(rd), after=rmw_after,
+                          inline_calls={} if os.environ.get('JB_NO_INLINE') else {0xAF96: ('nat_sn_AF96_i', 0x15)})
     # flat: every slot holds one page for good, so jumps, calls and returns need no page check; the 68030 forms the
     # 68000 runs too (m6809x Program.fast_forms: flags fixed through d7, returns compared most frequent first by the
     # coverage's counts of the returns to each point)

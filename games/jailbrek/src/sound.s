@@ -48,46 +48,62 @@ snd_frame:
 
 ; nat_sn_AF96: the native of $AF96 (`nop` x 5; `sta $3100`; `sta $3200`; `rts`: A to the SN76489A, the register file
 ; of jb_sn_w written in place): the same state at the RTS ($AFA1): N Z from A, V clear, C kept.  d0 = A.  Scratch: d5-d7,
-; a0, as in the translation.
-nat_sn_AF96:
-	move.w	sr,-(sp)
+; a0, as in the translation.  Called in three ways: from the 6809 (nat_sn_AF96: a return address on the 6809 stack, left
+; through the RTS's translation), directly (m6809x inline_calls: `jsr nat_sn_AF96_i`, no return address; `_nf` when no flag
+; is read afterwards).
+	macro	SNBODY
 	ifnd NOSOUND
 	st	snd_dirty
 	lea	jb_sn,a0
 	move.b	d0,d5
-	bpl.s	.data
+	bpl.s	.data\@
 	moveq	#$70,d7			; a latch byte: the register, its low 4 bits
 	and.b	d5,d7
 	lsr.b	#4,d7
 	move.b	d7,snd_sn_latch
 	add.w	d7,d7
-.low:	and.b	#$0F,d5
+.low\@:	and.b	#$0F,d5
 	and.b	#$F0,1(a0,d7.w)
 	or.b	d5,1(a0,d7.w)
-	bra.s	.done
-.data:	moveq	#0,d7			; a data byte: the latched register
+	bra.s	.done\@
+.data\@:	moveq	#0,d7			; a data byte: the latched register
 	move.b	snd_sn_latch,d7
 	btst	#0,d7
-	bne.s	.vol			; (a volume: its low 4 bits)
+	bne.s	.vol\@			; (a volume: its low 4 bits)
 	cmp.b	#6,d7
-	beq.s	.vol			; (the noise control: the same)
+	beq.s	.vol\@			; (the noise control: the same)
 	add.w	d7,d7			; a period: bits 4-9
 	and.w	#$3F,d5
 	lsl.w	#4,d5
 	and.w	#$0F,(a0,d7.w)
 	or.w	d5,(a0,d7.w)
-	bra.s	.done
-.vol:	add.w	d7,d7
-	bra.s	.low
-.done:
+	bra.s	.done\@
+.vol\@:	add.w	d7,d7
+	bra.s	.low\@
+.done\@:
 	endc
+	endm
+	macro	SNFLAGS
 	move.w	(sp)+,d6
 	and.w	#1,d6
 	tst.b	d0
 	move.w	sr,d7
 	or.b	d6,d7
 	move.w	d7,ccr
+	endm
+nat_sn_AF96:
+	move.w	sr,-(sp)
+	SNBODY
+	SNFLAGS
 	jmp	M00AFA1
+nat_sn_AF96_i:
+	move.w	sr,-(sp)
+	SNBODY
+	SNFLAGS
+	rts
+nat_sn_AF96_i_nf:
+	SNBODY
+	rts
 
 ; jb_sn_w: d5.b = a byte written to the SN76489A.  Keeps every register.
 jb_sn_w:

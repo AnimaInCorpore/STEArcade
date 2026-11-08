@@ -962,6 +962,7 @@ dbg_name4:
 	else
 	include	"render.s"
 	endc
+	include	"natives.s"
 	include	"sound.s"			; (NOSOUND: the chips' writes are kept, nothing plays)
 
 ; ------------------------------------------------------------------------------
