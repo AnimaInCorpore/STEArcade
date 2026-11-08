@@ -22,6 +22,8 @@ def main():
     args = ap.parse_args()
     if not (ROOT / "assets" / "roms" / "extracted" / "rthunder").is_dir():
         subprocess.run([sys.executable, str(Path(__file__).with_name("prepare.py"))], check=True)
+    import assets
+    assets.build()
     report = gen.generate()
     for name in ("main", "sub"):
         r = report[name]

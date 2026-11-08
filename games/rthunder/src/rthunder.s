@@ -25,3 +25,4 @@ sim_wait:
 	bra.s	sim_wait
 
 	include	"core.s"
+	include	"render.s"
