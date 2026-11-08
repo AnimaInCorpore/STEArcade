@@ -98,9 +98,22 @@ def main():
         miss0 = mem.r32(sym["tc_miss"])
         cyc = call("ren_bg_all")
         miss = mem.r32(sym["tc_miss"]) - miss0
-        got = planar_to_index(bytes(mem.r_block(sym["ren_bg"], 256 * 256)), 256, 32)
-        want = expected_bg(m, flat)
-        diff = int((got != want).sum())
+        buf = bytes(mem.r_block(sym["ren_bg"], 512 * 480))
+        full = planar_to_index(buf, 480, 64)                  # 480 lines of 1024 pixels
+        want = expected_bg(m, flat)                          # the map, 256 x 512
+        # the buffer holds the map twice across and (rows 0-27) twice down
+        tiled = np.tile(want, (1, 2))
+        diff = int((full[:256] != tiled).sum()) + int((full[256:480] != tiled[:224]).sum())
+        # the display window as the Shifter shows it: from ren_vaddr, fine scroll ren_fine (pixels), 320 x 224
+        vaddr = mem.r32(sym["ren_vaddr"]) - sym["ren_bg"]
+        fine = mem.r16(sym["ren_fine"])
+        line0, group0 = vaddr // 512, (vaddr % 512) // 8
+        x0 = group0 * 16 + fine
+        win = np.stack([full[line0 + r, x0:x0 + 320] for r in range(224)])
+        sx = m.xscroll[0][0] & 0x1FF
+        wx, wy = (4 + sx) & 511, (25 + (m.yscroll[0][0] & 255)) & 255
+        exp = np.stack([tiled[(wy + r) & 255, wx:wx + 320] for r in range(224)])
+        diff += int((win != exp).sum())
         print("frame %d: ren_bg_all %d cycles (%d tile conversions), %d pixels differ" % (m.frame, cyc, miss, diff))
         bad += diff != 0
     print("bg: %d pictures differ" % bad)

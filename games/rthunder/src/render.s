@@ -10,6 +10,7 @@
 ; made on first use from the 3 bit pens (assets: ren_t0 / ren_t1) and the colour row's map (ren_rowmap: pens 0-6 -> STE
 ; index).  Direct mapped, 8192 slots of 44 bytes: key (long: $10000000 | dev << 24 | code << 8 | attr, 0 = empty), form.
 
+RB_LB = 512			; ren_bg: 1024 pixels a line (the map twice), 256 + 224 lines (rows 0-27 twice)
 TC_SLOTS = 8192
 TC_SIZE = 44
 
@@ -163,7 +164,7 @@ ren_cell:
 	moveq	#0,d2
 	move.w	d7,d2
 	lsl.l	#8,d2
-	lsl.l	#3,d2			; row * 2048
+	lsl.l	#4,d2			; row * 4096 (8 lines of 512 bytes)
 	add.l	d2,a5
 	move.w	d6,d2
 	lsr.w	#1,d2
@@ -183,7 +184,7 @@ ren_cell:
 	move.b	d1,2(a1)
 	move.b	d2,4(a1)
 	move.b	d3,6(a1)
-	lea	256(a1),a1
+	lea	RB_LB(a1),a1
 	dbf	d4,.f
 	clr.w	rc_n
 .lay:	lea	lord,a0
@@ -268,17 +269,67 @@ ren_cell:
 	move.b	d2,6(a1)
 	bra.s	.next
 .skip:	addq.l	#4,a0
-.next:	lea	256(a1),a1
+.next:	lea	RB_LB(a1),a1
 	dbf	d4,.m
 	addq.w	#1,rc_n
 	cmp.w	#3,rc_n
 	bne	.lay
-	movem.l	(sp)+,d0-d7/a0-a5
+	; the twin columns (x + 512 pixels = +256 bytes) and, for rows 0-27, the twin lines (+256 lines)
+	move.l	a5,a0
+	lea	256(a0),a1
+	bsr.s	.cp
+	cmp.w	#28,d7
+	bcc.s	.nt2
+	move.l	a5,a1
+	add.l	#RB_LB*256,a1
+	move.l	a5,a0
+	bsr.s	.cp
+	move.l	a5,a1
+	add.l	#RB_LB*256+256,a1
+	move.l	a5,a0
+	bsr.s	.cp
+.nt2:	movem.l	(sp)+,d0-d7/a0-a5
+	rts
+.cp:	moveq	#7,d4			; a0 -> a1: the cell's 8 lines of 4 plane bytes
+.cpl:	move.b	(a0),(a1)
+	move.b	2(a0),2(a1)
+	move.b	4(a0),4(a1)
+	move.b	6(a0),6(a1)
+	lea	RB_LB(a0),a0
+	lea	RB_LB(a1),a1
+	dbf	d4,.cpl
+	rts
+
+; ---- ren_window: where the display window lies in ren_bg: the 320 x 224 pixels from picture column -16 (the picture's 288
+; columns with a 16 pixel band each side).  x = (4 + sx) mod 512 (the first layer's scroll: its dx 47, the picture from
+; arcade x 67), line = (25 + sy) mod 256; ren_vaddr = the address of the window's first line (the group), ren_fine = the
+; fine scroll (0-15) ----
+ren_window:
+	moveq	#0,d0
+	move.b	hwregs,d0
+	lsl.w	#8,d0
+	move.b	hwregs+1,d0		; sx
+	addq.w	#4,d0
+	and.w	#511,d0			; the window's x
+	moveq	#0,d1
+	move.b	hwregs+2,d1
+	add.w	#25,d1
+	and.w	#255,d1			; its first line
+	move.w	d0,d2
+	and.w	#15,d2
+	move.w	d2,ren_fine
+	lsr.w	#4,d0
+	lsl.w	#3,d0			; (x >> 4) * 8
+	mulu	#RB_LB,d1
+	add.l	d0,d1
+	add.l	#ren_bg,d1
+	move.l	d1,ren_vaddr
 	rts
 
 ; ---- ren_bg_all: every cell of ren_bg (ren_setup first) ----
 ren_bg_all:
 	bsr	ren_setup
+	bsr	ren_window
 	moveq	#0,d1
 .r:	moveq	#0,d0
 .c:	bsr	ren_cell
@@ -297,9 +348,12 @@ tm_rows:	ds.w	1
 tc_miss:	ds.l	1
 lord:		ds.w	3
 rc_n:		ds.w	1
+ren_fine:	ds.w	1
+	even
+ren_vaddr:	ds.l	1
 bkp:		ds.b	4
 	even
-ren_bg:		ds.b	256*256
+ren_bg:		ds.b	RB_LB*(256+224)
 tcache:		ds.b	TC_SLOTS*TC_SIZE
 	section data,data
 	even
