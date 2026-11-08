@@ -122,6 +122,7 @@ start:
 	bsr	init_hardware
 	bsr	init_video
 	bsr	init_render
+	move.b	#5,round5
 
 	lea	g1_dispatch,a0		; the dispatch tables in the order the code uses them: one table of 65536 longs for the
 	lea	g1_dispatch_sw,a1	; three CPUs (the index is the pc with its bytes swapped: the main CPU's pcs $0000-$3FFF and
@@ -384,13 +385,37 @@ dump_rate:
 
 rate_name:
 	dc.b	"RATE.BIN",0
+ram_name:
+	dc.b	"RAM.BIN",0
 	even
+
+; RAM.BIN: the arcade RAM $8000-$9FFF and the video latch $A000-$A007 (g_ram + $2000) at the quit: the reference renderer
+; draws the screen the long run ended on (tools/ramshot.py)
+dump_ram:
+	clr	-(sp)
+	pea	ram_name
+	move	#$3c,-(sp)
+	trap	#1
+	addq	#8,sp
+	move	d0,d6
+	pea	g_ram
+	move.l	#$2008,-(sp)
+	move	d6,-(sp)
+	move	#$40,-(sp)
+	trap	#1
+	lea	12(sp),sp
+	move	d6,-(sp)
+	move	#$3e,-(sp)
+	trap	#1
+	addq	#4,sp
+	rts
 
 	endc
 
 quit:
 	ifd RATE
 	bsr	dump_rate
+	bsr	dump_ram
 	endc
 	bsr	restore_hardware
 	ifd DEBUG
@@ -528,6 +553,7 @@ vbl:
 	bhs.s	.no_rate
 	move	cnt_vbl,(a0)+
 	move	cnt_render,(a0)+
+	move	cnt_round,(a0)+
 	move.l	a0,rate_ptr
 .no_rate:
 	endc
@@ -548,6 +574,12 @@ vbl:
 	tst.b	in_game			; a VBL inside the game's interrupts below (Timer B's handler lowers the IPL, Hatari): the
 	bne	vbl_done		; interrupted code is a handler or the sub CPU's task, not the main thread: nothing
 	st	in_game
+	cmp.b	#1,round5		; this VBL runs a second game frame: the YM is written after that one only
+	seq	round_first
+game_round:
+	ifd RATE
+	addq	#1,cnt_round
+	endc
 	ifd FREEZEAT
 	cmp.l	#FREEZEAT,frame_counter	; test: the game stands still from VBL FREEZEAT on,
 	bhs	vbl_render		; the renderer goes on (screens of two builds compared)
@@ -624,6 +656,16 @@ vbl:
 
 	bsr	g_boot_turns		; a booting CPU waiting for the main CPU gets on
 	chk_sp	22
+	ifnd NOSIXFIVE
+	subq.b	#1,round5		; the arcade runs 60.6 frames a second, the VBL 50: every fifth VBL a second game frame
+	bne.s	.one_round		; (six rounds in five VBLs: the game at full speed when the CPU allows it; the sound CPU's
+	move.b	#5,round5		; NMIs, the 51XX's frame and the interrupts are all part of the round)
+	bsr	n51_vbl
+	clr.b	round_first
+	bra	game_round
+	endc
+.one_round:
+	clr.b	round_first
 	clr.b	in_game
 
 vbl_render:
@@ -702,6 +744,92 @@ sndtest_n = *-sndtest_ids
 	even
 	endc
 
+	ifd BOTCHASE
+
+; tools/bot.py's player in 68000: walk to the nearest Pooka / Fygar (sprites 50-55 of colour 1 / 3: positions in the sprite
+; RAM at $9380, codes and colours at $8B80), pump when it is within 40 units.  In / out: d1 / d2 the pressed bits of in1 /
+; in0 (active high).  The sprite coordinates are rotated: RIGHT is +y, LEFT -y, DOWN +x, UP -x.
+bot_chase:
+	moveq	#0,d5
+	move.b	g_ram+$1380+34,d5	; the player (sprite 17): y
+	moveq	#0,d4
+	move.b	g_ram+$1380+35,d4	; x
+	move.w	#$7fff,d6		; the best distance so far
+	sub.l	a2,a2			; its dy, dx
+	sub.l	a3,a3
+	moveq	#50,d3
+.e:	move.w	d3,d0
+	add.w	d0,d0
+	lea	g_ram+$0B80,a0
+	moveq	#0,d7
+	move.b	1(a0,d0.w),d7		; the colour
+	cmp.b	#1,d7
+	beq.s	.col
+	cmp.b	#3,d7
+	bne.s	.skip
+.col:	lea	g_ram+$1380,a0
+	moveq	#0,d7
+	move.b	(a0,d0.w),d7		; ey (0: hidden)
+	beq.s	.skip
+	sub.w	d5,d7			; dy
+	movea.w	d7,a1
+	tst.w	d7
+	bpl.s	.ady
+	neg.w	d7
+.ady:	move.b	1(a0,d0.w),d0		; ex
+	sub.w	d4,d0			; dx
+	move.w	d0,-(sp)
+	tst.w	d0
+	bpl.s	.adx
+	neg.w	d0
+.adx:	add.w	d0,d7			; the distance
+	move.w	(sp)+,d0
+	cmp.w	d6,d7
+	bhs.s	.skip
+	move.w	d7,d6
+	movea.l	a1,a2
+	movea.w	d0,a3
+.skip:	addq	#1,d3
+	cmp	#56,d3
+	blo.s	.e
+	cmp.w	#$7fff,d6
+	beq.s	.none
+	move.l	a2,d0
+	move.l	a3,d7
+	move.l	d0,d4
+	bpl.s	.a1
+	neg.l	d4
+.a1:	move.l	d7,d5
+	bpl.s	.a2
+	neg.l	d5
+.a2:	cmp.l	d5,d4
+	ble.s	.vert
+	tst.l	d0
+	bmi.s	.left
+	or.b	#2,d2			; RIGHT
+	bra.s	.fire
+.left:	or.b	#8,d2
+	bra.s	.fire
+.vert:	tst.l	d7
+	bmi.s	.up
+	or.b	#4,d2			; DOWN
+	bra.s	.fire
+.up:	or.b	#1,d2
+.fire:	cmp.w	#40,d6
+	bhs.s	.rts
+	move.l	frame_counter,d0
+	and.l	#2,d0			; (two VBLs on, two off)
+	bne.s	.rts
+	or.b	#1,d1
+.rts:	rts
+.none:	btst	#6,frame_counter+3
+	beq.s	.d
+	or.b	#2,d2
+	rts
+.d:	or.b	#4,d2
+	rts
+	endc
+
 	ifd AUTOPLAY
 autoplay:
 	move.l	frame_counter,d0
@@ -711,6 +839,9 @@ autoplay:
 	blo.s	.set
 	move.l	d0,d3
 	sub.l	#AUTOPLAY,d3
+	divu	#3000,d3		; a game of 3000 VBLs, then the next coin and start (a game over ends it earlier)
+	swap	d3
+	and.l	#$ffff,d3
 	cmp.l	#6,d3			; the coin
 	bhs.s	.c1
 	moveq	#$10,d1
@@ -719,7 +850,13 @@ autoplay:
 	cmp.l	#46,d3
 	bhs.s	.m
 	moveq	#4,d1
-.m:	cmp.l	#400,d3			; then moves (right / down / left / up in turn) and the pump
+.m:	ifd BOTCHASE
+	cmp.l	#500,d3			; (-D BOTCHASE=1: the chase of tools/bot.py, from the start's walk-in on)
+	blo.s	.set
+	bsr	bot_chase
+	bra.s	.set
+	endc
+	cmp.l	#400,d3			; then moves (right / down / left / up in turn) and the pump
 	blo.s	.set
 	move.l	d3,d4
 	lsr.l	#5,d4
@@ -794,7 +931,10 @@ g_sound_frame:
 	lea	32(a1),a1
 	dbf	d6,.out
 .no_nmi3:
+	tst.b	round_first
+	bne.s	.no_ym
 	bra	snd_update
+.no_ym:	rts
 
 
 ; ------------------------------------------------------------------------------
@@ -1244,6 +1384,141 @@ dd_init_dispatch:
 	blo.s	.scatter
 	rts
 
+; nat_x04d5: the sound CPU's sequencer step of one voice, $04D5-$0630 (15% of the game's interrupts translated): the voice
+; counter and note pointer, the note's nibble tables, the registers $9B21-$9B2F, the volume rule and the multiply that decides
+; whether the note goes on.  Writes the same RAM bytes as the Z80 code and continues at its `ret` ($0612 / $0630); the
+; registers and flags are dead there (the callers, $0360 and $03C7, set their own).  tools/native_test.py.
+; a1 = the sound CPU's block (ROM below $1000), a2 = its RAM page $9A00 (offset = address - $9A00).
+
+nat_x04d5:
+	movem.l	a1-a2,-(a7)
+	lea	g3_block,a1
+	lea	g3_block+$9AF0,a2
+	moveq	#0,d0
+	move.b	69(a2),d0		; v ($9B35)
+	addq.b	#1,-68(a2,d0.w)		; the voice's counter $9AAC + v
+	move.w	d0,d1
+	add.w	d1,d1
+	moveq	#0,d2
+	lea	$700(a1),a3
+	move.b	1(a3,d1.w),d2		; the sequence's address $0700 + 2 v
+	lsl.w	#8,d2
+	move.b	(a3,d1.w),d2
+	moveq	#0,d3
+	move.b	-21(a2,d0.w),d3		; + the position $9ADB + v
+	add.w	d3,d2			; the note's address
+	move.b	d2,73(a2)		; ($9B39)
+	move.w	d2,d3
+	lsr.w	#8,d3
+	move.b	d3,74(a2)
+	moveq	#0,d3
+	move.b	(a1,d2.l),d3		; the note's byte
+	moveq	#0,d5
+	move.b	71(a2),d5		; the channel $9B37
+	cmp.b	#$FF,d3
+	beq	.end
+	moveq	#0,d1			; the nibble table of the voice ($07BD + v)
+	lea	$7BD(a1),a3
+	move.b	(a3,d0.w),d1
+	move.w	#$631,d7
+	tst.b	d1
+	beq.s	.t_set
+	move.w	#$64B,d7
+	subq.b	#1,d1
+	beq.s	.t_set
+	move.w	#$665,d7
+.t_set:	move.w	d3,d1
+	lsr.b	#4,d1
+	and.w	#15,d1
+	add.w	d1,d1
+	add.w	d7,d1
+	moveq	#0,d7
+	move.b	1(a1,d1.w),d7		; BC = the table's word
+	lsl.w	#8,d7
+	move.b	(a1,d1.w),d7
+	move.w	d3,d1
+	and.w	#15,d1
+	lsr.w	d1,d7			; >> the note's low nibble
+	move.w	#49,d2		; HL = $9B21 / $9B26 / $9B2B by the channel, DE = $9B25 / $9B2A / $9B2F
+	tst.b	d5
+	beq.s	.c_set
+	move.w	#54,d2
+	cmp.b	#1,d5
+	beq.s	.c_set
+	move.w	#59,d2
+.c_set:	move.b	d7,(a2,d2.w)
+	ror.b	#4,d7
+	move.b	d7,1(a2,d2.w)
+	ror.w	#8,d7
+	move.b	d7,2(a2,d2.w)
+	ror.b	#4,d7
+	move.b	d7,3(a2,d2.w)
+	addq.w	#4,d2			; (DE: HL + 4)
+	cmp.b	#$C0,d3
+	beq.s	.zero
+	moveq	#0,d1
+	move.b	d0,d1
+	add.b	#$FC,d1			; ($057B: `rst $10` leaves A = $FC + v, not a table byte: 0 / 1 never)
+	beq.s	.rule3
+	subq.b	#1,d1
+	beq.s	.rule2
+	move.b	-68(a2,d0.w),d1		; $0582: counter < 6: its complement
+	cmp.b	#6,d1
+	bhs.s	.rule3
+	not.b	d1
+	bra.s	.store
+.rule2:	move.b	-68(a2,d0.w),d1
+	cmp.b	#6,d1
+	bhs.s	.rule3
+	add.b	d1,d1
+	bra.s	.store
+.rule3:	moveq	#0,d1			; $05A0
+	lea	$826(a1),a3
+	move.b	(a3,d0.w),d1
+	beq.s	.ten
+	move.b	-68(a2,d0.w),d7
+	sub.b	d1,d7
+	bcs.s	.ten
+	sub.b	#$0A,d7
+	bcc.s	.zero
+	neg.b	d7
+	move.b	d7,d1
+	bra.s	.store
+.ten:	moveq	#$0A,d1
+	bra.s	.store
+.zero:	moveq	#0,d1
+.store:	move.b	d1,(a2,d2.w)
+	lea	$793(a1),a3
+	move.b	(a3,d0.w),64(a2,d5.w)
+	moveq	#0,d1
+	move.b	68(a2),d1		; the sound id $9B34
+	move.b	26(a2,d1.w),d1	; its value $9B0A + id
+	moveq	#0,d2
+	move.b	74(a2),d2
+	lsl.w	#8,d2
+	move.b	73(a2),d2
+	addq.w	#1,d2
+	moveq	#0,d3
+	move.b	(a1,d2.l),d3		; the note's second byte
+	mulu	d3,d1			; (the shift and add loop of $05E8)
+	cmp.b	-68(a2,d0.w),d1
+	bne.s	.out
+	addq.b	#2,-21(a2,d0.w)
+	clr.b	-68(a2,d0.w)
+.out:	movem.l	(a7)+,a1-a2
+	jmp	X0612
+.end:	move.w	#53,d2		; $0613: the end of the sequence
+	tst.b	d5
+	beq.s	.e_set
+	move.w	#58,d2
+	cmp.b	#1,d5
+	beq.s	.e_set
+	move.w	#63,d2
+.e_set:	clr.b	(a2,d2.w)
+	move.b	#1,72(a2)
+	movem.l	(a7)+,a1-a2
+	jmp	X0630
+
 ; A plain data write ($7000, hooked): into the 51XX's latch if the transfer is a write to it.
 
 g_data06:
@@ -1522,6 +1797,7 @@ key_table:
 	dc.b	$02,$00,$04		; 1 = start 1
 	dc.b	$03,$00,$08		; 2 = start 2
 	dc.b	$06,$00,$10		; 5 = coin
+	dc.b	$07,$00,$20		; 6 = coin 2 (the same coinage)
 	dc.b	0,0,0
 	even
 
@@ -1726,6 +2002,8 @@ current:	ds.b	1		; 0: the main CPU's code runs, 1: the sub CPU's
 booted2:	ds.b	1		; the sub CPU reached its idle loop
 cpu3_state:	ds.b	1
 ctrl06_mode:	ds.b	1
+round_first:	ds.b	1		; the first of two game frames in this VBL
+round5:		ds.b	1		; VBLs to the next second game frame
 in_game:	ds.b	1		; the VBL's game interrupts run (a nested VBL does nothing)
 in_fg2:		ds.b	1		; the sub CPU's EAROM task runs
 g1_iff:		ds.b	1		; the CPUs' interrupt enable (ei / di)
@@ -1747,6 +2025,7 @@ cnt_acia:	ds.w	1
 cnt_vbl:	ds.w	1
 cnt_skip:	ds.w	1
 cnt_render:	ds.w	1
+cnt_round:	ds.w	1
 	ifd RATE
 rate_count:	ds.w	1
 rate_ptr:	ds.l	1

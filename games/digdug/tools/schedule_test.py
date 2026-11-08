@@ -41,7 +41,7 @@ def script(f):
 
 
 if not a.no_build:
-    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "build.py"), "--sim"], check=True,
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "build.py"), "--sim", "-D", "NOSIXFIVE=1"], check=True,
                    stdout=subprocess.DEVNULL)
 s = Sim(str(RUN / "DIGDUG.PRG"), ram_kib=16384, run_dir=RUN)
 sym = {k: v + s.base for k, v in s.symbols(build_dir("digdug") / "digdug.map").items()}

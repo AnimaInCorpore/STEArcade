@@ -23,11 +23,15 @@ if (-not $p.WaitForExit(600000)) { $p.Kill(); "killed" }
 if (Test-Path "$run\CRASH.TXT") { "--- CRASH.TXT"; Get-Content "$run\CRASH.TXT" -TotalCount 10 }
 if (-not (Test-Path "$run\RATE.BIN")) { "no RATE.BIN"; exit 1 }
 $d = [IO.File]::ReadAllBytes("$run\RATE.BIN")
-$pv = 0; $pr = 0; $rates = @()
-for ($i = 0; $i + 3 -lt $d.Length; $i += 4) {
-    $v = $d[$i] * 256 + $d[$i + 1]; $r = $d[$i + 2] * 256 + $d[$i + 3]
-    if ($v -gt $pv) { $rates += [math]::Round(50 * ($r - $pr) / ($v - $pv), 1) }
-    $pv = $v; $pr = $r
+$pv = 0; $pr = 0; $pg = 0; $rates = @(); $logic = @()
+for ($i = 0; $i + 5 -lt $d.Length; $i += 6) {
+    $v = $d[$i] * 256 + $d[$i + 1]; $r = $d[$i + 2] * 256 + $d[$i + 3]; $g = $d[$i + 4] * 256 + $d[$i + 5]
+    if ($v -gt $pv) {
+        $rates += [math]::Round(50 * ($r - $pr) / ($v - $pv), 1)
+        $logic += [math]::Round(100 * 50 * ($g - $pg) / ($v - $pv) / 60.606, 0)
+    }
+    $pv = $v; $pr = $r; $pg = $g
 }
+"arcade frames a second as % of 60.6 per 500 VBLs: " + ($logic -join " ")
 "pictures a second per 500 VBLs: " + ($rates -join " ")
 "average: " + [math]::Round(($rates | Measure-Object -Average).Average, 1)

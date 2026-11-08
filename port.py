@@ -99,7 +99,7 @@ COVER = {
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry
                ("ref/cover.py", [7], 20000)],                                          # 7: the real 51XX
-    "digdug": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 9, 10, 11], 20000), ("ref/cover.py", [12], 12000), ("ref/cover.py", [13, 14, 15, 16], 40000)],   # 1-3 play, 4 two players, 5 hardest + 5 lives, 6 cocktail,
+    "digdug": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 9, 10, 11], 20000), ("ref/cover.py", [12], 12000), ("ref/cover.py", [13, 14, 15, 16, 17, 18, 19], 40000)],   # 17-19: the chasing bot (18, 19 with detours), 1-3 play, 4 two players, 5 hardest + 5 lives, 6 cocktail,
                                                                           # 7 no coin (attract), 9 other coinage / bonus DIPs, 10-11 fast input
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
@@ -358,7 +358,7 @@ TESTS = {
                ("../../engine/mb88x_test.py", ["{n}"], 3000),    # the translated 51XX against the event-driven one
                ("tools/n51_test.py", ["{n}"], 3000)],            # the build's 51XX traffic against the reference
     "digdug": [("tools/prepare.py", [], None),
-               ("tools/build.py", ["--sim"], None),
+               ("tools/build.py", ["--sim", "-D", "NOSIXFIVE=1"], None),       # (one game frame a VBL, as the reference machine's schedule)
                ("tools/schedule_test.py", ["{n}", "--no-build", "--every", "50", "--slack", "700"], 2400),   # the STE's tile / sprite RAM against the reference's schedule
                ("tools/native_test.py", [], None),                                                        # digdug.s's natives against the Z80 reference
                ("tools/render_test.py", ["1500", "2500", "3500", "5000"], None),                          # the picture against the reference renderer

@@ -42,6 +42,7 @@ def autoplay(f):
     g = f - 1400
     if g < 0:
         return in0, in1
+    g %= 3000
     if g < 6: in1 &= ~0x10
     if 40 <= g < 46: in1 &= ~0x04
     if g >= 400:

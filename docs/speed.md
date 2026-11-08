@@ -295,7 +295,7 @@ not been re-measured in Hatari since).
 | Port | Rate (Hatari) | Window guards | Leaves in place | Flag summaries / fast forms | Natives | Writer marks | Idle flags |
 |---|---|---|---|---|---|---|---|
 | Donkey Kong, DK Junior | 83% (one round a VBL) / 50 | n/a | - | n/a | - | - (compare) | n/a (VBL-locked) |
-| Dig Dug | 82% (one round a VBL) / 32.6 scripted play (17.9-49) | n/a | 32 + rst + jumps | n/a | sub CPU sprite copy, 53XX/51XX event model | cells (movep rows) | n/a (VBL-locked) |
+| Dig Dug | 90% avg (83-103, six frames in five VBLs) / 24.9 chasing bot (20-34) | n/a | 32 + rst + jumps | n/a | sub CPU sprite copy, sound sequencer, 51XX/53XX event model | cells (movep rows) | n/a (VBL-locked) |
 | Galaga | ~82% / 31.1 attract | n/a | - | n/a | 51XX read, sound boot | 32-byte blocks | n/a (VBL-locked) |
 | Jail Break | ~83% (50.3 of 60.6 arcade frames over 20,002 VBLs of the recorded play; median 85%, 10th percentile 71%) / 19.1 pictures a second (median 17.0), sound on, 2026-11-08 | video_inline | 6809 inline_calls (the SN write) | call_summaries, fast_forms, ret_weights, fixed_slots, per-site return/RTI/`JMP ,U` chains from the recorded play (`gen.py site_chains`: -6% logic) | SN write (`$AF96`), sprite-RAM copy (`$9272`) | cells + tile column spans | kept |
 | Pac-Man | 100% / 49.8 attract | n/a | 16 + rst + jumps | n/a | - | cells | kept |

@@ -29,7 +29,7 @@ TOKEN = 0x4001
 # The ROMs are fixed code (inline_limit = the ROM's size).
 INLINE = 0 if os.environ.get("DIGDUG_NO_INLINE") else int(os.environ.get("DIGDUG_INLINE", 32))
 ENTRIES = 0x4002
-SEEDS = (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16)
+SEEDS = (1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19)
 
 
 def configs():
@@ -53,7 +53,8 @@ def configs():
 
 
 # hand-written 68000 routines for hot Z80 code (digdug.s; tools/native_test.py checks them; DIGDUG_NO_NATIVES=1: none)
-NATIVES = [{}, {} if os.environ.get("DIGDUG_NO_NATIVES") else {0x0E4C: "nat_y0e4c"}, {}]
+NATIVES = [{}, {} if os.environ.get("DIGDUG_NO_NATIVES") else {0x0E4C: "nat_y0e4c"},
+           {} if os.environ.get("DIGDUG_NO_NATIVES") else {0x04D5: "nat_x04d5"}]
 
 ROOTS = [[0, 0x38, 0x66], [0, 0x38, 0x1DDC], [0, 0x66]]
 # the sound CPU's sound routines: $0391 looks the id in $9B34 up in a table of 21 routine pointers at $040D (rst $08,
