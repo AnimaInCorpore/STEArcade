@@ -53,6 +53,7 @@ def main():
     ap.add_argument('--render', action='store_true', help='draw (render_frame) and compare the published buffer and palette too')
     ap.add_argument('--profile', action='store_true', help='where the 68000 cycles go (a sample every 200 cycles)')
     ap.add_argument('--trace', type=int, default=-1, help='compare the executed instructions of this frame')
+    ap.add_argument('--sound', action='store_true', help='run snd_frame every frame and compare the sound board with tools/sound.py STEBoard')
     ap.add_argument('--tag', default='junofrst_sim', help='the build in run/<tag> (build.py --sim --tag)')
     args = ap.parse_args()
     run = ROOT / 'run' / args.tag
@@ -109,6 +110,33 @@ def main():
         sp = cpu.r_reg(R.A7)
         cpu.w_pc(mem.r32(sp))
         cpu.w_reg(R.A7, sp + 4)
+
+    sndb = [None]
+    sndc = [0, 0, 0]
+
+    def sound_frame(f):
+        from sound import STEBoard
+        if sndb[0] is None:
+            sndb[0] = STEBoard()
+        b = sndb[0]
+        cmds = [v for fr, v in m.sound_log if fr == f - 1]      # (snd_frame runs at the frame's delivery: the commands
+        b.run_frame(cmds)                                        # of the frame before)
+        sndc[2] += len(cmds)
+        sp = b.cpu.sp
+        ram = bytes(mem.r_block(sym['snd_g'] + 0x8000 + 0x2000, 0x400))
+        live = [i for i in range(0x400) if not 0x2300 <= 0x2000 + i < sp]
+        if any(ram[i] != b.mem[0x2000 + i] for i in live):
+            d = [(hex(0x2000 + i), ram[i], b.mem[0x2000 + i]) for i in live if ram[i] != b.mem[0x2000 + i]]
+            raise RuntimeError('frame %d: sound RAM (address, STE, model) %s; commands %s' % (f, d[:10], cmds))
+        ay = list(mem.r_block(sym['snd_ay'], 16))
+        if ay != b.ay:
+            raise RuntimeError('frame %d: AY registers %s, model %s' % (f, ay, b.ay))
+        ym = list(mem.r_block(sym['snd_ym_cache'], 14))
+        if ym != b.ym.cache[:14]:
+            raise RuntimeError('frame %d: YM registers %s, model %s' % (f, ym, b.ym.cache[:14]))
+        if mem.r8(sym['snd_status']) != b.status or mem.r8(sym['snd_busy']) != b.busy:
+            raise RuntimeError('frame %d: i8039 status %d busy %d, model %d %d' % (
+                f, mem.r8(sym['snd_status']), mem.r8(sym['snd_busy']), b.status, b.busy))
 
     snd = [0]
     pics = [0]
@@ -212,6 +240,8 @@ def main():
             resume()
             run_to({done})
         compare(f)
+        if args.sound:
+            sound_frame(f)
         resume()
         run_to({wait})
         per_frame.append(cycles[0] - sum(per_frame))
@@ -224,9 +254,19 @@ def main():
         tot = sum(prof.values())
         for i, n in prof.most_common(14):
             print('  %5.1f%% %s' % (100 * n / tot, symlist[i][1]))
+        if args.sound:
+            print('  sound hot spots: ' + ', '.join('%s %.1f%%' % (symlist[i][1], 100 * n / tot) for i, n in prof.most_common(60) if re.fullmatch('X[0-9A-F]{4}(_r)?', symlist[i][1]) or symlist[i][1].startswith('snd_')))
+        agg = collections.Counter()
+        for i, n in prof.items():
+            nm = symlist[i][1]
+            agg['sound (X<pc> labels, snd_*)' if re.fullmatch('X[0-9A-F]{4}(_r)?', nm) or nm.startswith('snd_') else 'other'] += n
+        print('  ' + ', '.join('%s %.1f%%' % (k, 100 * v / tot) for k, v in agg.items()))
     if per_frame:
         pf = sorted(per_frame)
         print('per arcade frame: median %d, 75%% %d, 90%% %d, 99%% %d, max %d cycles (the 50 Hz STE has 160,000 a VBL, the arcade 60.6 frames a second need <= 132,000 each)' % (pf[len(pf) // 2], pf[len(pf) * 3 // 4], pf[len(pf) * 9 // 10], pf[len(pf) * 99 // 100], pf[-1]))
+    if args.sound:
+        b = sndb[0]
+        print('sound: AY registers, YM registers, sound RAM and i8039 status equal every frame; %d commands, %d YM writes, %d i8039 effects, %d fast loop passes' % (sndc[2], sum(len(w) for w in b.ym_log), len(b.dac_log), b.fast))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
 
 

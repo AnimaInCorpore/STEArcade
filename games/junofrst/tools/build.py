@@ -2,7 +2,7 @@
 
     python tools/build.py [--sim] [--debug] [--assets] [--frames N] [-D NAME=VALUE ...] [--tag T]
 
-The sound is not done yet: NOSOUND is always defined.
+-D NOSOUND=1 builds without the sound.
 """
 from pathlib import Path
 import argparse
@@ -38,7 +38,15 @@ def main():
     print('main: instructions %d, unsupported %d' % (report['instructions'], len(report['unsupported'])), report['stats'])
     defs = list(args.defines)
     if not any(d.startswith('NOSOUND') for d in defs):
-        defs.append('NOSOUND=1')
+        import sndgen
+        (build / 'snd.rom').write_bytes(sndgen.image()[:0x1000])
+        stext, srep2 = sndgen.generate()
+        if args.assets or not (build / 'snd_dac.s').exists():
+            subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'i8039.py'), '--rate', '6258',
+                            '--cap', '7'], check=True)
+        (build / 'snd_code.s').write_text(stext)
+        print('sound: instructions', srep2['instructions'], 'unsupported', len(srep2['unsupported']), 'missing',
+              len(srep2['missing']))
     tag = args.tag or ('junofrst_sim' if args.sim else 'junofrst')
     out = ROOT / 'run' / tag / 'JUNOFRST.PRG'
     out.parent.mkdir(parents=True, exist_ok=True)

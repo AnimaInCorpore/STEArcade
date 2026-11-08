@@ -39,7 +39,9 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
-    "junofrst": [("ref/cover.py", list(range(1, 13)), 30000)],    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play
+    "junofrst": [("ref/cover.py", list(range(1, 13)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play
+                 ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
+                 ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
     "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
@@ -88,9 +90,9 @@ COVER = {
 TESTS = {
     "junofrst": [("tools/prepare.py", [], None),
                  ("tools/build.py", ["--sim"], None),
-                 ("tools/logic_test.py", ["{n}"], 3000),
-                 ("tools/logic_test.py", ["6000", "--seed", "5", "--quiet"], None),    # 256 lives
-                 ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet"], None),   # two players
+                 ("tools/logic_test.py", ["{n}", "--sound"], 3000),             # + the sound board against tools/sound.py
+                 ("tools/logic_test.py", ["6000", "--seed", "5", "--quiet", "--sound"], None),    # 256 lives
+                 ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet", "--sound"], None),   # two players
                  ("tools/render_test.py", ["3000", "--seed", "1", "--quiet"], None),
                  ("tools/sprite_test.py", ["400"], None)],            # the fast blit against the reference blit
     "mario": [("tools/prepare.py", [], None),
