@@ -9,10 +9,11 @@ sound CPU: the main CPU's NMI handler drives an SN76489A and a VLM5030 speech ch
 the STE's YM2149 and the VLM's phrases (rendered offline) on the DMA sound.  The picture is MAME's, 256 x 224, centred in
 the 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`),
 exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.
-Status: **Incomplete** (logic and picture exact in lock-step with the reference; short Hatari checks only; no
-full-game verification, cocktail flip not done).
-Speed: 96% of the arcade's rate (58.2 arcade frames a second), 37.7 pictures a second, with the sound (Hatari,
-`tools/hatari.ps1 -Sound 1`, 3,000 VBLs of the AUTOPLAY script, DEBUG build, 4 MB, 2026-11-07).
+Status: **Incomplete** (logic and picture exact in lock-step with the reference, screen flip and cocktail included; a
+21,000-VBL Hatari run through the stages by cheat without a crash; no unaided full playthrough, high-score entry not reached).
+Speed: 98% of the arcade's rate (59.6 arcade frames a second), 41.6 pictures a second, with the sound over 21,000 VBLs
+of cheated play from stage 1; 96.7% / 43 pictures in attract (Hatari, `tools/hatari.ps1 -Sound 1`, DEBUG build, 4 MB,
+2026-11-08).
 
 ## Build and run
 
@@ -39,7 +40,8 @@ to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the re
 
 **5/6** coin 1 / 2, **1/2** start; move with the **arrows** (up jumps, down ducks), kick with **Z / Space / Control**,
 punch with **X / Alternate**, **C** is the board's unused third button, **Esc** quits.  Joystick port 1 player 1, port 0
-player 2 (IN2, which the arcade reads only with dual controls or in a cocktail cabinet): the stick moves, fire kicks (a
+player 2 (IN2, which the arcade reads only with dual controls or in a cocktail cabinet); on the keyboard the keypad is
+player 2's stick and buttons (**4 6 8 2** move, **0** kick, **.** punch, **Enter** the third button): the stick moves, fire kicks (a
 joystick has no punch button).  Jaguar pad / PowerPad: pad A player 1, pad B player 2, **A** kick, **B** punch, **C**
 the third button, **Option** coin, **Pause** start.  DIP switches: MAME's defaults (1 life, upright, bonus 30000 /
 80000, normal difficulty, demo sounds on, 1 coin 1 credit); `build.py --dsw2 N --dsw3 N` builds with others.
@@ -74,8 +76,29 @@ the third button, **Option** coin, **Pause** start.  DIP switches: MAME's defaul
   from stage 7 through Tonfun and Blues into the next round; 59 arcade frames a second, 34-36 pictures; no crash, no
   `z80_badpc`.
 * Not done, most important first: a full-game playthrough without cheats (nothing here was played to the end; the
-  high-score name entry and round 99 are not reached by any seed, the cheats do not make a high score); the cocktail flip (control bit 0: the reference stops at it); the VLM's real time (below); the service mode's screens
+  high-score name entry and round 99 are not reached by any seed, the cheats do not make a high score); the VLM's real time (below); the service mode's screens
   are covered by one seed only.
+
+* **Screen flip and cocktail** (2026-11-08): control bit 0 (the game sets it from DSW3's flip switch, and the board's
+  player 2 turns in a cocktail cabinet: `$8B30`'s `<$C1` path) flips the tilemap by 180 degrees and, as in
+  `yiear.cpp`, only the sprites' y (`sy = 240 - sy`) and their y flip, not x.  The reference implements it from the 0.286
+  source (no MAME run with the DIP set was compared); `render.s` draws the opposite cell with both flips toggled and
+  redraws everything when the bit changes.  Seeds 27 (flip on) and 28 (cocktail, flip, two players, 720,000 passes of
+  `$8B8A`): lock-step exact (6,000 / 12,000 frames), pictures exact (967 / 975 sampled).  `sprite_test.py` does not
+  flip.
+* **Long Hatari run** (2026-11-08, `hatari.ps1 -Frames 21000 -Avi 0 -Sound 1 -Extra @('-D','AUTOPLAY=1','-D','STAGE=1','-D','STAGEBCD=1','-D','FINISH=1')`):
+  21,001 VBLs, 25,020 arcade frames (59.6 a second, 98.3%), 17,470 pictures (41.6 a second), border fallbacks 2, late
+  border events 0, no `CRASH.TXT`.  The cheat clears the opponent's energy every 512th frame, so the run should have
+  gone through all eleven stages and more (the same schedule in the reference needs about 1,000 frames a stage); this
+  run recorded no picture, so the stage reached was not looked at (the earlier 9,000- and 12,000-VBL runs with stills
+  are above).  Not measured: busy stretches separately (the rate is an average over the run).
+* **Sound against MAME** (2026-11-08): MAME 0.248 (`-wavwrite`, 75 s of attract from power-on, 22,050 Hz) against
+  Hatari's audio of the attract mode (3,700 VBLs, no input).  Hatari starts 5.2 s later (TOS and loading); aligned by
+  the envelope, the silent stretches (10 s before the first sound, 40-46 s) and the phrases coincide, the loudest
+  frequency of the 2-second windows is the same or within a few semitones in most windows (676/699, 764/813, 366/360,
+  704/737, 731/773, 761/688, 368/368 Hz ...) and the level is 1.4 dB below MAME's on average; the 500 ms envelopes
+  correlate at only 0.5 (the SN's waveform on the YM, the VLM phrases rendered by `engine/vlm5030.py`, the YM/DMA balance).
+  Nobody has listened to either.
 
 ## How it works
 

@@ -23,7 +23,7 @@ from machine import YieArPort, load
 from paths import build_dir, require_coverage
 
 RESET, IRQ, NMI = YieArPort.ENTRY, YieArPort.IRQ, YieArPort.NMI
-SEEDS = [int(x) for x in os.environ.get("YA_SEEDS", "").split(",") if x] or range(1, 28)
+SEEDS = [int(x) for x in os.environ.get("YA_SEEDS", "").split(",") if x] or range(1, 29)
 NATIVES = {YieArPort.IDLE: "ya_idle", 0x8B30: "nat_8B30"}
 ROM_FILES = ("407_i08.10d", "407_i07.8d")
 

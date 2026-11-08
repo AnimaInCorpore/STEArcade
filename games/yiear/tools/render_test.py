@@ -53,7 +53,7 @@ class Harness:
         self.m = m = machine.YieArPort(*cover.dsws(seed))
         self.seed = seed
         self.rnd = random.Random(seed)
-        self.state = {'two': seed == 9}
+        self.state = {'two': seed in (9, 28)}
         self.cyc = collections.Counter()
         mem = self.mem
         mem.w8(sym['io_dsw1'], m.dsw1)
