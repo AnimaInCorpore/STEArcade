@@ -36,6 +36,7 @@ blit_go_copy:				; (borders.s' pieces in the STE build)
 
 	include	"core.s"
 	include	"render.s"
+	include	"mcu.s"
 	else
 	include	"ste.s"
 	endc

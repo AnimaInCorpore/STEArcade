@@ -34,6 +34,7 @@ def main():
                     "against the reference (registers compared at every translated 6809 instruction)")
     ap.add_argument("--watch", default="", help="hex offsets of the shared RAM to compare at every label in --steplock")
     ap.add_argument("--render", action="store_true", help="after each frame ren_update runs (the marks the translated stores set) and the window is compared")
+    ap.add_argument("--mcu", action="store_true", help="also run src/mcu.s's mcu_frame on the state before the reference's MCU and compare the mailbox bytes it writes")
     ap.add_argument("--trace", action="store_true", help="log the translated labels (slow)")
     ap.add_argument("--skip", type=int, default=0, help="frames the reference runs on without the comparison")
     args = ap.parse_args()
@@ -256,7 +257,19 @@ def main():
     cycles = 0
     for f in range(args.frames):
         m.in0, m.in1, m.in2 = inputs(f)
+        before = bytes(m.cus30)
         m.run_others()
+        if args.mcu:
+            put("cus30", before)
+            for k, v in enumerate((m.in0, m.in1, m.in2)):
+                mem.w8(sym["io_in0"] + k, v)
+            call_routine("mcu_frame")
+            got = get("cus30", 0x400)
+            watch = list(range(0x25C, 0x282)) + [0x189, 0x18A, 0x18B, 0x18C, 0x18D, 0x1A5, 0x1A6, 0x1A7, 0x380]
+            dm = [(o, got[o], m.cus30[o]) for o in watch if got[o] != m.cus30[o]]
+            if dm:
+                print("frame %d: mailbox model differs: %s" % (m.frame, " ".join("%03x:%02x/%02x" % d for d in dm)))
+                return 1
         put("cus30", m.cus30)
         mem.w_block(sym["shared"] + 0x1800, bytes(m.spriteram))      # (the vertical blank's sprite buffer copy)
         mem.w8(sym["sprite_latch"], 0)

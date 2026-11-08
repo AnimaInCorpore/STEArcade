@@ -283,6 +283,7 @@ vbl:
 	jp_merge	kin0,io_in0,0
 	jp_merge	kin1,io_in1,1
 	jp_merge	kin2,io_in2,2
+	bsr	sanitize_inputs
 	ifd AUTOPLAY
 	bsr	autoplay
 	endc
@@ -304,6 +305,23 @@ vbl:
 	endc
 	movem.l	(sp)+,d0-d2/a0
 	rte
+
+; sanitize_inputs: a stick has no opposite directions (the game's loops run on when it sees both: the keyboard and the pads can)
+opposite	macro
+	btst	#\2,\1
+	bne.s	.n\@
+	btst	#\4,\3
+	bne.s	.n\@
+	bset	#\2,\1
+	bset	#\4,\3
+.n\@:
+	endm
+sanitize_inputs:
+	opposite	io_in2,4,io_in2,5		; player 1: left / right
+	opposite	io_in1,2,io_in0,2		; up / down
+	opposite	io_in2,7,io_in0,4		; player 2: left / right
+	opposite	io_in1,3,io_in0,3		; up / down
+	rts
 
 ; vbl_video: the published picture shown from the next frame on (the video base is read at the frame's start): the video
 ; address of its first line less the border lines above the picture, the fine scroll and the line width
@@ -342,6 +360,55 @@ vbl_video:
 .p:	move.l	(a0)+,(a1)+
 	dbf	d0,.p
 .out:	rts
+
+	ifd AUTOPLAY
+; The benchmark's play (-D AUTOPLAY=1): a coin and the start, then moves, shots and jumps; period 4000 arcade frames (the
+; game over screens lead back to a coin).
+autoplay:
+	movem.l	d0-d4/a0,-(sp)
+	moveq	#0,d0
+	move.w	isr_count,d0
+	divu	#4000,d0
+	swap	d0
+	cmp.w	#100,d0
+	blo.s	.ap1
+	cmp.w	#106,d0
+	bhs.s	.ap1
+	bclr	#5,io_in0		; coin 1
+.ap1:	cmp.w	#140,d0
+	blo.s	.ap2
+	cmp.w	#144,d0
+	bhs.s	.ap2
+	bclr	#6,io_in0		; start 1
+.ap2:	cmp.w	#400,d0
+	blo.s	.ap3
+	move.w	d0,d1
+	lsr.w	#5,d1
+	and.w	#7,d1
+	move.w	d1,d2
+	add.w	d1,d1
+	add.w	d2,d1
+	lea	.tab(pc),a0
+	move.b	(a0,d1.w),d2		; the bits cleared in IN0, IN1, IN2
+	and.b	d2,io_in0
+	move.b	1(a0,d1.w),d2
+	and.b	d2,io_in1
+	move.b	2(a0,d1.w),d2
+	and.b	d2,io_in2
+	btst	#2,d0			; the shot: four frames of eight
+	bne.s	.ap3
+	bclr	#3,io_in2
+.ap3:	movem.l	(sp)+,d0-d4/a0
+	rts
+.tab:	dc.b	$FF,$FF,$DF		; right
+	dc.b	$FD,$FF,$DF		; right + jump (button 2)
+	dc.b	$FF,$FF,$DF
+	dc.b	$FF,$FB,$FF		; up
+	dc.b	$FF,$FF,$EF		; left
+	dc.b	$FB,$FF,$FF		; down
+	dc.b	$FD,$FF,$DF
+	dc.b	$FF,$FF,$FF
+	endc
 
 ; ------------------------------------------------------------------------------
 ; The program
@@ -699,6 +766,7 @@ dbg_name3:
 	borders_handlers
 	jagpad_text
 	jagpad_maps
+	borders_blit_go
 	include	"core.s"
 	include	"render.s"
 	include	"mcu.s"
@@ -752,9 +820,6 @@ jy_b:		ds.b	3
 kin0:		ds.b	1		; keyboard and sticks, active low
 kin1:		ds.b	1
 kin2:		ds.b	1
-io_in0:		ds.b	1		; + the pads: what the MCU model reads
-io_in1:		ds.b	1
-io_in2:		ds.b	1
 	even
 shown_pal:	ds.w	16
 black_pal:	ds.w	16

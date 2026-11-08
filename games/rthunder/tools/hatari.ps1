@@ -6,7 +6,7 @@
 #     the AVI's audio track extracted to run/<Name>/rthunder.wav]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
 param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "rthunder_hatari", [int]$Avi = 0,
-      [string[]]$Extra = @(), [int]$Sound = 0)
+      [string[]]$Extra = @(), [int]$Sound = 0, [int]$Autoplay = 0)
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
@@ -14,6 +14,7 @@ $arcade = if ($env:F030ARCADE) { $env:F030ARCADE } else { "C:/Arbeit/F030Arcade"
 $msys = if ($env:MSYS2) { $env:MSYS2 } else { "C:/msys64" }
 $py = if (Test-Path (Join-Path $root "venv/bin/python.exe")) { Join-Path $root "venv/bin/python.exe" } else { "python" }
 $env:PATH += ";$msys/mingw64/bin;$msys/ucrt64/bin;$msys/usr/bin"
+if ($Autoplay) { $Extra += @("-D", "AUTOPLAY=1") }
 & $py "$PSScriptRoot/build.py" --debug --frames $Frames --tag $Name @Extra
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 $out = (Get-Item -LiteralPath (Join-Path $root "run/$Name")).FullName

@@ -19,7 +19,7 @@
 
 SPC_SIZE = 720
 SPC_SLOTS = 512
-DMG_MAX = 200
+DMG_MAX = 600
 
 	section text,code
 
