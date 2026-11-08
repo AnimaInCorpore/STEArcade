@@ -4,7 +4,7 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Pooyan's.
 #   powershell -File games/dkong3/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name dkong3_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "dkong3_hatari", [int]$Avi = 1,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "dkong3_hatari", [int]$Avi = 1, [int]$Sound = 0,
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
@@ -23,7 +23,7 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'RATE.BIN', 'dkong3.avi')) {
 }
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$(if ($Sound) { '44100' } else { 'off' }),'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
 if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\dkong3.avi") }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `

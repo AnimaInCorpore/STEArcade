@@ -284,6 +284,9 @@ vbl:
 	ifnd NOSOUND
 	bsr	snd_mix			; (the sound ring brought up to the DMA's position)
 	endc
+	ifd SNDTEST
+	bsr	snd_script_step
+	endc
 	ifnd PLAYBACK
 	bsr	jagpad_poll
 	move.b	in0_low,d0		; (active high on the Z80 side: the keyboard's and joysticks' bits inverted, the pads or'd)
@@ -301,7 +304,7 @@ vbl:
 	move.w	isr_count,d0
 	divu	#4000,d0
 	ifd CHEAT				; (-D CHEAT=1: MAME's cheats for a long run: lives $601A, and the stage byte $601B poked while a game starts,
-	moveq	#0,d1				;  the stage = the period's number mod 6; the play is the same)
+	moveq	#0,d1				;  the stage = the period's number mod 3; the play is the same)
 	move.w	d0,d1
 	move.b	#6,G_Z80+$601A
 	move.b	#$63,G_Z80+$6BF1
@@ -310,7 +313,7 @@ vbl:
 	blo.s	.nch
 	cmp.w	#900,d0
 	bhs.s	.nch
-	divu	#6,d1
+	divu	#3,d1
 	swap	d1
 	move.b	d1,G_Z80+$601B
 .nch:	swap	d0

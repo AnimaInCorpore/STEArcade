@@ -49,7 +49,7 @@ def mix_test(h, clips, pcm, nclips):
     short = min(shots, key=lambda c: clips[c][1] - clips[c][0])
     for trial in range(40):
         voices = {}
-        for v in range(6):
+        for v in range(9):
             kind = rng.randint(4)
             if kind == 0:
                 continue
@@ -58,13 +58,13 @@ def mix_test(h, clips, pcm, nclips):
             if kind == 3:
                 pos = clips[c][1] - int(rng.randint(2, 200)) // 2 * 2         # (about to end)
             voices[v] = [c, pos]
-        for v in range(6):
+        for v in range(9):
             base = sym['snd_voices'] + 12 * v
             if v in voices:
                 c, pos = voices[v]
                 mem.w32(base, pos)
                 mem.w32(base + 4, clips[c][1])
-                mem.w32(base + 8, clips[c][0] if clips[c][2] else 0)
+                mem.w32(base + 8, clips[c][2])
             else:
                 mem.w32(base, 0)
         wp = int(rng.randint(0, 512)) * 4
@@ -83,7 +83,7 @@ def mix_test(h, clips, pcm, nclips):
             wp, n = (target - 384) & 2044, 384
         want = np.zeros(n, int)
         for v, (c, pos) in voices.items():
-            ptr, end, lp = pos, clips[c][1], clips[c][0] if clips[c][2] else 0
+            ptr, end, lp = pos, clips[c][1], clips[c][2]
             data = []
             while len(data) < n and ptr is not None:
                 m = min(n - len(data), end - ptr)
@@ -115,7 +115,9 @@ def main():
     tabs = {k: {int(v): n for v, n in t.items()} for k, t in rep['tabs'].items()}
     nclips = len(rep['clips'])
     clips = [(mem.r32(sym['snd_clips'] + 12 * n) + sym['dk_sound'], mem.r32(sym['snd_clips'] + 12 * n + 4) + sym['dk_sound'],
-              mem.r32(sym['snd_clips'] + 12 * n + 8)) for n in range(nclips + 1)]
+              (mem.r32(sym['snd_clips'] + 12 * n + 8) + sym['dk_sound']) if mem.r32(sym['snd_clips'] + 12 * n + 8) else 0)
+             for n in range(nclips + 1)]
+    ckind = [mem.r8(sym['snd_clipkind'] + n) for n in range(nclips + 1)]
     pcm = (BUILD / 'dkong3_sound.bin').read_bytes()
     # the driver's own tables must be the converter's
     for k, a_ in enumerate(LATCHES):
@@ -126,7 +128,7 @@ def main():
                 assert mem.r8(base + v) == want.get(v, 0), (kind, k, v)
     last = [0, 0, 0]
     lh, le = [0, 0, 0], [0, 0, 0]
-    want = [0] * 6
+    want = [0] * 9
     prev_vals = (0, 0, 0)
     checked = starts = bad = 0
     voices = sym['snd_voices']
@@ -141,16 +143,16 @@ def main():
                 eff = tabs['%04x_eff' % LATCHES[k]].get(v, 0)
                 if hold != lh[k]:
                     lh[k] = hold
-                    want[2 * k] = hold
+                    want[3 * k] = hold
                     starts += bool(hold)
                 if eff != le[k]:
                     le[k] = eff
                     if eff:
-                        want[2 * k + 1] = eff
+                        want[3 * k + 1 + ckind[eff]] = eff
                         starts += 1
         prev_vals = tuple(h.m.snd[a_] for a_ in LATCHES)
         call(h, 'snd_mix')
-        for n in range(6):
+        for n in range(9):
             ptr = mem.r32(voices + 12 * n)
             got = 0
             if ptr:

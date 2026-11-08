@@ -23,7 +23,7 @@ IDLE = 0x0249
 TOKEN = 0xE001                      # the NMI's return token on the Z80 stack (unmapped: no code)
 TABLE_ENTRIES = 0xFFFF             # (z80_init_dispatch compares words: no pc $FFFF)
 IO_REDIRECT = {0x7C00: 0x7A00, 0x7C80: 0x7A80, 0x7D00: 0x7B00, 0x7D80: 0x7B80}      # IN0, IN1, DSW0, DSW1 (the write sides keep their addresses)
-COVER_SEEDS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+COVER_SEEDS = tuple(range(1, 25))
 COVER = ["cover_%d.pkl" % s for s in COVER_SEEDS]
 INLINE = int(os.environ.get('DK3_INLINE', '8'))   # calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves)
 DMA_BYTES = 0x1A0                   # the chip transfers the block length ($19F) plus one byte
@@ -37,16 +37,20 @@ PATCH_WORDS = {0x5DB0: 0x7A80, 0x8556: 0x7B00}
 
 # stores through HL that the arcade ignores because HL points into the ROM (a null pointer: $62D0, $6150 and $6170 hold 0
 # until a table is set up): the translation's block holds the ROM, so such a store must not happen
-ROM_STORE_SITES = {0x0F56, 0x0F68, 0x0F6D}
+ROM_STORE_SITES = {0x0F56, 0x0F68, 0x0F6D, 0x0A62}
+ROM_STORE_BC = {0x338D}               # (`ld (bc),a`: B = 0 clears a byte in page 0 when a table entry is empty)
 
 
 class DK3Emitter(Emitter):
     def x_ld(self, ins):
-        if ins.pc not in ROM_STORE_SITES:
+        if ins.pc not in ROM_STORE_SITES and ins.pc not in ROM_STORE_BC:
             return super().x_ld(ins)
         skip = self.new_label()
         self.e("move.w sr,d5")                   # (the flags may be live: the guard keeps them)
-        self.e("cmp.w #$6000,d3")
+        if ins.pc in ROM_STORE_BC:
+            self.e("cmp.b #$60,d1")              # (BC is kept swapped: B is the low byte)
+        else:
+            self.e("cmp.w #$6000,d3")
         self.e("blo.s %s" % skip)
         super().x_ld(ins)
         self.lines.append(skip + ":")

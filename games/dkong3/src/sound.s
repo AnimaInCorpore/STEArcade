@@ -23,7 +23,7 @@
 SND_RING = 2048				; the ring (bytes: 327 ms)
 SND_LEAD = 384				; the samples ready ahead of the DMA's position (61 ms; the VBL comes every 20 ms)
 SND_QLEN = 16				; commands queued
-SND_VOICES = 6				; a tune and an effect for each latch
+SND_VOICES = 9				; a tune, an effect and a sound that goes on, for each latch
 
 	section text,code
 
@@ -98,7 +98,11 @@ microwire:
 
 snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tune / effect tables
 	moveq	#0,d0
+	ifd SNDTEST
+	move.b	snd_inbuf+\1,d0		; (the script's, not the game's)
+	else
 	move.b	G_Z80+\2,d0
+	endc
 	cmp.b	snd_last+\1,d0
 	beq.s	.same\@
 	move.b	d0,snd_last+\1
@@ -107,18 +111,23 @@ snd_latch	macro			; \1 = k (0-2), \2 = the latch's Z80 address, \3 / \4 = its tu
 	cmp.b	snd_lh+\1,d1
 	beq.s	.eff\@
 	move.b	d1,snd_lh+\1
-	move.w	#(\1*2)<<8,d2
+	move.w	#(\1*3)<<8,d2
 	or.b	d1,d2
 	bsr	snd_queue
 .eff\@:	lea	\4,a0
+	moveq	#0,d1
 	move.b	(a0,d0.w),d1		; the effect it starts (0: none)
 	cmp.b	snd_le+\1,d1
 	beq.s	.same\@
 	move.b	d1,snd_le+\1
 	tst.b	d1
 	beq.s	.same\@
-	move.w	#((\1*2)+1)<<8,d2
-	or.b	d1,d2
+	lea	snd_clipkind,a0
+	move.w	#((\1*3)+1)<<8,d2
+	tst.b	(a0,d1.w)		; a sound that goes on (a loop until the next one) has a voice of its own
+	beq.s	.os\@
+	move.w	#((\1*3)+2)<<8,d2
+.os\@:	or.b	d1,d2
 	bsr	snd_queue
 .same\@:
 	endm
@@ -174,12 +183,11 @@ snd_mix:
 	move.l	(a2)+,d5		; end
 	add.l	a3,d5
 	move.l	d5,4(a0)
-	tst.l	(a2)			; loops
+	move.l	(a2),d4			; the loop start (0: none)
 	beq.s	.nolp
-	move.l	d4,8(a0)
-	bra.s	.cmd
-.nolp:	clr.l	8(a0)
-	bra.s	.cmd
+	add.l	a3,d4
+.nolp:	move.l	d4,8(a0)
+	bra	.cmd
 .stop:	clr.l	(a0)
 	bra.s	.cmd
 .cmds:	move.b	d3,snd_qh
@@ -303,3 +311,33 @@ snd_vars_end:
 snd_mixbuf:	ds.b	SND_RING/2
 snd_ring:	ds.b	SND_RING
 	section text,code
+
+	ifd SNDTEST
+; -D SNDTEST=1 (tools/sound_check.py): the three sound latches are written every VBL from a script (one entry of 3 bytes per
+; VBL, 20 ms: build/dkong3/sndtest.s) instead of by the game, so that MAME can play the same commands at the same times.
+snd_script_step:
+	movem.l	d0/a0,-(sp)
+	move.l	frame_counter,d0
+	sub.l	#SNDTEST_START,d0
+	bmi.s	.out
+	cmp.l	#SNDTEST_N,d0
+	bhs.s	.end
+	move.l	d0,a0
+	add.l	d0,a0
+	add.l	d0,a0
+	add.l	#snd_script,a0
+	move.b	(a0)+,snd_inbuf
+	move.b	(a0)+,snd_inbuf+1
+	move.b	(a0)+,snd_inbuf+2
+	bra.s	.out
+.end:	clr.b	snd_inbuf
+	clr.b	snd_inbuf+1
+	clr.b	snd_inbuf+2
+.out:	movem.l	(sp)+,d0/a0
+	rts
+	section data,data
+	include	"sndtest.s"
+	section bss,bss
+snd_inbuf:	ds.b	4
+	section text,code
+	endc
