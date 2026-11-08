@@ -420,8 +420,9 @@ class Gen:
             if kind[0] == "timer":
                 out.append("\ttst.b\t%s+%d\n\tbne\t.full\n\tmove.b\t%s+%d,d7\n\tcmp.b\t%s+%d,d7\n\tbne\t.full" %
                            (st, S_INIRQ, st, kind[1], st, S_TL))
-            else:
+            elif kind[0] == "irq":
                 out.append("\ttst.b\t%s+%d\n\t%s\t.full" % (st, S_IRQ, "beq" if kind[1] else "bne"))
+            # ("idle",): the chip stops here whenever no interrupt is pending
             out.append("\tmove.l\t(sp)+,d7\n\trts")
             if a in self.fast and not PLAIN:
                 out.append(".f%d:\t\t\t\t; an interrupt pending at %03X: the native way (else .full)" % (i, a))
@@ -457,7 +458,7 @@ class Gen:
               (S_INIRQ, l, kind[1], S_TL, l))
         elif kind[0] == "irq":                                 # the /IRQ line at a level
             e("\ttst.b\t%d(a0)\n\t%s.s\t%sx" % (S_IRQ, "beq" if kind[1] else "bne", l))
-        else:
+        elif kind[0] != "idle":                                # ("idle",): stop, no interrupt is pending
             raise ValueError(kind)
         e("\tlea\t%s(pc),a1\n\tbra\t%s_stop" % (self.L(a), p))
         e("%sx:" % l)
@@ -654,6 +655,24 @@ FAST_51XX = {0x182: """\tbtst\t#2,d7
 \tmovem.l\t(sp)+,d6/a0
 \tmove.l\t(sp)+,d7
 \trts"""}
+
+
+# The 53XX of Dig Dug (games/digdug/tools/machine.py: wait53): the input loop of mode 7 at $22C stops whenever no interrupt is
+# pending; a transfer's bytes wait for the chip select to end ($359) and to come again ($35C).  K = the latch's Q5-Q7
+# ($6825-$6827 of the main CPU's cells, bit 0 each) as MOD0-MOD2 in K1-K3; O = the byte the main CPU reads.
+WAITS_53XX = {0x22C: ("idle",), 0x359: ("irq", 1), 0x35C: ("irq", 0)}
+
+
+def k_53xx(io1):
+    """K = (Q7 << 3) | (Q6 << 2) | (Q5 << 1) from the latch cells at io1 + $6825..$6827"""
+    return "\n".join(["\tmoveq\t#1,d0", "\tand.b\t%s+$6827,d0" % io1, "\tlsl.b\t#3,d0",
+                      "\tmoveq\t#1,d7", "\tand.b\t%s+$6826,d7" % io1, "\tlsl.b\t#2,d7", "\tor.b\td7,d0",
+                      "\tmoveq\t#1,d7", "\tand.b\t%s+$6825,d7" % io1, "\tadd.b\td7,d7", "\tor.b\td7,d0"])
+
+
+def translate_53xx(rom, io1, prefix="N53"):
+    text, seen = translate(rom, prefix, WAITS_53XX, k_53xx(io1), o_asm=O_51XX)
+    return text + support(prefix), seen
 
 
 def translate_51xx(rom, prefix="N51"):

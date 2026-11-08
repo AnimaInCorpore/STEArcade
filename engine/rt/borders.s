@@ -331,21 +331,32 @@ bd_fast_top:
 	move.b #2,$ffff820a.w
 	rts
 
+; bd_speed_poll: the first VBL looks for TOS's _MCH cookie (a Mega STE: $00010010).  By then the port owns the
+; machine and may have reused TOS's memory (Gauntlet does): the jar pointer must be even and below 4 MB, at most 32
+; cookies are read (a scan through garbage ran past the RAM - a bus error - or for longer than a frame; 2026-11-07).
 bd_speed_poll:
-	movem.l d0/a0,-(sp)
+	movem.l d0-d1/a0,-(sp)
 	tst.b bd_speed_known
 	bne.s .known
 	st bd_speed_known
 	move.l $5a0.w,d0
 	beq.s .done
+	btst #0,d0
+	bne.s .done
+	cmp.l #$800,d0
+	blo.s .done
+	cmp.l #$400000-32*8,d0
+	bhs.s .done
 	move.l d0,a0
+	moveq #32-1,d1
 .cookie:
 	move.l (a0)+,d0
 	beq.s .done
 	cmp.l #'_MCH',d0
 	beq.s .machine
 	addq.l #4,a0
-	bra.s .cookie
+	dbf d1,.cookie
+	bra.s .done
 .machine:
 	cmp.l #$00010010,(a0)
 	bne.s .done
@@ -358,7 +369,7 @@ bd_speed_poll:
 	cmp.b #3,d0
 	seq bd_fast
 .done:
-	movem.l (sp)+,d0/a0
+	movem.l (sp)+,d0-d1/a0
 	rts
 
 	if BD_HUD

@@ -89,7 +89,7 @@ prepared stefastbobs2's way.  Check every port with two tile layers, palette eff
   joins only (`porting-guide.md`, "Translation").
 * **Guard only the coverage's window sites, and audit the rest** (Bubble Bobble, Black Tiger 2026-10-11): a check at
   every indirect access costs a quarter of the translated cycles.  Record the sites in the coverage runs (reads of the
-  window and the banked RAM, writes of the latter), keep them in `docs/window-sites.json`, and trace a simulator run
+  window and the banked RAM, writes of the latter), keep them in the port's `docs/window-sites.json`, and trace a simulator run
   for accesses to the unused image of the window (`logic_test.py --audit`).  Black Tiger's play logic 80.7k -> 65.3k a
   tick; 1943 69.8k -> 61.0k; 1942 26.6k -> 23.8k; Bubble Bobble's main CPU 67.7k -> 62.4k; Gun.Smoke 40.5k -> 37.3k (229
   of 1479 sites).  `W_GUARD_ALL=1` builds the old way for comparison.  Guard every block copy regardless (MARP,
@@ -295,7 +295,9 @@ not been re-measured in Hatari since).
 | Port | Rate (Hatari) | Window guards | Leaves in place | Flag summaries / fast forms | Natives | Writer marks | Idle flags |
 |---|---|---|---|---|---|---|---|
 | Donkey Kong, DK Junior | 83% (one round a VBL) / 50 | n/a | - | n/a | - | - (compare) | n/a (VBL-locked) |
+| Dig Dug | 82% (one round a VBL) / 32.6 scripted play (17.9-49) | n/a | 32 + rst + jumps | n/a | sub CPU sprite copy, 53XX/51XX event model | cells (movep rows) | n/a (VBL-locked) |
 | Galaga | ~82% / 31.1 attract | n/a | - | n/a | 51XX read, sound boot | 32-byte blocks | n/a (VBL-locked) |
+| Jail Break | ~67% (40.5 of 60 arcade frames; 3 of 4 pictures skipped while behind) / 15.4 pictures a second, AUTOPLAY, sound on | video_inline | 6809 inline_calls (the SN write) | call_summaries, fast_forms, ret_weights, fixed_slots | SN write (`$AF96`), sprite-RAM copy (`$9272`) | cells + tile column spans | kept |
 | Pac-Man | 100% / 49.8 attract | n/a | 16 + rst + jumps | n/a | - | cells | kept |
 | Pooyan | ~100% / 43.5 with sound | n/a | 16 | n/a | - | cells | kept |
 | Mr. Do! | ~100% / 44-50 play | n/a | 16 | n/a | - | cells | kept |
@@ -311,14 +313,22 @@ not been re-measured in Hatari since).
 | Moon Patrol | 95% / 27.0 autoplay | flat | - | n/a | - | - (text compare 14k) | kept |
 | Gyruss | 55% / 12.7 autoplay | n/a | yes (main, sound) | sub: summaries | sub: copies, scans, projections | cells | kept |
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
+| Mikie | 92% / 35.4 attract + first room (with sound) | n/a (flat) | n/a | both | idle, CWAI, sort, sprite copy, `inline_calls` emitter, sound | `video_inline` | n/a (idle native) |
+| Mario Bros. | 98% / 29.9 autoplay | n/a | - (translated with leaves off) | n/a | - | - (video RAM compared as longs) | kept |
+| Donkey Kong 3 | 84% / 26.9 autoplay (sound, 4 MB) | n/a | leaves in place | n/a | - | - | kept |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
+| Juno First | 61% / 8.1 play (MAX_SKIP 6) | n/a | - | both (+1% only) | clears, blit passes | - (planar `vram_wr`) | custom |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
+| Yie Ar Kung-Fu | 96% / 37.7 autoplay | flat | - | both | sprite RAM builder, idle | `st vram_w` / `vram_n` after coverage-recorded store sites, `static_write` for the sound ports | n/a (idle native) |
+| Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
+| Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
+| Xevious | 45-53% (27-32 arcade fps) / 6.8-8.0 attract and autoplay (2026-11-08, after the sprite passes; 35% / 5.4 before) | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
 | Galaga '88 | ~20% / 6.1 BENCH | n/a | - | both | - | `tile_marks` | ? |
-| Dragon Spirit | 13% / 3.0 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
+| Dragon Spirit | 14% / 2.9 BENCH (14 MB) | n/a | - | both | 3 | `tile_marks` | ? |
 
 **Pictures**
 
@@ -338,13 +348,23 @@ not been re-measured in Hatari since).
 | Moon Patrol | - (layers per line) | a row loop | dirty 16-pixel groups redrawn | `movep` panel; pieces | PROM per picture |
 | Gyruss | - | `sprite_programs` | drawn lines from clean | tiles | default fitter flat |
 | Track & Field, Hyper Sports | per row | `sprite_programs` | sprite-only rows: their groups | tiles | default fitter flat |
+| Mikie | - | `sprite_programs` (key tables, row table per Y) | drawn lines from clean | tiles | PROM (4096 pens fitted to 16) |
+| Mario Bros. | - | `sprite_programs` (shapes by coverage) | opaque rows from the playfield; unused entries skipped fast | tiles (playfield, cell cache) | fitted flat, 16 colours |
+| Donkey Kong 3 | - | Mario's renderer turned to portrait | as Mario | tiles | fitted flat |
 | Double Dragon | H | a row loop, rows sorted by mask | cells invalidated | pairs, fills | checker pairs |
+| Super Basketball | H, recomposed (hardware scroll tried: exact, slower) | `sprite_programs` (348 shapes, per-slot cache) | sprite-only rows and changed cells | tiles | default fitter flat |
 | Gauntlet | H + V (torus) | baked 32-pixel strips, a pass a row | rectangles from clean | runs; CPU masks for transparent ones | checker pairs + player colours |
 | R-Type | H (twin columns) | `sprite_programs` (streams) | contour from clean; clears over black | status bar image | checker pairs per scene |
 | Mr. HELI | fine H (`m72render`) | per-code line routines | rows | **AND + OR (to convert)** | scene palettes |
 | Splatterhouse | H (twin columns) | converted per colour, a pass a line | rectangles from the twins | bar images | chooser per scene |
 | Galaga '88 | - (fixed buffers) | a pass a line (X count 3) | rectangles from clean | composed into cells | chooser per scene |
 | Dragon Spirit | H + V (twin lines and columns) | Galaga '88's | row spans | OP 3 passes per fine shift | chooser + flash |
+| Dig Dug | - | Galaga's renderer: generated code per shape (not `sprite_programs`, not tried) | as Galaga (see its README) | tiles and characters composed into one background screen | fitted 16 (23 PROM colours) |
+| Jail Break | H (Shifter fine scroll, 16-pixel Blitter steps; `render_rows.s` before) | `sprite_programs` (per-slot cache) | rows / 16-pixel groups from clean | tiles | default fitter flat |
+| Juno First | - | none: the arcade's CPU and 16 x 16 blitter draw into the planar picture directly | n/a (no sprite layer) | n/a | 16 fixed pens |
+| Yie Ar Kung-Fu | - | `sprite_programs` (per-slot cache) | sprite-only rows: their groups | tiles (row restores, `draw_rows`) | bounded flat fit, black and 15 |
+| Roc'n Rope | - | `sprite_programs` (per-slot cache) | drawn lines (`restore_damage`) | tiles (tile cache, cell list) | default fitter flat |
+| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
 
 ## Techniques that look applicable elsewhere (2026-11-07)
 

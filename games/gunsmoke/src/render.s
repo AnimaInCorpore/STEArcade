@@ -19,7 +19,7 @@
 ; inner word while the window starts on a 16-pixel group, else whole and clears its 16 pixels there).
 ;
 ; Sprites are drawn at the window's position (whole into the guard lines above and below), text as a strip per text row (composed with movep.l when the row
-; changes, drawn with the Blitter at the window's pixel offset: NOT mask AND screen, then the planes ORed in); what they
+; changes, drawn as OP 3 copy pieces with the Blitter at the window's pixel offset: text_run_pieces / fg_pieces_build); what they
 ; covered is a damage list per buffer, copied back from the twin lines the next time that buffer is drawn.  Graphics
 ; are baked into STE planes on first use (a hashed cache per kind) from their pixel-value planes through a routine per
 ; colour bank (assets.py: the pens' masks ORed into the planes by the 16 colour palette).

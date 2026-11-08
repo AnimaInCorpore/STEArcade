@@ -203,7 +203,7 @@ cheaper).  Not done, by expected gain: inlining small leaf functions (call + ret
 the MCU translator `m6801x.py` (9% of Bubble Bobble's translated cycles, untouched), keeping the Z80 stack words in
 68000 order so `push`/`pop` of DE/HL/IX need no `ror.w #8` (3-5%; but code that reads the stack as memory would break),
 Black Tiger guarded every indirect access as a possible window read (a window check of ~40 cycles each: a quarter of its
-translated cycles); since 2026-10-11 only the coverage's sites are guarded, as in Bubble Bobble (`docs/window-sites.json`,
+translated cycles); since 2026-10-11 only the coverage's sites are guarded, as in Bubble Bobble (`games/blktiger/docs/window-sites.json`,
 `logic_test.py --audit`: the logic in play 80.7k -> 65.3k cycles a tick).  A factor of 2 for every
 port is not in reach of the translation alone; the renderers are the larger part of most frames anyway.
 
@@ -336,8 +336,8 @@ The rule above has grown into four forms; a new port picks the one its board fit
 
 | Schedule | How | Ports |
 |---|---|---|
-| VBL-locked | one round of the arcade's interrupts a VBL, then the drawing in the VBL handler (a nested VBL skips it): 50 of the arcade's 60 rounds, the game 5/6 slow | Donkey Kong, Donkey Kong Junior, Galaga (with its star throttle), Bubble Bobble (three screens; `-D TICK60` two rounds at most) |
-| Idle hook, frames counted | the VBL only counts arcade frames (`vbl_phase`: six for five VBLs at 60 Hz; `ARCADE_FRAC` for other rates, Moon Patrol's 56.74 Hz); the idle hook of the arcade program (its wait loop, reached through a token return) runs the pending frames and draws; up to `MAX_PENDING` frames wait, at most `MAX_SKIP` in a row are not drawn; three buffers plus a clean screen | `MAX_PENDING` 3 / `MAX_SKIP` 3: Pac-Man, Pooyan, Mr. Do!, Time Pilot, Track & Field, Hyper Sports, Commando, Gun.Smoke, Moon Patrol; `MAX_SKIP` 2: Gyruss, Kung-Fu Master, 1942 (its cooperative kernel's idle point); the game first, `MAX_SKIPS` 4-8: 1943, Black Tiger, Trojan (`MAX_PENDING` 5), Double Dragon |
+| VBL-locked | one round of the arcade's interrupts a VBL, then the drawing in the VBL handler (a nested VBL skips it): 50 of the arcade's 60 rounds, the game 5/6 slow | Donkey Kong, Donkey Kong Junior, Galaga (with its star throttle), Dig Dug (Galaga's), Bubble Bobble (three screens; `-D TICK60` two rounds at most) |
+| Idle hook, frames counted | the VBL only counts arcade frames (`vbl_phase`: six for five VBLs at 60 Hz; `ARCADE_FRAC` for other rates, Moon Patrol's 56.74 Hz); the idle hook of the arcade program (its wait loop, reached through a token return) runs the pending frames and draws; up to `MAX_PENDING` frames wait, at most `MAX_SKIP` in a row are not drawn; three buffers plus a clean screen | `MAX_PENDING` 3 / `MAX_SKIP` 3: Pac-Man, Pooyan, Mr. Do!, Time Pilot, Track & Field, Hyper Sports, Commando, Gun.Smoke, Moon Patrol, Yie Ar Kung-Fu, Super Basketball (Xevious `MAX_SKIP` 3, Juno First 6; the other newer ports: see their READMEs); `MAX_SKIP` 2: Gyruss, Kung-Fu Master, 1942 (its cooperative kernel's idle point); the game first, `MAX_SKIPS` 4-8: 1943, Black Tiger, Trojan (`MAX_PENDING` 5), Double Dragon |
 | Picture every n frames | one arcade frame a VBL, a picture every `PIC_EVERY` frames at most, the logic at most `MAX_BEHIND` frames behind; R-Type also starts a picture when `PIC_VBLS` VBLs passed (`pic_due`, Timer D) | `PIC_EVERY` 2 / `MAX_BEHIND` 3: Splatterhouse, Galaga '88, Dragon Spirit (8 / 12 measured as an option); 8 / 12: R-Type (with `PIC_VBLS` 3), Mr. HELI |
 | Two threads | the picture is the foreground; the game runs per arcade interrupt until its wait loops (TRAP), a sixth IRQ every fifth VBL for 60 Hz | Gauntlet (its 68010 program runs natively) |
 
@@ -366,7 +366,10 @@ strips, allowing interrupts between pieces. The former `wait_borders` policy is 
 and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
 record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
-Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.
+Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.  The first VBL
+looks for TOS's `_MCH` cookie (`bd_speed_poll`); by then a port may have reused TOS's memory, so the jar pointer must
+be even and below 4 MB and at most 32 cookies are read (2026-11-07: an unbounded scan crashed Donkey Kong and
+Gauntlet on a plain STE).
 It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
 during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
 the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz

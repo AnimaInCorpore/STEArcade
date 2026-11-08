@@ -116,6 +116,9 @@ start:
 	ifd BORDER_ONLY
 	bra border_only
 	endc
+	ifd SETUP_ONLY
+	bra setup_only
+	endc
 	; Baseline BIOS key path, before replacing the ACIA handler.
 	lea bios_text,a0
 	bsr log_text
@@ -241,6 +244,30 @@ exit:
 	addq.l #6,sp
 	clr.w -(sp)
 	trap #1
+
+	ifd SETUP_ONLY
+; Focused timing investigation; the production diagnostic is unchanged.
+setup_only:
+	clr.w mode_index
+.mode:
+	lea mode_text,a0
+	bsr log_text
+	moveq #0,d0
+	move.w mode_index,d0
+	bsr log_hex
+	bsr log_eol
+	bsr set_speed
+	bsr setup_test
+	bsr mode_validate
+	bsr save_report
+	tst.b is_mega
+	beq .done
+	addq.w #1,mode_index
+	cmp.w #3,mode_index
+	blo .mode
+.done:
+	bra border_only_finish
+	endc
 
 	ifd BORDER_ONLY
 border_only:

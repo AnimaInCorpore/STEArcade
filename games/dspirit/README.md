@@ -7,9 +7,9 @@ and are identical to the reference board `engine/namcos1.py` over 7700 frames on
 runs as Splatterhouse's native model; the sound CPU is not run. The picture is upright and widened to the STE's 320
 pixels (`src/render.s`, exact against the reference model); there is no sound. Status: Experimental / deferred (logic
 exact, 320-pixel renderer, no sound); not registered in `port.py`, not released, and the program needs more than the
-4 MB release budget: it is developed with 14 MB in Hatari (the user, 2026-11-07). Latest speed (2026-11-07, Hatari
-14 MB, BENCH game: the intro, then stage 1): 7.97 arcade frames a second (13% of the arcade's 60.606 Hz), 3.02
-pictures a second; logic 89.3k Musashi cycles a frame (seed 5).
+4 MB release budget: it is developed with 14 MB in Hatari (the user, 2026-11-07). Latest speed (2026-11-08, Hatari
+14 MB, BENCH game: the intro, then stage 1): 8.32 arcade frames a second (14% of the arcade's 60.606 Hz), 2.93
+pictures a second; logic 83.9k Musashi cycles a frame (seed 5).
 
 ## Build and run
 
@@ -49,7 +49,7 @@ button both air shot and bomb.
 * Memory: 3.79 MB (text + data + bss) before the renderer's buffers, about 3.8 MB with them: over the release's 3.7 MB
   load budget; the 4 MB release is open.
 * Missing: sound.
-* Speed: 13% of the arcade's rate; the logic alone takes ~0.86 VBL an arcade frame in Hatari.
+* Speed: 14% of the arcade's rate; the logic alone takes ~0.81 VBL an arcade frame in Hatari.
 
 ## How it works
 
@@ -173,9 +173,11 @@ Not implemented: the sound CPU is not run, the MCU's voices are not played.
 
 | date | setup | arcade frames/s | % of 60.606 Hz | pictures/s | Musashi |
 |---|---|---|---|---|---|
+| 2026-11-08 | Hatari 14 MB, `bench.sh` BENCH, frames 600-1600 (intro, stage 1), 9 natives | 8.32 | 14% | 2.93 | logic 0.807 VBL a frame, render 14.7 VBLs a picture |
 | 2026-11-07 | Hatari 14 MB, `bench.sh` BENCH, frames 600-1600 (intro, stage 1) | 7.97 | 13% | 3.02 | render 14 VBLs a picture |
 | 2026-11-07 | Musashi, `render_test.py` | | | | play median 1.3M a picture, attract 3.4M |
-| 2026-11-07 | Musashi, natives, seed 5 / seed 22 | | | | logic 89.3k / 117.5k a frame for the two CPUs (attract ~63k, translation only) |
+| 2026-11-08 | Musashi, 9 natives, seed 5 / seed 22, 3000 frames | | | | logic 83.9k / 110.5k a frame for the two CPUs |
+| 2026-11-07 | Musashi, 3 natives, seed 5 / seed 22 | | | | logic 89.3k / 117.5k a frame for the two CPUs (attract ~63k, translation only) |
 
 What made it fast (2026-11-07, R-Type's lessons; BENCH 0.55 -> 7.97 arcade frames/s, 0.24 -> 3.02 pictures/s):
 
@@ -187,15 +189,21 @@ What made it fast (2026-11-07, R-Type's lessons; BENCH 0.55 -> 7.97 arcade frame
 * The terrain renderer above against the simple renderer: play median 4.1M -> 1.3M cycles a picture (Musashi).
   A Hatari run of the terrain renderer (14 MB, coin, start, intro, stage 1, 210 s, not the BENCH game): 5.2 arcade
   frames/s, 1.25 pictures/s.
-* The natives: 106.8k -> 89.3k (seed 5) and 143.1k -> 117.5k (seed 22) cycles a frame.
+* The natives: 106.8k -> 89.3k (seed 5) and 143.1k -> 117.5k (seed 22) cycles a frame; six more (2026-11-08: the
+  enemy-slot collision scans $F4B0 / $F6C7, $836C, $8277, $9222, the tile streaming $C025, and a `dbra` slot skip in
+  $C37F) -> 83.9k / 110.5k (-6%).  Natives stop paying here: each further candidate is 1-3%, the hand-written code
+  pays the same byte accesses (16 bit fields at odd offsets), calls, returns and bank writes as the translation.
+  Return points (`gen.py` writes `live_main.json` / `live_sub.json`: the flags each instruction reads) and
+  `profile.py --callers N` (the code that goes on into a runtime routine) help writing and choosing them.
 * The intro's palette flash: play 230-560 1036M -> 711M cycles (Colours).
 
 Measured, not kept: R-Type's schedule (`-D PIC_EVERY=8 -D MAX_BEHIND=12`): 7.97 -> 11.2 arcade frames/s, but 3.02 ->
 1.40 pictures/s.
 
-Open (in order): the logic (~0.86 VBL an arcade frame in Hatari: at 60 frames a second the logic alone needs more than
+Open (in order): the logic (~0.81 VBL an arcade frame in Hatari: at 60 frames a second the logic alone needs more than
 the STE's 160k cycles a VBL; `tools/profile.py`: gameplay ~140k a frame before the natives, most of what is left is the
-translation's own costs: LDD/STD indexed ~80 cycles, dynamic slots, D built from A and B); the colour choices (~40-60M);
+translation's own costs: returns that miss their compared return points and go through the dispatcher, ~10-15%, bank
+writes ~5-7%, LDD/STD indexed ~80 cycles, dynamic slots, D built from A and B); the colour choices (~40-60M);
 the text layers' passes (~300 a picture: recordings per fine shift rarely reused, the window pans every frame); tile
 conversion of new terrain rows.
 

@@ -1,0 +1,1165 @@
+; ------------------------------------------------------------------------------
+; The renderer.  The arcade picture (288 x 224) is shown rotated 90 degrees clockwise: display x = 223 - raw y,
+; display line = raw x (tools/assets.py).  Three layers, as MAME draws them:
+;
+;   background: a clean ring of 512 lines (the tile map's 64 tile columns x 8 lines; 224 pixels wide: its 28 visible tile
+;       rows) plus a copy of its first 288 lines behind it, so that the picture is one copy of 288 lines starting at line
+;       (20 + scroll) & 511.  The ring is updated where the program wrote tile RAM (vblocks, marked by the translated
+;       writers; shadow copies of codes and attributes tell the cells that changed);
+;   sprites: the sprite registers' 64 entries, each 1 to 4 tiles of 16 x 16, drawn first to last (the last on top);
+;   foreground: the character layer over everything, cells with pixels only.
+;
+; First version, drawn by the CPU for exactness (sprite rows converted from the three pen bit planes and the palette's
+; colours, shifted and merged into the four screen planes; the picture copied by the Blitter): the Blitter's masked
+; sprite passes of AGENTS.md are not used yet.  Not drawn: the cocktail flip, a foreground scroll, a vertical
+; background scroll other than 0 (the game uses none).
+; ------------------------------------------------------------------------------
+
+STRIDE = 256				; bytes per line, 512 pixel virtual screen
+GAME_X = 24				; byte offset of the game area in a line (3 chunks)
+GAME_LINES = 288			; the rotated arcade picture
+PIC_Y0 = 32				; the buffer line of the picture's first line
+CROP_TOP = 32				; the STE shows 277 of the 288 lines: from this buffer line on
+SHOW_OFFSET = CROP_TOP*STRIDE
+SCREEN_BYTES = $20000*3
+RING_STRIDE = 112			; 224 pixels, 4 planes
+RING_LINES = 512+288
+RING_BYTES = RING_STRIDE*RING_LINES
+SC_FG = 320*4*64			; the characters' keys follow the sprites'
+SC_KEYS = SC_FG+256*4*16			; sprite image cache: (code, flips, palette) keys
+SC_SLOTS = 2048
+BGC_KEYS = 512*4*128
+BGC_SLOTS = 3000
+SC_SIZE = 160				; 16 masks, 16 rows of 4 plane words
+
+; Tile RAM and sprite registers in the shared RAM block
+R_BGCODE = g_ram+$4800			; $C800
+R_BGATTR = g_ram+$3800			; $B800
+R_FGCODE = g_ram+$4000			; $C000
+R_FGATTR = g_ram+$3000			; $B000
+R_SPR1 = g_ram+$0780			; $8780: y, x low
+R_SPR2 = g_ram+$1780			; $9780: flags, x high
+R_SPR3 = g_ram+$2780			; $A780: code, colour
+
+init_video:
+	move.l	#screens,d0
+	add.l	#$10000-1,d0
+	and.l	#$ffff0000,d0
+	move.l	d0,bg_address
+	add.l	#$20000,d0
+	move.l	d0,scr_address
+	add.l	#$20000,d0
+	move.l	d0,scr_address+4
+
+	move.l	bg_address,d0
+	bsr	clear_screen
+	move.l	scr_address,d0
+	bsr	clear_screen
+	move.l	scr_address+4,d0
+	bsr	clear_screen
+
+	movem.l	ga_palette,d0-d7
+	movem.l	d0-d7,$ffff8240.w
+
+	clr.b	$ffff8260.w		; low resolution, 50 Hz
+	move.b	#2,$ffff820a.w
+	move.b	#(512-320)/2/2,$ffff820f.w	; virtual line width 512 pixels
+
+	move.l	scr_address+4,draw_screen_address
+	move.l	scr_address,display_screen_address
+	clr	draw_index
+	move.l	scr_address,d0		; the screen the VBL shows first
+	add.l	#SHOW_OFFSET,d0
+	move.l	d0,-(sp)
+	move.b	1(sp),$ffff8201.w
+	move.b	2(sp),$ffff8203.w
+	move.b	3(sp),$ffff820d.w
+	addq.l	#4,sp
+	rts
+
+; d0 = address of a 128 KiB screen
+
+clear_screen:
+	move	#2,$ffff8a2e.w
+	move	#$ffff,$ffff8a28.w
+	move	#$ffff,$ffff8a2a.w
+	move	#$ffff,$ffff8a2c.w
+	move.b	#1,$ffff8a3a.w		; HOP 1 (halftone only)
+	move.b	#0,$ffff8a3b.w		; OP 0 (destination = 0)
+	clr.b	$ffff8a3d.w
+	move	#2,$ffff8a30.w		; Destination Y increment
+	move	#16,$ffff8a36.w		; X count: 16 words, 4096 lines = 128 KB
+	move.l	d0,$ffff8a32.w
+	move	#4096,$ffff8a38.w
+	bra	blit_go			; (the interrupts run: in pieces)
+
+init_render:
+	st	force_all
+	bsr	bgc_flush
+	bra	sc_flush
+
+; ------------------------------------------------------------------------------
+; One frame: the ring brought up to date, the picture copied, the sprites and the foreground drawn.
+; ------------------------------------------------------------------------------
+
+render_frame:
+	movem.l	d0-d7/a0-a6,-(sp)
+	bsr	update_bg
+	bsr	compose_bg
+	bsr	draw_sprites
+	bsr	draw_fg
+	addq	#1,cnt_render
+	st	frame_ready
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; ------------------------------------------------------------------------------
+; The background ring.  The marks of the translated writers (vblocks: blocks of 32 bytes of $B000-$CFFF mod 256: the
+; foreground codes $00-$3F, the background codes $40-$7F, the foreground attributes $80-$BF, the background attributes
+; $C0-$FF) say which cells (32 a block) to compare with their shadows.
+; ------------------------------------------------------------------------------
+
+update_bg:
+	lea	vblocks,a0
+	moveq	#0,d2
+	moveq	#15,d0
+.f1:	or.l	(a0)+,d2		; the foreground's marks: the codes $00-$3F
+	dbf	d0,.f1
+	lea	vblocks+$80,a0
+	moveq	#15,d0
+.f2:	or.l	(a0)+,d2		; and the attributes $80-$BF
+	dbf	d0,.f2
+	tst.l	d2
+	beq.s	.nofg
+	bsr	fg_diff			; (a rebuild only if the RAM differs from what the list was built from)
+.nofg:	lea	vblocks,a0
+	lea	cell_dirty,a1
+	moveq	#63,d1
+	tst.b	force_all
+	bne.s	.all
+	tst.b	vblock_all
+	bne.s	.all
+	lea	vblocks+$40,a2
+	lea	vblocks+$c0,a3
+	moveq	#0,d0			; cell blocks: marks of the codes and the attributes
+.mk:	move.b	(a2,d0.w),d2
+	or.b	(a3,d0.w),d2
+	move.b	d2,(a1,d0.w)
+	addq.w	#1,d0
+	cmp.w	#64,d0
+	blo.s	.mk
+	bra.s	.clear
+.all:	st	fg_rebuild
+	moveq	#63,d0
+.alld:	st	(a1,d0.w)
+	dbf	d0,.alld
+.clear:	moveq	#63,d0			; the marks are taken (the foreground's too: it is drawn from the RAM every frame)
+	lea	vblocks,a0
+.c1:	clr.l	(a0)+
+	dbf	d0,.c1			; (256 bytes)
+	clr.b	vblock_all
+	move.b	force_all,draw_all	; (the first picture: every cell is drawn, whatever its shadow says)
+	clr.b	force_all
+
+	moveq	#0,d7			; the cell block
+.blk:	tst.b	(a1,d7.w)
+	beq	.next
+	move.w	d7,d6
+	lsl.w	#5,d6			; its first cell
+	tst.b	draw_all
+	bne.s	.cells
+	lea	R_BGCODE,a2		; (the block as 8 longs of codes and of attributes: all as drawn: nothing to do)
+	lea	(a2,d6.w),a2
+	lea	shadow_bg,a4
+	lea	(a4,d6.w),a4
+	moveq	#7,d0
+.q1:	cmpm.l	(a2)+,(a4)+
+	bne.s	.cells
+	dbf	d0,.q1
+	lea	R_BGATTR,a3
+	lea	(a3,d6.w),a3
+	lea	shadow_bg+2048,a5
+	lea	(a5,d6.w),a5
+	moveq	#7,d0
+.q2:	cmpm.l	(a3)+,(a5)+
+	bne.s	.cells
+	dbf	d0,.q2
+	bra	.next
+.cells:
+	moveq	#31,d5
+.cell:	lea	R_BGCODE,a2
+	lea	R_BGATTR,a3
+	lea	shadow_bg,a4
+	lea	shadow_bg+2048,a5
+	move.b	(a2,d6.w),d0
+	move.b	(a3,d6.w),d1
+	tst.b	draw_all
+	bne.s	.chg
+	cmp.b	(a4,d6.w),d0
+	bne.s	.chg
+	cmp.b	(a5,d6.w),d1
+	beq.s	.same
+.chg:	move.b	d0,(a4,d6.w)
+	move.b	d1,(a5,d6.w)
+	movem.l	d5-d7/a1,-(sp)
+	move.w	d6,d2
+	bsr	draw_bg_cell		; d0 = code, d1 = attribute, d2 = the cell
+	movem.l	(sp)+,d5-d7/a1
+.same:	addq.w	#1,d6
+	dbf	d5,.cell
+.next:	addq.w	#1,d7
+	cmp.w	#64,d7
+	blo	.blk
+	clr.b	draw_all
+	rts
+
+; plane P of a background row: the pens' masks (d4: pen 0, d3: pen 1, d5: pen 2, d2: pen 3) of the pens whose STE colour has
+; the plane's bit (d6 bits 4 * P + pen), stored into tilebuf
+selplane macro
+	moveq	#0,d0
+	btst	#\1*4+0,d6
+	beq.s	.a\@
+	or.b	d4,d0
+.a\@:	btst	#\1*4+1,d6
+	beq.s	.b\@
+	or.b	d3,d0
+.b\@:	btst	#\1*4+2,d6
+	beq.s	.c\@
+	or.b	d5,d0
+.c\@:	btst	#\1*4+3,d6
+	beq.s	.d\@
+	or.b	d2,d0
+.d\@:	move.b	d0,(a3)+
+	endm
+
+; One background cell into the ring (and its copy behind the ring when it lies in the first 288 lines): d0.b = code,
+; d1.b = attribute, d2.w = the cell (ty * 64 + tx).  Visible tile rows ty 2-29 only (tmy = y + 16).  The cell's rows are
+; converted from the two pen bit planes to the four screen planes (a 4-bit plane selection per plane: the pens whose
+; STE colour has the plane's bit) into tilebuf, then stored.
+
+draw_bg_cell:
+	move.w	d2,d3
+	lsr.w	#6,d3			; ty
+	cmp.w	#2,d3
+	blo	.r
+	cmp.w	#29,d3
+	bhi	.r
+	moveq	#29,d4
+	sub.w	d3,d4			; cx = 29 - ty: the 8 pixel column of the display
+	and.w	#63,d2			; tx
+	move.w	d2,a4
+	mulu	#RING_STRIDE*8,d2	; the ring address: tx * 8 lines of 112 bytes, the group cx / 2, the byte cx & 1
+	move.w	d4,d5
+	lsr.w	#1,d5
+	lsl.w	#3,d5
+	add.l	d5,d2
+	and.w	#1,d4
+	add.l	d4,d2
+	lea	ring,a2
+	add.l	d2,a2
+	moveq	#0,d3
+	move.b	d1,d3
+	and.w	#$3c,d3
+	lsr.w	#2,d3			; (attr & $3c) >> 2
+	moveq	#0,d5
+	move.b	d0,d5
+	and.w	#$80,d5
+	lsr.w	#3,d5
+	or.w	d5,d3
+	moveq	#0,d5
+	move.b	d1,d5
+	and.w	#3,d5
+	lsl.w	#5,d5
+	or.w	d5,d3			; the colour 0-127
+	; the converted tile: key = (tile * 4 + flip) * 128 + colour, tile = code + (attr & 1) * 256, flip = attr >> 6
+	moveq	#0,d6
+	move.b	d0,d6
+	moveq	#0,d5
+	move.b	d1,d5
+	and.w	#1,d5
+	lsl.w	#8,d5
+	add.w	d5,d6
+	lsl.w	#2,d6
+	moveq	#0,d5
+	move.b	d1,d5
+	lsr.w	#6,d5
+	add.w	d5,d6
+	lsl.l	#7,d6
+	add.w	d3,d6
+	add.l	d6,d6			; (the index entry's offset)
+	move.l	d6,bg_koff
+	lea	bgc_index,a0
+	move.w	(a0,d6.l),d5
+	beq.s	.conv
+	subq.w	#1,d5
+	ext.l	d5
+	lsl.l	#5,d5
+	lea	bgc_data,a3
+	add.l	d5,a3
+	bra	.store
+.conv:	lsl.w	#2,d3
+	lea	bg_lut,a0
+	lea	(a0,d3.w),a0		; the four pens' STE colours
+	moveq	#0,d6			; the plane selection: bit 4 * plane + pen
+	moveq	#3,d3
+.pk:	moveq	#3,d5
+.pp:	moveq	#0,d7
+	move.b	(a0,d5.w),d7
+	btst	d3,d7
+	beq.s	.np
+	move.w	d3,d7
+	lsl.w	#2,d7
+	add.w	d5,d7
+	bset	d7,d6
+.np:	dbf	d5,.pp
+	dbf	d3,.pk
+	moveq	#0,d3			; the tile's rows
+	move.b	d0,d3
+	moveq	#0,d5
+	move.b	d1,d5
+	and.w	#1,d5
+	lsl.w	#8,d5
+	add.w	d5,d3
+	lsl.w	#2,d3
+	moveq	#0,d5
+	move.b	d1,d5
+	lsr.w	#6,d5
+	add.w	d5,d3
+	lsl.l	#4,d3
+	lea	bgt,a1
+	lea	(a1,d3.l),a1
+	lea	tilebuf,a3
+	moveq	#7,d7
+.row:	moveq	#0,d0
+	move.b	(a1)+,d0		; pen bit 0 of the 8 pixels
+	moveq	#0,d1
+	move.b	(a1)+,d1		; pen bit 1
+	move.b	d0,d2
+	and.b	d1,d2			; pen 3
+	move.b	d1,d3
+	not.b	d3
+	and.b	d0,d3			; pen 1
+	move.b	d0,d5
+	not.b	d5
+	and.b	d1,d5			; pen 2
+	move.b	d0,d4
+	or.b	d1,d4
+	not.b	d4			; pen 0
+	selplane	0
+	selplane	1
+	selplane	2
+	selplane	3
+	dbf	d7,.row
+	; into the cache (all again when it is full)
+	move.l	bg_koff,d6
+	lea	bgc_index,a0
+	move.w	bgc_used,d5
+	cmp.w	#BGC_SLOTS,d5
+	blo.s	.room
+	movem.l	a2/a4,-(sp)
+	bsr	bgc_flush
+	movem.l	(sp)+,a2/a4
+	moveq	#0,d5
+.room:	addq.w	#1,d5
+	move.w	d5,bgc_used
+	move.w	d5,(a0,d6.l)
+	subq.w	#1,d5
+	ext.l	d5
+	lsl.l	#5,d5
+	lea	bgc_data,a1
+	add.l	d5,a1
+	lea	tilebuf,a3
+	movem.l	(a3),d0-d7
+	movem.l	d0-d7,(a1)
+.store:	move.l	a3,a1			; the 8 rows of 4 plane bytes
+	moveq	#7,d7
+.cp:	move.b	(a3)+,(a2)
+	move.b	(a3)+,2(a2)
+	move.b	(a3)+,4(a2)
+	move.b	(a3)+,6(a2)
+	lea	RING_STRIDE(a2),a2
+	dbf	d7,.cp
+	move.w	a4,d3
+	cmp.w	#36,d3			; tx * 8 < 288: the copy behind the ring
+	bhs.s	.r
+	move.l	a1,a3
+	lea	512*RING_STRIDE-8*RING_STRIDE(a2),a2
+	moveq	#7,d7
+.cp2:	move.b	(a3)+,(a2)
+	move.b	(a3)+,2(a2)
+	move.b	(a3)+,4(a2)
+	move.b	(a3)+,6(a2)
+	lea	RING_STRIDE(a2),a2
+	dbf	d7,.cp2
+.r:	rts
+
+; the cache of converted background tiles empties
+bgc_flush:
+	movem.l	d0-d7/a0-a1,-(sp)
+	moveq	#0,d1
+	moveq	#0,d2
+	moveq	#0,d3
+	moveq	#0,d4
+	moveq	#0,d5
+	moveq	#0,d6
+	moveq	#0,d7
+	sub.l	a1,a1
+	lea	bgc_index+BGC_KEYS*2,a0
+	move.w	#BGC_KEYS*2/32-1,d0
+.f:	movem.l	d1-d7/a1,-(a0)
+	dbf	d0,.f
+	clr.w	bgc_used
+	movem.l	(sp)+,d0-d7/a0-a1
+	rts
+
+; ------------------------------------------------------------------------------
+; The picture: 288 lines of the ring from line (20 + scroll) & 511 (the Blitter copies 56 words a line).
+; ------------------------------------------------------------------------------
+
+compose_bg:
+	moveq	#0,d0
+	move.w	scroll,d0
+	add.w	#20,d0
+	and.w	#511,d0
+	mulu	#RING_STRIDE,d0
+	add.l	#ring,d0
+	move	#2,$ffff8a20.w		; source X increment
+	move	#2,$ffff8a22.w		; Y: the lines follow each other
+	move.l	d0,$ffff8a24.w
+	move	#$ffff,$ffff8a28.w
+	move	#$ffff,$ffff8a2a.w
+	move	#$ffff,$ffff8a2c.w
+	move	#2,$ffff8a2e.w
+	move	#STRIDE-2*55,$ffff8a30.w	; destination Y increment
+	move.l	draw_screen_address,d0
+	add.l	#PIC_Y0*STRIDE+GAME_X,d0
+	move.l	d0,$ffff8a32.w
+	move	#56,$ffff8a36.w
+	move	#GAME_LINES,$ffff8a38.w
+	move.b	#2,$ffff8a3a.w		; HOP 2: the source
+	move.b	#3,$ffff8a3b.w		; OP 3: a copy
+	clr.b	$ffff8a3d.w
+	bra	blit_go			; (HOG: the CPU waits for the copy, the sprites are drawn over it)
+
+; ------------------------------------------------------------------------------
+; One row of up to 16 pixels merged into the picture: d0.w = the opaque pixels (the leftmost the top bit), d1.w-d4.w =
+; the planes' bits, d5.w = the display x of the leftmost pixel (-15 to 223), a0 = the picture line (its group 0).  Only
+; the groups of the picture (0-13: 16 pixels, 8 bytes) are touched (the outer words are clipped at the picture's
+; edges).  Clobbers d5-d7, a1.
+; ------------------------------------------------------------------------------
+
+blit_row:
+	move.w	d5,d6
+	and.w	#15,d6			; the shift
+	move.w	d6,blit_s
+	asr.w	#4,d5			; the group (floor)
+	swap	d0
+	clr.w	d0
+	swap	d1
+	clr.w	d1
+	swap	d2
+	clr.w	d2
+	swap	d3
+	clr.w	d3
+	swap	d4
+	clr.w	d4
+	lsr.l	d6,d0			; the high word: the pixels of the group, the low word: those of the next
+	lsr.l	d6,d1
+	lsr.l	d6,d2
+	lsr.l	d6,d3
+	lsr.l	d6,d4
+	swap	d0			; (the high words in the low ones)
+	swap	d1
+	swap	d2
+	swap	d3
+	swap	d4
+	cmp.w	#13,d5
+	bhi.s	.nohi
+	move.w	d5,d7
+	lsl.w	#3,d7
+	lea	(a0,d7.w),a1
+	bsr.s	.merge
+.nohi:	tst.w	blit_s
+	beq.s	.r
+	addq.w	#1,d5
+	cmp.w	#13,d5
+	bhi.s	.r
+	swap	d0			; the low words
+	swap	d1
+	swap	d2
+	swap	d3
+	swap	d4
+	move.w	d5,d7
+	lsl.w	#3,d7
+	lea	(a0,d7.w),a1
+.merge:	move.w	d0,d7
+	not.w	d7
+	move.w	(a1),d6
+	and.w	d7,d6
+	or.w	d1,d6
+	move.w	d6,(a1)+
+	move.w	(a1),d6
+	and.w	d7,d6
+	or.w	d2,d6
+	move.w	d6,(a1)+
+	move.w	(a1),d6
+	and.w	d7,d6
+	or.w	d3,d6
+	move.w	d6,(a1)+
+	move.w	(a1),d6
+	and.w	d7,d6
+	or.w	d4,d6
+	move.w	d6,(a1)+
+.r:	rts
+
+; pen p of a sprite row: its mask from the three bit planes (d0-d2), if it is opaque, ORed into rowacc (the opaque mask,
+; then the planes of its STE colour); clobbers d3-d5
+pen	macro
+	move.b	\1(a2),d4
+	cmp.b	#255,d4
+	beq	.n\@
+	move.w	#$ffff,d3
+	ifne \1&1
+	and.w	d0,d3
+	else
+	move.w	d0,d5
+	not.w	d5
+	and.w	d5,d3
+	endc
+	ifne \1&2
+	and.w	d1,d3
+	else
+	move.w	d1,d5
+	not.w	d5
+	and.w	d5,d3
+	endc
+	ifne \1&4
+	and.w	d2,d3
+	else
+	move.w	d2,d5
+	not.w	d5
+	and.w	d5,d3
+	endc
+	or.w	d3,(a3)
+	btst	#0,d4
+	beq.s	.p0\@
+	or.w	d3,2(a3)
+.p0\@:	btst	#1,d4
+	beq.s	.p1\@
+	or.w	d3,4(a3)
+.p1\@:	btst	#2,d4
+	beq.s	.p2\@
+	or.w	d3,6(a3)
+.p2\@:	btst	#3,d4
+	beq.s	.p3\@
+	or.w	d3,8(a3)
+.p3\@:
+.n\@:
+	endm
+
+; ------------------------------------------------------------------------------
+; The sprites: the 64 entries of the registers in order.  A sprite is one tile, two wide or high, or four (MAME's
+; draw_sprites: the arrangement depends on the flips); a tile at raw (x, y) is drawn at display (208 - y, x).
+; ------------------------------------------------------------------------------
+
+draw_sprites:
+	clr.w	spr_off
+.next:	move.w	spr_off,d7
+	lea	R_SPR3,a0
+	move.b	1(a0,d7.w),d0
+	btst	#6,d0
+	bne	.skip
+	moveq	#63,d4
+	and.w	d0,d4			; the palette (colour mod 64)
+	move.w	d4,spr_pal
+	lea	R_SPR2,a1
+	moveq	#0,d1
+	move.b	(a1,d7.w),d1		; the flags
+	move.w	d1,spr_flags
+	moveq	#0,d0
+	move.b	(a0,d7.w),d0		; the code
+	btst	#7,d1
+	beq.s	.low
+	and.w	#$3f,d0
+	add.w	#$100,d0
+.low:	move.w	d0,spr_code
+	move.w	d1,d6
+	lsr.w	#2,d6
+	and.w	#3,d6
+	move.w	d6,spr_fl		; flip x (bit 0), flip y (bit 1)
+	lea	R_SPR1,a2
+	moveq	#0,d2
+	move.b	1(a2,d7.w),d2
+	sub.w	#40,d2
+	btst	#0,1(a1,d7.w)
+	beq.s	.xl
+	add.w	#256,d2			; sx
+.xl:	move.w	d2,spr_sx
+	moveq	#0,d3
+	move.b	(a2,d7.w),d3
+	neg.w	d3
+	add.w	#223,d3			; sy = 28 * 8 - y - 1
+	move.w	d3,spr_sy
+	btst	#1,spr_flags+1
+	bne.s	.tall
+	btst	#0,spr_flags+1
+	bne.s	.wide
+	moveq	#0,d0			; one tile
+	moveq	#0,d1
+	moveq	#0,d2
+	bsr	put
+	bra	.skip
+.wide:	and.w	#$fffe,spr_code		; two wide
+	moveq	#0,d0
+	bsr	pos_wide0
+	bsr	put
+	moveq	#1,d0
+	bsr	pos_wide1
+	bsr	put
+	bra	.skip
+.tall:	btst	#0,spr_flags+1
+	beq.s	.t2
+	and.w	#$fffc,spr_code		; four tiles
+	moveq	#3,d0
+	bsr	pos_wide1
+	bsr	put
+	moveq	#1,d0
+	bsr	pos_f1
+	bsr	put
+	and.w	#$fffd,spr_code
+	moveq	#2,d0
+	bsr	pos_wide0
+	bsr	put
+	moveq	#0,d0
+	bsr	pos_t0
+	bsr	put
+	bra.s	.skip
+.t2:	and.w	#$fffd,spr_code		; two high
+	moveq	#2,d0
+	bsr	pos_wide0
+	bsr	put
+	moveq	#0,d0
+	bsr	pos_t0
+	bsr	put
+.skip:	addq.w	#2,spr_off
+	cmp.w	#$80,spr_off
+	blo	.next
+	rts
+
+; the tile offsets (d1 = dx, d2 = dy from the sprite's sx, sy) by MAME's draw_sprites; d0 = the code offset is kept
+pos_wide0:				; flipx ? sx + 16 : sx, flipy ? sy - 16 : sy
+	moveq	#0,d1
+	moveq	#0,d2
+	btst	#0,spr_fl+1
+	beq.s	.a
+	moveq	#16,d1
+.a:	btst	#1,spr_fl+1
+	beq.s	.b
+	moveq	#-16,d2
+.b:	rts
+pos_wide1:				; flipx ? sx : sx + 16, flipy ? sy - 16 : sy
+	moveq	#16,d1
+	moveq	#0,d2
+	btst	#0,spr_fl+1
+	beq.s	.a
+	moveq	#0,d1
+.a:	btst	#1,spr_fl+1
+	beq.s	.b
+	moveq	#-16,d2
+.b:	rts
+pos_f1:				; flipx ? sx : sx + 16, flipy ? sy : sy - 16
+	moveq	#16,d1
+	moveq	#-16,d2
+	btst	#0,spr_fl+1
+	beq.s	.a
+	moveq	#0,d1
+.a:	btst	#1,spr_fl+1
+	beq.s	.b
+	moveq	#0,d2
+.b:	rts
+pos_t0:				; flipx ? sx + 16 : sx, flipy ? sy : sy - 16
+	moveq	#0,d1
+	moveq	#-16,d2
+	btst	#0,spr_fl+1
+	beq.s	.a
+	moveq	#16,d1
+.a:	btst	#1,spr_fl+1
+	beq.s	.b
+	moveq	#0,d2
+.b:	rts
+
+; one tile: code spr_code + d0, at (sx + d1, sy + d2)
+put:
+	move.w	spr_code,d3
+	add.w	d0,d3
+	move.w	spr_sx,d4
+	add.w	d1,d4
+	move.w	spr_sy,d5
+	add.w	d2,d5
+	move.w	d3,d0
+	move.w	d4,d2
+	move.w	d5,d3
+	; (falls through)
+
+; d0.w = the tile code (0-319), d2.w = raw x, d3.w = raw y; the flips spr_fl, the palette spr_pal
+tile_draw:
+	move.w	#208,d4
+	sub.w	d3,d4			; the display x of its leftmost pixel
+	cmp.w	#223,d4
+	bgt	tile_none
+	cmp.w	#-15,d4
+	blt	tile_none
+	cmp.w	#287,d2
+	bgt	tile_none
+	cmp.w	#-15,d2
+	blt	tile_none
+	move.w	d0,t_code
+	move.w	d4,t_x
+	move.w	d2,t_y			; the display line of its first row
+	; the baked image (code, flips, palette): masks, then the plane words, both in row order
+	moveq	#0,d5
+	move.w	d0,d5
+	lsl.l	#2,d5
+	add.w	spr_fl,d5
+	lsl.l	#6,d5
+	or.w	spr_pal,d5		; the key (0-81919)
+	move.l	d5,d6
+	add.l	d6,d6
+	lea	sc_index,a0
+	move.w	(a0,d6.l),d1
+	bne.s	.have
+	move.w	sc_used,d1
+	cmp.w	#SC_SLOTS,d1
+	blo.s	.room
+	movem.l	d6/a0,-(sp)
+	bsr	sc_flush
+	movem.l	(sp)+,d6/a0
+	moveq	#0,d1
+.room:	addq.w	#1,d1
+	move.w	d1,sc_used
+	move.w	d1,(a0,d6.l)
+	subq.w	#1,d1
+	mulu	#SC_SIZE,d1
+	lea	sc_data,a1
+	add.l	d1,a1
+	bsr	bake_slot
+	bra.s	.baked
+.have:	subq.w	#1,d1
+	mulu	#SC_SIZE,d1
+	lea	sc_data,a1
+	add.l	d1,a1
+.baked:
+	move.w	#16,t_rows
+	; (falls through)
+
+; a1 = the image slot, t_x / t_y = its first row's display x and line, t_rows = its rows (16, or 8 for a character)
+tile_blit:
+	; the rows inside the picture: first .. last
+	move.w	t_y,d1
+	moveq	#0,d4
+	tst.w	d1
+	bpl.s	.t0
+	move.w	d1,d4
+	neg.w	d4			; the first row
+.t0:	move.w	#287,d3
+	sub.w	d1,d3
+	move.w	t_rows,d0
+	subq.w	#1,d0
+	cmp.w	d0,d3
+	ble.s	.t1
+	move.w	d0,d3
+.t1:	sub.w	d4,d3			; the rows less one
+	bmi	.r
+	; the destination of the first row drawn, the source pointers
+	move.w	t_x,d5
+	moveq	#15,d6
+	and.w	d5,d6			; the shift
+	asr.w	#4,d5			; the group (-1 to 13)
+	move.l	draw_screen_address,a0
+	lea	PIC_Y0*STRIDE+GAME_X(a0),a0
+	ext.l	d1
+	add.w	d4,d1			; the line of the first row drawn
+	lsl.l	#8,d1
+	add.l	d1,a0
+	move.w	d5,d1
+	ext.l	d1
+	lsl.l	#3,d1
+	add.l	d1,a0			; + the group's byte
+	move.w	d4,d1
+	add.w	d1,d1
+	lea	(a1,d1.w),a2		; the masks
+	lea	32(a1),a3
+	lsl.w	#2,d1
+	add.w	d1,a3			; the plane words (8 bytes a row)
+	move.w	d3,d4			; the loop count
+	moveq	#4,d7
+	move.w	#2,$ffff8a20.w
+	move.w	#2,$ffff8a22.w
+	move.w	#8,$ffff8a2e.w
+	move.b	#2,$ffff8a3a.w		; HOP 2
+	move.b	#3,$ffff8a3b.w		; OP 3
+	tst.w	d6
+	beq	.one
+	; two destination words (the shift in the pass, NFSR); the outer words clipped by their end masks
+	move.w	#2,$ffff8a36.w
+	move.w	#-6,$ffff8a30.w
+	move.b	d6,d1
+	or.b	#$40,d1
+	move.b	d1,$ffff8a3d.w
+	moveq	#-1,d2
+	tst.w	d5
+	bpl.s	.cl
+	moveq	#0,d2			; group -1: the first word is outside
+.cl:	moveq	#-1,d3
+	cmp.w	#13,d5
+	bne.s	.cr
+	moveq	#0,d3			; group 13: the second word is outside
+.cr:	moveq	#16,d5
+	sub.w	d6,d5
+.r2:	move.w	(a2)+,d1
+	beq.s	.n2
+	move.w	d1,d0
+	lsr.w	d6,d1
+	and.w	d2,d1
+	move.w	d1,$ffff8a28.w
+	lsl.w	d5,d0
+	and.w	d3,d0
+	move.w	d0,$ffff8a2c.w
+	move.l	a0,$ffff8a32.w
+	move.l	a3,$ffff8a24.w
+	move.w	d7,$ffff8a38.w
+	move.b	#$c0,$ffff8a3c.w
+.n2:	lea	STRIDE(a0),a0
+	lea	8(a3),a3
+	dbf	d4,.r2
+	rts
+	; one word, no shift
+.one:	move.w	#1,$ffff8a36.w
+	move.w	#2,$ffff8a30.w
+	clr.b	$ffff8a3d.w
+.r1:	move.w	(a2)+,d1
+	beq.s	.n1
+	move.w	d1,$ffff8a28.w
+	move.l	a0,$ffff8a32.w
+	move.l	a3,$ffff8a24.w
+	move.w	d7,$ffff8a38.w
+	move.b	#$c0,$ffff8a3c.w
+.n1:	lea	STRIDE(a0),a0
+	lea	8(a3),a3
+	dbf	d4,.r1
+.r:	rts
+tile_none:	rts
+
+; a1 = a slot: the image of tile t_code with the flips spr_fl and the palette spr_pal baked into it (16 masks, then 16 rows
+; of the four plane words).  Keeps all registers.
+bake_slot:
+	movem.l	d0-d7/a0-a6,-(sp)
+	move.w	t_code,d5
+	lsl.w	#2,d5
+	add.w	spr_fl,d5
+	mulu	#96,d5
+	lea	spt,a4
+	lea	(a4,d5.l),a4
+	move.w	spr_pal,d5
+	lsl.w	#3,d5
+	lea	spr_lut,a2
+	lea	(a2,d5.w),a2
+	move.l	a1,a5			; the masks
+	lea	32(a1),a6		; the plane words
+	moveq	#15,d7
+.row:	move.w	(a4)+,d0
+	move.w	(a4)+,d1
+	move.w	(a4)+,d2
+	lea	rowacc,a3
+	clr.l	(a3)
+	clr.l	4(a3)
+	clr.w	8(a3)
+	pen	0
+	pen	1
+	pen	2
+	pen	3
+	pen	4
+	pen	5
+	pen	6
+	pen	7
+	lea	rowacc,a3
+	move.w	(a3)+,(a5)+
+	move.w	(a3)+,(a6)+
+	move.w	(a3)+,(a6)+
+	move.w	(a3)+,(a6)+
+	move.w	(a3)+,(a6)+
+	dbf	d7,.row
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; the cache of baked images empties (all again from now on)
+sc_flush:
+	movem.l	d0-d7/a0-a1,-(sp)
+	moveq	#0,d1
+	moveq	#0,d2
+	moveq	#0,d3
+	moveq	#0,d4
+	moveq	#0,d5
+	moveq	#0,d6
+	moveq	#0,d7
+	sub.l	a1,a1
+	lea	sc_index+SC_KEYS*2,a0
+	move.w	#SC_KEYS*2/32-1,d0
+.f:	movem.l	d1-d7/a1,-(a0)
+	dbf	d0,.f
+	clr.w	sc_used
+	movem.l	(sp)+,d0-d7/a0-a1
+	rts
+
+
+; ------------------------------------------------------------------------------
+; The foreground: the characters of the cells that have pixels (tx 4-39, ty 2-30 show), over everything.  A cell
+; starts at display line 8 * tx - 32 and display x 234 - 8 * ty (a glyph's rows are display lines, its bits run left to
+; right).  Clobbers everything.
+; ------------------------------------------------------------------------------
+
+draw_fg:
+	tst.b	fg_rebuild
+	beq.s	.have
+	clr.b	fg_rebuild
+	bsr	fg_scan
+	bsr	fg_sync
+.have:	lea	fg_list,a5
+.cell:	move.w	(a5)+,d0
+	bmi	.done
+	move.w	d0,d1
+	and.w	#63,d1
+	move.w	d1,fg_tx
+	lsr.w	#6,d0
+	move.w	d0,fg_ty
+	; the cell's position: the first line, the leftmost pixel's x
+	move.w	fg_tx,d3
+	lsl.w	#3,d3
+	sub.w	#32,d3
+	move.w	fg_ty,d4
+	lsl.w	#3,d4
+	neg.w	d4
+	add.w	#234,d4
+	cmp.w	#224,d4			; (a cell outside)
+	bge	.cell
+	cmp.w	#-8,d4
+	ble	.cell
+	cmp.w	#288,d3
+	bge	.cell
+	cmp.w	#-8,d3
+	ble	.cell
+	move.w	d3,t_y
+	move.w	d4,t_x
+	move.w	fg_ty,d0
+	lsl.w	#6,d0
+	add.w	fg_tx,d0
+	lea	R_FGCODE,a1
+	moveq	#0,d1
+	move.b	(a1,d0.w),d1
+	lea	R_FGATTR,a1
+	moveq	#0,d2
+	move.b	(a1,d0.w),d2		; the attribute
+	move.w	d2,d3
+	and.w	#3,d3
+	lsl.w	#4,d3
+	move.w	d2,d4
+	and.w	#$3c,d4
+	lsr.w	#2,d4
+	or.w	d4,d3			; the colour 0-63
+	lea	fg_lut,a2
+	moveq	#0,d4
+	move.b	(a2,d3.w),d4
+	move.w	d4,fg_ste
+	lsr.w	#6,d2
+	and.w	#3,d2			; the flips
+	lsl.w	#2,d1
+	add.w	d2,d1			; character * 4 + flips
+	move.w	d1,fg_char
+	; the image: key SC_FG + (character * 4 + flips) * 16 + STE colour
+	moveq	#0,d6
+	move.w	d1,d6
+	lsl.l	#4,d6
+	add.w	d4,d6
+	add.l	#SC_FG,d6
+	add.l	d6,d6
+	lea	sc_index,a0
+	move.w	(a0,d6.l),d1
+	bne.s	.have2
+	move.w	sc_used,d1
+	cmp.w	#SC_SLOTS,d1
+	blo.s	.room
+	movem.l	d6/a0/a5,-(sp)
+	bsr	sc_flush
+	movem.l	(sp)+,d6/a0/a5
+	moveq	#0,d1
+.room:	addq.w	#1,d1
+	move.w	d1,sc_used
+	move.w	d1,(a0,d6.l)
+	subq.w	#1,d1
+	mulu	#SC_SIZE,d1
+	lea	sc_data,a1
+	add.l	d1,a1
+	bsr	bake_fg
+	bra.s	.baked
+.have2:	subq.w	#1,d1
+	mulu	#SC_SIZE,d1
+	lea	sc_data,a1
+	add.l	d1,a1
+.baked:	move.w	#8,t_rows
+	bsr	tile_blit
+	bra	.cell
+.done:	rts
+
+; a1 = a slot: the glyph fg_char (character * 4 + flips) in the STE colour fg_ste (one row a byte at the top of the word)
+bake_fg:
+	movem.l	d0-d7/a0-a6,-(sp)
+	lea	fgt,a4
+	move.w	fg_char,d5
+	lsl.w	#3,d5
+	lea	(a4,d5.w),a4
+	move.w	fg_ste,d5
+	move.l	a1,a5
+	lea	32(a1),a6
+	moveq	#7,d7
+.row:	moveq	#0,d0
+	move.b	(a4)+,d0
+	lsl.w	#8,d0
+	move.w	d0,(a5)+
+	moveq	#0,d1
+	moveq	#0,d2
+	moveq	#0,d3
+	moveq	#0,d4
+	btst	#0,d5
+	beq.s	.f0
+	move.w	d0,d1
+.f0:	btst	#1,d5
+	beq.s	.f1
+	move.w	d0,d2
+.f1:	btst	#2,d5
+	beq.s	.f2
+	move.w	d0,d3
+.f2:	btst	#3,d5
+	beq.s	.f3
+	move.w	d0,d4
+.f3:	move.w	d1,(a6)+
+	move.w	d2,(a6)+
+	move.w	d3,(a6)+
+	move.w	d4,(a6)+
+	dbf	d7,.row
+	moveq	#7,d7			; (the unused rows: masks 0)
+.z:	clr.w	(a5)+
+	dbf	d7,.z
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+; the foreground RAM as the list was built from it
+fg_sync:
+	lea	R_FGCODE,a0
+	lea	fg_shadow,a1
+	move.w	#2048*2/4-1,d0
+.l1:	move.l	(a0)+,(a1)+
+	dbf	d0,.l1
+	lea	R_FGATTR,a0
+	lea	fg_shadow+2048,a1
+	move.w	#2048/4-1,d0
+.l2:	move.l	(a0)+,(a1)+
+	dbf	d0,.l2
+	rts
+
+; the marked blocks of the foreground RAM against the shadow: a difference asks for a new list
+fg_diff:
+	lea	vblocks,a0
+	lea	R_FGCODE,a1
+	lea	fg_shadow,a2
+	bsr.s	.part
+	lea	vblocks+$80,a0
+	lea	R_FGATTR,a1
+	lea	fg_shadow+2048,a2
+.part:	moveq	#63,d3
+.b:	tst.b	(a0)+
+	beq.s	.nx
+	moveq	#7,d0
+	move.l	a1,a3
+	move.l	a2,a4
+.c:	cmpm.l	(a3)+,(a4)+
+	bne.s	.d
+	dbf	d0,.c
+	bra.s	.nx
+.d:	st	fg_rebuild
+.nx:	lea	32(a1),a1
+	lea	32(a2),a2
+	dbf	d3,.b
+	rts
+
+; The cells of the foreground that have pixels (tx 4-39, ty 2-30 show): their numbers, ended by -1.
+
+fg_scan:
+	lea	fg_list,a0
+	lea	R_FGCODE,a1
+	lea	fg_any,a2
+	moveq	#2,d1			; ty
+.ty:	moveq	#4,d2			; tx
+.tx:	move.w	d1,d0
+	lsl.w	#6,d0
+	add.w	d2,d0
+	moveq	#0,d3
+	move.b	(a1,d0.w),d3
+	tst.b	(a2,d3.w)
+	beq.s	.no
+	move.w	d0,(a0)+
+.no:	addq.w	#1,d2
+	cmp.w	#40,d2
+	blo.s	.tx
+	addq.w	#1,d1
+	cmp.w	#31,d1
+	blo.s	.ty
+	move.w	#-1,(a0)+
+	rts
+
+; ------------------------------------------------------------------------------
+	section bss,bss
+	even
+tilebuf:	ds.b	32
+blit_s:		ds.w	1
+t_code:		ds.w	1
+sc_used:	ds.w	1
+t_rows:		ds.w	1
+fg_char:	ds.w	1
+bgc_used:	ds.w	1
+bg_koff:	ds.l	1
+rowacc:		ds.w	5
+spr_pal:	ds.w	1
+spr_fl:		ds.w	1
+spr_sx:		ds.w	1
+spr_sy:		ds.w	1
+spr_code:	ds.w	1
+spr_flags:	ds.w	1
+spr_off:	ds.w	1
+t_x:		ds.w	1
+t_y:		ds.w	1
+t_row:		ds.w	1
+fg_tx:		ds.w	1
+fg_ty:		ds.w	1
+fg_ste:		ds.w	1
+cell_dirty:	ds.b	64
+force_all:	ds.b	1
+draw_all:	ds.b	1
+fg_rebuild:	ds.b	1
+	even
+fg_list:	ds.w	1100
+	even
+fg_shadow:	ds.b	4096
+	even
+shadow_bg:	ds.b	4096		; the codes, then the attributes, of the background cells as drawn into the ring
+	cnop	0,4
+ring:		ds.b	RING_BYTES
+	cnop	0,4
+bgc_index:	ds.b	BGC_KEYS*2
+bgc_data:	ds.b	BGC_SLOTS*32
+sc_index:	ds.b	SC_KEYS*2
+sc_data:	ds.b	SC_SLOTS*SC_SIZE
+	section text,code
+
+	borders_handlers
+	borders_blit_go
+	borders_report

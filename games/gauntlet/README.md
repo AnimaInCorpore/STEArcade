@@ -68,7 +68,7 @@ PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** magic, **Option*
 
 * **Main**: MC68010 at 14.318181 MHz / 2. `engine/m68kmame.py` is MAME's own Musashi: the build takes MAME 0.289's
   core sources (`m68k_in.lst` through MAME's `m68kmake.py`, the functions of `m68kcpu.cpp` a 68010 needs, unchanged;
-  downloaded from github.com/mamedev/mame, tag mame0289, into `build/mame0289/`) and compiles them outside MAME with
+  downloaded from github.com/mamedev/mame, tag mame0289 (a CPU core, not a driver: the drivers are read from the authoritative 0.286 tree, AGENTS.md), into `build/mame0289/`) and compiles them outside MAME with
   a stand-in for MAME's framework (`engine/m68kmame/emu.h`) and a C interface (`glue.cpp`: 4 KB pages of RAM / ROM /
   unmapped / callback with mirrors, the board's callbacks through ctypes, an instruction hook, a trace buffer,
   coverage per instruction). The copy of MAME in F030Arcade is 0.286 with local changes and its 68010 differs (0.289

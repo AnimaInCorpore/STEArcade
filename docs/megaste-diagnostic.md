@@ -1,5 +1,10 @@
 # Darklord's Mega STE diagnostic — version 4
 
+For the remaining setup-time difference, use the smaller, unattended
+[BLITTIME follow-up](blittime.md). It records independent MFP/TOS clocks,
+register-access controls and start/payload variants; the original diagnostic
+below remains the broader correctness and screen-capture test.
+
 **Start `DLTEST.TOS` and let it finish. No keyboard, mouse, or joystick input is
 needed to advance the tests.** It saves a detailed report and nine stage-specific
 BMP captures on a Mega STE. Physical controls and display/sound quality can be

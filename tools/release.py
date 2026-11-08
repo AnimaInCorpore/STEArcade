@@ -128,10 +128,53 @@ GAMES = [
      "  DMA sound",
      "fire: Space, Control, Z, joystick fire, pad A.  jump: Up, Alternate, X, pad B.  Left / right: slower / faster.\n"
      "  coins: 5 / 6."),
+    ("mario", "MARIO.PRG", "Mario Bros. (Nintendo 1983)",
+     "work in progress: exact logic (lock-step) and picture (256 x 224 in 16 fitted colours), about 98% of the arcade's speed\n"
+     "  and 30 pictures a second (Hatari); the music and effects as recordings of MAME on the DMA sound (not listened to)",
+     "move: the arrows, joystick, pad D-pad.  jump: Space, Control, joystick fire, pad A / C.  coins: 5 / 6, start: 1 / 2."),
+    ("mikie", "MIKIE.PRG", "Mikie (Konami 1984)",
+     "work in progress: exact logic (lock-step) and picture (224 x 256, turned as the arcade's monitor), 16 fitted\n"
+     "  colours; the two SN76489s' voices on the YM (three of the eight at a time); speed measured in Hatari (see the\n"
+     "  game's README)",
+     "move: the arrows, the joystick or a pad; kick / hit: Space, Control, Z, joystick fire, pad A / C;\n"
+     "  second button: Alternate, X, pad B.  Coins 5 / 6, start 1 / 2."),
+    ("yiear", "YIEAR.PRG", "Yie Ar Kung-Fu (Konami 1985)",
+     "work in progress: exact logic and picture (256 x 224 in 16 fitted colours), 96% speed and 37 pictures a second (Hatari), with sound",
+     "move: the arrows, joystick, pad A.  kick: Z, Space, Control, joystick fire, pad A.  punch: X, Alternate, pad B.\n"
+     "  coins: 5 / 6, start 1 / 2."),
+    ("sbasketb", "SBASKETB.PRG", "Super Basketball (Konami 1984)",
+     "work in progress: about 83-90% of the arcade's speed, 19-31 pictures a second (Hatari); exact logic and picture,\n"
+     "  the turned 224 x 256 picture in 16 fitted colours; the sound board's output recorded in MAME, on the DMA sound",
+     "move: arrows, joystick, pad D-pad.  shoot (button 1): Space, Control, Z, joystick fire, pad A.  pass (button 2):\n"
+     "  X, pad B.  button 3: C, pad C.  Joystick 1 / pad A player 1, joystick 0 / pad B player 2."),
+    ("jailbrek", "JAILBREK.PRG", "Jail Break (Konami 1986)",
+     "work in progress: exact logic, the 240 x 224 picture in 16 fitted colours, sound (see the game's README)",
+     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,\n"
+     "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
+    ("dkong3", "DKONG3.PRG", "Donkey Kong 3 (Nintendo 1983)",
+     "work in progress: about 84% of the arcade's speed and 27 pictures a second (Hatari); exact logic, picture\n"
+     "  and sprites; the sound as recordings of MAME on the DMA (not listened to)",
+     "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  coins: 5 / 6,\n"
+     "  start: 1 / 2."),
+    ("junofrst", "JUNOFRST.PRG", "Juno First (Konami 1983)",
+     "experimental: about 61% of the arcade's speed, 8 pictures a second (Hatari); exact logic and picture\n"
+     "  (224 x 256, the screen turned as the arcade's); sound (YM + DMA effects), not compared with the arcade's audio",
+     "Left / Right / Up / Down, the joystick or a pad move the ship; Space, Control, Z or the stick's fire shoot\n"
+     "  (X: the second button).  5 / 6 coin, 1 / 2 start."),
+    ("xevious", "XEVIOUS.PRG", "Super Xevious (Namco 1984)",
+     "experimental: slow (about 22 arcade frames a second, a few pictures a second in Hatari); exact logic\n"
+     "  (three Z80s) and picture; the explosion noise only",
+     "move: the arrows, joystick, pad D-pad.  zapper: Space, Control, fire, pad A / C.  blaster (bomb): Alternate,\n"
+     "  pad B.  coin 5, start 1 / 2."),
+    ("rocnrope", "ROCNROPE.PRG", "Roc'n Rope (Konami 1983)",
+     "work in progress: the arcade's logic exact, the 224 x 256 picture in 16 colours; sound (the sound Z80\n"
+     "  translated, two AYs); later stages not reached",
+     "left / right / up / down: the arrows, joystick, pad.  Button 1 (Space, Z, fire, pad A / C), button 2\n"
+     "  (Control, X, pad B).  1/2 start, 5/6 coins."),
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again
-NOT_RELEASED = {"rtype"}
+NOT_RELEASED = {"rtype", "digdug"}      # Dig Dug: loads 3.66 MB since 2026-11-08 (one dispatch table for the three CPUs), runs in Hatari with 4 MB; left out until the user decides (no natural playthrough, 18-33 pictures a second)
 assert [g[0] for g in GAMES] == [g for g in port.GAMES if g not in NOT_RELEASED] and \
     all(g[1] == port.GAMES[g[0]] for g in GAMES), \
     "tools/release.py: GAMES must list port.GAMES but NOT_RELEASED (same order, same programs)"
@@ -169,7 +212,11 @@ by those tests.  1942: 51,176 inputs / 426 RAM checkpoints; Donkey Kong: 38,200 
 Galaga runs the real 51XX MCU program since 2026-10-21 (the 54XX's explosions are still
 simulated); its full-game verification is pending.  Time Pilot has no sound yet.  Donkey Kong Junior, Pac-Man,
 Pooyan, Mr. Do!, Moon Patrol, Track & Field and Hyper Sports are new: their logic and picture are checked against
-the reference, their full-game verification is pending.  R-Type is not part of this release: while it is developed it needs more than 4 MB of
+the reference, their full-game verification is pending.  Mario Bros., Mikie, Yie Ar Kung-Fu, Super Basketball, Jail
+Break, Donkey Kong 3, Roc'n Rope, Juno First and Super Xevious are newer still: logic and picture are checked against
+the reference, their sound was not listened to and they were not played through; Juno First and Super Xevious are
+slow.  Dig Dug (3.66 MB, 18-33 pictures a second) is not in this release.
+R-Type is not part of this release: while it is developed it needs more than 4 MB of
 RAM.  See the source README for the five-color status
 legend and each port's limitations.  The performance descriptions below are prior per-port measurements,
 not measurements of this release or proof of a full natural playthrough.

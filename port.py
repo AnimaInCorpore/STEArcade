@@ -34,11 +34,28 @@ GAMES = {"dkong": "DKONG.PRG", "1942": "1942.PRG", "galaga": "GALAGA.PRG", "blkt
          "rtype": "RTYPE.PRG", "ddragon": "DDRAGON.PRG", "timeplt": "TIMEPLT.PRG",
          "dkongjr": "DKONGJR.PRG", "pacman": "PACMAN.PRG", "trackfld": "TRACKFLD.PRG",
          "hyperspt": "HYPERSPT.PRG", "pooyan": "POOYAN.PRG", "mrdo": "MRDO.PRG",
-         "mpatrol": "MPATROL.PRG"}
+         "mpatrol": "MPATROL.PRG", "mario": "MARIO.PRG", "mikie": "MIKIE.PRG", "yiear": "YIEAR.PRG", "sbasketb": "SBASKETB.PRG", "jailbrek": "JAILBREK.PRG", "digdug": "DIGDUG.PRG", "dkong3": "DKONG3.PRG", "junofrst": "JUNOFRST.PRG", "xevious": "XEVIOUS.PRG", "rocnrope": "ROCNROPE.PRG"}
 EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
+    "mikie": [("ref/cover.py", list(range(1, 10)), 30000),        # 1-3 play, 4-6 lives kept, 7-8 two players, 9 DIPs
+              ("ref/cover_sound.py", list(range(1, 10)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
+    "yiear": [("ref/cover.py", list(range(1, 12)), 20000),        # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
+              ("ref/cover.py", list(range(12, 27)), 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
+    "dkong3": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-6 and 11 play, 7 two players, 8-9 DIPs, 10 test mode (service DIP), 12 service button
+               ("ref/cover_pens.py", [1, 2, 3, 4, 5, 6], 12000)],  # the pens the colour fit is trained on
+    "junofrst": [("ref/cover.py", list(range(1, 13)), 30000),    # 1-4 play, 5-6 256 lives (6: coin 2), 7 two players, 8 DIPs, 9-12 play
+                 ("ref/sound_log.py", [1, 2, 5, 7], 12000),      # the sound commands of those plays (build/junofrst/sndlog*.pkl)
+                 ("ref/cover_sound.py", [0, 1, 2, 3], 20000)],   # the sound Z80: 0 the game's commands, 1-3 random ones
+    "rocnrope": [("ref/cover.py", list(range(1, 12)), 20000),     # 1-3 play, 4-9 infinite lives (7-9 stages 2-4), 10 two players, 11 DIPs
+                 ("ref/cover.py", list(range(12, 16)), 60000),    # 12-15 MAME's cheats: lives, invincibility, bonus
+                 ("ref/cover.py", list(range(16, 20)), 20000),    # 16-19 the cheats with stages 2, 3, 4, 8 poked ($50C1)
+                 ("ref/cover_sound.py", [0, 1, 2, 3], 12000)],    # the sound Z80: 0 the game's commands, 1-3 random
+    "mario": [("ref/cover.py", list(range(1, 13)), 20000)],       # 1-3 play, 4-6 + 11-12 free play and lives, 7 two players, 8-9 DIPs, 10 service mode
+    "xevious": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9], 20000),      # 1-3 play, 4-5 two players, 6 the attract mode, 7-9 DIPs
+                ("ref/cover.py", [11, 12, 13, 14], 60000),               # infinite lives (MAME cheat)
+                ("ref/cover.py", [31, 32, 33, 34], 60000)],              # invincible (MAME cheat, a ROM patch of the reference): the later areas
     "mpatrol": [("ref/cover.py", list(range(1, 10)), 20000)],    # 1-2 play (2: two players), 3-6 courses by cheats,
                                                                 # 7 sector selection, 8 stop mode, 9 DIPs
     "pooyan": [("ref/cover.py", list(range(1, 14)), 20000),       # 1-3 play, 4-8 lives, 9 high score, 10-11 two players,
@@ -51,8 +68,12 @@ COVER = {
                                                                 # 10 rack test, 11-12 levels 20+ / 250+ (split screen)
     "dkongjr": [("ref/cover.py", [1, 2, 3, 11, 12, 13, 14, 15, 16, 21, 22, 23], 40000),   # play, stages by $6227, name entry
                 ("ref/cover.py", [4, 5], 30000)],                  # no coin: the whole attract sequence (the title)
-    "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
-    "trackfld": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
+    "hyperspt": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-10 start event + first try, 11 two players, 12 DIPs
+              ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
+    "jailbrek": [("ref/cover.py", list(range(1, 13)), 20000)],    # 1-3 play (2, 3: lives, weapons), 4 two players, 5 cheats, 6 DIPs + two players, 7-12 more play styles
+    "trackfld": [("ref/cover.py", list(range(1, 13)), 20000),    # 1-3 play, 4-9 start event + qualify + lives, 10-11 two players, 12 DIPs
+              ("shared:games/trackfld/ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80 (seeds 1-12 the game's commands, 101-103 random)
+    "sbasketb": [("ref/cover.py", list(range(1, 22)), 20000)],   # 1-3 play, 4-5 two players, 6-9 DIPs, 10-11 fast input, 12 the service mode, 13-14 late or no coin, 15-20 patterns, 21 the AUTOPLAY script
     "timeplt": [("ref/cover.py", list(range(1, 14)), 20000)],     # 1-3 play, 4-8 lives + start stage, 9 invincible, 10-11 two players, 12 DIPs, 13 10+ lives
     "gyruss": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-3 play, 4-9 infinite lives, 10-11 two players, 12 DIPs
                ("ref/cover_sound.py", [0], 20000),                 # the sound Z80: the game's commands (seed 1's play)
@@ -74,6 +95,8 @@ COVER = {
               ("ref/cover_pens.py", [31, 32, 33], 30000)],       # the last one finds the palette pens
     "galaga": [("ref/cover.py", [1, 2, 3], 20000), ("ref/cover.py", [4, 5, 6], 30000),   # 4-6: high scores, the name entry
                ("ref/cover.py", [7], 20000)],                                          # 7: the real 51XX
+    "digdug": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 9, 10, 11], 20000), ("ref/cover.py", [12], 12000), ("ref/cover.py", [13, 14, 15, 16], 40000)],   # 1-3 play, 4 two players, 5 hardest + 5 lives, 6 cocktail,
+                                                                          # 7 no coin (attract), 9 other coinage / bonus DIPs, 10-11 fast input
     "bublbobl": [("ref/cover.py", [1, 2, 3, 4, 5, 6], 20000)],
     "1942": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], 60000)],   # 5-8: cheats (later stages), 9-12: two players, 13-16: lives only
     "blktiger": [("ref/cover.py", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], 20000)],   # 4-11: cheats, one stage each
@@ -84,6 +107,60 @@ COVER = {
 }
 # tests: command lines (relative to games/<game>), {n} = the frames argument
 TESTS = {
+    "yiear": [("tools/prepare.py", [], None),
+              ("tools/build.py", ["--sim"], None),
+              ("tools/logic_test.py", ["{n}"], 3000),
+              ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+              ("tools/logic_test.py", ["6000", "--seed", "9", "--quiet"], None),    # two players
+              ("tools/logic_test.py", ["16000", "--seed", "23", "--quiet"], None),  # stages finished in turn by cheat
+              ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
+              ("tools/render_test.py", ["3000", "--seed", "2", "--start", "100", "--every", "3"], None),
+              ("tools/render_test.py", ["9000", "--seed", "24", "--start", "100", "--every", "9"], None),   # later stages
+              ("tools/sprite_test.py", [], None)],              # edges, 16 shifts, holes, guards, 64 KB crossings
+    "dkong3": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/logic_test.py", ["{n}"], 3000),
+               ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+               ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
+               ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
+               ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, guards, 64 KB crossings, both orientations
+               ("tools/sound_test.py", ["3000"], None)],          # the DMA sound driver against the game's commands, snd_mix against the clips
+    "junofrst": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}", "--sound"], 3000),             # + the sound board against tools/sound.py
+                 ("tools/logic_test.py", ["6000", "--seed", "5", "--quiet", "--sound"], None),    # 256 lives
+                 ("tools/logic_test.py", ["6000", "--seed", "7", "--quiet", "--sound"], None),   # two players
+                 ("tools/render_test.py", ["3000", "--seed", "1", "--quiet"], None),
+                 ("tools/sprite_test.py", ["400"], None)],            # the fast blit against the reference blit
+    "rocnrope": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["3000", "--seed", "4"], None),    # infinite lives
+                 ("tools/logic_test.py", ["3000", "--seed", "10"], None),   # two players
+                 ("tools/logic_test.py", ["6000", "--seed", "12"], None),   # MAME's cheats: invincible, deeper play
+                 ("tools/logic_test.py", ["3000", "--seed", "17"], None),   # stage 3 (the waterfall)
+                 ("tools/logic_test.py", ["3000", "--seed", "18"], None),   # stage 4 (the cave)
+                 ("tools/logic_test.py", ["3000", "--seed", "19"], None),   # stage 8
+                 ("tools/render_test.py", ["3000", "--seed", "4", "--start", "900", "--every", "3"], None),
+                 ("tools/render_test.py", ["4000", "--seed", "17", "--start", "1000", "--every", "3"], None),   # stage 3: PSHU into the video RAM
+                 ("tools/render_test.py", ["4000", "--seed", "18", "--start", "1000", "--every", "3"], None),   # stage 4
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/build.py", ["--sim", "--tag", "rocnrope_snd"], None),
+                 ("tools/sound_test.py", ["3000", "--seed", "4", "--tag", "rocnrope_snd"], None)],   # the translated driver, AYs and YM against sound.py
+    "mario": [("tools/prepare.py", [], None),
+              ("tools/build.py", ["--sim"], None),
+              ("tools/logic_test.py", ["{n}"], 3000),
+              ("tools/logic_test.py", ["8000", "--seed", "3", "--quiet"], None),
+              ("tools/render_test.py", ["3000", "--seed", "1", "--start", "100", "--every", "3"], None),
+              ("tools/render_test.py", ["3000", "--seed", "5", "--start", "100", "--every", "3"], None),   # (5: two players)
+              ("tools/sprite_test.py", [], None),                # edges, 16 shifts, flips, guards, 64 KB crossings, both orientations
+              ("tools/sound_test.py", ["3000"], None)],              # the DMA sound driver against the game's commands
+    "xevious": [("tools/prepare.py", [], None),
+                ("tools/build.py", ["--sim"], None),
+                ("tools/logic_test.py", ["{n}"], 3000),                    # the lock-step test, seed 1
+                ("tools/logic_test.py", ["4000", "--seed", "4", "--quiet"], None),   # two players
+                ("tools/render_test.py", ["3000", "--start", "200", "--every", "97"], None),
+                ("tools/render_test.py", ["3000", "--seed", "3", "--start", "150", "--every", "131"], None)],
     "mpatrol": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
@@ -124,6 +201,23 @@ TESTS = {
                  ("tools/render_test.py", ["3000", "--seed", "5", "--start", "500", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
                  ("tools/native_test.py", ["2000"], None)],       # src/natives.s against the 6809 (edge cases too)
+    "mikie": [("tools/prepare.py", [], None),
+              ("tools/build.py", ["--sim"], None),
+              ("tools/logic_test.py", ["{n}"], 3000),
+              ("tools/logic_test.py", ["20000", "--seed", "4"], None),    # lives kept: later rooms
+              ("tools/logic_test.py", ["8000", "--seed", "7"], None),     # two players
+              ("tools/render_test.py", ["3000", "--seed", "4", "--start", "500", "--every", "3"], None),
+              ("tools/sprite_test.py", [], None),             # edges, 16 shifts, holes, guards, 64 KB crossings
+              ("tools/sound_test.py", ["3000"], None),                # the translated sound driver and the YM against sound.py
+              ("tools/sound_test.py", ["3000", "--seed", "2", "--random"], None)],   # the same with random commands
+    "jailbrek": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["20000", "--seed", "3"], None),   # play, lives and weapons cheats
+                 ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # the other DIP switches, two players
+                 ("tools/render_test.py", ["3000", "--seed", "3", "--start", "700", "--every", "3"], None),
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
+                 ("tools/native_test.py", ["600"], None)],        # nat_sn_AF96 against the 6809
     "trackfld": [("tools/prepare.py", [], None),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 3000),
@@ -131,6 +225,15 @@ TESTS = {
                  ("tools/logic_test.py", ["8000", "--seed", "10"], None),   # two players
                  ("tools/render_test.py", ["3000", "--seed", "6", "--start", "1000", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None)],             # edges, 16 shifts, holes, guards, 64 KB crossings
+    "sbasketb": [("tools/prepare.py", [], None),
+                 ("tools/build.py", ["--sim"], None),
+                 ("tools/logic_test.py", ["{n}"], 3000),
+                 ("tools/logic_test.py", ["8000", "--seed", "4"], None),    # two players
+                 ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # a 30 s game: game over, the name entry
+                 ("tools/render_test.py", ["3000", "--seed", "1", "--start", "300", "--every", "5"], None),
+                 ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, banks, guards, 64 KB crossings
+                 ("tools/logic_test.py", ["16000", "--autoplay", "--quiet"], None),   # the runtime's AUTOPLAY script
+                 ("tools/sound_test.py", ["3000"], None)],        # the DMA clips against the game's sound commands
     "timeplt": [("tools/prepare.py", [], None),
                 ("tools/build.py", ["--sim"], None),
                 ("tools/logic_test.py", ["{n}"], 3000),
@@ -241,6 +344,13 @@ TESTS = {
                ("ref/mcu_events_test.py", ["{n}"], 3000),        # the event-driven 51XX against the cycle-exact one
                ("../../engine/mb88x_test.py", ["{n}"], 3000),    # the translated 51XX against the event-driven one
                ("tools/n51_test.py", ["{n}"], 3000)],            # the build's 51XX traffic against the reference
+    "digdug": [("tools/prepare.py", [], None),
+               ("tools/build.py", ["--sim"], None),
+               ("tools/schedule_test.py", ["{n}", "--no-build", "--every", "50", "--slack", "700"], 2400),   # the STE's tile / sprite RAM against the reference's schedule
+               ("tools/native_test.py", [], None),                                                        # digdug.s's natives against the Z80 reference
+               ("tools/render_test.py", ["1500", "2500", "3500", "5000"], None),                          # the picture against the reference renderer
+               ("tools/sprite_test.py", [], None),                                                        # the sprite renderer's edge cases
+               ("tools/sound_test.py", ["2600"], None)],                                                  # the YM registers against tools/sound.py
     "bublbobl": [("tools/mcu_test.py", ["{n}"], 2600),
                  ("tools/build.py", ["--sim"], None),
                  ("tools/logic_test.py", ["{n}"], 2000),          # (into the play: src/natives.s runs there)
@@ -346,6 +456,9 @@ def main():
         wanted = [int(x) for x in rest]
         for script, seeds, frames, *extra in COVER[game]:     # (extra: the script's further arguments)
             for s in [x for x in wanted if x in seeds] if wanted else seeds:   # (a seed given: its group's frames)
+                if script.startswith("shared:"):       # (a script of another port that takes the game first: cover_sound.py)
+                    jobs.append([PY, str(ROOT / script[7:]), game, str(s), str(frames)])
+                    continue
                 jobs.append([PY, game_script(game, script), str(s), str(frames)] + [str(x) for x in (extra[0] if extra else [])])
         if wanted and len(jobs) < len(wanted):
             sys.exit("port.py cover %s: not every seed is in COVER[%r]" % (game, game))

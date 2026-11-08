@@ -178,7 +178,7 @@ in the WolfMAME version that recorded it, a recording is the board's own game, a
 F030Arcade replays such a game on its Falcon Black Tiger port (this repository's translation): 67 minutes, 2,006,700
 points, equal at every check to game over (F030Arcade's `docs/marp-replay.md`, `scripts/mame_inp_dump.py`).  Use it
 for any port whose set has a recording: it found what coverage, PPO and reference tests had not (below, "Coverage and
-discovery"; every port has recordings: the port's schedule then has to leave them as the arcade does).
+discovery"; where a port has recordings, its schedule has to leave them as the arcade does).
 
 ## Coverage and discovery
 
@@ -210,7 +210,7 @@ discovery"; every port has recordings: the port's schedule then has to leave the
   [bp+0h],2D50h`) and called later, some only through ROM tables copied to RAM.  `games/rtype/tools/gen.py` takes them
   from the program: tables in ROM, stored handlers, every stored code address, code right after a RET nothing refers to
   ("plausible" = ordinary instructions up to a transfer, never starting inside covered code).
-* **What the MARP replay found in Black Tiger**: `docs/window-sites.json` misses block copies (bank 0's `ldir` at
+* **What the MARP replay found in Black Tiger**: `games/blktiger/docs/window-sites.json` misses block copies (bank 0's `ldir` at
   `$AC71` copies a 32-byte template from the window: guard every block copy, the guard tests HL at run time);
   object-script handlers reached only through data tables (5-byte records, `00 lo hi` jumps to a handler: F030Arcade
   added ~50 roots, `games/blktiger/docs/main-roots-extra.json`); task starts `ld a,n / ld bc,entry / call $00F6` (BC is
@@ -270,7 +270,7 @@ runtime have to keep:
   address from `read8(op, io_read=False)`: a gen that guards in `read8` also guards stores unless it tells them apart
   (`GSEmitter.storing`; fixed in Black Tiger's and Bubble Bobble's gens too).  1942's and 1943's gens still match
   `(a6,dN.w)` only (2026-11-07): an `(iy+d)` read at one of their window sites is not guarded.
-* **Which window sites to guard**: only the coverage's, kept in `docs/window-sites.json` and audited
+* **Which window sites to guard**: only the coverage's, kept in the port's `docs/window-sites.json` and audited
   (`logic_test.py --audit`); see `speed.md`, "Logic".
 * **A frame-exact replay needs the Z80's time**: delivering the frame interrupt only when the task kernel idles runs
   each frame's work in zero time (Black Tiger's boot then left its random generator five frames ahead).  F030Arcade's
@@ -347,7 +347,7 @@ The mechanism is in `architecture.md`, "Native replacements"; where they pay is 
 * **Hatari scans the old ring out once more**: after the video base is written at the VBL, the frame that starts still
   shows the ring shown before; drawing into the ring just flipped away from tears the lower half.  Draw into a ring
   that was neither shown nor waiting during the last frame (three rings at 50 pictures a second).  Look with a
-  recording (`tools/record.sh`, ffmpeg, a frame at a time).
+  recording (Hatari's AVI or `games/1942/tools/record.sh`, ffmpeg, a frame at a time).
 * **Publish a finished picture with one store**: the VBL runs between any two instructions; a ring index and a ready
   flag written one after the other can be seen half done (a draw ring 3 and a crash far away).  One byte = ring + 1.
 * **Only short HOG passes** (the rule of stefastbobs2): the border interrupts may come at any moment of the
@@ -412,7 +412,7 @@ The mechanism is in `architecture.md`, "Native replacements"; where they pay is 
   level, total level; the modulators only shape the timbre and are left out).  Mind the prescaler the driver selects
   ($2D/$2E/$2F): it sets the FM rate (clock / 72, / 36, / 24) and the SSG clock.  ymfm's attack step relies on C's `~`
   of a promoted int (`att += (~att * inc) >> 4`): with `~att & 0x3FF` in Python the attack never leaves full
-  attenuation.  `engine/opl.py` does the same for Bubble Bobble's YM3526, `engine/opm.py` is planned for R-Type's YM2151.
+  attenuation.  `engine/opl.py` does the same for Bubble Bobble's YM3526, `engine/opm.py` does it for the YM2151 (Double Dragon).
 * **Record with the STE's interrupt timing, not the arcade's.**  The arcade's sound CPU loses an IRQ when a handler
   runs longer than the gap to the next; a driver that does part of its work on odd counts then drifts against its own
   loop.  The STE runs the IRQs of a tick back to back, so record that way and the tunes become periodic; their tempo
@@ -457,7 +457,7 @@ Track & Field's and Hyper Sports' SN76489A with speech on the DMA); see the READ
 ## Memory and release
 
 * **The load budget** (2026-10-15): a program asks TOS for at most 3,700,000 bytes (text + data + BSS + 256;
-  `tools/release.py` refuses more, R-Type is deferred through `OVER_LOAD`).  TOS 2.06 alone leaves 4,061,212 bytes from
+  `tools/release.py` refuses more; R-Type, 6.1 MB, is left out through `NOT_RELEASED`).  TOS 2.06 alone leaves 4,061,212 bytes from
   the desktop on a 4 MB STE (`tools/memfree.sh`), but a tester's Mega STE with a hard disk driver and accessories had
   3,831,554, and five ports at 3.93-4.05 MB would not start.  What brought them to 2.94-3.67 MB without changing what
   the games do:
@@ -476,11 +476,11 @@ Track & Field's and Hyper Sports' SN76489A with speech on the DMA); see the READ
   strips); the release's load limit is solved later (per-stage loading, packing, `engine/rt/hdd.s`).
 * **Floppy disks** (2026-10-28): `tools/release.py` packs each program with LZ4 (`tools/lz4prg.py`, `lz4 -12`) behind a
   0.9 KB stub (`tools/lz4stub.s`) in the AUTO folder of a bootable 720 or 800 KB image (`tools/stdisk.py`) when it
-  fits (12 ports; not Black Tiger, 1943 or Double Dragon at 0.99-1.26 MB packed).  The stub unpacks in place: the packer
+  fits (all but the largest, e.g. Black Tiger, 1943 and Double Dragon at 0.99-1.26 MB packed; release.py says which).  The stub unpacks in place: the packer
   simulates the depacker byte for byte and moves the frame only as far up as the output never overtakes it (~920 bytes
   more than the program; `tools/lz4prg_test.py` runs the stub on Musashi for every port).  4.4-12.7 s at 8 MHz, a VBL
   handler draws the progress bar from the depacker's output pointer; the lengths are longs (matches over 64 KB exist).
-  From a floppy's AUTO folder TOS 2.06 leaves 4,108,870 bytes, so R-Type (3.85 MB) starts there.
+  From a floppy's AUTO folder TOS 2.06 leaves 4,108,870 bytes, which a program of up to the 3.7 MB limit fits.
 
 ## Two related projects compared (2026-10-11)
 

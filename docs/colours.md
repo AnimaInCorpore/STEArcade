@@ -73,6 +73,8 @@ palettes. Dragon Spirit and Splatterhouse were not part of the rollout.
 | Donkey Kong, Donkey Kong Junior | a small PROM set merged by distance and the square root of the minimum count |
 | Galaga, Pac-Man, Moon Patrol | explicit colour sets, direct indices, separate panel and picture palettes |
 | Pac-Mania | no STE colour path yet |
+| Mikie, Mario Bros., Donkey Kong 3, Yie Ar Kung-Fu, Super Basketball, Jail Break, Roc'n Rope, Dig Dug, Super Xevious (ports made after the rollout) | one flat 16-colour palette fitted offline (the default fitter or, for Yie Ar Kung-Fu, a bounded flat fit; the details in each README) |
+| Juno First | 16 fixed pens (the arcade's bitmap has 16 colours) |
 
 Cold conversions in the checker ports do more CPU work: the rollout was a colour change, not a speed-up. The bus
 audit of the rollout also found Commando's shifted-tile pass could reach 320 bus cycles; it now uses two eight-line

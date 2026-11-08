@@ -128,6 +128,8 @@ def defs_uses(ins):
     if stem in ("neg", "com", "asl", "lsl", "clr") or mn in ("nega", "negb", "coma", "comb", "asla", "aslb", "lsla",
                                                              "lslb", "clra", "clrb"):
         return NZVC, 0
+    if mn == "nc":                        # (KONAMI-1 / 6809 $x2: COM when C is set, else NEG; only liveness: not emitted)
+        return NZVC, C
     if stem in ("rol",) or mn in ("rola", "rolb"):
         return NZVC, C
     if stem in ("inc", "dec") or mn in ("inca", "incb", "deca", "decb"):
@@ -197,11 +199,23 @@ class Program:
         # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
         # stores still call io_w.
         self.video_inline = None
+        self.no_follow = set()                    # (set after construction) pcs whose successors discovery does not follow
+        # a3_pb (set after construction, Juno First): the stack's / direct page's slot is above $7FFF, where a 68000
+        # displacement cannot reach from VB: a3 holds PB[a3_slot] (the page's base) instead, the static accesses of the
+        # slot use $<offset in the page>(a3), S = a5 - a3 + slot * $2000, the indexed ones load VB from the context
+        self.a3_pb = False
+        # indirect_io (set after construction, Juno First): the pointer of an indirect operand at an I/O site is read
+        # through <cpu>_io_r (the pointer lives in a bank window's data)
+        self.indirect_io = False
+        # video_push (set after construction): (lo, hi): a PSHU whose bytes land in lo .. hi - 1 (the game fills the
+        # video RAM with the user stack pointer) lists their cells: `bsr <name>_vlist` with d7.w = the lowest address
+        # and d6.w = the byte count - 1 (the cells as video_store lists them; the other addresses are left out)
+        self.video_push = None
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
         self.a3_slot, self.a4_slot = a3_slot, a4_slot     # the slots whose VB a3 / a4 hold (a3: DP's and the stack's)
-        assert a3_slot <= 3 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot
+        assert a3_slot <= 7 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot   # (a3 in slot 4: Juno First, flat bases)
         self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
         self.pid_checks = pid_checks              # page checks compare the slot's page number (PID) instead of PB
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
@@ -279,6 +293,8 @@ def discover(prog):
             ins = decode(rd, pc, prog.dp_at(v), rd_op=prog.opcode_reader(rd) if prog.opcode_reader else None)
             code[v] = ins
             nxt = pc + ins.length
+            if v in prog.no_follow:               # (a hooked instruction that goes nowhere: Mikie's dead LBRA into padding)
+                break
             if ins.target is not None and ins.flow in ("jmp", "jcc", "call"):
                 for t in branch_targets(prog, v, ins):
                     work.append(t)
@@ -613,6 +629,8 @@ class Emitter:
         if a is not None:
             a = (a + off) & 0xFFFF
             k = a >> 13
+            if self.p.a3_pb and k == self.p.a3_slot:
+                return "$%X(a3)" % (a & 0x1FFF)             # (a3 = PB of the slot)
             if self.cached(k):
                 return "$%X(%s)" % (a, self.cached(k))     # (a3 / a4 = VB of their slots)
             if k == 7:
@@ -653,6 +671,7 @@ class Emitter:
             # accumulator offsets on S: the address as a value
             self.e("move.l a5,d7")
             self.e("sub.l %s,d7" % self.s_base())
+            self.s_fix("d7")
             self.acc_add_d7(x.kind)
             self.slot_base_dyn()
             return "%d(a0,d7.l)" % off if off else "(a0,d7.l)"
@@ -723,7 +742,9 @@ class Emitter:
 
     def cached(self, k):
         """the 68000 register holding VB of slot k, or None"""
-        return "a3" if k == self.p.a3_slot else "a4" if k == self.p.a4_slot else None
+        if k == self.p.a3_slot:
+            return None if self.p.a3_pb else "a3"
+        return "a4" if k == self.p.a4_slot else None
 
     def slot_base(self, v, slots, dr, offset):
         """a0 = VB[slot] of the indexed access; the slot from the coverage, else from the register (a3 / a4 hold VB of
@@ -771,6 +792,7 @@ class Emitter:
                     raise Unsupported("auto inc/dec on S: " + ins.text)
                 self.e("move.l a5,d7")
                 self.e("sub.l %s,d7" % self.s_base())
+                self.s_fix("d7")
                 self.e("and.l #$FFFF,d7")
             else:
                 dr = REG16[r]
@@ -794,6 +816,19 @@ class Emitter:
                 reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
                 if len(reads) == 1:
                     ptr = next(iter(reads))
+            if self.p.indirect_io and self.p.io_sites is not None and v in self.p.io_sites:
+                # (indirect_io, Juno First: a pointer in the bank window's data: both bytes through <cpu>_io_r, which
+                # keeps d5 and d6)
+                self.e("move.w d7,-(sp)")
+                self.e("bsr %s_io_r" % self.p.name)
+                self.e("lsl.w #8,d7")
+                self.e("move.w d7,-(sp)")
+                self.e("move.w 2(sp),d7")
+                self.e("addq.w #1,d7")
+                self.e("bsr %s_io_r" % self.p.name)
+                self.e("or.w (sp)+,d7")
+                self.e("addq.l #2,sp")
+                return
             if ptr is not None and self.cached(ptr):
                 b = self.cached(ptr)
             elif ptr is not None:
@@ -1279,7 +1314,7 @@ class Emitter:
     def emit(self, v, ins):
         self.cur_v = v
         mn = ins.mn
-        if mn.startswith("x") and mn not in ("xdec",):
+        if mn.startswith("x") and mn not in ("xdec", "xnc"):
             raise Unsupported("undocumented " + mn)
         bm = base_mn(mn)
         fl = ins.flow
@@ -1685,6 +1720,8 @@ class Emitter:
     STACK_REGS = [(0x80, "pc"), (0x40, "us"), (0x20, "y"), (0x10, "x"), (0x08, "dp"), (0x04, "b"), (0x02, "a"),
                   (0x01, "cc")]
 
+    STACK_SIZE = {"pc": 2, "us": 2, "y": 2, "x": 2}      # (the others: one byte)
+
     def stack_ptr(self, mn):
         """(68000 operand prefix: a5 for S, else a1 loaded from U)"""
         return "a5" if mn.endswith("s") else "a1"
@@ -1737,6 +1774,19 @@ class Emitter:
                 self.e("move.b d7,-(%s)" % sp)
         if user:
             self.a1_to_u()
+            vp = self.p.video_push
+            if vp:
+                n = sum(self.STACK_SIZE.get(r, 1) for bit, r in self.STACK_REGS if mask & bit)
+                skip = self.new_label()
+                self.e("cmp.w #$%04X,d4" % max(vp[0] - n + 1, 0))
+                self.e("blo.s %s" % skip)
+                self.e("cmp.w #$%04X,d4" % vp[1])
+                self.e("bhs.s %s" % skip)
+                self.e("move.w d4,d7")
+                self.e("moveq #%d,d6" % (n - 1))
+                self.e("bsr %s_vlist" % self.p.name)
+                self.lines.append(skip + ":")
+                self._a0 = None
         if live:
             self.e("move.w d5,ccr")
 
@@ -1845,6 +1895,12 @@ class Emitter:
         """d6 = S as a 6809 value"""
         self.e("move.l a5,d6")
         self.e("sub.l %s,d6" % self.s_base())
+        self.s_fix("d6")
+
+    def s_fix(self, reg):
+        """after `sub.l s_base,reg` with a3 = PB of the stack's slot (a3_pb): the page's start address added"""
+        if self.p.a3_pb:
+            self.e("add.l #$%X,%s" % (self.p.a3_slot * 0x2000, reg))
 
     def s_base(self):
         """the operand holding VB of the stack's slot"""
@@ -1854,7 +1910,10 @@ class Emitter:
         """S = d7.w (upper word may be anything): a5 from the stack's slot (dynamic_stack: the slot of S - 1)"""
         self.e("and.l #$FFFF,d7")
         if not self.p.dynamic_stack:
-            self.e("move.l a3,a5")
+            if self.p.a3_pb:
+                self.e("lea -$%X(a3),a5" % (self.p.a3_slot * 0x2000))
+            else:
+                self.e("move.l a3,a5")
             self.e("add.l d7,a5")
             return
         self.e("move.w d7,d6")
@@ -2057,7 +2116,7 @@ class Emitter:
                   "lsla", "lslb", "lsra", "lsrb", "asra", "asrb", "rola", "rolb", "rora", "rorb"):
             self.unary(v, ins, mn[:-1], REG8[mn[-1]])
             return
-        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror"):
+        if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror", "xnc"):
             if self.io_site(v, ins):
                 if mn == "tst":
                     def b():
@@ -2203,7 +2262,22 @@ class Emitter:
         runs inside the flag wrapper (it may spoil the CCR: increments, slot lookups); ROL / ROR take C first."""
         def opnd():
             return r if r else self.ea(v, ins)
-        if op == "neg":
+        if op == "xnc":
+            # KONAMI-1 / 6809 $x2 (undocumented): COM when C is set, else NEG (memory forms; Roc'n Rope's $B610).  C is
+            # saved around the operand's address code, which may spoil the CCR.
+            lc, ld = self.new_label(), self.new_label()
+            self.e("move.w sr,-(sp)")
+            ea = opnd()
+            self.e("move.w (sp)+,d6")
+            self.e("btst #0,d6")
+            self.e("bne.s %s" % lc)
+            self.e("neg.b %s" % ea)
+            self.e("bra.s %s" % ld)
+            self.lines.append(lc + ":")
+            self.e("not.b %s" % ea)
+            self.e("or.b #1,ccr")
+            self.lines.append(ld + ":")
+        elif op == "neg":
             self.e("neg.b %s" % opnd())
         elif op == "com":
             self.wrap(v, N | Z | V, lambda: self.e("not.b %s" % opnd()), const_set=C)

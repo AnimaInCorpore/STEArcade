@@ -1,0 +1,73 @@
+BLITTIME - FOCUSED MEGA STE TIMING TEST
+====================================
+
+Thank you for helping us compare the Mega STE with Hatari.
+This test needs no keyboard, mouse or joystick input.
+
+1. PREPARE
+----------
+Extract BLITTIME.ZIP into a NEW, writable folder on your hard disk.
+Please keep your normal disk driver and AUTO programs for the first run.
+Close other applications. Do not run this alongside music or other tests.
+
+2. START
+--------
+Double-click BLITTIME.TOS. It is a console application, so the desktop
+mouse pointer is hidden. The test changes no display mode and plays no sound.
+It writes BLITTIME.TXT into its working folder. An existing report is never
+replaced: use a new folder for another run.
+
+3. WAIT
+-------
+Allow several minutes. No input is needed to advance any test.
+The screen shows the test number, CPU mode and estimated time remaining.
+The estimate updates BETWEEN timed measurements, so it can pause briefly.
+The first estimate appears after the first completed measurement.
+
+Tests run twice in each mode:
+  Mode 0:  8 MHz, cache off
+  Mode 1: 16 MHz, cache off
+  Mode 2: 16 MHz, cache on
+
+Within Mode 2 the CPU stays at 16 MHz with the cache enabled.
+Both normal TOS interrupt handling and minimal handlers are measured.
+The original CPU setting, Blitter registers and interrupt handlers are
+restored when the program finishes. It then returns to the desktop.
+
+There are no visual sprite tests or BMP captures in this focused program.
+It draws into private RAM and compares the results and guard memory itself.
+The earlier DLTEST captures already established matching sprite images.
+
+4. EXPECTED RESULTS
+-------------------
+The completed report ends with DONE and a total bad-word count of zero.
+It contains 390 measurement rows; numbers in the report are hexadecimal.
+Different elapsed times are useful measurements, not an automatic failure.
+Please send the report even if it records errors or stops partway through.
+
+If it says Timer A or the Blitter is already active, the test skips running
+instead of taking over a running task. Please tell us the exact message.
+
+5. SEND BACK
+------------
+Please send BLITTIME.TXT. Also tell us whether the run finished normally
+and whether anything unusual happened. Keep BUILD.JSN with the report so
+we can identify the exact test build. No screenshot is required.
+
+HATREF.TXT and MMIOREF.TXT are emulator reference reports, not your result.
+Please return BLITTIME.TXT from the Mega STE.
+
+6. OPTIONAL SECOND RUN
+----------------------
+After the first report is safely copied, you may repeat in another NEW
+folder after a simpler boot with optional AUTO programs/accessories disabled.
+Keep the hard-disk driver needed to load the test and save its report.
+Please label the two returned reports NORMAL and SIMPLE.
+
+WHAT THIS INVESTIGATES
+----------------------
+The test varies transfer size, added NOPs, byte/word/BSET start instructions,
+immediate destination read/modify/write, a busy fence, and interrupt overhead.
+CPU-only and idle-register controls provide comparisons without a transfer.
+An independent MFP clock checks the TOS 200 Hz elapsed-time measurements.
+All Blitter transfers use short HOG passes and copy/end-mask operations.

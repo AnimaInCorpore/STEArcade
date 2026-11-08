@@ -36,6 +36,8 @@ attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2/5/6**, **\***
 
 ## State
 
+* Open: in Hatari the attract mode stops at an untranslated Z80 address, `$03C0` (z80_badpc, CRASH.TXT), after about
+  115 s (2026-11-07; release 0.7 stops there too): a coverage gap.
 * Reference board equal to MAME 0.289 (one run, `engine/mame_frames.lua`): the picture 0 pixels and the pens 0 differ
   at 14 frames from 60 to 3600 and at 5000-13800; RAM, sprite buffer, registers, pens and the sound latch identical
   at every 10th frame through 3600 and every 250th through 13800; every stack write with MAME's value and beam
