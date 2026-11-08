@@ -197,6 +197,7 @@ class Program:
         # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
         # stores still call io_w.
         self.video_inline = None
+        self.no_follow = set()                    # (set after construction) pcs whose successors discovery does not follow
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -279,6 +280,8 @@ def discover(prog):
             ins = decode(rd, pc, prog.dp_at(v), rd_op=prog.opcode_reader(rd) if prog.opcode_reader else None)
             code[v] = ins
             nxt = pc + ins.length
+            if v in prog.no_follow:               # (a hooked instruction that goes nowhere: Mikie's dead LBRA into padding)
+                break
             if ins.target is not None and ins.flow in ("jmp", "jcc", "call"):
                 for t in branch_targets(prog, v, ins):
                     work.append(t)
