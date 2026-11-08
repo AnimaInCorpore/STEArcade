@@ -4,9 +4,10 @@
 # run/<Name>.  Only the Hatari this script starts is stopped (other sessions may run their own).  After Mario Bros.'s.
 #   powershell -File games/sbasketb/tools/hatari.ps1 [-Frames 3000] [-Every 300] [-Name sbasketb_hatari] [-Avi 1]
 #     [-Extra build.py options; default -D AUTOPLAY=1: a coin, start and play from the VBL]
-param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "sbasketb_hatari", [int]$Avi = 1,
+param([int]$Frames = 3000, [int]$Every = 300, [string]$Name = "sbasketb_hatari", [int]$Avi = 1, [int]$Sound = 0, [string]$Codec = 'bmp',
       [string[]]$Extra = @('-D', 'AUTOPLAY=1'))
 $ErrorActionPreference = "Stop"
+if ($Sound) { $env:SDL_AUDIODRIVER = 'dummy' }      # (no audio device needed: the AVI still carries the mixed audio)
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 if ($Name -notmatch '^[a-zA-Z0-9_-]+$') { throw "Name must be a simple directory name" }
 $arcade = if ($env:F030ARCADE) { $env:F030ARCADE } else { "C:/Arbeit/F030Arcade" }
@@ -23,9 +24,9 @@ foreach ($f in @('COUNTERS.BIN', 'CRASH.TXT', 'RATE.BIN', 'sbasketb.avi')) {
 }
 Get-ChildItem -LiteralPath $out -Filter 'still_*.png' | Remove-Item
 $args = @('--machine','ste','--memsize','4','--tos',"$arcade/third_party/tos/tos206de.img",
-    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound','off','--borders','true',
+    '--fast-boot','true','--cpu-exact','true','--compatible','true','--sound',$(if ($Sound) { "$Sound" } else { 'off' }),'--borders','true',
     '--confirm-quit','off','--statusbar','false','--run-vbls',($Frames+400),'--log-file',"$out\hatari.log")
-if ($Avi) { $args += @('--avirecord','true','--avi-vcodec','bmp','--avi-file',"$out\sbasketb.avi") }
+if ($Avi) { $args += @('--avirecord','true','--avi-vcodec',$Codec,'--avi-file',"$out\sbasketb.avi") }
 $p = Start-Process -WindowStyle Hidden -PassThru -FilePath "$arcade/third_party/hatari/build-ucrt64/src/hatari.exe" `
     -WorkingDirectory $out -ArgumentList ($args + "$out\SBASKETB.PRG")
 try {

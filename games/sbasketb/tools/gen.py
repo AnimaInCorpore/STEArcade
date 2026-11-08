@@ -47,6 +47,29 @@ def plausible(rd, ops, v, limit=24):
     return True
 
 
+def clean(rd, ops, v, exec_, limit=600):
+    """everything reachable from v (fall-through, branches, calls) before a known instruction decodes as ordinary code"""
+    seen, work = set(), [v]
+    while work and len(seen) < limit:
+        pc = work.pop()
+        while pc not in seen and pc not in exec_:
+            seen.add(pc)
+            if not 0x6000 <= pc < 0xFFE0:
+                return False
+            try:
+                i = decode(rd, pc, DP, rd_op=ops)
+            except Exception:
+                return False
+            if i.mn.upper().startswith("X") or i.mn.upper() in ("NOP2",) or i.flow in ("halt", "swi", "wait"):
+                return False
+            if i.target is not None and i.flow in ("jmp", "jcc", "call"):
+                work.append(i.target)
+            if i.flow in ("ret", "jmp", "ijmp", "rti"):
+                break
+            pc += i.length
+    return True
+
+
 def table_roots(mem):
     """the entries of TABLES: words from the base while they are plausible code addresses and before the next table"""
     rd = lambda a: mem[a & 0xFFFF]
@@ -67,7 +90,7 @@ def table_roots(mem):
     return roots
 
 
-NATIVES = {SBasketPort.IDLE: "sb_idle"}
+NATIVES = {SBasketPort.IDLE: "sb_idle", 0x8DD8: "nat_div_8DD8", 0x64F7: "nat_list_64F7"}   # (src/natives.s)
 
 
 def image():
@@ -81,6 +104,30 @@ def image():
 
 def page_addr(p):
     return "sb_mem+$%04X" % (p << 13)
+
+
+CODE_END = 0xD6A3                               # (the first table: the code is below)
+
+
+def data_roots(mem, exec_):
+    """code addresses that no coverage run reached, found in the ROM: words of the data ($D6A3 on) and 16-bit immediates
+    of executed loads (LDD / LDX / LDY / LDU #) that point into the code, to the start of a basic block (right after an
+    executed return, jump or branch-always) and that decode as ordinary code (`plausible`).  The object scripts and the
+    state machines (JMP ,U) name their handlers this way; a handler no seed met is translated all the same."""
+    rd = lambda a: mem[a & 0xFFFF]
+    ops = konami1_opcode(rd)
+    ends, pool, imm = set(), set(), set()
+    for pc in exec_:
+        i = decode(rd, pc, DP, rd_op=ops)
+        if i.flow in ("ret", "jmp", "ijmp", "rti") or i.mn.upper() in ("BRA", "LBRA"):
+            ends.add(pc + i.length)
+        t = i.text.upper().replace(" ", "")
+        if t[:3] in ("LDD", "LDX", "LDY", "LDU") and t[3:5] == "#$" and len(t) == 9:
+            imm.add(int(t[5:], 16))
+    for a in range(CODE_END, 0xFFDF):
+        pool.add(rd(a) << 8 | rd(a + 1))
+    ok = lambda v: 0x6000 <= v < CODE_END and v not in exec_ and plausible(rd, ops, v) and clean(rd, ops, v, exec_)
+    return {v for v in pool if v in ends and ok(v)} | {v for v in imm if ok(v)}      # (an immediate may name a state inside a routine)
 
 
 def load_cover():
@@ -122,7 +169,7 @@ def program(cover):
     # one base for every slot: an indexed access uses a4 (slot 0) whatever slot the coverage saw
     flat = {v: {(rw, 0, 0, odd) for rw, sl, pg, odd in s} for v, s in acc.items()}
     prog = m6809x.Program("main", "M", lambda p: mem[p << 13:(p + 1) << 13], {p: p for p in range(3, 8)},
-                          roots=[RESET, IRQ] + sorted(NATIVES) + sorted(table_roots(mem)), exec_cover=set(exec_), acc_cover=flat, targets=tg,
+                          roots=[RESET, IRQ] + sorted(NATIVES) + sorted(table_roots(mem)) + sorted(data_roots(mem, exec_)), exec_cover=set(exec_), acc_cover=flat, targets=tg,
                           page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0x20, a3_slot=1, a4_slot=0, dp_sites=dp_sites,
                           natives={v: l for v, l in NATIVES.items()
                                    if '%04X' % v not in os.environ.get('SB_NO_NATIVES', '')},

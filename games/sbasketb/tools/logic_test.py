@@ -60,6 +60,11 @@ def main():
     trace = [] if os.environ.get('TRACE') else None
     trace_from = int(os.environ.get('TRACE') or 0)
     cur = [0]
+    prof_from = int(os.environ.get('PROF') or 0) if os.environ.get('PROF') else None
+    prof = {}
+    if prof_from is not None:
+        names = sorted((v, k) for k, v in sym.items())
+        nv = [v for v, _ in names]
     if trace is not None:
         names = sorted((v, k) for k, v in sym.items())
         nv = [v for v, _ in names]
@@ -67,7 +72,13 @@ def main():
     def run_to(targets):
         total = 0
         while total < 400_000_000:
-            total += cpu.execute(1 if trace is not None and cur[0] >= trace_from else 2000).cycles
+            if prof_from is not None and cur[0] >= prof_from:
+                p0 = cpu.r_pc()
+                c = cpu.execute(1).cycles
+                total += c
+                prof[p0] = prof.get(p0, 0) + c
+            else:
+                total += cpu.execute(1 if trace is not None and cur[0] >= trace_from else 2000).cycles
             pc = cpu.r_pc()
             if trace is not None and cur[0] >= trace_from:
                 trace.append(pc)
@@ -149,6 +160,16 @@ def main():
             print('%d frames exact' % (f + 1), flush=True)
     print('PASS: %d frames (seed %d), RAM, video RAM, sprite RAM, the palette bank, the scroll, the latch and the sound commands exact' % (args.frames, args.seed))
     print('68000 cycles a frame (the logic, no drawing; Musashi): %d' % (cycles[0] // args.frames))
+    if prof:                    # PROF=<first frame>: the cycles by the last symbol at or before the pc (a label of the generated code)
+        n = args.frames - prof_from
+        agg, tot = {}, 0
+        for a, c in prof.items():
+            k = names[bisect.bisect_right(nv, a) - 1][1]
+            agg[k] = agg.get(k, 0) + c
+            tot += c
+        print('profile over %d frames: %d cycles a frame; hottest labels:' % (n, tot // n))
+        for k, c in sorted(agg.items(), key=lambda kv: -kv[1])[:60]:
+            print('  %-22s %6d  %4.1f%%' % (k, c // n, 100.0 * c / tot))
 
 
 if __name__ == '__main__':

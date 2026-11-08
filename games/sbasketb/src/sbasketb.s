@@ -915,6 +915,7 @@ dbg_name4:
 	endc
 
 	include	"render.s"
+	include	"natives.s"
 	ifnd NOSOUND
 	include	"sound.s"
 	endc
