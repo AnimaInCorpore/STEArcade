@@ -198,11 +198,18 @@ class Program:
         # stores still call io_w.
         self.video_inline = None
         self.no_follow = set()                    # (set after construction) pcs whose successors discovery does not follow
+        # a3_pb (set after construction, Juno First): the stack's / direct page's slot is above $7FFF, where a 68000
+        # displacement cannot reach from VB: a3 holds PB[a3_slot] (the page's base) instead, the static accesses of the
+        # slot use $<offset in the page>(a3), S = a5 - a3 + slot * $2000, the indexed ones load VB from the context
+        self.a3_pb = False
+        # indirect_io (set after construction, Juno First): the pointer of an indirect operand at an I/O site is read
+        # through <cpu>_io_r (the pointer lives in a bank window's data)
+        self.indirect_io = False
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
         self.a3_slot, self.a4_slot = a3_slot, a4_slot     # the slots whose VB a3 / a4 hold (a3: DP's and the stack's)
-        assert a3_slot <= 3 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot
+        assert a3_slot <= 7 and a4_slot <= 3 and a3_slot != a4_slot and dp >> 5 == a3_slot   # (a3 in slot 4: Juno First, flat bases)
         self.nf_dispatch = nf_dispatch            # the runtime has <cpu>_dispatch_nf: no CCR kept (no flags live)
         self.pid_checks = pid_checks              # page checks compare the slot's page number (PID) instead of PB
         self.after = after                        # (v, ins) -> 68000 lines to run after the instruction (seq ones), or None
@@ -616,6 +623,8 @@ class Emitter:
         if a is not None:
             a = (a + off) & 0xFFFF
             k = a >> 13
+            if self.p.a3_pb and k == self.p.a3_slot:
+                return "$%X(a3)" % (a & 0x1FFF)             # (a3 = PB of the slot)
             if self.cached(k):
                 return "$%X(%s)" % (a, self.cached(k))     # (a3 / a4 = VB of their slots)
             if k == 7:
@@ -656,6 +665,7 @@ class Emitter:
             # accumulator offsets on S: the address as a value
             self.e("move.l a5,d7")
             self.e("sub.l %s,d7" % self.s_base())
+            self.s_fix("d7")
             self.acc_add_d7(x.kind)
             self.slot_base_dyn()
             return "%d(a0,d7.l)" % off if off else "(a0,d7.l)"
@@ -726,7 +736,9 @@ class Emitter:
 
     def cached(self, k):
         """the 68000 register holding VB of slot k, or None"""
-        return "a3" if k == self.p.a3_slot else "a4" if k == self.p.a4_slot else None
+        if k == self.p.a3_slot:
+            return None if self.p.a3_pb else "a3"
+        return "a4" if k == self.p.a4_slot else None
 
     def slot_base(self, v, slots, dr, offset):
         """a0 = VB[slot] of the indexed access; the slot from the coverage, else from the register (a3 / a4 hold VB of
@@ -774,6 +786,7 @@ class Emitter:
                     raise Unsupported("auto inc/dec on S: " + ins.text)
                 self.e("move.l a5,d7")
                 self.e("sub.l %s,d7" % self.s_base())
+                self.s_fix("d7")
                 self.e("and.l #$FFFF,d7")
             else:
                 dr = REG16[r]
@@ -797,6 +810,19 @@ class Emitter:
                 reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
                 if len(reads) == 1:
                     ptr = next(iter(reads))
+            if self.p.indirect_io and self.p.io_sites is not None and v in self.p.io_sites:
+                # (indirect_io, Juno First: a pointer in the bank window's data: both bytes through <cpu>_io_r, which
+                # keeps d5 and d6)
+                self.e("move.w d7,-(sp)")
+                self.e("bsr %s_io_r" % self.p.name)
+                self.e("lsl.w #8,d7")
+                self.e("move.w d7,-(sp)")
+                self.e("move.w 2(sp),d7")
+                self.e("addq.w #1,d7")
+                self.e("bsr %s_io_r" % self.p.name)
+                self.e("or.w (sp)+,d7")
+                self.e("addq.l #2,sp")
+                return
             if ptr is not None and self.cached(ptr):
                 b = self.cached(ptr)
             elif ptr is not None:
@@ -1848,6 +1874,12 @@ class Emitter:
         """d6 = S as a 6809 value"""
         self.e("move.l a5,d6")
         self.e("sub.l %s,d6" % self.s_base())
+        self.s_fix("d6")
+
+    def s_fix(self, reg):
+        """after `sub.l s_base,reg` with a3 = PB of the stack's slot (a3_pb): the page's start address added"""
+        if self.p.a3_pb:
+            self.e("add.l #$%X,%s" % (self.p.a3_slot * 0x2000, reg))
 
     def s_base(self):
         """the operand holding VB of the stack's slot"""
@@ -1857,7 +1889,10 @@ class Emitter:
         """S = d7.w (upper word may be anything): a5 from the stack's slot (dynamic_stack: the slot of S - 1)"""
         self.e("and.l #$FFFF,d7")
         if not self.p.dynamic_stack:
-            self.e("move.l a3,a5")
+            if self.p.a3_pb:
+                self.e("lea -$%X(a3),a5" % (self.p.a3_slot * 0x2000))
+            else:
+                self.e("move.l a3,a5")
             self.e("add.l d7,a5")
             return
         self.e("move.w d7,d6")

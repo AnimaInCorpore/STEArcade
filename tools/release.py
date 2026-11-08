@@ -151,6 +151,11 @@ GAMES = [
      "work in progress: exact logic, the 240 x 224 picture in 16 fitted colours, sound (see the game's README)",
      "move: the arrows, joystick, pad D-pad.  fire: Space, Control, joystick fire, pad A / C.  select weapon: X,\n"
      "  Alternate, pad B.  Player 2: joystick 0, pad B, W A S D Q E.  coins: 5 / 6, start: 1 / 2."),
+    ("junofrst", "JUNOFRST.PRG", "Juno First (Konami 1983)",
+     "experimental: about 56% of the arcade's speed, 9-10 pictures a second (Hatari); exact logic and picture (\n"
+     "  224 x 256, the screen turned as the arcade's); sound (YM + DMA effects), not compared with the arcade's audio",
+     "Left / Right / Up / Down, the joystick or a pad move the ship; Space, Control, Z or the stick's fire shoot\n"
+     "  (X: the second button).  5 / 6 coin, 1 / 2 start."),
 ]
 # registered ports left out of the release: R-Type needs more than 4 MB while it is developed (all eight stages'
 # sprites pre-coloured); the user took it out on 2026-11-01 until it fits again

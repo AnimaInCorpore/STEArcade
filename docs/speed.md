@@ -315,6 +315,7 @@ not been re-measured in Hatari since).
 | Track & Field | 95% / 41.9 autoplay | n/a | sound: 6 | both | idle, sound | `video_inline` | n/a (idle native) |
 | Mikie | 92% / 35.4 attract + first room (with sound) | n/a (flat) | n/a | both | idle, CWAI, sort, sprite copy, `inline_calls` emitter, sound | `video_inline` | n/a (idle native) |
 | Hyper Sports | 85% / 26.9 autoplay | n/a | sound | both | idle, copies, division, sound | `video_inline` | n/a (idle native) |
+| Juno First | 61% / 8.1 play (MAX_SKIP 6) | n/a | - | both (+1% only) | clears, blit passes | - (planar `vram_wr`) | custom |
 | Double Dragon | 56% / 7.1 play (MAX_SKIPS 8) | n/a (bank contexts) | `inline_calls` (bank selectors) | both + `RET_WEIGHTS` | collision, sprites, banks, MCU | `*_written` | ? |
 | Yie Ar Kung-Fu | 96% / 37.7 autoplay | flat | - | both | sprite RAM builder, idle | `st vram_w` / `vram_n` after coverage-recorded store sites, `static_write` for the sound ports | n/a (idle native) |
 | Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
