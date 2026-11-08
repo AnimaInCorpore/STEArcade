@@ -1244,6 +1244,141 @@ dd_init_dispatch:
 	blo.s	.scatter
 	rts
 
+; nat_x04d5: the sound CPU's sequencer step of one voice, $04D5-$0630 (15% of the game's interrupts translated): the voice
+; counter and note pointer, the note's nibble tables, the registers $9B21-$9B2F, the volume rule and the multiply that decides
+; whether the note goes on.  Writes the same RAM bytes as the Z80 code and continues at its `ret` ($0612 / $0630); the
+; registers and flags are dead there (the callers, $0360 and $03C7, set their own).  tools/native_test.py.
+; a1 = the sound CPU's block (ROM below $1000), a2 = its RAM page $9A00 (offset = address - $9A00).
+
+nat_x04d5:
+	movem.l	a1-a2,-(a7)
+	lea	g3_block,a1
+	lea	g3_block+$9AF0,a2
+	moveq	#0,d0
+	move.b	69(a2),d0		; v ($9B35)
+	addq.b	#1,-68(a2,d0.w)		; the voice's counter $9AAC + v
+	move.w	d0,d1
+	add.w	d1,d1
+	moveq	#0,d2
+	lea	$700(a1),a3
+	move.b	1(a3,d1.w),d2		; the sequence's address $0700 + 2 v
+	lsl.w	#8,d2
+	move.b	(a3,d1.w),d2
+	moveq	#0,d3
+	move.b	-21(a2,d0.w),d3		; + the position $9ADB + v
+	add.w	d3,d2			; the note's address
+	move.b	d2,73(a2)		; ($9B39)
+	move.w	d2,d3
+	lsr.w	#8,d3
+	move.b	d3,74(a2)
+	moveq	#0,d3
+	move.b	(a1,d2.l),d3		; the note's byte
+	moveq	#0,d5
+	move.b	71(a2),d5		; the channel $9B37
+	cmp.b	#$FF,d3
+	beq	.end
+	moveq	#0,d1			; the nibble table of the voice ($07BD + v)
+	lea	$7BD(a1),a3
+	move.b	(a3,d0.w),d1
+	move.w	#$631,d7
+	tst.b	d1
+	beq.s	.t_set
+	move.w	#$64B,d7
+	subq.b	#1,d1
+	beq.s	.t_set
+	move.w	#$665,d7
+.t_set:	move.w	d3,d1
+	lsr.b	#4,d1
+	and.w	#15,d1
+	add.w	d1,d1
+	add.w	d7,d1
+	moveq	#0,d7
+	move.b	1(a1,d1.w),d7		; BC = the table's word
+	lsl.w	#8,d7
+	move.b	(a1,d1.w),d7
+	move.w	d3,d1
+	and.w	#15,d1
+	lsr.w	d1,d7			; >> the note's low nibble
+	move.w	#49,d2		; HL = $9B21 / $9B26 / $9B2B by the channel, DE = $9B25 / $9B2A / $9B2F
+	tst.b	d5
+	beq.s	.c_set
+	move.w	#54,d2
+	cmp.b	#1,d5
+	beq.s	.c_set
+	move.w	#59,d2
+.c_set:	move.b	d7,(a2,d2.w)
+	ror.b	#4,d7
+	move.b	d7,1(a2,d2.w)
+	ror.w	#8,d7
+	move.b	d7,2(a2,d2.w)
+	ror.b	#4,d7
+	move.b	d7,3(a2,d2.w)
+	addq.w	#4,d2			; (DE: HL + 4)
+	cmp.b	#$C0,d3
+	beq.s	.zero
+	moveq	#0,d1
+	move.b	d0,d1
+	add.b	#$FC,d1			; ($057B: `rst $10` leaves A = $FC + v, not a table byte: 0 / 1 never)
+	beq.s	.rule3
+	subq.b	#1,d1
+	beq.s	.rule2
+	move.b	-68(a2,d0.w),d1		; $0582: counter < 6: its complement
+	cmp.b	#6,d1
+	bhs.s	.rule3
+	not.b	d1
+	bra.s	.store
+.rule2:	move.b	-68(a2,d0.w),d1
+	cmp.b	#6,d1
+	bhs.s	.rule3
+	add.b	d1,d1
+	bra.s	.store
+.rule3:	moveq	#0,d1			; $05A0
+	lea	$826(a1),a3
+	move.b	(a3,d0.w),d1
+	beq.s	.ten
+	move.b	-68(a2,d0.w),d7
+	sub.b	d1,d7
+	bcs.s	.ten
+	sub.b	#$0A,d7
+	bcc.s	.zero
+	neg.b	d7
+	move.b	d7,d1
+	bra.s	.store
+.ten:	moveq	#$0A,d1
+	bra.s	.store
+.zero:	moveq	#0,d1
+.store:	move.b	d1,(a2,d2.w)
+	lea	$793(a1),a3
+	move.b	(a3,d0.w),64(a2,d5.w)
+	moveq	#0,d1
+	move.b	68(a2),d1		; the sound id $9B34
+	move.b	26(a2,d1.w),d1	; its value $9B0A + id
+	moveq	#0,d2
+	move.b	74(a2),d2
+	lsl.w	#8,d2
+	move.b	73(a2),d2
+	addq.w	#1,d2
+	moveq	#0,d3
+	move.b	(a1,d2.l),d3		; the note's second byte
+	mulu	d3,d1			; (the shift and add loop of $05E8)
+	cmp.b	-68(a2,d0.w),d1
+	bne.s	.out
+	addq.b	#2,-21(a2,d0.w)
+	clr.b	-68(a2,d0.w)
+.out:	movem.l	(a7)+,a1-a2
+	jmp	X0612
+.end:	move.w	#53,d2		; $0613: the end of the sequence
+	tst.b	d5
+	beq.s	.e_set
+	move.w	#58,d2
+	cmp.b	#1,d5
+	beq.s	.e_set
+	move.w	#63,d2
+.e_set:	clr.b	(a2,d2.w)
+	move.b	#1,72(a2)
+	movem.l	(a7)+,a1-a2
+	jmp	X0630
+
 ; A plain data write ($7000, hooked): into the 51XX's latch if the transfer is a write to it.
 
 g_data06:

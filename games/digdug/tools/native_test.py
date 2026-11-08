@@ -76,4 +76,70 @@ for n in range(cases):
         if bad > 5:
             break
 print("nat_y0e4c: %d cases, %d differ" % (cases, bad))
-sys.exit(1 if bad else 0)
+
+
+# ---- nat_x04d5: the sound CPU's sequencer step against its Z80 code ($04D5, returns at $0612 / $0630 / $05FF)
+srom = load("dd1.7")
+STOP3 = (sym["X0612"], sym["X0630"])
+
+
+def z80_snd(ram):
+    mem8 = bytearray(0x10000)
+    mem8[:len(srom)] = srom
+    mem8[0x8000:0xA000] = ram
+    def rd(a): return mem8[a & 0xFFFF]
+    def wr(a, v):
+        if a >= 0x8000: mem8[a & 0xFFFF] = v
+    c = Z80(rd, wr)
+    c.pc, c.sp = 0x04D5, 0x8B80
+    c.sp -= 2; mem8[c.sp] = 0x34; mem8[c.sp + 1] = 0x12
+    while c.pc != 0x1234:
+        c.step()
+    return bytes(mem8[0x8000:0xA000])
+
+
+def native_snd(ram):
+    mem.w_block(sym["g3_block"], srom)
+    mem.w_block(sym["g3_ram"], bytes(ram))
+    cpu.w_sr(0x2700)
+    for r in (R.D0, R.D1, R.D2, R.D3, R.D5, R.D7):
+        cpu.w_reg(r, 0)
+    cpu.w_reg(R.A6, sym["g3_block"])
+    cpu.w_reg(R.A7, 0x8000)
+    for r in (R.A0, R.A1, R.A2, R.A3):
+        cpu.w_reg(r, 0x1111111 * (1 + r - R.A0))
+    cpu.w_pc(sym["nat_x04d5"])
+    for _ in range(100000):
+        if cpu.r_pc() in STOP3:
+            break
+        cpu.execute(1)
+    else:
+        raise AssertionError("nat_x04d5 did not reach a ret")
+    for r in (R.A0, R.A1, R.A2):
+        assert cpu.r_reg(r) == 0x1111111 * (1 + r - R.A0), "a%d changed" % (r - R.A0)
+    return bytes(mem.r_block(sym["g3_ram"], 0x2000))
+
+
+bad2 = 0
+rnd2 = random.Random(11)
+for n in range(cases * 4):
+    ram = bytearray(rnd2.randrange(256) for _ in range(0x2000))
+    ram[0x1B35] = rnd2.randrange(3)                      # the voice
+    ram[0x1B37] = rnd2.choice((0, 1, 2, 2, 3, 255))      # the channel
+    ram[0x1B34] = rnd2.randrange(21)                     # the sound id
+    if rnd2.random() < 0.8:
+        ram[0x1ADB + ram[0x1B35]] = rnd2.randrange(0, 40)        # the position in the sequence
+    ram[0x1AAC + ram[0x1B35]] = rnd2.choice((0, 1, 2, 5, 6, 7, 9, 20, rnd2.randrange(256)))
+    ram[0x1B0A + ram[0x1B34]] = rnd2.randrange(256)
+    want = z80_snd(bytes(ram))
+    got = native_snd(ram)
+    same = want[:0xB60] == got[:0xB60] and want[0xB80:0xB90] == got[0xB80:0xB90] and want[0xBA0:] == got[0xBA0:]       # (below SP = $8B80: the call's word)
+    same = want == got or all(want[i] == got[i] for i in range(0x2000) if not 0xB60 <= i < 0xB80)
+    if not same:
+        bad2 += 1
+        d = [i for i in range(0x2000) if want[i] != got[i] and not 0xB60 <= i < 0xB80]
+        print("snd case %d: %d bytes differ, first %s" % (n, len(d), ["%04X %02X/%02X" % (0x8000 + i, want[i], got[i]) for i in d[:4]]))
+        if bad2 > 5:
+            break
+print("nat_x04d5: %d cases, %d differ" % (cases * 4, bad2))
+sys.exit(1 if bad or bad2 else 0)
