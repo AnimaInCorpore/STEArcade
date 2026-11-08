@@ -281,9 +281,10 @@ def main():
             print("stopped after %d good frames" % f)
             return 1
         if args.render:
+            mem.w16(sym["ren_buf"], f & 1)
             rc = call_routine("ren_update")
             rcycles.append(rc)
-            dd = render_test.window_diff(mem, sym, m, flat)
+            dd = render_test.window_diff(mem, sym, m, flat, "dbuf%d" % (f & 1))
             if dd:
                 print("frame %d (%d after the start): ren_update, %d window pixels differ" % (m.frame, f, dd))
                 return 1
