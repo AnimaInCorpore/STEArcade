@@ -956,6 +956,12 @@ key_table:
 	dc.b	$03,$10,$00,$00		; 2 = start 2
 	dc.b	$06,$01,$00,$00		; 5 = coin 1
 	dc.b	$07,$02,$00,$00		; 6 = coin 2
+	dc.b	$6a,$00,$00,$01		; keypad 4 = player 2 left
+	dc.b	$6c,$00,$00,$02		; keypad 6 = right
+	dc.b	$68,$00,$00,$04		; keypad 8 = up
+	dc.b	$6e,$00,$00,$08		; keypad 2 = down
+	dc.b	$70,$00,$00,$10		; keypad 0 = player 2 button 1
+	dc.b	$71,$00,$00,$20		; keypad . = player 2 button 2
 	dc.b	0,0,0,0
 	even
 
