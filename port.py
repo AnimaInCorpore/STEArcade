@@ -40,7 +40,8 @@ EXTRACTED = ROOT / "assets" / "roms" / "extracted"
 # coverage: (script, seeds, frames) groups; the pickles land in build/<game>/
 COVER = {
     "mikie": [("ref/cover.py", list(range(1, 10)), 30000),        # 1-3 play, 4-6 lives kept, 7-8 two players, 9 DIPs
-              ("ref/cover_sound.py", list(range(1, 10)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
+              ("ref/cover.py", [10, 11, 12], 30000),              # 10-12 the rooms 0-6 started by hand in turn (ref/cover.py cheats)
+              ("ref/cover_sound.py", list(range(1, 13)) + [101, 102, 103], 20000)],   # the sound Z80: the game's commands (seeds 1-9), random commands
     "yiear": [("ref/cover.py", list(range(1, 12)), 20000),        # 1-4 play, 5-8 five lives and easy, 9 two players, 10 DIPs (dual controls), 11 service mode
               ("ref/cover.py", list(range(12, 27)), 30000)],     # 12-22 start stage 1-11 by cheat, 23-24 stages finished in turn, 25-26 deaths in stages 4 / 9
     "dkong3": [("ref/cover.py", list(range(1, 13)), 20000),        # 1-6 and 11 play, 7 two players, 8-9 DIPs, 10 test mode (service DIP), 12 service button

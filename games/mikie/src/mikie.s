@@ -501,6 +501,29 @@ mk_emit:
 	addq.w	#4,d4
 	rts
 
+; mk_inc1u: the native at $C9CE (INC 1,U with U in the colour RAM: read-modify-write of the video area, which the
+; translation does not do): the byte incremented, its cell listed for the renderer once; flags dead (LDA ,U follows).
+mk_inc1u:
+	moveq	#0,d7
+	move.w	d4,d7
+	addq.w	#1,d7
+	cmp.w	#$3800,d7
+	blo.s	.ram
+	cmp.w	#$4000,d7
+	bhs.s	.ram
+	addq.b	#1,(a3,d7.w)
+	and.w	#$7FF,d7
+	lea	cell_dirty,a0
+	tst.b	(a0,d7.w)
+	bne.s	.d
+	st	(a0,d7.w)
+	move.l	cell_ptr,a0
+	move.w	d7,(a0)+
+	move.l	a0,cell_ptr
+.d:	jmp	M00C9D0
+.ram:	addq.b	#1,(a3,d7.w)
+	jmp	M00C9D0
+
 mk_idle:
 	move	sr,d5			; the 6809's N Z V C
 	moveq	#0,d7

@@ -8,7 +8,7 @@ sprites: Counter of (code, gfx bank, palette-bank colour, flip x, flip y) entrie
 
 Seeds: 1-3 attract, coin, start, random play (to the game over and again); 4-6 the same with player 1's lives kept at
 $2970 (the game runs on: every stage reached by play); 7-8 two players; 9 the other DIP switches (7 lives, bonus 40k,
-hardest, no demo sounds), 10 the service-less variants: start button held at the start.
+hardest, no demo sounds), 10-12 as 4-6 with the later rooms started by hand (cheats).
 """
 import collections
 import pickle
@@ -66,9 +66,20 @@ def inputs(frame, rnd, state):
     return system, p1, p1 if two else 0xFF
 
 
+ROOM = 0x2971                  # the room (0-6; its palette bank is the table at $D1C6)
+STATE = 0x2908                 # the play state machine (1: a room starts)
+
+
 def cheats(seed, frame, m, state):
-    if 4 <= seed <= 6 and m.mem[LIVES1] < 2:
+    """4-6, 10-12: player 1's lives kept.  10-12: in play every 700 + 250 (seed - 10) frames the next room (seed 10: +1,
+    11: +2, 12: +3 of 7) is started by hand (ROOM, STATE = 1): the later rooms, as the game starts them"""
+    if (4 <= seed <= 6 or seed >= 10) and m.mem[LIVES1] < 2:
         m.mem[LIVES1] = 2
+    if seed >= 10 and m.mem[0x2902] == 2 and frame >= state.get('room_at', 0):
+        room = state['room'] = (state.get('room', 0) + seed - 9) % 7
+        state['room_at'] = frame + 700 + 250 * (seed - 10)
+        m.mem[ROOM] = room
+        m.mem[STATE] = 1
 
 
 def io(a, rw):
