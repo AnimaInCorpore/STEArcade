@@ -130,13 +130,23 @@ def main():
     compare(-1)
     state = {'two': args.seed in (4, 6)}
     cycles[0] = 0
+    replay = cover.replay_ticks() if args.seed == 13 else None     # (the search bot's recorded play, lives cheat from 420)
+    if replay:
+        args.frames = min(args.frames, len(replay))
     for f in range(args.frames):
         m.frame = f
-        m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
+        if replay:
+            m.system, m.p1, m.p2 = replay[f][0], replay[f][1], 0xFF
+        else:
+            m.system, m.p1, m.p2 = cover.inputs(f, rnd, state)
         for n, v in (('io_sys', m.system), ('io_p1', m.p1), ('io_p2', m.p2)):
             mem.w8(sym[n], v)
         before = bytes(m.mem)
-        cover.cheats(args.seed, f, m, state)
+        if replay:
+            if f >= 420:
+                m.mem[cover.LIVES1] = 8
+        else:
+            cover.cheats(args.seed, f, m, state)
         after = bytes(m.mem)
         for lo, hi in AREAS:
             for a in range(lo, hi):
