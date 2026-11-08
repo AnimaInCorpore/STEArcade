@@ -292,6 +292,9 @@ vbl:
 	move.b	in0_low,d0		; (active high on the Z80 side: the keyboard's and joysticks' bits inverted, the pads or'd)
 	not.b	d0
 	or.b	jp_in,d0
+	move.b	jp_in+1,d1		; (the second pad's directions and fire move the same Stanley: not its coins)
+	and.b	#$1F,d1
+	or.b	d1,d0
 	move.b	d0,IO_IN0
 	move.b	in1_low,d0
 	not.b	d0
@@ -501,6 +504,7 @@ acia_isr:
 compose_inputs:
 	move.b	in0_kbd,d0
 	or.b	p1_joy,d0
+	or.b	p2_joy,d0		; (an upright cabinet has one set of controls: player 2's joystick moves the same Stanley; IN1 gets them too)
 	not.b	d0
 	move.b	d0,in0_low
 	move.b	in1_kbd,d0

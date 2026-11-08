@@ -526,17 +526,14 @@ draw_rows:
 	move.w	d0,B_END1.w
 	move.w	d0,B_END2.w
 	move.w	d0,B_END3.w
-	move.w	#8,B_SXI.w
-	move.w	#8,B_DXI.w
-	move.w	#PICG,B_XC.w
-	move.w	#2-(PICG-1)*8,B_DYI.w
-	move.w	#2-(PICG-1)*8,B_SYI.w
+	move.w	#2,B_SXI.w		; (the playfield and the buffer have the planes' words in the same order: a row's groups are
+	move.w	#2,B_DXI.w		; contiguous words: one pass copies a few lines of them)
 	clr.b	B_SKEW.w
+	move.w	#-1,rc_n
 	lea	B_SRC.w,a3
 	lea	B_DST.w,a4
 	lea	B_YC.w,a5
 	lea	B_CTRL.w,a6
-	moveq	#1,d3
 	moveq	#-$40,d4		; ($C0: start, HOG)
 	moveq	#0,d0			; the offset o (no scroll)
 	moveq	#0,d7			; the row
@@ -546,8 +543,12 @@ draw_rows:
 	bne.s	.draw
 	move.l	sd_rows,d1
 	btst	d7,d1
-	bne	.part
-	bra	.next
+	bne.s	.part
+.next:	addq.l	#2,a2
+	addq.w	#1,d7
+	cmp.w	#32,d7
+	bne.s	.row
+	rts
 .draw:	move.w	d0,(a2)
 	move.w	d7,d1			; the source's first line: (8 * row + o) & 255
 	lsl.w	#3,d1
@@ -561,38 +562,15 @@ draw_rows:
 	move.w	d7,d1
 	mulu	#8*LB,d1
 	add.l	d1,d2			; the destination
-	moveq	#8-1,d5
-.line:	move.l	a1,(a3)
-	move.l	d2,(a4)
-	move.w	d3,(a5)			; four HOG passes of one plane (the addresses run on)
-	move.b	d4,(a6)
-	move.w	d3,(a5)
-	move.b	d4,(a6)
-	move.w	d3,(a5)
-	move.b	d4,(a6)
-	move.w	d3,(a5)
-	move.b	d4,(a6)
-	lea	PF_LB(a1),a1
-	add.l	#LB,d2
-	dbf	d5,.line
-.next:	addq.l	#2,a2
-	addq.w	#1,d7
-	cmp.w	#32,d7
-	bne	.row
-	rts
+	moveq	#PICG,d5
+	bsr	rowcopy
+	bra	.next
 .part:	moveq	#0,d5			; the groups g0 .. g1 of the row (row_span)
 	move.b	row_span-row_scroll(a2),d5
 	moveq	#0,d2
 	move.b	row_span-row_scroll+1(a2),d2
-	sub.w	d5,d2			; n - 1
-	move.w	d2,d1
-	addq.w	#1,d1
-	move.w	d1,B_XC.w		; n
-	lsl.w	#3,d2
-	moveq	#2,d1
-	sub.w	d2,d1
-	move.w	d1,B_DYI.w		; 2 - (n - 1) * 8
-	move.w	d1,B_SYI.w
+	sub.w	d5,d2
+	addq.w	#1,d2			; n
 	move.w	d7,d1			; the source's first line, its group g0
 	lsl.w	#3,d1
 	add.w	d0,d1
@@ -605,11 +583,59 @@ draw_rows:
 	move.w	d7,d1
 	mulu	#8*LB,d1
 	add.l	d5,d1
-	move.l	draw_base,d2
-	add.l	#PIC0+LEFT/2,d2
-	add.l	d1,d2			; the destination's group g0
+	move.l	draw_base,d5
+	add.l	#PIC0+LEFT/2,d5
+	add.l	d1,d5			; the destination's group g0
+	move.l	d5,d1
+	move.l	d2,d5			; d5 = n
+	move.l	d1,d2			; d2 = the destination
+	bsr	rowcopy
+	bra	.next
+
+; rowcopy: n = d5.w groups of a tile row's 8 lines from a1 (playfield) to d2 (buffer).  Up to 8 groups: the 4 n words of a
+; line are contiguous, so one pass copies several lines (at most 32 words a pass: 256 bus cycles) from a table (rc_tab).  A
+; wider row, in passes of one plane of a line (the groups' words 8 bytes apart).  a3-a6, d4 as draw_rows set them.
+rowcopy:
+	cmp.w	#8,d5
+	bhi.s	rc_wide
+	lsl.w	#4,d5
+	lea	rc_tab-16,a0
+	add.w	d5,a0
+	cmp.w	rc_n,d5
+	beq.s	.same
+	move.w	d5,rc_n
+	move.w	#2,B_SXI.w
+	move.w	#2,B_DXI.w
+	move.w	(a0),B_XC.w
+	move.w	2(a0),B_SYI.w
+	move.w	4(a0),B_DYI.w
+.same:	move.w	6(a0),d3		; the lines a pass
+	move.w	8(a0),d1		; the passes - 1
+	move.w	10(a0),d5		; the source's advance a pass
+	move.w	12(a0),a0		; the destination's
+.go:	move.l	a1,(a3)
+	move.l	d2,(a4)
+	move.w	d3,(a5)
+	move.b	d4,(a6)
+	add.w	d5,a1
+	add.l	a0,d2
+	dbf	d1,.go
+	rts
+
+rc_wide:				; n groups: per line four passes of one plane (the addresses run on)
+	move.w	#-1,rc_n
+	move.w	#8,B_SXI.w
+	move.w	#8,B_DXI.w
+	move.w	d5,B_XC.w
+	subq.w	#1,d5
+	lsl.w	#3,d5
+	moveq	#2,d1
+	sub.w	d5,d1
+	move.w	d1,B_DYI.w		; 2 - (n - 1) * 8
+	move.w	d1,B_SYI.w
+	moveq	#1,d3
 	moveq	#8-1,d5
-.pl:	move.l	a1,(a3)
+.line:	move.l	a1,(a3)
 	move.l	d2,(a4)
 	move.w	d3,(a5)
 	move.b	d4,(a6)
@@ -621,11 +647,21 @@ draw_rows:
 	move.b	d4,(a6)
 	lea	PF_LB(a1),a1
 	add.l	#LB,d2
-	dbf	d5,.pl
-	move.w	#PICG,B_XC.w
-	move.w	#2-(PICG-1)*8,B_DYI.w
-	move.w	#2-(PICG-1)*8,B_SYI.w
-	bra	.next
+	dbf	d5,.line
+	rts
+
+	section data,data
+rc_tab:					; per n (1-8): the words a line, source and destination Y increments, the lines a pass, the
+					; passes - 1, the source's and the destination's advance a pass (16 bytes)
+	dc.w	4,106,154,8,0,896,1280,0
+	dc.w	8,98,146,4,1,448,640,0
+	dc.w	12,90,138,2,3,224,320,0
+	dc.w	16,82,130,2,3,224,320,0
+	dc.w	20,74,122,1,7,112,160,0
+	dc.w	24,66,114,1,7,112,160,0
+	dc.w	28,58,106,1,7,112,160,0
+	dc.w	32,50,98,1,7,112,160,0
+	section text,code
 
 ; ======================================================================================================================
 ; draw_sprites: the 256 entries, the first first (the last on top), each once; the rows they cover and the guard lines
@@ -1215,6 +1251,8 @@ last_mode:	ds.w	1
 sc_used:	ds.w	1
 tc_used:	ds.w	1
 spr_rows:	ds.l	1			; draw_sprites: the rows the sprites drawn now cover
+rc_n:		ds.w	1			; rowcopy: the group count the Blitter's registers are set for
+rc_lpp:		ds.w	1			; and the lines a pass
 row_dirty:	ds.l	NBUF			; per buffer: rows to draw whatever their scroll
 row_scroll:	ds.w	NBUF*32			; per buffer and row: the offset o it was drawn at (-1: never)
 row_span:	ds.b	NBUF*64			; per buffer and row: the groups g0, g1 its last sprites covered
