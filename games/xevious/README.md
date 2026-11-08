@@ -43,10 +43,10 @@ crc c2f57ef8) and `namco54.zip` (`54xx.bin`, crc ee7357e0).
 
 ## Controls
 
-**5** coin, **1/2** start, **cursor keys** move (8 directions), **Space/Ctrl** zapper (fire), **Alt** blaster (bomb),
+**5** coin (**6** the second coin slot), **1/2** start, **cursor keys** move (8 directions), **Space/Ctrl** zapper (fire), **Alt** blaster (bomb),
 **Esc** quits.  Jaguar pad / PowerPad (STE enhanced ports, [architecture](../../docs/architecture.md#input-all-ports)): the
 D-pad moves, **A / C** fire, **B** bomb, **Option** coin, **Pause** start, keypad **1/2** start, **5** coin, **\*** + **#**
-quit.  The second button reaches the program through the DIP switch bank ($6800 bit 0), as on the board.
+quit.  The second button reaches the program through the DIP switch bank ($6800 bit 0), as on the board.  Both players use the one joystick and button (the upright cabinet; the cocktail inputs are not wired).
 
 ## State
 
