@@ -40,6 +40,22 @@ def expected_bg(m, flat):
     return flat[out]
 
 
+def window_diff(mem, sym, m, flat):
+    """the display window of ren_bg (as the Shifter shows it: ren_vaddr, ren_fine, 320 x 224) against the reference's map"""
+    buf = bytes(mem.r_block(sym["ren_bg"], 512 * 480))
+    full = planar_to_index(buf, 480, 64)
+    tiled = np.tile(expected_bg(m, flat), (1, 2))
+    vaddr = mem.r32(sym["ren_vaddr"]) - sym["ren_bg"]
+    fine = mem.r16(sym["ren_fine"])
+    line0, group0 = vaddr // 512, (vaddr % 512) // 8
+    x0 = group0 * 16 + fine
+    win = np.stack([full[line0 + r, x0:x0 + 320] for r in range(224)])
+    sx = m.xscroll[0][0] & 0x1FF
+    wx, wy = (4 + sx) & 511, (25 + (m.yscroll[0][0] & 255)) & 255
+    exp = np.stack([tiled[(wy + r) & 255, wx:wx + 320] for r in range(224)])
+    return int((win != exp).sum())
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames", nargs="?", type=int, default=600)

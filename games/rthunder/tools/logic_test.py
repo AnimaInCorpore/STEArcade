@@ -13,6 +13,8 @@ does not read are not kept by the translation) are left out.  Seeds 0 attract mo
 """
 import argparse
 import sys
+
+import numpy as np
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "ref"),
@@ -31,6 +33,7 @@ def main():
     ap.add_argument("--steplock", type=int, default=-1, help="frame (after the start) run instruction by instruction "
                     "against the reference (registers compared at every translated 6809 instruction)")
     ap.add_argument("--watch", default="", help="hex offsets of the shared RAM to compare at every label in --steplock")
+    ap.add_argument("--render", action="store_true", help="after each frame ren_update runs (the marks the translated stores set) and the window is compared")
     ap.add_argument("--trace", action="store_true", help="log the translated labels (slow)")
     ap.add_argument("--skip", type=int, default=0, help="frames the reference runs on without the comparison")
     args = ap.parse_args()
@@ -239,6 +242,17 @@ def main():
             cpu.execute(1)
         print("no end")
 
+    def call_routine(name):
+        sp = cpu.r_reg(R.A7) - 4
+        mem.w32(sp, sym["sim_wait"])
+        cpu.w_reg(R.A7, sp)
+        cpu.w_pc(sym[name])
+        return run_to(sym["sim_wait"], limit=2_000_000_000)
+
+    if args.render:
+        import render_test
+        flat = np.load(build_dir("rthunder") / "palfit.npz")["flat"]
+    rcycles = []
     cycles = 0
     for f in range(args.frames):
         m.in0, m.in1, m.in2 = inputs(f)
@@ -266,9 +280,18 @@ def main():
         if f >= args.skip and not compare(f, pushed):
             print("stopped after %d good frames" % f)
             return 1
+        if args.render:
+            rc = call_routine("ren_update")
+            rcycles.append(rc)
+            dd = render_test.window_diff(mem, sym, m, flat)
+            if dd:
+                print("frame %d (%d after the start): ren_update, %d window pixels differ" % (m.frame, f, dd))
+                return 1
         if f % 100 == 99:
             print("%d frames ok (%.0f 68000 cycles a frame)" % (f + 1, cycles / (f + 1)), flush=True)
     print("%d frames identical; %.0f 68000 cycles a frame for the two CPUs" % (args.frames, cycles / args.frames))
+    if rcycles:
+        print("ren_update: mean %.0f, worst %d cycles" % (sum(rcycles) / len(rcycles), max(rcycles)))
     return 0
 
 

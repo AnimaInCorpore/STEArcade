@@ -90,6 +90,7 @@ def load_cover():
     wraps = {0: set(), 1: set()}
     spin = {0: set(), 1: set()}
     semw = {0: set(), 1: set()}
+    tilew = {0: collections.defaultdict(set), 1: collections.defaultdict(set)}
     for f in files:
         d = pickle.load(open(f, "rb"))
         for i in (0, 1):
@@ -105,7 +106,11 @@ def load_cover():
             wraps[i] |= {v for v, slot in d["wrap"][i]}
             spin[i] |= d["spin"][i]
             semw[i] |= d["semw"][i]
-    return dict(exec=exec_, acc=acc, ioacc=ioacc, tg=tg, dps=dps, wraps=wraps, spin=spin, semw=semw, files=len(files))
+            if "tilew" not in d:
+                sys.exit("error: %s has no tile writers (an old ref/cover.py): run it again" % f)
+            for (v, slot), t in d["tilew"][i].items():
+                tilew[i][v] |= t
+    return dict(exec=exec_, acc=acc, ioacc=ioacc, tg=tg, dps=dps, wraps=wraps, spin=spin, semw=semw, tilew=tilew, files=len(files))
 
 
 def io_sites(cpu, ioacc):
@@ -142,6 +147,8 @@ def program(cpu, r, cov):
         out = []
         if ins.mode == "ext" and ins.arg == LATCH[cpu] and m6809x.base_mn(ins.mn).startswith("st"):
             out.append("st sprite_latch")
+        for layer in sorted(cov["tilew"][cpu].get(v, ())):
+            out.append("st tile_written+%d" % layer)       # (the renderer compares the layers marked: src/render.s)
         if v in semw:
             out.append("bsr %s_sem_yield" % name)
         return out or None

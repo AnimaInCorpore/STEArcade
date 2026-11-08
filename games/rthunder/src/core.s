@@ -377,7 +377,10 @@ main_io_w:
 	lea	hwregs,a0
 	move.b	d5,(a0,d7.w)
 	rts
-.ram:	cmp.w	#$5FF2,d7
+.ram:	cmp.w	#$4000,d7
+	bcc.s	.nv
+	move.l	#$FFFFFFFF,tile_written	; (a store into tile RAM through the runtime: every layer)
+.nv:	cmp.w	#$5FF2,d7
 	bne.s	.n
 	st	sprite_latch
 .n:	bsr	addr_page
@@ -387,7 +390,10 @@ main_io_w:
 sub_io_w:
 	cmp.w	#$6000,d7
 	bcc.s	.hi
-	cmp.w	#$1FF2,d7
+	cmp.w	#$2000,d7
+	bcs.s	.nv
+	move.l	#$FFFFFFFF,tile_written
+.nv:	cmp.w	#$1FF2,d7
 	bne.s	.n
 	st	sprite_latch
 .n:	bsr	addr_page
