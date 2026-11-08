@@ -323,7 +323,7 @@ not been re-measured in Hatari since).
 | Super Basketball | 83-90% / 19-31 autoplay (5,000-9,000 VBLs) | n/a (flat) | - | both | 2 (division, sprite list) | `video_inline` | n/a (idle native) |
 | Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
-| Xevious | 45-53% (27-32 arcade fps) / 6.8-8.0 attract and autoplay (2026-11-08, after the sprite passes; 35% / 5.4 before) | n/a | tried, inexact (stack residue) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
+| Xevious | 44-53% (26-32 arcade fps, mean 28.8) / 6.6-8.0 pictures, 20,000 VBLs of autoplay (2026-11-08, after the sprite passes and 4 natives; 35% / 5.4 before) | n/a | leaves in place kept; narrow copy rejected (exact, 5% slower in Hatari) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
 | R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
@@ -364,7 +364,7 @@ not been re-measured in Hatari since).
 | Juno First | - | none: the arcade's CPU and 16 x 16 blitter draw into the planar picture directly | n/a (no sprite layer) | n/a | 16 fixed pens |
 | Yie Ar Kung-Fu | - | `sprite_programs` (per-slot cache) | sprite-only rows: their groups | tiles (row restores, `draw_rows`) | bounded flat fit, black and 15 |
 | Roc'n Rope | - | `sprite_programs` (per-slot cache) | drawn lines (`restore_damage`) | tiles (tile cache, cell list) | default fitter flat |
-| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
+| Xevious | V (512-line ring, Blitter picture copy; no hardware scroll yet: a build without the copy ran +18-20% fps, +20% pictures) | baked images per (tile, flips, palette), a HOG pass a row (X count 2, NFSR) | redrawn from the ring each picture | characters as baked images; background tiles cached | fitted 16, flat |
 
 ## Techniques that look applicable elsewhere (2026-11-07)
 
