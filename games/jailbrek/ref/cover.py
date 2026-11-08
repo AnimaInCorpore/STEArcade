@@ -115,7 +115,10 @@ class SiteCover(Cover6809):
 
 def replay_ticks():
     """build/jailbrek/play_inputs.bin (runs of count, SYSTEM, P1; a count of 0 ends it) -> [(SYSTEM, P1)] a tick"""
-    data = (build_dir('jailbrek') / 'play_inputs.bin').read_bytes()
+    f = build_dir('jailbrek') / 'play_inputs.bin'
+    if not f.exists():
+        raise SystemExit('%s is missing: python games/jailbrek/tools/play_search.py 60000 makes it (~17 min)' % f)
+    data = f.read_bytes()
     out, i = [], 0
     while i + 2 < len(data) and data[i]:
         out += [(data[i + 1], data[i + 2])] * data[i]

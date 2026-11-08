@@ -215,6 +215,7 @@ TESTS = {
                  ("tools/logic_test.py", ["{n}"], 3000),
                  ("tools/logic_test.py", ["20000", "--seed", "3"], None),   # play, lives and weapons cheats
                  ("tools/logic_test.py", ["8000", "--seed", "6"], None),    # the other DIP switches, two players
+                 ("tools/logic_test.py", ["20000", "--seed", "13"], None),  # the recorded play (tools/play_search.py 60000 first)
                  ("tools/render_test.py", ["3000", "--seed", "3", "--start", "700", "--every", "3"], None),
                  ("tools/sprite_test.py", [], None),              # edges, 16 shifts, holes, guards, 64 KB crossings
                  ("tools/native_test.py", ["600"], None)],        # nat_sn_AF96 against the 6809
