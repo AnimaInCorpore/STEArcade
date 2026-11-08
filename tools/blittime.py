@@ -87,6 +87,24 @@ def build(out, quick=False):
     return meta
 
 
+def clock_calibration(text):
+    """Infer video rate: BLITTIME preserves the desktop display mode."""
+    values = re.findall(r'CAL mode mfpCounts tosTicks vbls: ([0-9A-F]+) ([0-9A-F]+) ([0-9A-F]+) ([0-9A-F]+)', text)
+    assert len(values) == 3, 'missing clock calibration'
+    results = []
+    for expected_mode, fields in enumerate(values):
+        mode, counts, ticks, vbls = (int(v, 16) for v in fields)
+        seconds = counts / 12288
+        assert mode == expected_mode and .98 < seconds < 1.02, fields
+        assert 200 <= ticks <= 202, fields
+        rate = min([50, 60, 71], key=lambda hz: abs(vbls / seconds - hz))
+        assert abs(vbls - seconds * rate) <= 2, fields
+        results.append(dict(mode=mode, mfp_counts=counts, tos_ticks=ticks,
+                            vbls=vbls, inferred_video_hz=rate))
+    assert len({r['inferred_video_hz'] for r in results}) == 1, 'video rate changed between CPU modes'
+    return results
+
+
 def parse(path, meta):
     text = path.read_text(errors='replace')
     assert f"Build {meta['build_id']};" in text, 'report/build identity mismatch'
@@ -108,12 +126,7 @@ def parse(path, meta):
         assert row['mfp_counts'] > 0, row
         for key in ['speed_before', 'speed_after']:
             assert row[key] & 3 == [0, 2, 3][row['mode']], row
-    calibrations = re.findall(r'CAL mode mfpCounts tosTicks vbls: ([0-9A-F]+) ([0-9A-F]+) ([0-9A-F]+) ([0-9A-F]+)', text)
-    assert len(calibrations) == 3, 'missing clock calibration'
-    for expected_mode, values in enumerate(calibrations):
-        mode, counts, ticks, vbls = (int(v, 16) for v in values)
-        assert mode == expected_mode and .98 < counts / 12288 < 1.02, values
-        assert 200 <= ticks <= 202 and 48 <= vbls <= 52, values
+    clock_calibration(text)
     done = re.search(r'DONE - .*?Total bad words: ([0-9A-F]{8})', text)
     assert done and int(done[1], 16) == sum(r['bad_words'] for r in rows), 'missing/inconsistent final summary'
     return rows
@@ -133,6 +146,8 @@ def summary(data):
              ('PASS' if data['all_drawing_checks_pass'] else 'FAIL'),
              'All times below are microseconds per pass; averages of repeats.',
              'Timing differences are observations, not automatic hardware failures.', '']
+    if 'clock_calibration' in data:
+        lines.insert(2, f"Inferred video rate: {data['clock_calibration'][0]['inferred_video_hz']} Hz")
     for m in range(3):
         lines += [f'Mode {m}:',
                   '  Normal/minimal interrupts, three writes: '
@@ -163,12 +178,14 @@ def summary(data):
 def analyse(path, meta, out, reference=None):
     rows = parse(path, meta)
     data = dict(report_sha256=sha(path), build_id=meta['build_id'], rows=rows,
+                clock_calibration=clock_calibration(path.read_text(errors='replace')),
                 all_drawing_checks_pass=not any(r['bad_words'] for r in rows))
     # Preserve differences, including failed cases: never turn a timing probe's
     # drawing failure into a missing result or a timing success.
     if reference:
         refs = parse(reference, meta)
         data['reference_report_sha256'] = sha(reference)
+        data['reference_clock_calibration'] = clock_calibration(reference.read_text(errors='replace'))
         data['differences_us_per_pass'] = [a['us_per_pass'] - b['us_per_pass'] for a, b in zip(rows, refs)]
     out.write_text(json.dumps(data, indent=2) + '\n')
     out.with_suffix('.TXT').write_text(summary(data))
@@ -210,7 +227,8 @@ def verify(out, meta, hatari):
     # Independent clocks must agree to within timer quantisation and boundaries.
     for row in data['rows']:
         assert abs(row['seconds'] - row['tos_ticks'] / 200) < .015, row
-        assert abs(row['seconds'] - row['vbls'] / 50) < .035, row
+        rate = data['clock_calibration'][row['mode']]['inferred_video_hz']
+        assert abs(row['seconds'] - row['vbls'] / rate) < 2 / rate, row
     print(f"PASS: {len(data['rows'])} profiles, all private RAM guards and output words; both clocks agree")
     return data
 
