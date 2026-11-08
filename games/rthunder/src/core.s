@@ -295,7 +295,12 @@ cpu_badpc:
 	move.w	d6,badslot
 	move.l	a6,badctx
 sim_badpc:
+	ifd SIM
 	bra.s	sim_badpc
+	else
+	moveq	#99,d0
+	bra	crash_common
+	endc
 
 ; ---- I/O: d7.w = the 6809 address, d5.b = the value (io_w) / the byte in d7 (io_r); d0-d4 a5 a6 kept ----
 ; main: $4000-$43FF the CUS30 mailbox (`cus30`); stores: $6000-$7FFF cus115 (select = bits 12-9: 4 the bank, 0-3 the PCM

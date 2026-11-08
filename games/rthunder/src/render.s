@@ -533,11 +533,10 @@ ren_sync:
 	lsl.w	#4,d0
 	lea	dstate,a4
 	add.w	d0,a4
-	lea	dbuf0,a0
-	tst.w	ren_buf
-	beq.s	.b0
-	lea	dbuf1,a0
-.b0:	move.l	a0,ds_base
+	move.w	ren_buf,d0
+	lsl.w	#2,d0
+	lea	dbuf_tab,a0
+	move.l	(a0,d0.w),ds_base
 	move.l	clog_n,d7
 	sub.l	12(a4),d7		; entries not yet seen
 	tst.w	(a4)
@@ -691,6 +690,7 @@ ren_bg_all:
 
 	section bss,bss
 	even
+rbss_start:
 tile_written:	ds.b	4
 cell_ok:	ds.b	2048
 shadow:		ds.b	3*4096
@@ -725,16 +725,19 @@ ren_wr1:	ds.w	1
 ren_buf:	ds.w	1
 ds_base:	ds.l	1
 clog_n:		ds.l	1
-dstate:		ds.b	32
+dstate:		ds.b	48
 clog:		ds.w	4096
 bkp:		ds.b	4
+rbss_end:
 	even
 ren_bg:		ds.b	DB_SIZE
 dbuf0:		ds.b	DB_SIZE
 dbuf1:		ds.b	DB_SIZE
+dbuf2:		ds.b	DB_SIZE
 tcache:		ds.b	TC_SLOTS*TC_SIZE
 	section data,data
 	even
+dbuf_tab:	dc.l	dbuf0,dbuf1,dbuf2
 coloff:	dc.w	0,64,-64
 rowoff:	dc.w	0,32,-32
 ren_t0:		incbin	"ren_t0.bin"
