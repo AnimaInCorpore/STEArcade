@@ -40,16 +40,6 @@ CELL = {1: 0x81, 2: 0x82, 3: 0x83, 4: 0x84, 5: 0x85, 6: 0x86, 7: 0x87, 8: 0x88, 
         13: 0x8D, 14: 0x8E, 15: 0x8F, 16: 0x90, 17: 0x91, 18: 0x92, 19: 0x93, 20: 0x94}
 
 
-def _tmproot():
-    """scratch under F:\claude\tmp\digdug (user rule 2026-11-08), else the system temp"""
-    d = r"F:\claude	mp\digdug"
-    try:
-        os.makedirs(d, exist_ok=True)
-        return d
-    except OSError:
-        return None
-
-
 def pokes(ids):
     """(frame, address, value, mask): the byte becomes (old & mask) | value.  Bit 1 of $8657 (the attract mode's own state:
     X00C2 skips the command cells while it is set, and MAME's random power-on RAM makes it vary from run to run) is cleared."""
@@ -78,7 +68,7 @@ end)
 
 
 def mame_audio(ev, seconds, keep):
-    tmp = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="digdug_snd_", dir=_tmproot()))
+    tmp = Path(keep) if keep else Path(tempfile.mkdtemp(prefix="digdug_snd_"))
     tmp.mkdir(parents=True, exist_ok=True)
     roms = tmp / "roms"
     roms.mkdir(exist_ok=True)
