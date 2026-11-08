@@ -71,6 +71,9 @@ def main():
     ap.add_argument("frames", nargs="?", type=int, default=600)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--every", type=int, default=100)
+    ap.add_argument("--sprites", action="store_true", help="ren_update + ren_sprites every K-th frame; the picture's 288 columns against stemodel (without the fixed layer)")
+    ap.add_argument("--nol3", action="store_true", help="with --sprites: the model without the fixed layer")
+    ap.add_argument("--dump", help="with --sprites: the first differing picture (ours left, the model right) as a PNG, then stop")
     ap.add_argument("--update", action="store_true", help="ren_update every frame (marks set), the window compared every frame")
     args = ap.parse_args()
     run = ROOT / "run" / "rthunder_sim"
@@ -136,6 +139,38 @@ def main():
             if d:
                 print("frame %d: ren_update, %d window pixels differ" % (m.frame, d))
                 bad += 1
+            continue
+        if args.sprites:
+            if f % args.every != args.every - 1:
+                continue
+            put_state(m)
+            mem.w_block(sym["shared"] + 0x1800, bytes(m.spriteram))
+            for i in range(4):
+                mem.w8(sym["tile_written"] + i, 1)
+            mem.w16(sym["ren_buf"], f % 3)
+            call("ren_update")
+            mem.set_trace_mode(True)                      # (the simulator's Blitter runs on the trace hook)
+            c0 = call("ren_sprites")
+            mem.set_trace_mode(False)
+            buf = bytes(mem.r_block(sym["dbuf%d" % (f % 3)], RB_LB * LINES))
+            full = planar_to_index(buf, LINES, RB_LB // 8)
+            voff = mem.r32(sym["ren_voff"])
+            fine = mem.r16(sym["ren_fine"])
+            line0, group0 = voff // RB_LB, (voff % RB_LB) // 8
+            x0 = group0 * 16 + fine
+            win = np.stack([full[line0 + r, x0:x0 + 320] for r in range(224)])[:, 16:304]
+            import stemodel
+            exp = stemodel.picture(m, flat, True, l3=not args.nol3)
+            n = int((win != exp).sum())
+            print("frame %d: ren_sprites %d cycles, %d misses, %d pixels differ (of %d sprites drawn)" % (
+                m.frame, c0, mem.r32(sym["pm_miss"]), n, mem.r16(sym["spl_n"])))
+            bad += n != 0
+            if n and args.dump:
+                from PIL import Image
+                pal = np.load(build_dir("rthunder") / "palfit.npz")["palette"].astype(np.uint8)
+                both = np.concatenate([pal[win], pal[exp]], axis=1)
+                Image.fromarray(both).resize((both.shape[1] * 2, both.shape[0] * 2), Image.NEAREST).save(args.dump)
+                return 1
             continue
         if f % args.every != args.every - 1:
             continue

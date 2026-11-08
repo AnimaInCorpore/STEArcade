@@ -77,7 +77,7 @@ def blit(out, x, y, img, color, lut):
     o[opq] = lut[2048 + color * 16 + sub[opq].astype(np.int32)]
 
 
-def picture(m, flat, bgfirst=False):
+def picture(m, flat, bgfirst=False, l3=True):
     """the painter's-order picture as indirect colours (288 x 224), then mapped with `flat`"""
     bw, bh = 384, 264
     lut = m.pen_table()
@@ -94,6 +94,8 @@ def picture(m, flat, bgfirst=False):
                 for k in range(7):
                     for (x, y, img, color) in spr_by_pri[k]:
                         blit(out, x, y, img, color, lut)
+            if i == 3 and not l3:
+                continue
             dev, lay = i >> 1, i & 1
             pens, opaque = m.tilemap(dev, lay)
             dx = (47 if dev == 0 else 46) + (0, 2)[lay]

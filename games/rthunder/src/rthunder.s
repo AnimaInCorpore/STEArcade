@@ -30,6 +30,10 @@ init_tables:
 	dbf	d0,.bdir
 	rts
 
+blit_go_copy:				; (borders.s' pieces in the STE build)
+	move.b	#$c0,$ffff8a3c.w
+	rts
+
 	include	"core.s"
 	include	"render.s"
 	else

@@ -420,7 +420,7 @@ ren_update:
 	move.w	#2048/4-1,d0
 .clr:	clr.l	(a0)+
 	dbf	d0,.clr
-.nochg:	moveq	#2,d7
+.nochg:	moveq	#3,d7
 .lay:	lea	tile_written,a0
 	tst.b	(a0,d7.w)
 	beq.s	.nolay
@@ -516,7 +516,13 @@ ren_scan:
 	sub.l	a2,d0
 	lsr.l	#1,d0
 	subq.w	#2,d0			; the first of the two cells
-	lea	cell_ok,a3
+	cmp.w	#3,d7
+	bne.s	.l012
+	bsr	l3_cell			; the fixed layer: the cells' non-empty flags (it is drawn at every picture)
+	addq.w	#1,d0
+	bsr	l3_cell
+	bra.s	.same
+.l012:	lea	cell_ok,a3
 	clr.b	(a3,d0.w)
 	clr.b	1(a3,d0.w)
 	st	rw_dirty
@@ -688,12 +694,14 @@ ren_bg_all:
 	bne.s	.r
 	rts
 
+	include	"sprites.s"
+
 	section bss,bss
 	even
 rbss_start:
 tile_written:	ds.b	4
 cell_ok:	ds.b	2048
-shadow:		ds.b	3*4096
+shadow:		ds.b	4*4096
 tm_rows:	ds.w	1
 	even
 tc_miss:	ds.l	1

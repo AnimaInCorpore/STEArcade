@@ -377,6 +377,7 @@ render_picture:
 	bra.s	.pick
 .got:	move.w	d0,ren_buf
 	bsr	ren_update
+	bsr	ren_sprites
 	move.w	ren_buf,d0
 	move.w	d0,d1
 	lsl.w	#2,d1
@@ -400,6 +401,8 @@ init_picture:
 .cl:	clr.l	(a0)+
 	cmp.l	a1,a0
 	blo.s	.cl
+	moveq	#-1,d0
+	move.l	d0,tile_written		; (every layer to be scanned: the first picture)
 	lea	tcache,a0
 	move.l	#TC_SLOTS*TC_SIZE/4,d0
 .tc:	clr.l	(a0)+
