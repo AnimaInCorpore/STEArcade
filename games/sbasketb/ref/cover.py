@@ -9,7 +9,7 @@ sprites: Counter of (code, colour set, flip x, flip y) entries; scrolls: Counter
 Seeds: 1-3 attract, coin, start, random play (the game's clock runs out, the name entry, again); 4-5 two players
 (coin, coin, start 2); 6-9 the game time 30 / 40 / 50 s and other DIP switches; 10-11 more random play with faster
 input changes; 12 the service mode (start 1 + start 2 held through the boot's input read); 13 no coin (the whole attract
-cycle: title, the demo game, the high scores); 14 the coin after 6000 frames; 15-20 fixed stick and button patterns; 21 the runtime's AUTOPLAY script itself.
+cycle: title, the demo game, the high scores); 14 the coin after 6000 frames; 15-20 fixed stick and button patterns; 21 the runtime's AUTOPLAY script itself, 22 the same with player 1's score held high (cheat).
 """
 import collections
 import pickle
@@ -124,6 +124,14 @@ def autoplay(frame):
     return system, p1, 0xFF
 
 
+def cheat(mem, frame):
+    """seed 22 (and logic_test.py --cheat): the AUTOPLAY script with player 1's score held at 9,990 BCD ($20A1-$20A2: the
+    scoreboard's 99,900) once its game is under way (the game's reaction: the score digits, the clock's end, the high score)"""
+    if frame % 4000 >= 900:
+        mem[0x20A1] = 0x99
+        mem[0x20A2] = 0x90
+
+
 def io(a, rw):
     """the accesses the translation sends through the runtime: the I/O, the unmapped space, stores to the ROM, and the
     stores to the video and colour RAM ($3000-$37FF: the renderer's changed cells)"""
@@ -158,7 +166,9 @@ def main():
     mem = m.mem
     for frame in range(frames):
         m.frame = frame
-        m.system, m.p1, m.p2 = autoplay(frame) if seed == 21 else inputs(frame, rnd, state)
+        m.system, m.p1, m.p2 = autoplay(frame) if seed in (21, 22) else inputs(frame, rnd, state)
+        if seed == 22:
+            cheat(m.mem, frame)
         m.run_frame_port()
         base = 0x3900 if m.latch[5] else 0x3800
         for o in range(0, 0x100, 4):

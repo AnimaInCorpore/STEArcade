@@ -529,10 +529,14 @@ compose:
 	or.l	(a1,d1.w),d6		; the rows with a changed cell
 	clr.l	(a1,d1.w)
 	lea	buf_scroll,a0
-	cmp.w	(a0,d2.w),d0
+	move.w	(a0,d2.w),d1
+	cmp.w	d1,d0
 	beq.s	.same
 	move.w	d0,(a0,d2.w)
-	moveq	#-1,d6			; (another scroll: every row)
+	or.l	#$FFFFFFC0,d6		; (another scroll: the scrolled rows; the fixed ones 0-5 stand still)
+	cmp.w	#-1,d1
+	bne.s	.same
+	moveq	#-1,d6			; (never composed: every row)
 .same:	tst.l	d6
 	beq	.done
 	move.w	#$0203,B_HOP.w		; source, OP 3

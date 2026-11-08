@@ -24,7 +24,7 @@ from paths import build_dir, require_coverage
 
 RESET, IRQ = 0x6000, SBasketPort.IRQ
 DP = 0x20
-SEEDS = [int(x) for x in os.environ.get("SB_SEEDS", "").split(",") if x] or range(1, 22)
+SEEDS = [int(x) for x in os.environ.get("SB_SEEDS", "").split(",") if x] or range(1, 23)
 # the tables behind the computed jumps (JMP / JSR [A,X], [A,U], [B,X] with the table's base loaded just before, 22 sites):
 # each entry is a root, so a handler that no coverage run reached (an object type the game meets later) is translated too
 TABLES = [0xD6A3, 0xFE98, 0xDBCE, 0xDBF0, 0xDCA4, 0xDCB0, 0xDCCA, 0xDCDE, 0xF405, 0xF5C4, 0xF6BE, 0xFA7F, 0xFAEC, 0xFC43,
