@@ -27,7 +27,7 @@ DEFAULT_EXE = r"C:\Arbeit\F030Arcade\third_party\wolfmame-0248\mame.exe"
 frames, keep = mc.parse_args([400, 800, 1200, 1800, 2400])
 os.environ.setdefault("MAME", DEFAULT_EXE)
 
-rompath = Path(tempfile.mkdtemp(prefix="digdug_roms_"))
+rompath = Path(tempfile.mkdtemp(prefix="digdug_roms_", dir=(r"F:aude	mpdigdug" if os.path.isdir("F:\claude") else None)))
 for z in ("digdug.zip", "namco51.zip", "namco53.zip"):
     shutil.copy(ROMS / z, rompath / z)
 d = mc.run_mame("digdug", frames, ["maincpu:0x8000:0x9fff"], keep=keep, rompath=rompath)
