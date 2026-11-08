@@ -2059,6 +2059,22 @@ class Emitter:
             return
         if mn in ("neg", "com", "inc", "dec", "tst", "asl", "lsl", "lsr", "asr", "rol", "ror"):
             if self.io_site(v, ins):
+                if mn == "tst":
+                    def b():
+                        self.io_read(v, ins)
+                        self.e("tst.b d7")
+                    self.wrap(v, N | Z | V, b)
+                    return
+                if mn in ("inc", "dec") and not self.live_out.get(v, NZVC) & V:
+                    def b():
+                        self.io_read(v, ins)
+                        self.e("move.b d7,d5")
+                        self.e("%s.b #1,d5" % ("addq" if mn == "inc" else "subq"))
+                        self.e("move.w sr,-(sp)")
+                        self.store8(v, ins, "d5")
+                        self.e("move.w (sp)+,ccr")
+                    self.wrap(v, N | Z, b)
+                    return
                 raise Unsupported("read-modify-write of I/O: " + ins.text)
             self.unary(v, ins, mn, None)
             return

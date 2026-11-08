@@ -73,3 +73,12 @@ BRA, queues `$56B3/$56B4`, `$566E/$566F` equal), cpu2 `$80A6` (`$1667/$1668` equ
 
 Memory map, interrupts and the video chips are in the docstring of `tools/machine.py` (MAME 0.286 source:
 `src/mame/namco/namcos86.cpp`, `namcos86_v.cpp`, `namco_cus4xtmap.cpp`, `namcos1_sprite.cpp`).
+
+### 2026-11-08: coverage and translation
+
+`ref/cover.py SEED 6000 --port` (now `RthunderRule`) for seeds 0-5 ran to the end (distinct pcs: cpu1 1964-3363, cpu2 4094-4570).
+The spin sites and the `$16D2` semaphore they found are constants in `machine.py` (`SPIN`, `SEMO`); seeds 0, 1, 5 re-ran 4000
+frames with them.  `tools/gen.py` translates the main program (4689 instructions) and the sub program (6411) with none
+unsupported; the main program's `TST` / `INC` of the CUS30 mailbox needed `engine/m6809x.py` to read-modify-write I/O
+sites (TST; INC/DEC when V is dead): `m6809x_test.py` passes but does not cover this path.  NOT done: the spin-hook stubs,
+dispatch tables and `src/core.s`, so nothing of the translation has run; no lock-step, no renderer, no sound, no Hatari.

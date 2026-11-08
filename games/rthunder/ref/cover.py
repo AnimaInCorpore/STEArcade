@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "tools"), str(Path(__file__).resolve().parents[3] / "engine")]
-from machine import Rthunder, RthunderPort
+from machine import Rthunder, RthunderPort, RthunderRule
 from m6809 import P1
 from m6809dis import decode
 from paths import build_dir
@@ -82,7 +82,7 @@ def schedule(seed):
 
 def run(seed, frames, port=False, out=None):
     dswa, dswb, inputs = schedule(seed)
-    m = RthunderPort() if port else Rthunder()
+    m = RthunderRule() if port else Rthunder()
     m.dsw = [dswa, dswb]
     exec_ = {0: collections.Counter(), 1: collections.Counter()}
     acc = {0: collections.defaultdict(set), 1: collections.defaultdict(set)}

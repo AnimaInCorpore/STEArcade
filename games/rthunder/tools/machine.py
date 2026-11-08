@@ -558,8 +558,8 @@ class RthunderPort(Rthunder):
     """
     START = 200
     IDLE = {0: 0x81BC, 1: 0x80A6}              # the main loops' BRA (the translation's hooks replace them)
-    SPIN = ({0x903A, 0x918A, 0xAA6F}, {0x858F, 0x8597})            # backward branches of spin waits; more are learned (`learned`)
-    SEMO = {0x1606, 0x1607}                                  # the shared RAM offsets (cpu2's address) of the semaphore bytes
+    SPIN = ({0x903A, 0x918A, 0x92D0, 0xAA6F}, {0x858F, 0x8597, 0x87A0, 0x8857, 0x892F, 0x8ADE})            # backward branches of spin waits; more are learned (`learned`)
+    SEMO = {0x1606, 0x1607, 0x16D2}                                  # the shared RAM offsets (cpu2's address) of the semaphore bytes
     ORDER = (1, 0)                                         # cpu2's IRQ handler reaches its dispatch long before cpu1's: it runs first
     LEARN = True                                           # (ref/cover.py: learn more spin waits and semaphore bytes)
 
