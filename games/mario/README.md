@@ -10,6 +10,11 @@ full-game verification.
 Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, `-D AUTOPLAY=1`, 3000 VBLs, 2026-11-08): 57.9 arcade frames a second
 (98% of 59.185) and 29.9 pictures a second; 2 border fallbacks, no late border events.
 
+Long run (Hatari, `-D AUTOPLAY=1 -D CHEAT=1`: the lives cheat keeps the game going, 30,000 VBLs = 10 minutes, no video,
+2026-11-08): no crash, 59.8 arcade frames a second (the schedule's 60 against the arcade's 59.185: 1% fast) and 30.3
+pictures a second.  The scripted input only walks and jumps, so it does not clear phases: the later phases are not
+reached in Hatari yet.
+
 ## Build and run
 
 ```sh
