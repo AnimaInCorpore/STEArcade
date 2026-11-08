@@ -10,7 +10,7 @@
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow picture)
 	endc
 	ifnd MAX_SKIP
-MAX_SKIP = 3				; arcade frames in a row that are not drawn while the game is behind
+MAX_SKIP = 5				; arcade frames in a row that are not drawn while the game is behind (2026-11-08, Hatari AUTOPLAY: 3 -> 53.0, 5 -> 56.2 arcade frames a second, pictures 26.9 -> 28.1)
 	endc
 	ifnd FRAMES
 FRAMES = 0
@@ -300,6 +300,21 @@ vbl:
 	moveq	#0,d0
 	move.w	isr_count,d0
 	divu	#4000,d0
+	ifd CHEAT				; (-D CHEAT=1: MAME's cheats for a long run: lives $601A, and the stage byte $601B poked while a game starts,
+	moveq	#0,d1				;  the stage = the period's number mod 6; the play is the same)
+	move.w	d0,d1
+	move.b	#6,G_Z80+$601A
+	move.b	#$63,G_Z80+$6BF1
+	swap	d0
+	cmp.w	#764,d0
+	blo.s	.nch
+	cmp.w	#900,d0
+	bhs.s	.nch
+	divu	#6,d1
+	swap	d1
+	move.b	d1,G_Z80+$601B
+.nch:	swap	d0
+	endc
 	swap	d0
 	cmp.w	#700,d0
 	blo.s	.ap1

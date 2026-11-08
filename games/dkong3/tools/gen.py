@@ -28,7 +28,7 @@ COVER = ["cover_%d.pkl" % s for s in COVER_SEEDS]
 INLINE = int(os.environ.get('DK3_INLINE', '8'))   # calls of leaf functions of up to this many instructions are emitted in place (z80x Config.inline_leaves)
 DMA_BYTES = 0x1A0                   # the chip transfers the block length ($19F) plus one byte
 
-NATIVES = {0x00DD: "nat_otir"}           # src/natives.s
+NATIVES = {0x00DD: "nat_otir", 0x0251: "nat_sprcopy", 0x0114: "nat_timers1", 0x0138: "nat_timers2"}           # src/natives.s
 # register-indirect reads of the input ports (the redirect only knows static addresses): the pointer's immediate goes to the
 # redirected byte (the translation reads the patched image only; the runtime keeps the ROM as it is): the boot test's
 # `ld ix,$7C80` ($5DAF: reads IN1 through (ix+0)) and the coinage table's `ld hl,$7D00` ($8555: DSW0)
