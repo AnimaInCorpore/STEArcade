@@ -16,11 +16,11 @@ def build(out):
     defines=['DEBUG=1','MSTE_TEST=1','BD_PCLOG=1']
     identity=hashlib.sha256(json.dumps(dict(source=hashes,defines=defines),sort_keys=True).encode()).hexdigest()[:16]
     b=build_dir('gunsmoke')
-    (b/'mt_build.i').write_text(f"\tdc.b 'Gun.Smoke Mega STE test 1 - {identity}',13,10,0\n")
+    (b/'mt_build.i').write_text(f"\tdc.b 'Gun.Smoke Mega STE test 2 - {identity}',13,10,0\n")
     out.mkdir(parents=True,exist_ok=True)
     assemble_link('gunsmoke','gunsmoke.s','mste_human',str(out/'GUNSMOKE.TOS'),defines)
     shutil.copyfile(b/'mste_human.map',out/'GUNSMOKE.MAP')
-    meta=dict(game='gunsmoke',test_version=1,build_id=identity,git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),source_sha256=hashes,executable_sha256=sha(out/'GUNSMOKE.TOS'),defines=defines,cheats=False,autoplay=False,replay=False)
+    meta=dict(game='gunsmoke',test_version=2,build_id=identity,git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),source_sha256=hashes,executable_sha256=sha(out/'GUNSMOKE.TOS'),defines=defines,cheats=False,autoplay=False,replay=False)
     (out/'BUILD.JSN').write_text(json.dumps(meta,indent=2)+'\n')
     return meta
 
@@ -132,7 +132,7 @@ def package(out):
     message=(ROOT/'games/gunsmoke/docs/darklord-message.txt').read_text()
     (out/'DARKLORD.TXT').write_bytes(message.replace('\n','\r\n').encode('ascii'))
     with zipfile.ZipFile(out/'SOURCE.ZIP','w',zipfile.ZIP_DEFLATED) as z:
-        for p in [ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',Path(__file__),Path(__file__).with_name('megaste_bench.py'),ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']:
+        for p in [ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',Path(__file__),Path(__file__).with_name('megaste_bench.py'),Path(__file__).with_name('megaste_input_test.py'),ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']:
             z.write(p,p.relative_to(ROOT))
         z.write(build_dir('gunsmoke')/'mt_build.i','build/gunsmoke/mt_build.i')
     names=['GUNSMOKE.TOS','GUNSMOKE.MAP','BUILD.JSN','README.TXT','DARKLORD.TXT','SOURCE.ZIP']
@@ -145,11 +145,15 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--out',type=Path,default=ROOT/'build/gunsmoke-megaste/package')
     ap.add_argument('--verify',action='store_true')
+    ap.add_argument('--verify-machine',choices=['both','megaste','ste'],default='both')
     ap.add_argument('--hatari',type=Path,default=Path('/Users/saschaspringer/Work/F030Arcade/third_party/hatari/build/src/hatari'))
     args=ap.parse_args();out=args.out.resolve();build(out)
     if args.verify:
+        from megaste_input_test import test as input_test
+        input_test(out)
         print(packet_test(out))
-        for machine in ['megaste','ste']:verify(out,args.hatari,machine,stress_rounds=4)
-        verify(out,args.hatari,'megaste',startup60=True,stress_rounds=4)
+        machines=['megaste','ste'] if args.verify_machine=='both' else [args.verify_machine]
+        for machine in machines:verify(out,args.hatari,machine,stress_rounds=4)
+        if 'megaste' in machines:verify(out,args.hatari,'megaste',startup60=True,stress_rounds=4)
     package(out)
 if __name__=='__main__':main()

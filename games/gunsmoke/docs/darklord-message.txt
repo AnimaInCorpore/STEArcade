@@ -1,8 +1,12 @@
 Hi Darklord,
 
-Thank you again for running the tests and sending the results. I've prepared
-a focused Gun.Smoke test for your Mega STE. It keeps the CPU at 16 MHz with
-the cache enabled, including while drawing and opening the screen borders.
+Thank you for the photos and results - they are very useful, and there is
+no need to apologise. Coin/start and the joystick working is good news.
+
+I found a bug in my test's joystick logger that can write into unrelated
+game memory. This version corrects that bug. It may explain some corruption,
+but I still need your comparison to establish that. It keeps the CPU at
+16 MHz with cache enabled during drawing and border opening.
 
 Would you please extract GUNMSTE.ZIP into a new, writable folder and run
 GUNSMOKE.TOS? It needs 4 MB RAM and a colour display that accepts 50 Hz,

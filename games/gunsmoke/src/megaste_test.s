@@ -43,6 +43,7 @@ mt_key:
 	rts
 mt_joy:
 	movem.l d0/a0,-(sp)
+	and.w #$ff,d0	; IKBD promises only d0.b; a later serial-byte IRQ has arbitrary upper bits
 	subq.w #1,d0	; 1=port 0, 2=port 1
 	lea mt_joysticks,a0
 	or.b d1,(a0,d0.w)

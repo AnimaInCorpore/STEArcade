@@ -30,14 +30,18 @@ this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the repos
 For Darklord's identified, human-playable Mega STE package:
 
 ```sh
-venv/bin/python games/gunsmoke/tools/megaste_test.py --verify
-# -> build/gunsmoke-megaste/package/GUNMSTE.ZIP
+venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
+  --out build/gunsmoke-megaste/package-v2
+# -> build/gunsmoke-megaste/package-v2/GUNMSTE.ZIP
 ```
 
 This `.TOS` selects 16 MHz/cache on only on a Mega STE, records inputs and machine state, and restores the original
 CPU/video settings on exit. It uses normal controls, without replay or cheats. It requires 4 MB and a colour display
 accepting **50 Hz**, including on US machines; native 60 Hz open borders are not provided. See the
 [operator instructions](docs/megaste-instructions.txt) and [validation notes](docs/megaste-test.md).
+Version 2 fixes a diagnostic joystick-logging memory write exposed by Darklord's return. For its focused Mega STE
+validation use `--verify --verify-machine megaste --out build/gunsmoke-megaste/package-v2`. The ordinary STE path
+has an intermittent top-border event under live-input stress; see the [return investigation](docs/megaste-test.md#darklords-return-2026-11-09).
 
 ## Controls
 

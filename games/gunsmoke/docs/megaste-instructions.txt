@@ -1,8 +1,10 @@
-GUN.SMOKE - MEGA STE TEST 1
+GUN.SMOKE - MEGA STE TEST 2
 =========================
 
 Thank you for helping us test one playable game on the Mega STE.
 This build has normal controls: no autoplay, recorded inputs or lives cheat.
+Version 2 fixes an out-of-bounds write in the diagnostic joystick logger.
+Please tell us whether the graphics corruption changes with this version.
 
 1. PREPARE
 ----------
@@ -12,7 +14,8 @@ Keep BUILD.JSN and GUNSMOKE.MAP with this exact executable.
 
 The game selects 16 MHz WITH CACHE ENABLED on a Mega STE and retains it
 through drawing and border opening. It restores your original CPU setting
-when you exit. An ordinary STE retains its original CPU configuration.
+when you exit. This version targets Mega STE; its ordinary 8 MHz STE border
+path has a known intermittent late event and is not part of this validation.
 The display switches to 50 Hz for the open-border screen, then is restored.
 US machines still need a display accepting 50 Hz; native 60 Hz open-border
 operation is not provided in this test build.

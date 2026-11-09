@@ -9,16 +9,17 @@ the cause of Darklord's earlier unidentified-game crash or certify the whole gam
 Run from the repository root with the locally supplied ROMs and normal toolchain:
 
 ```sh
-venv/bin/python games/gunsmoke/tools/megaste_test.py --verify
+venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
+  --out build/gunsmoke-megaste/package-v2
 ```
 
-Output: `build/gunsmoke-megaste/package/GUNMSTE.ZIP`. Give Darklord this archive and its
+Output: `build/gunsmoke-megaste/package-v2/GUNMSTE.ZIP`. Give Darklord this archive and its
 [operator instructions](megaste-instructions.txt). The executable is `GUNSMOKE.TOS`, avoiding the GEM desktop mouse
 pointer. `BUILD.JSN` contains its SHA256, source hashes, build ID and flags; `GUNSMOKE.MAP` identifies native crash
 addresses. `SOURCE.ZIP` retains the diagnostic hooks and shared timing/input source. The package contains no autoplay,
 replay or lives cheat. A normal build is also regenerated at `run/gunsmoke/GUNSMOKE.PRG`.
 
-Validated build ID: `9e77235103519092`; executable SHA256:
+Previously delivered version 1 build ID: `9e77235103519092`; executable SHA256:
 `476237ae597b4b52e089892dbe9955ac1538aa945295f349ba6b7e1b7bddbadb`.
 
 The helper selects low bits 3 of `$FF8E21` once after recognizing the Mega STE cookie. Drawing and border opening
@@ -108,3 +109,56 @@ not full US hardware compatibility. Hatari's local `src/clocks_timings.c` declar
 selects `ATARI_MEGA_STE_PAL_MCLK` when initializing Mega STE. Do not equate a 60 Hz startup with emulating the US
 master oscillator. TOS country/sync configuration is documented in the
 [Atari Compendium, OS Configuration Bits](https://info-coach.fr/atari/software/_development/Atari-Compendium.pdf#page=158).
+
+## Darklord's return, 2026-11-09
+
+Archive `GUNSMOKE(1).ZIP`, SHA256 `8c3a5491d16720bd1f9328795d1ebad686158d6b72686bf951278b8010ad89f5`,
+matches the delivered version 1 manifest. It identifies a Mega STE, US TOS 2.06 (`os_conf=0000`) and a 60 Hz
+desktop. All four CPU-mode samples are `$1F` (low bits 3: 16 MHz/cache on); exit phase is 01 and exception-vector
+restore mismatches are zero. The run has 884 VBLs, 878 arcade ticks, 378 pictures, two startup fallbacks, zero late
+events, zero late-PC entries and 25,255 split Blitter passes. The last quantities are decoded as eight words plus
+one long from `COUNTERS.BIN`, not ten independent counters. The report shows joystick packet activity but no key
+presses and only release `$7E`; it cannot confirm the reported coin/start trial came from this particular saved run.
+
+The photographs show widespread colour/pattern corruption in the test build. Zero late counters do not prove that
+the 50/60 Hz writes hit the Shifter's sub-line timing windows, and framebuffer contents were not captured in this
+return. Do not mark physical scanout, US timing, or the complete graphics path as verified from these counters.
+The older release's 200-line crop is separate from this new corruption; the game renders a 256-line picture.
+
+### Confirmed diagnostic logger bug
+
+`ikbd_byte` promises only **d0.b** at the joystick payload callback. The old `mt_joy` subtracted one from d0.w and
+used that full word as an index into a two-byte OR-mask array. Header and payload normally arrive in separate ACIA
+interrupts; foreground execution changes D0 between them. For example, a payload arriving with d0.w=`$3402` writes
+13,313 bytes past `mt_joysticks`, into unrelated game memory, rather than updating port 1. This was reproduced with
+the delivered version 1 native executable. It is an actual memory-safety bug, not proof that it caused every
+photographed defect. Previous tests exercised the byte decoder but disabled host joysticks and missed this path.
+
+Version 2 masks the callback selector to eight bits before indexing. The new `megaste_input_test.py` drives the
+actual ACIA ISR with a separate interrupt for every header and payload. It covers all 256 stale upper-byte values
+on both ports, all 256 payload values on both ports, register preservation, bounded RAM writes, keyboard make/break
+events and Esc release. It fails on the delivered version 1 binary and passes after the correction.
+
+```sh
+venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
+  --out build/gunsmoke-megaste/package-v2
+venv/bin/python games/gunsmoke/tools/megaste_input_test.py build/gunsmoke-megaste/package-v2
+```
+
+No border constants or renderer code are changed by this correction. An additional live-input run on the ordinary
+8 MHz STE path recorded one late top event; the legacy STOP/ACIA interaction remains a separate limitation.
+`--verify-machine megaste` explicitly confines this package's validation to the intended Mega STE target while
+retaining both machine tests in the default `--verify` workflow. Physical confirmation of corrected graphics is
+still required, and native US 60 Hz open-border operation is not provided.
+
+Version 2 build ID: `997e584eddc94ee0`; executable SHA256
+`7e201327954eebb0a0f5f0f69c5c761185445993dac22243328774b068594ec2`. Both normal and simulated 60 Hz startup Mega STE
+runs passed four additional rounds of keyboard stress with zero late events and restored CPU mode/exception
+vectors. The split-IRQ test passed 1024 packet cases plus neutral packets, keyboard make/break and Esc release.
+This confirms the logger correction in native execution; it does not certify the physical game's scanout.
+
+ST2VGA-type adapters generally preserve Atari video timings and require a 15 kHz-capable display, rather than
+scaling the game into a VGA raster: see the [manufacturer's timing explanation](https://docs.sidecartridge.com/st2vga-family/)
+and [Centurion's ST2VGA r4 specification](https://centuriontech.eu/product/st2vga-r4/). The exact Dell model and its
+input status remain useful for checking cropping/scaling. Do not blame the monitor for a confirmed diagnostic
+memory write or infer full 50 Hz overscan compatibility merely because an older cropped game displays.

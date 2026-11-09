@@ -42,3 +42,9 @@ pads disabled. No joystick events in a keyboard-only run mean **not exercised**,
 not a hardware failure. The host joystick decoder test checks all 256 input
 bytes against the native conversion routine; that does not establish that a
 physical joystick or the full serial packet transport was exercised.
+
+Darklord's 2026-11-09 return exposed a separate diagnostic logger bug: it indexed a two-byte array with d0.w even
+though the joystick callback promises only d0.b. The fixed logger masks the selector first. Its new native ISR
+regression test delivers headers/payloads in separate interrupts and varies the foreground register's stale upper
+bits, rather than assuming an entire serial packet arrives in one interrupt. This synthetic transport check still
+does not substitute for physical input testing. See the [Gun.Smoke return investigation](../games/gunsmoke/docs/megaste-test.md#darklords-return-2026-11-09).
