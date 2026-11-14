@@ -108,3 +108,77 @@ The detailed local reports are `build/border-timing/long-cache/timing.json`,
 `build/border-timing/timeplt-game/verified.json`. These generated files are not
 source fixtures. The updated `build/dltest/DARKLORD.ZIP` contains the standalone
 console diagnostic and fresh reference captures for real-hardware comparison.
+
+## Controlled fixed-picture return test (2026-11-14)
+
+`tools/videoctrl.py` builds `VIDCTRL.TOS` and `VIDCTRL.ZIP` for Darklord's
+next physical comparison. It uses the independently verified gameplay frame
+from the latest return's `GSCAP2.BIN`, with ten black guard rows, the same
+256-byte stride, fine scroll zero and constant palette. Its three automatic
+20-second stages are closed borders, top only, then top and bottom. CPU
+low bits remain 3 (16 MHz/cache on) throughout; the original mode is restored
+only after the test. There is no game execution or runtime Blitter work.
+A small CPU-written label/countdown occupies the otherwise black side band.
+The closed and top-only stages intentionally crop the lower picture.
+
+The builder creates an instrumented copy of `engine/rt/borders.s`; production
+source is unchanged. The fast first frequency writes use D3 (0 enabled,
+2 disabled) plus a NOP in place of CLR, loading the gate before warming/polling.
+The top kernel's extra word is explicitly warmed. Bottom D3 is saved/restored.
+Both enabled stages follow the same timed paths and retain the shared delay
+constants. Constant palette and absence of game/Blitter traffic are deliberate
+isolation controls, so a clean result is not full-game timing certification.
+
+`VIDCTRL.TXT` records per-stage VBLs, CPU samples, RAM integrity outside the
+HUD, border fallback/late counters, optional late DMA counter ranges, and
+native register/vector restoration mismatches. No file I/O happens during
+the display stages. Timer D is used only when originally idle with no pending
+or in-service interrupt; normal TOS 2.06's serial Timer D is left running and
+its sampler is reported unavailable. Report zero samples as unavailable,
+not as successful DMA verification. The optional sampler runs before the
+STE's line-310 address reset; a VBL sample would already see the reset base.
+The pinned Hatari `Video_CalculateAddress` adds LINEWID when read in the right
+horizontal border before its vertical end test, allowing an extra 96 bytes
+below a closed display. Preserve those readbacks without calling them a
+pixel mismatch.
+
+Build and verify from the checkout:
+
+```sh
+venv/bin/python tools/videoctrl.py --capture build/darklord-gunsmoke-2026-11-14/GSCAP2.BIN
+venv/bin/python tools/videoctrl_test.py
+venv/bin/python tools/videoctrl_test.py --fixture
+```
+
+The second verification uses a separate native launcher to select a 60 Hz,
+16 MHz/cache-on starting desktop and an idle Timer D before Pexec of the exact
+diagnostic. It exercises transition and optional-sampler paths with German
+TOS 2.06; it does not emulate a US oscillator or certify Darklord's ST2VGA/Dell
+scanout. The debugger takes screenshots/reads guest state and never pokes IO
+or timing registers. Verification checks the full visible arcade region
+against the independently verified reference (190, 219 and 256 picture rows),
+frequency-pulse margins, CPU writes, per-stage native checks and restoration.
+Retain the exact build IDs, executable/emulator hashes and results in the
+ignored output's `BUILD.JSN` and `hatari*/RESULT.JSN`.
+
+The operator instructions and BBCode forum draft are
+`docs/megaste-video-control-readme.txt` and
+`docs/megaste-video-control-message.txt`. Request `VIDCTRL.TXT` and phone
+photos of all three stages or a transition video; `REFPIC.BMP` is the
+source picture, not a monitor recording. No physical fix is inferred until
+those observations return.
+
+Validated build `d56cc302402067b6` (executable SHA256
+`4417c7be9d191462cde70cdc39a29bce863db42a7a0e1a287b09f94d2e852f93`)
+against the currently pinned Hatari `4be28430610455af9c313fc837312889ea0ecd22`
+(binary SHA256 `c2b0b334200b47f8f6a952a7e821939fca9eb9afc70531ae2b1fe80cc486e3bc`).
+Both startup cases passed: zero differences across the full 320-pixel hardware
+window, including side bands/HUD/guards; zero RAM, CPU-mode, restoration or
+late-border errors. Each stage recorded 1006 VBLs, including the final RAM
+integrity scan. Active pulses stayed within the required windows (top line 33,
+return on 34 before cycle 36; bottom line 262, return on 263 before cycle 36).
+The optional sampler recorded 998 samples per stage with an idle Timer D;
+normal TOS correctly left the active serial timer alone. A real emulated IKBD
+Esc press/release exited early with mode/vector restoration checks passing.
+The source inside the delivered archive rebuilt byte-for-byte, all outer
+filenames fit 8.3, and archive checksums passed. Physical results remain pending.

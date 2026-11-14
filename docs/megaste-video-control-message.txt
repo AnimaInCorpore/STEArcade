@@ -1,0 +1,15 @@
+Hi Darklord,
+
+Thank you again for your help. Your saved pictures are correct, so this test isolates the display/border handling.
+
+Please extract [b]VIDCTRL.ZIP[/b] into a fresh writable folder and run [b]VIDCTRL.TOS[/b] with the same monitor setup. It runs automatically, showing the same frozen picture for 20 seconds each:
+[list]
+[*][b]A CLOSE:[/b] borders closed.
+[*][b]B TOP:[/b] top border open.
+[*][b]C BOTH:[/b] top and bottom open.
+[/list]
+All three use [b]16 MHz with cache on[/b]. Cropping in A/B is expected; please check whether the visible picture is clean or corrupted.
+
+Could you please return [b]VIDCTRL.TXT[/b] and a phone photo of each stage, or a short video of the transitions? Please ZIP the report for upload and mention when any corruption or flickering first appears. It returns to the desktop after about a minute.
+
+Many thanks!
