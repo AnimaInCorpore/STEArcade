@@ -21,6 +21,9 @@ LABEL_HEIGHT = 16
 	ifd BOTTOM_PROBE
 	include "bottomprobe.i"
 	endc
+	ifd INTERACTIVE_PULSE
+	include "pulseprobe.i"
+	endc
 FRAMES = SECONDS*50
 STRIDE = 256
 ROWS = 320
@@ -62,6 +65,11 @@ start:
 	move.w 28(a0),d0
 	bsr log_hex
 	bsr log_eol
+	ifd INTERACTIVE_PULSE
+	moveq #0,d7
+.find_log:
+	bsr ip_log_name
+	endc
 	clr.w -(sp)
 	pea filename
 	move.w #$3d,-(sp)
@@ -73,6 +81,11 @@ start:
 	move.w #$3e,-(sp)
 	trap #1
 	addq.l #4,sp
+	ifd INTERACTIVE_PULSE
+	addq.w #1,d7
+	cmp.w #100,d7
+	blo .find_log
+	endc
 	lea exists_text,a0
 	bra quit_message
 .new:
@@ -121,7 +134,11 @@ start:
 	clr.w top_gate
 	bsr bp_load_phase
 	endc
+	ifd INTERACTIVE_PULSE
+	bsr ip_hud
+	else
 	bsr draw_hud
+	endc
 	; Confirm the output directory is writable before owning the display.
 	bsr save_report
 	tst.b save_failed
@@ -203,6 +220,10 @@ start:
 	stop #$2300
 	tst.b quit_flag
 	bne .exit
+	ifd INTERACTIVE_PULSE
+	bsr ip_step
+	bra .wait
+	else
 	move.w phase_frames,d0
 	ifd BOTTOM_PROBE
 	cmp.w bp_frames,d0
@@ -257,8 +278,17 @@ start:
 	bra .wait
 .all_done:
 	st completed
+	endc
 .exit:
+	ifd INTERACTIVE_PULSE
+	; Keep the check before teardown, at the same interrupt level as normal foreground.
+	st quit_flag
+	bsr check_image
+	endc
 	ori.w #$700,sr
+	ifd INTERACTIVE_PULSE
+	bsr ip_finish
+	endc
 	tst.b completed
 	bne .snapshot_done
 	bsr snapshot_counters
@@ -435,6 +465,9 @@ vbl:
 	beq .speed_ok
 	addq.l #1,4(a0)
 .speed_ok:
+	ifd INTERACTIVE_PULSE
+	bsr ip_vbl
+	endc
 	ifd BOTTOM_PROBE
 	moveq #0,d0
 	move.b $fffffa03.w,d0
@@ -506,9 +539,16 @@ timer_d:
 	movem.l (sp)+,d0-d2/a0-a1
 	rte
 acia:
+	ifd INTERACTIVE_PULSE
+	movem.l d0-d2/a0,-(sp)
+	else
 	movem.l d0-d2,-(sp)
+	endc
 .again:
 	ikbd_byte
+	ifd INTERACTIVE_PULSE
+	bsr ip_key
+	endc
 	bra .again
 .packet_byte:
 	clr.b ikbd_state
@@ -520,7 +560,11 @@ acia:
 	move.b $fffffc06.w,d0
 	bra .done
 .out:
+	ifd INTERACTIVE_PULSE
+	movem.l (sp)+,d0-d2/a0
+	else
 	movem.l (sp)+,d0-d2
+	endc
 	rte
 
 snapshot_counters:
@@ -612,6 +656,9 @@ draw_hud:
 	ifd BOTTOM_PROBE
 	bp_code
 	endc
+	ifd INTERACTIVE_PULSE
+	ip_code
+	endc
 
 final_report:
 	lea cpu_text,a0
@@ -667,6 +714,9 @@ final_report:
 	bne .stage
 	ifd BOTTOM_PROBE
 	bsr bp_report
+	endc
+	ifd INTERACTIVE_PULSE
+	bsr ip_report
 	endc
 	lea end_text,a0
 	bsr log_text
@@ -743,14 +793,22 @@ restored_values:
 	dc.l old_res,old_fine,old_width,old_speed
 	dc.l old_cd
 	ifd BOTTOM_PROBE
+	ifd INTERACTIVE_PULSE
+filename: dc.b 'PULSE00.TXT',0
+	else
 filename: dc.b 'BOTTOM.TXT',0
+	endc
 	else
 filename: dc.b 'VIDCTRL.TXT',0
 	endc
 digits: dc.b '0123456789ABCDEF'
 eol: dc.b 13,10,0
 	ifd BOTTOM_PROBE
+	ifd INTERACTIVE_PULSE
+title: dc.b 'PULSE 1 - Mega STE interactive bottom-border probe',13,10
+	else
 title: dc.b 'BOTTOM 1 - Mega STE bottom-border pulse probe',13,10
+	endc
 	else
 title: dc.b 'VIDCTRL 1 - Mega STE controlled scanout test',13,10
 	endc
@@ -761,25 +819,45 @@ restore_text: dc.b 'Restoration register/vector mismatches (must be zero): ',0
 base_text: dc.b 'Fixed screen base, stride=256, fine=0, LINEWID=48: ',0
 td_text: dc.b 'Late-frame Timer D sampler available (1=yes): ',0
 stage_text: dc.b 'STAGE ',0
+	ifd INTERACTIVE_PULSE
+end_text: dc.b 'DONE interactive session: ',0
+	else
 end_text: dc.b 'DONE completed (1=yes,0=Esc abort): ',0
+	endc
 	ifd BOTTOM_PROBE
+	ifd INTERACTIVE_PULSE
+exists_text: dc.b 'All PULSE00-PULSE99 log slots are used.',13,10,0
+	else
 exists_text: dc.b 'BOTTOM.TXT exists. Use a fresh folder for another run.',13,10,0
+	endc
 	else
 exists_text: dc.b 'VIDCTRL.TXT exists. Use a fresh folder for another run.',13,10,0
 	endc
 unsupported_text: dc.b 'VIDCTRL needs a Mega STE. Settings unchanged.',13,10,0
 busy_text: dc.b 'Timer A/B busy. Please clean-boot and retry. Settings unchanged.',13,10,0
 	ifd BOTTOM_PROBE
+	ifd INTERACTIVE_PULSE
+disk_text: dc.b 'Cannot save PULSE log. Check free space/write protection.',13,10,0
+done_text: dc.b 'PULSE finished. Results saved in the next numbered PULSE log.',13,10,0
+	else
 disk_text: dc.b 'Cannot save BOTTOM.TXT. Check free space/write protection.',13,10,0
 done_text: dc.b 'BOTTOM finished. Please return BOTTOM.TXT and phone video.',13,10,0
+	endc
 	else
 disk_text: dc.b 'Cannot save VIDCTRL.TXT. Please check free space/write protection.',13,10,0
 done_text: dc.b 'VIDCTRL finished. Please return VIDCTRL.TXT and phone photos/video.',13,10,0
+	endc
+	ifd INTERACTIVE_PULSE
+	even
 	endc
 	ifd BOTTOM_PROBE
 	bp_data
 	endc
 	even
+	ifd INTERACTIVE_PULSE
+	ip_data
+	even
+	endc
 image_palette: incbin 'PALETTE.BIN'
 label_tiles: incbin 'LABELS.BIN'
 timer_tiles: incbin 'TIMERS.BIN'
@@ -829,6 +907,9 @@ screen_space: ds.b STRIDE*ROWS+255
 	ifd BOTTOM_PROBE
 	even
 	bp_vars
+	ifd INTERACTIVE_PULSE
+	ip_vars
+	endc
 report: ds.b 16384
 	else
 report: ds.b 4096

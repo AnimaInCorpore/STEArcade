@@ -1,0 +1,20 @@
+Hi Darklord,
+
+Thanks again for the video. Please run PULSE.TOS from PULSE.ZIP with the
+same monitor setup. When the TOP picture looks clean, press C, then tap
+Space to try one bottom-border pulse. Press C if the picture stays clean
+or X if it scrambles.
+
+After a clean single pulse, press T to repeat that setting for ten
+seconds. Look for a stable, full-height picture with both the top and
+bottom borders open, correct colours throughout, and no flicker. The
+probe runs at 16 MHz with cache on the whole time.
+
+The arrow keys adjust the timing. If the picture scrambles, press X,
+then R to save and return to the desktop. Please confirm TOP looks clean
+again after relaunching before trying another setting.
+
+Could you zip and return the PULSEnn.TXT logs and let us know which
+settings met all those conditions? A short phone clip would also help.
+
+Many thanks!
