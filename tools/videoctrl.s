@@ -9,7 +9,18 @@ BD_K = 3
 BD_POLL = 240
 DEBUG = 1
 KEY_ESC = 1
+	ifnd SECONDS
 SECONDS = 20
+	endc
+	ifnd PHASE_COUNT
+PHASE_COUNT = 3
+	endc
+	ifnd LABEL_HEIGHT
+LABEL_HEIGHT = 16
+	endc
+	ifd BOTTOM_PROBE
+	include "bottomprobe.i"
+	endc
 FRAMES = SECONDS*50
 STRIDE = 256
 ROWS = 320
@@ -97,7 +108,7 @@ start:
 	dbf d0,.copy
 	lea stats,a4
 	move.l a4,current_stats
-	moveq #2,d0
+	moveq #PHASE_COUNT-1,d0
 .initstats:
 	move.l #$7fffffff,12(a4)
 	lea RECSIZE(a4),a4
@@ -106,6 +117,10 @@ start:
 	move.w #2,top_gate
 	move.w #2,low_gate
 	move.w #SECONDS,countdown
+	ifd BOTTOM_PROBE
+	clr.w top_gate
+	bsr bp_load_phase
+	endc
 	bsr draw_hud
 	; Confirm the output directory is writable before owning the display.
 	bsr save_report
@@ -147,6 +162,11 @@ start:
 	move.b $fffffa25.w,old_tddr
 	move.l #timer_d,16(a0)
 .no_td:
+	ifd BOTTOM_PROBE
+	move.b $fffffa03.w,bp_old_aer
+	bclr #3,$fffffa03.w
+	move.b $fffffa03.w,bp_selected_aer
+	endc
 	move.l #hbl,$68.w
 	move.l #vbl,$70.w
 	bclr #3,$fffffa17.w
@@ -184,12 +204,20 @@ start:
 	tst.b quit_flag
 	bne .exit
 	move.w phase_frames,d0
+	ifd BOTTOM_PROBE
+	cmp.w bp_frames,d0
+	else
 	cmp.w #FRAMES,d0
+	endc
 	bhs .next
 	moveq #0,d0
 	move.w phase_frames,d0
 	divu #50,d0
+	ifd BOTTOM_PROBE
+	move.w bp_seconds,d1
+	else
 	moveq #SECONDS,d1
+	endc
 	sub.w d0,d1
 	cmp.w countdown,d1
 	beq .wait
@@ -198,11 +226,19 @@ start:
 	bra .wait
 .next:
 	bsr check_image
+	ifd BOTTOM_PROBE
+	; Latch every new timing at VBL, never halfway through a pulse frame.
+	move.w phase_frames,d0
+.wait_phase_vbl:
+	stop #$2300
+	cmp.w phase_frames,d0
+	beq.s .wait_phase_vbl
+	endc
 	ori.w #$700,sr
 	bsr snapshot_counters
 	move.l current_stats,a4
 	move.l #1,40(a4)
-	cmp.w #2,phase
+	cmp.w #PHASE_COUNT-1,phase
 	beq .all_done
 	addq.w #1,phase
 	add.l #RECSIZE,current_stats
@@ -213,6 +249,9 @@ start:
 	clr.w low_gate
 .gate_ready:
 	move.w #SECONDS,countdown
+	ifd BOTTOM_PROBE
+	bsr bp_load_phase
+	endc
 	move.w #$2300,sr
 	bsr draw_hud
 	bra .wait
@@ -224,6 +263,9 @@ start:
 	bne .snapshot_done
 	bsr snapshot_counters
 .snapshot_done:
+	ifd BOTTOM_PROBE
+	move.b $fffffa03.w,bp_end_aer
+	endc
 	move.b $ffff8e21.w,end_speed
 	clr.b $fffffa19.w
 	clr.b $fffffa1b.w
@@ -245,6 +287,10 @@ start:
 	move.l old_td,16(a0)
 	move.l old_hbl,$68.w
 	move.l old_vbl,$70.w
+	ifd BOTTOM_PROBE
+	move.b bp_old_aer,$fffffa03.w
+	move.b $fffffa03.w,bp_restored_aer
+	endc
 	lea reg_addresses,a0
 	lea old_regs,a1
 	moveq #8,d0
@@ -264,6 +310,9 @@ start:
 	move.b old_speed,$ffff8e21.w
 	move.b $ffff8e21.w,restored_speed
 	; Verify saved masks, vectors and the explicitly owned video registers.
+	ifd BOTTOM_PROBE
+	bsr bp_verify_restoration
+	else
 	lea reg_addresses,a0
 	lea old_regs,a1
 	moveq #8,d0
@@ -276,6 +325,7 @@ start:
 .reg_ok:
 	dbf d0,.verify_regs
 	bsr verify_restoration
+	endc
 	move.w old_sr,sr
 	; Finish a desktop frame before returning; no disk access during any stage.
 	move.w #37,-(sp)
@@ -385,6 +435,19 @@ vbl:
 	beq .speed_ok
 	addq.l #1,4(a0)
 .speed_ok:
+	ifd BOTTOM_PROBE
+	moveq #0,d0
+	move.b $fffffa03.w,d0
+	move.l d0,56(a0)
+	cmp.l #1,(a0)
+	bne.s .edge_first_done
+	move.l d0,52(a0)
+.edge_first_done:
+	btst #3,d0
+	beq.s .edge_ok
+	addq.l #1,60(a0)
+.edge_ok:
+	endc
 	tst.b td_enabled
 	beq .out
 	and.b #$f0,$fffffa1d.w
@@ -516,12 +579,12 @@ draw_hud:
 	movem.l d0-d2/a0-a2,-(sp)
 	moveq #0,d0
 	move.w phase,d0
-	mulu #24*16,d0
+	mulu #24*LABEL_HEIGHT,d0
 	lea label_tiles,a0
 	adda.l d0,a0
 	move.l screen,a1
 	adda.l #32*STRIDE,a1
-	moveq #15,d2
+	moveq #LABEL_HEIGHT-1,d2
 .labels:
 	moveq #5,d1
 .lcopy:
@@ -546,6 +609,9 @@ draw_hud:
 	movem.l (sp)+,d0-d2/a0-a2
 	rts
 	borders_handlers
+	ifd BOTTOM_PROBE
+	bp_code
+	endc
 
 final_report:
 	lea cpu_text,a0
@@ -585,7 +651,11 @@ final_report:
 	move.l d5,d0
 	bsr log_hex
 	lea (a4),a3
+	ifd BOTTOM_PROBE
+	moveq #15,d4
+	else
 	moveq #12,d4
+	endc
 .field:
 	move.l (a3)+,d0
 	bsr log_hex
@@ -593,8 +663,11 @@ final_report:
 	bsr log_eol
 	lea RECSIZE(a4),a4
 	addq.l #1,d5
-	cmp.w #3,d5
+	cmp.w #PHASE_COUNT,d5
 	bne .stage
+	ifd BOTTOM_PROBE
+	bsr bp_report
+	endc
 	lea end_text,a0
 	bsr log_text
 	moveq #0,d0
@@ -669,10 +742,18 @@ restored_values:
 	dc.l old_base+1,old_base+2,old_base+3,old_sync
 	dc.l old_res,old_fine,old_width,old_speed
 	dc.l old_cd
+	ifd BOTTOM_PROBE
+filename: dc.b 'BOTTOM.TXT',0
+	else
 filename: dc.b 'VIDCTRL.TXT',0
+	endc
 digits: dc.b '0123456789ABCDEF'
 eol: dc.b 13,10,0
+	ifd BOTTOM_PROBE
+title: dc.b 'BOTTOM 1 - Mega STE bottom-border pulse probe',13,10
+	else
 title: dc.b 'VIDCTRL 1 - Mega STE controlled scanout test',13,10
+	endc
 	include "vc_build.i"
 	dc.b 'TOS version / os_conf (HEX): ',0
 cpu_text: dc.b 'CPU original / selected / end / restored FF8E21: ',0
@@ -681,11 +762,23 @@ base_text: dc.b 'Fixed screen base, stride=256, fine=0, LINEWID=48: ',0
 td_text: dc.b 'Late-frame Timer D sampler available (1=yes): ',0
 stage_text: dc.b 'STAGE ',0
 end_text: dc.b 'DONE completed (1=yes,0=Esc abort): ',0
+	ifd BOTTOM_PROBE
+exists_text: dc.b 'BOTTOM.TXT exists. Use a fresh folder for another run.',13,10,0
+	else
 exists_text: dc.b 'VIDCTRL.TXT exists. Use a fresh folder for another run.',13,10,0
+	endc
 unsupported_text: dc.b 'VIDCTRL needs a Mega STE. Settings unchanged.',13,10,0
 busy_text: dc.b 'Timer A/B busy. Please clean-boot and retry. Settings unchanged.',13,10,0
+	ifd BOTTOM_PROBE
+disk_text: dc.b 'Cannot save BOTTOM.TXT. Check free space/write protection.',13,10,0
+done_text: dc.b 'BOTTOM finished. Please return BOTTOM.TXT and phone video.',13,10,0
+	else
 disk_text: dc.b 'Cannot save VIDCTRL.TXT. Please check free space/write protection.',13,10,0
 done_text: dc.b 'VIDCTRL finished. Please return VIDCTRL.TXT and phone photos/video.',13,10,0
+	endc
+	ifd BOTTOM_PROBE
+	bp_data
+	endc
 	even
 image_palette: incbin 'PALETTE.BIN'
 label_tiles: incbin 'LABELS.BIN'
@@ -731,6 +824,12 @@ restore_bad: ds.l 1
 counter_baseline: ds.w 4
 	borders_vars
 	even
-stats: ds.b RECSIZE*3
+stats: ds.b RECSIZE*PHASE_COUNT
 screen_space: ds.b STRIDE*ROWS+255
+	ifd BOTTOM_PROBE
+	even
+	bp_vars
+report: ds.b 16384
+	else
 report: ds.b 4096
+	endc

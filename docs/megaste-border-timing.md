@@ -182,3 +182,181 @@ normal TOS correctly left the active serial timer alone. A real emulated IKBD
 Esc press/release exited early with mode/vector restoration checks passing.
 The source inside the delivered archive rebuilt byte-for-byte, all outer
 filenames fit 8.3, and archive checksums passed. Physical results remain pending.
+
+## Physical VIDCTRL return (2026-11-15)
+
+Darklord's `Downloads/VIDCTRL.ZIP` (SHA256
+`b78cd176608ffe116dedb78af02fd8e7d44546083a07d60cb069094abd2d45a0`)
+contains only `VIDCTRL.TXT`, reporting build `d56cc302402067b6`. There is no
+returned executable to rehash. The report, original supplied photo bytes and
+machine-readable findings are retained under
+`build/darklord-videoctrl-2026-11-15/` (ignored).
+
+| Stage | Physical photograph / operator observation | Report |
+|---|---|---|
+| A: closed | Clean visible picture; expected lower crop | 1006 VBLs, 1006 Timer-A fallbacks |
+| B: top only | Clean visible picture; more picture visible | 1006 VBLs, one startup fallback |
+| C: top + bottom | Corrupted in both photos; bottom band changes, reportedly about every half-second | 1006 VBLs, no fallbacks |
+
+All three stages completed with zero changed RAM words outside the HUD,
+zero bad CPU-mode samples and zero coarse late-top/late-bottom counters.
+Original/selected/end/restored CPU readbacks are all `$27`; first/last VBL
+samples are `$47` in each stage. Both values have low bits 3, so there is no
+reported transition away from 16 MHz/cache on. The report identifies TOS
+2.06, `os_conf=0` (US), with fixed screen base `$056C00`, stride 256 and fine
+scroll zero. Timer D was unavailable, so zero DMA/video-register samples are
+**unavailable measurements**, not successful scanout/register verification.
+
+The controlled result reproduces the failure without gameplay, animation,
+runtime Blitter transfers, palette switching or file I/O during the display.
+It localizes the observed trigger to enabling the bottom frequency pulse
+while the top border is open, on this machine/display chain. The top-only
+case is a working physical baseline at 16 MHz/cache on. It does not exclude
+a display/converter reaction to the altered signal, identify an exact bad
+cycle, or establish that every top-border timing variant is correct.
+The existing late counters check line/event synchronization, not whether both
+frequency writes fall inside the narrow Shifter window. Their zero values
+do not certify the fine timing. A software-first investigation should keep
+the working top path and CPU mode fixed and measure bottom pulse start and
+width independently, with a top-only recovery baseline between variants.
+The roughly half-second rhythm is an operator observation; no video or timing
+trace establishes its period or clock source.
+
+There is also **one aggregate restoration mismatch**. Test 1 does not log
+which register/vector failed, so the error cannot be dismissed as harmless or
+attributed to a particular register. Its full-byte comparisons include
+`$FF8E21`, whose non-mode bits differ between read sites in this return even
+though the two mode bits remain correct. A follow-up must log per-register
+expected/actual/masked values and compare defined bits. The error is recorded
+separately from the visual result; it does not prove a damaged Mega STE.
+
+The Timer-B poll also assumes the DE falling edge but neither logs nor selects
+MFP AER bit 3. The authoritative Hatari `MFP_ActiveEdge_WriteByte` and
+`Video_TimerB_GetPosFromDE` explicitly model that selection. Record and control
+that precondition in the next probe before interpreting a delay sweep.
+The pinned emulator's Mega STE clock initialization still selects its PAL
+master frequency, so a 60 Hz desktop launcher alone does not cover physical
+US clock ratios. Do not tune the production handler or emulator into an
+unmeasured presumed correction from these photos alone. No timing fix has yet
+been physically verified by this return.
+
+## Bottom-pulse sweep probe (2026-11-15)
+
+`tools/bottomprobe.py` packages `BOTTOM.TOS`/`BOTTOM.ZIP` from the same
+independently checked static Gun.Smoke frame. `tools/bottomprobe.s` enables
+probe-only hooks in `tools/videoctrl.s`; `tools/bottomprobe.i` implements the
+phase table and per-register logging. The original default VIDCTRL executable
+still assembles byte-for-byte with its original generated build include.
+Production `engine/rt/borders.s` and the special Hatari are not modified.
+
+The top path is the same warmed gated kernel as VIDCTRL 1. All 21 phases keep
+16 MHz/cache on and top open: B00 TOP (four seconds), P01 (ten seconds), B01,
+P02, ... P10, B10. The total is 144 seconds plus about three seconds of RAM
+checks/phase latching. Every timing transition waits for the next VBL after
+the RAM check, then loads the new descriptor atomically with interrupts
+masked. Short TOP recovery stages retain the same dummy frequency-write
+path and close only the bottom, so recovery itself can be photographed.
+
+MFP AER is saved, bit 3 is explicitly cleared for DE falling, and original,
+selected, end and restored AER are reported. Every VBL logs CPU mode and AER,
+including bad-edge counts. P01 uses the previous DE poll target/pulse method
+with the width preloaded before the timed region. P02 polls one DE falling
+edge earlier, then waits in a warmed DBF loop: initial count 101 has 101 taken
+iterations at 10 CPU cycles plus the final 14, totalling one 1024-cycle CPU
+scanline. This provides room for genuinely earlier as well as later starts.
+P03-P06 vary only that start loop; P07-P10 vary only the pulse loop. The masks,
+gates and changing parameters are loaded before the warmed/polled region.
+
+| Probe | Nominal start change from P02 | Width DBF count | Hatari median start / duration (8 MHz units) |
+|---|---:|---:|---:|
+| P01 OLD | previous method | 17 | 420 / 104 |
+| P02 REF | 0 | 17 | 415 / 104 |
+| P03 E20 | -20 | 17 | 395 / 104 |
+| P04 E10 | -10 | 17 | 405 / 104 |
+| P05 L10 | +10 | 17 | 425 / 104 |
+| P06 L20 | +20 | 17 | 435 / 104 |
+| P07 W13 | 0 | 13 | 415 / 84 |
+| P08 W15 | 0 | 15 | 415 / 94 |
+| P09 W19 | 0 | 19 | 415 / 114 |
+| P10 W21 | 0 | 21 | 415 / 124 |
+
+These are emulator measurements, not physical calibration. Some trials
+intentionally miss a safe window: P03 and P07 are cropped at the sampled
+Hatari frames and sometimes open on other frames. They are useful negative
+controls. Do not certify all ten scanouts as correct or install one of these
+settings as a production fix without Darklord's photographs/video.
+
+`BOTTOM.TXT` retains per-stage RAM/CPU/coarse late/optional DMA checks and
+logs all restored registers separately as address, size, expected, actual,
+mask and masked XOR. Non-mode CPU bits, unused video/MFP control bits and
+unused palette bits are retained raw but excluded from failure comparisons.
+All six replaced vectors are checked in full. There are 41 rows with serial
+Timer D left alone, or 42 including Timer-D data when it was idle and used.
+A native simulator regression checks that `$27` versus `$47` with mask 3
+passes while a true mode-bit mismatch fails, and that palette/vector masks
+preserve the same distinction.
+
+Verification (`tools/bottomprobe_test.py`, `--fixture`, `--abort`) uses one
+persistent guest-PC breakpoint, read-only guest snapshots and a blocking
+host reply FIFO. It records every phase and derives the B/P timing runs from
+the actual frequency-write gates/PCs. Start and duration changes are checked
+independently against P02, with every recovery window compared to the reference.
+The separate native startup fixture selects 60 Hz, cache on, an initially
+rising Timer-B edge and an idle Timer D before Pexec; it verifies edge selection
+and restoration without debugger IO pokes. It remains a PAL-master emulator
+transition test, not US oscillator emulation. Full runs, Esc restoration and
+native mask regressions passed on the current pinned Hatari; hashes, pulse
+histograms, snapshots and reports are under `build/megaste-bottom-probe/`.
+
+Build and verify:
+
+```sh
+venv/bin/python tools/bottomprobe.py --capture build/darklord-gunsmoke-2026-11-14/GSCAP2.BIN
+venv/bin/python tools/bottomprobe_test.py
+venv/bin/python tools/bottomprobe_test.py --fixture
+venv/bin/python tools/bottomprobe_test.py --abort
+```
+
+The ZIP includes an ASCII/CRLF README, BBCode draft, reference BMP, manifest,
+checksums and exact native source/generated assets. Native reconstruction
+from SOURCE.ZIP must match the delivered executable byte-for-byte. All outer
+filenames fit TOS 8.3. Request the complete BOTTOM.TXT and a phone recording
+showing the P/B labels, specifically clean full-height P cases, flicker and
+whether each subsequent TOP stage becomes clean again.
+
+## Physical BOTTOM return (2026-11-17)
+
+Darklord's returned ZIP has SHA256
+`0fad2f34a1a6db2eb099899c644ddfaed407c2e736258d5af3513f412a2f4926`.
+It contains only `BOTTOM.TXT`, which reports shipped build
+`09b94f162a92fe95`. All 21 case descriptors match the build manifest.
+The run completed all 7,347 VBLs with one startup Timer-A fallback and
+zero changed image words, CPU-mode errors or coarse late-border events.
+AER was `$04` before, during and after the run, confirming DE falling was
+already selected. The serial Timer D was active, so the run has no video
+counter samples. All 41 masked restoration checks passed. The only raw
+readback difference was `$FF8E21` (`$27` expected, `$5F` read);
+the two mode bits matched. This explains how the earlier full-byte check
+could flag a mismatch, although that earlier report did not name the register.
+
+The phone video shows clean, cropped B00 TOP at about 7 s. P01 briefly
+shows the full picture at about 8.2 s. By about 8.3 s the picture is
+scrambled above the bottom extension. B01 TOP crops the lower area as
+intended, but the remaining picture is still scrambled at 20 s. The same
+upper-image corruption is visible in sampled views of every later P and
+TOP stage, including P10 at 142 s and B10 at 149 s. Several P stages show
+a clean bottom strip below the scrambled area. The desktop looks clean at
+155 s after the display blanks on exit. These are observations of the
+complete display chain from the phone footage.
+
+The in-run TOP intervals therefore fail to restore the clean baseline.
+P02–P10 start after the fault has appeared, so the sweep cannot rank those
+settings by whether they would trigger the fault from a clean start.
+The emulator's clean TOP recoveries do not match this physical return.
+Keep 16 MHz/cache on in the next measurement and run only one bottom
+variant after a verified clean TOP baseline. A single P01 pulse followed
+by clean-state recovery measurements would help distinguish a one-pulse
+trigger from a fault that requires repeated pulses. Testing recovery
+through a desktop mode transition and, if available, a second video path
+would help distinguish the Atari video state from converter/display state.
+The report is retained in `build/darklord-bottom-2026-11-17/BOTTOM.TXT`.

@@ -1,0 +1,13 @@
+Hi Darklord,
+
+Thank you again. Your A/B/C results narrow this down to opening the bottom border.
+
+Please extract [b]BOTTOM.ZIP[/b] into a fresh writable folder and run [b]BOTTOM.TOS[/b] with the same monitor setup. It runs automatically for about two and a half minutes, always at [b]16 MHz with cache on[/b].
+
+It shows ten numbered pulse tests ([b]P01-P10[/b]), with short [b]TOP[/b] recovery stages between them. Cropping during TOP is expected. Some test timings may deliberately look wrong.
+
+Could you please return [b]BOTTOM.TXT[/b] zipped, and preferably a phone video including the stage labels? Please note which P numbers show a clean full picture, which flicker, and whether TOP becomes clean again after each test.
+
+It also logs the Timer-B edge and individual restoration checks. It returns to the desktop automatically.
+
+Many thanks!
