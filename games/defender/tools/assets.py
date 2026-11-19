@@ -125,45 +125,46 @@ def spr_code():
 # one movep read-modify-write, both lines' addresses from one movem of tline.  A column not shown: terr_hid.
 def terr_code():
     vc, vm = vcol(), vmask()
-    out, cold = ['	section text,code'], []
+    out, cold = ['\tsection text,code'], []
     for k in range(152):
         a = 0x98 - k
         e = vc[a] if a < 152 else 0xFFFFFFFF
         L = 'tc%d' % k
-        out += ['%s:' % L, '	move.w	#$%04X,d0' % (a << 8), '	move.b	(a5)+,d0', '	move.b	(a5)+,d5',
-                '	move.b	(a5)+,d4', '	move.w	(a2),d2', '	move.w	d0,(a2)+']
+        out += ['%s:' % L, '\tmove.w\t#$%04X,d0' % (a << 8), '\tmove.b\t(a5)+,d0', '\tmove.b\t(a5)+,d5',
+                '\tmove.b\t(a5)+,d4', '\tmove.w\t(a2),d2', '\tmove.w\td0,(a2)+']
         if e == 0xFFFFFFFF:
-            out.append('	bsr	terr_hid')
+            out.append('\tbsr\tterr_hid')
             continue
         off, pos = e >> 16, (e & 0xFFFF) >> 10
         mask = '#$%08X' % vm[pos]
 
         def erase(addr, ar, x):
-            return ['	tst.b	%s' % addr, '	beq.s	%s' % x, '	clr.b	%s' % addr,
-                    '	movep.l	%d(%s),d7' % (off, ar), '	and.l	%s,d7' % mask, '	movep.l	d7,%d(%s)' % (off, ar)]
+            return ['\ttst.b\t%s' % addr, '\tbeq.s\t%s' % x, '\tclr.b\t%s' % addr,
+                    '\tmovep.l\t%d(%s),d7' % (off, ar), '\tand.l\t%s,d7' % mask, '\tmovep.l\td7,%d(%s)' % (off, ar)]
 
         def put(dr, addr, ar, x):
-            return ['	cmp.b	%s,%s' % (addr, dr), '	beq.s	%s' % x, '	move.b	%s,%s' % (dr, addr),
-                    '	moveq	#0,d6', '	move.b	%s,d6' % dr, '	lsl.w	#4,d6',
-                    '	movep.l	%d(%s),d7' % (off, ar), '	and.l	%s,d7' % mask,
-                    '	or.l	%d(a6,d6.w),d7' % (pos * 4), '	movep.l	d7,%d(%s)' % (off, ar)]
-        out += ['	cmp.w	d2,d0', '	bne	%s_m' % L, '	cmp.b	(a4,d0.l),d5', '	bne	%s_n' % L,
-                '	cmp.b	1(a4,d0.l),d4', '	beq	tc%d' % (k + 1), '	bra	%s_n' % L,
-                '%s_m:' % L, '	move.w	d2,d3', '	eor.w	d0,d3', '	cmp.w	#$100,d3', '	bhs	%s_o' % L,
-                '	moveq	#0,d1', '	move.b	d2,d1', '	add.w	d1,d1', '	add.w	d1,d1',
-                '	movem.l	(a3,d1.w),a0/a1', '	move.w	d0,d3', '	sub.w	d2,d3',
-                '	subq.w	#1,d3', '	beq	%s_e' % L]
+            return ['\tcmp.b\t%s,%s' % (addr, dr), '\tbeq.s\t%s' % x, '\tmove.b\t%s,%s' % (dr, addr),
+                    '\tmoveq\t#0,d6', '\tmove.b\t%s,d6' % dr, '\tlsl.w\t#4,d6',
+                    '\tmovep.l\t%d(%s),d7' % (off, ar), '\tand.l\t%s,d7' % mask,
+                    '\tor.l\t%d(a6,d6.w),d7' % (pos * 4), '\tmovep.l\td7,%d(%s)' % (off, ar)]
+        out += ['\tcmp.w\td2,d0', '\tbne\t%s_m' % L, '\tcmp.b\t(a4,d0.l),d5', '\tbne\t%s_n' % L,
+                '\tcmp.b\t1(a4,d0.l),d4', '\tbeq\ttc%d' % (k + 1), '\tbra\t%s_n' % L,
+                '%s_m:' % L, '\tmove.w\td2,d3', '\teor.w\td0,d3', '\tcmp.w\t#$100,d3', '\tbhs\t%s_o' % L,
+                '\tmoveq\t#0,d1', '\tmove.b\td2,d1', '\tadd.w\td1,d1', '\tadd.w\td1,d1',
+                '\tmovem.l\t(a3,d1.w),a0/a1', '\tmove.w\td0,d3', '\tsub.w\td2,d3',
+                '\tsubq.w\t#1,d3', '\tbeq\t%s_e' % L]
         out += erase('1(a4,d2.l)', 'a1', '%s_f' % L)
-        out += ['%s_f:' % L, '	addq.w	#2,d3', '	beq	%s_n' % L, '%s_e:' % L]
+        out += ['%s_f:' % L, '\taddq.w\t#2,d3', '\tbeq\t%s_n' % L, '%s_e:' % L]
         out += erase('(a4,d2.l)', 'a0', '%s_n' % L)
-        out += ['%s_n:' % L, '	moveq	#0,d1', '	move.b	d0,d1', '	add.w	d1,d1', '	add.w	d1,d1',
-                '	movem.l	(a3,d1.w),a0/a1']
+        out += ['%s_n:' % L, '\tmoveq\t#0,d1', '\tmove.b\td0,d1', '\tadd.w\td1,d1', '\tadd.w\td1,d1',
+                '\tmovem.l\t(a3,d1.w),a0/a1']
         out += put('d5', '(a4,d0.l)', 'a0', '%s_p' % L)
         out += ['%s_p:' % L]
         out += put('d4', '1(a4,d0.l)', 'a1', 'tc%d' % (k + 1))
-        cold += ['%s_o:' % L, '	bsr	terr_oth', '	bra	%s_n' % L]
-    out += ['tc152:', '	bra	terr_done'] + cold
+        cold += ['%s_o:' % L, '\tbsr\tterr_oth', '\tbra\t%s_n' % L]
+    out += ['tc152:', '\tbra\tterr_done'] + cold
     return out
+
 
 
 def build():

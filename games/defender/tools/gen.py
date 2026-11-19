@@ -207,12 +207,45 @@ def video_addr(em, v, ins, off=0):
             em.e("addq.w #%d,d7" % off)
 
 
+# CUT (src/defender.s): sites whose screen work the STE program leaves out (df_mem stays exact): the stars' draw
+# ($E0EC) on odd lines (half the stars), and every other column pair of the scaled images ($FEA0-$FEE8, `STY [,U]`:
+# enemies appearing and bursting; their erase list still clears the screen).
+CUT_ODD = {0xE0EC}
+CUT_ALL = {0xFEA0, 0xFEB8, 0xFED0, 0xFEE8}
+
+
+def cut_open(em, v, nbytes, src):
+    """the CUT arm: d7 = the address, d5 the byte (one) / src the word (two): df_mem only; returns the label after it"""
+    full, done = em.new_label(), em.new_label()
+    e = em.e
+    e("ifne CUT")
+    if v in CUT_ODD:
+        e("btst #0,d7")
+        e("beq.s %s" % full)
+    e("cmp.w #$%04X,d7" % (0x9800 - nbytes + 1))
+    e("bhs.s %s" % full)
+    if nbytes == 1:
+        e("move.b d5,(a4,d7.l)")
+    else:
+        e("move.w %s,d5" % src)
+        e("lsr.w #8,d5")
+        e("move.b d5,(a4,d7.l)")
+        e("move.b %s,1(a4,d7.l)" % src)
+    e("bra %s" % done)
+    em.lines.append(full + ":")
+    e("endc")
+    return done
+
+
 def store8(self, v, ins, src, off=0):
     if v in VIDEO_SITES and self.io_site(v, ins) and src in ("d0", "d1", "d2", "d3", "d4"):
         self.stats["video store inline"] += 1
         video_addr(self, v, ins, off)
         self.e("move.b %s,d5" % src)
+        done = cut_open(self, v, 1, src) if v in CUT_ODD | CUT_ALL else None
         video_put(self)
+        if done:
+            self.lines.append(done + ":")
         self.e("tst.b %s" % src)
         return
     return _store8(self, v, ins, src, off)
@@ -222,6 +255,7 @@ def store16(self, v, ins, src):
     if v in VIDEO_SITES and self.io_site(v, ins) and src in ("d0", "d1", "d2", "d3", "d4"):
         self.stats["video store inline"] += 2
         video_addr(self, v, ins)
+        done = cut_open(self, v, 2, src) if v in CUT_ODD | CUT_ALL else None
         self.e("move.w d7,-(sp)")
         self.e("move.w %s,d5" % src)
         self.e("lsr.w #8,d5")
@@ -231,6 +265,8 @@ def store16(self, v, ins, src):
         self.e("addq.w #1,d7")
         self.e("move.b %s,d5" % src)
         video_put(self)
+        if done:
+            self.lines.append(done + ":")
         self.e("tst.w %s" % src)
         return
     return _store16(self, v, ins, src)
