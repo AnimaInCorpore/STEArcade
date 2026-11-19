@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 52.8 arcade frames a second (88% of the arcade's 60.10); in play 42.1 (70%); every frame
+title and attract demo): 52.7 arcade frames a second (88% of the arcade's 60.10); in play 41.3 (69%); every frame
 shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
@@ -21,8 +21,6 @@ python games/defender/ref/cover.py <seed> [frames]      # coverage: seeds 1-18, 
 python games/defender/tools/build.py --sim              # the translation (tools/gen.py) -> run/defender_sim/DEFENDER.PRG
 python games/defender/tools/logic_test.py [frames] [--seed N] [--trace F | --wtrace F] [--profile]   # lock-step on Musashi
                                                         # (--profile with DF_PROFINS=N: the N hottest 6809 instructions)
-python games/defender/tools/build.py --sim -D CUT=1 --tag defender_cut   # the STE program's simplifications: then
-python games/defender/tools/logic_test.py 6000 --tag defender_cut --nopic    # the logic exact (the screen differs)
 python games/defender/tools/build.py                    # the STE program -> run/defender/DEFENDER.PRG
 powershell -ExecutionPolicy Bypass -File games/defender/tools/hatari.ps1 -Frames 3400   # hidden Hatari: a still and the speed
 & games/defender/tools/hatari.ps1 -Frames 9000 -Name defender_play -Extra @('--play','5')   # (in PowerShell) play speed:
@@ -161,11 +159,10 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 52.8 arcade frames a second, 88% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 52.7 arcade frames a second, 88% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
-42.1 arcade frames a second, 70%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
-play from its start at VBL 1789 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 44.3; the STE program has the
-`CUT` simplifications below, the simulator's exact test not).  On Musashi
+41.3 arcade frames a second, 69%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1789 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 43.6).  On Musashi
 (`logic_test.py`, 6,000 frames) the seeds with play take 126,000-146,000 68000 cycles an arcade frame (seed 7, attract only, 90,700).  Its profile
 (seed 2): the translated code 42% (its inline video stores included; flat, the hottest instruction the stars' draw at
 $E0EC with 2%), `df_terrain` 24% (it runs about every other frame in play, ~50,000 cycles a call: 57% of its 152
@@ -190,12 +187,13 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | the lasers' erase loops ($E621 / $E68D, `df_lzr` / `df_lzl`: the run cleared in df_mem, then on the screen a whole plane byte at a time, `hzero`), the task list walk ($E856, `df_task`: every task switch), $F522's image copy ($F53C, `df_icopy`); play 36.9 -> 37.5 | 51.7 | |
 | the terrain's 152 columns as generated code (`assets.py` terr_code): each column's screen offset, mask and position baked in, both lines' addresses from one `movem` of `tline`, the old bytes the draw does not cover erased, a byte written only where it changes (seed 2: 156,900 -> 147,100 cycles a frame); play 37.5 -> 40.7 | 52.4 | |
 | the translation: a 16-bit load with post-increment finds its slot once (`byte_operands`), `[n,X]` reads its pointer straight from the flat base (`flat_ptr`), the inline video store has no test for an address not shown (`vtab` points it at `vdummy`) and its I/O call off the straight path (seed 2: 147,100 -> 145,300); play 40.7 -> 41.3 | 52.7 | |
-| `CUT` (on in the STE program, off in the simulator's exact test; df_mem, the game's video RAM, stays exact, only screen work is left out): the stars on odd lines and every other particle go into df_mem only, their erases still clear the screen; every sprite is drawn (the scaled images' columns were cut too at first, user: keep all sprites) (seed 2: 145,300 -> 143,300); play 41.3 -> 42.1 | 52.8 | |
 
-Next: play (42.1) is the figure to raise.  Tried and dropped (`CUT`): the terrain's screen every other call (the call between
-doing the 6809's work in df_mem only, the next rewriting the lines it showed, held and draws now: on the reference 32%
-fewer line rewrites, 179 a call against 264, but the call between still costs its ~10,000 cycles on every column, so
-no gain).  The cuts gain little because an erase must still reach the screen (the screen follows df_mem).  The terrain is near its floor now: a call must change ~273 screen bytes
+Next: play (41.3) is the figure to raise; every element is drawn (user, 2026-11-19: no simplified effects).  Tried
+and dropped, simplifications with df_mem kept exact and only screen work left out: half the stars, every other
+particle and every other column pair of the scaled images (play 41.3 -> 42.2; an erase must still reach the screen,
+so only the draws are saved); the terrain's screen every other call (on the reference 179 line rewrites a call against
+264, but the call between still costs its ~10,000 cycles on every column: no gain).  Hardware scrolling for the
+hills does not fit: the STE scrolls all planes of the one bitmap the game draws everything into, in screen positions.  The terrain is near its floor now: a call must change ~273 screen bytes
 (seed 2, frames 3000-3600: 57% of the columns keep their address, 14% move one line, 29% two or more), one
 read-modify-write each; grouping them by plane byte (224 a call) would save little.  Tried and dropped: the stars ($E0A2-$E0F2) as a
 native through `VPUT` / `VZERO` (seed 2: 157,300 -> 162,100 cycles a frame; their cost is the 32 screen writes a

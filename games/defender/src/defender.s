@@ -40,15 +40,6 @@ DP = $A0
 	ifnd MAX_PENDING
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow frame)
 	endc
-; CUT: effects simplified for speed (the game's video RAM, df_mem, stays exact; only screen work is left out): the
-; stars on odd lines into df_mem only (gen.py CUT_ODD), every other particle too (df_part); every sprite is drawn.  On in the STE program, off in the simulator's exact test.
-	ifnd CUT
-	ifd SIM
-CUT = 0
-	else
-CUT = 1
-	endc
-	endc
 	ifnd FRAMES
 FRAMES = 0
 	endc
@@ -1293,11 +1284,7 @@ df_part:
 	lea	(a4,d7.l),a2		; Y
 	lea	vtab,a1
 	lea	vv_tab,a3
-.p:
-	ifne CUT
-	bchg	#0,part_tog
-	endc
-	moveq	#0,d4			; LDU ,Y
+.p:	moveq	#0,d4			; LDU ,Y
 	move.b	(a2),-(sp)
 	move.w	(sp)+,d4
 	move.b	1(a2),d4
@@ -1325,10 +1312,6 @@ df_part:
 	move.b	d0,2(a2)
 	move.b	d1,3(a2)
 	move.b	d0,(a2)
-	ifne CUT
-	btst	#0,part_tog
-	bne	.cut
-	endc
 	tst.b	d1
 	bmi	.two
 	move.b	#$BB,d0			; STD [,Y]
@@ -1357,28 +1340,6 @@ df_part:
 	PB	$101,$B0
 	move.b	#$B0,d0
 	move.b	#$B0,d1
-	ifne CUT
-	bra.s	.n
-.cut:	moveq	#0,d7			; (CUT: this particle into df_mem only)
-	move.b	(a2),-(sp)
-	move.w	(sp)+,d7
-	move.b	1(a2),d7
-	lea	(a4,d7.l),a0
-	tst.b	d1
-	bmi.s	.ct
-	move.b	#$BB,d0
-	move.b	d0,(a0)
-	move.b	d0,1(a0)
-	move.b	d0,d1
-	bra.s	.n
-.ct:	move.w	d7,d4			; (LDU ,Y)
-	move.b	#$0B,(a0)
-	move.b	#$0B,1(a0)
-	move.b	#$B0,d0
-	move.b	d0,$100(a0)
-	move.b	d0,$101(a0)
-	move.b	d0,d1
-	endc
 .n:	lea	10(a2),a2		; LEAY $A,Y; CMPY #$B800
 	move.l	a2,d7
 	sub.l	a4,d7
@@ -2230,8 +2191,6 @@ vline:		ds.l	256		; per y the screen address of its line, 0 where not shown (ini
 tline:		ds.l	257		; df_terrain: per y (0-256) vline's, tdummy where not shown
 tdummy:		ds.b	168
 terr_calls:	ds.l	1
-part_tog:	ds.b	1		; (CUT: df_part draws every other particle)
-	even
 spr_u:		ds.w	1
 spr_p:		ds.l	4*1024		; spr_build: per position bank 2's $CC00-$CFFF bytes as planar bits
 vdummy:		ds.b	8		; vtab's screen byte for the addresses not shown
