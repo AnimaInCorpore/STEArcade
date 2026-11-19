@@ -37,6 +37,7 @@ POWER_ON = 0xF61F
 IDLE = 0xE7C3                       # LDA <$5D; BEQ $E7C3: the foreground waits for the IRQ's frame count
 SEEDS = [int(x) for x in os.environ.get("DF_SEEDS", "").split(",") if x] or range(1, 19)
 NATIVES = {IDLE: "df_idle"}
+VIDEO_SITES = set()                 # (load_cover)
 NVIEWS = 8                          # (views 8-15 are empty: no code, read 0)
 SLOT6 = 6
 
@@ -157,10 +158,21 @@ def load_cover():
         for v, x in d["targets"].items():
             tg[v] |= x
         wraps |= d["wraps"]
-        io |= {pc for pc, a, rw in d["io"] if a >= 0xC000}          # (the video RAM is memory here)
+        # the window and the I/O, and the stores into the video RAM (main_io_w: the screen too; its reads are memory)
+        io |= {pc for pc, a, rw in d["io"] if a >= 0xC000 or (a < 0x9800 and rw == 'w')}
         returns.update(d.get("returns", {}))
     for v in [v for v in exec_ if v < 0xC000]:
         del exec_[v]                                                # ($A08F: the IRQ vector's JMP $DF17 in RAM)
+    # the sites whose stores the coverage saw only in the video RAM: df_vstore (no I/O decoding; other addresses go on
+    # to main_io_w)
+    wr = collections.defaultdict(set)
+    for s in SEEDS:
+        d = pickle.loads((build_dir("defender") / ("cover%d.pkl" % s)).read_bytes())
+        for pc, a, rw in d["io"]:
+            if rw == 'w':
+                wr[pc].add(a < 0x9800)
+    global VIDEO_SITES
+    VIDEO_SITES = {pc for pc, k in wr.items() if k == {True}}
     return exec_, acc, tg, wraps, io, returns
 
 
@@ -178,6 +190,8 @@ def program(cover):
     prog = m6809x.Program("main", "M", page_bytes, slot_of, roots=[RESET, POWER_ON, IRQ] + sorted(NATIVES), exec_cover=set(exec_),
                           acc_cover=flat, targets=tg, page_addr=page_addr, io_sites=io, wrap_sites=wraps, dp=0xA0,
                           a3_slot=5, a4_slot=0, natives=dict(NATIVES), pid_checks=True)
+    prog.io_w_alt = {v: 'df_vstore' for v in VIDEO_SITES if v in io}
+    prog.video_push = (0, 0x9800)               # (PSHU into the video RAM: main_vlist puts the bytes on the screen)
     prog.indirect_io = True                     # (JSR [A,Y] with the table in the window's data: through main_io_r)
     prog.dp_data = True                         # (DP is a data byte in the block copies and fills: PSHU / PULS DP)
     prog.a3_pb = True                           # (DP $A0 and the stack in slot 5: a3 = df_mem + $A000)

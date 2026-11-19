@@ -3,9 +3,12 @@
 MAME set `defender` (Defender, Red label; `midway/williams.cpp`, `williams_m.cpp`, `williams_v.cpp`).  The main CPU is
 an MC6809E at 1 MHz that draws every pixel of a 304 x 256 bitmap of 4 bpp itself (no blitter on this board), 16
 pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The main program is statically translated
-to 68000 code (`engine/m6809x.py`).  Status: **started** (2026-11-19): the ROM set, the reference board and its check
-against MAME, the main CPU's coverage and its translation (exact against the reference in the simulator) exist;
-there is no STE program yet (hardware, picture, input, sound), and the port is not in `port.py list`.
+to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
+**started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
+simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
+title and attract demo): 27.7 arcade frames a second (46% of the arcade's 60.10), every frame shown.
+
+![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
 
 ## Build and run
 
@@ -15,7 +18,9 @@ python games/defender/tools/machine.py out.png          # the reference board: 6
 python games/defender/ref/mame_cmp_defender.py [frame ...] [--factory] [--keep DIR]  # against MAME (MAME=...\wolfmame-0248\mame.exe)
 python games/defender/ref/cover.py <seed> [frames]      # coverage: seeds 1-18, 30,000 frames each -> build/defender/cover<seed>.pkl
 python games/defender/tools/build.py --sim              # the translation (tools/gen.py) -> run/defender_sim/DEFENDER.PRG
-python games/defender/tools/logic_test.py [frames] [--seed N] [--trace F | --wtrace F]   # lock-step on Musashi
+python games/defender/tools/logic_test.py [frames] [--seed N] [--trace F | --wtrace F] [--profile]   # lock-step on Musashi
+python games/defender/tools/build.py                    # the STE program -> run/defender/DEFENDER.PRG
+powershell -ExecutionPolicy Bypass -File games/defender/tools/hatari.ps1 -Frames 3400   # hidden Hatari: a still and the speed
 ```
 
 Coverage of all seeds (about 2.5 minutes each, run them in parallel):
@@ -27,6 +32,14 @@ for s in $(seq 1 18); do python games/defender/ref/cover.py $s 30000 & done; wai
 Supply `assets/roms/defender.zip`: MAME's merged Defender set (the parent's 14 files at the archive's root, the
 clones in their folders); `docs/rom_manifest.json` has the parent's sizes, CRCs and SHA-1s, equal to MAME 0.286's
 `ROM_START( defender )`.  Nothing ROM-derived is in git.
+
+## Controls
+
+Keyboard: **Up / Down** arrows move, **Space / Z / Control** fire, **X** or **Right** arrow thrust, **C** or **Left**
+arrow reverse, **B** smart bomb, **H** hyperspace, **5 / 6** coin, **1 / 2** start, **Esc** quits.  Joystick (either
+port): up / down, fire, right thrust, left reverse.  Jaguar pad A: up / down, A fire, B thrust, C smart bomb, right
+thrust, left reverse, Option coin, Pause start; pad B's C is hyperspace.  The settings are the factory ones (3 ships,
+a bonus ship every 10,000, 1 coin 1 credit).
 
 ## State
 
@@ -62,8 +75,13 @@ clones in their folders); `docs/rom_manifest.json` has the parent's sizes, CRCs 
   112,000-138,000 68000 cycles an arcade frame on Musashi (the means of those seeds; the STE has 160,000 a 50 Hz VBL
   and the arcade's 60.1 frames a second need about 133,000 each), drawing into the 6809's video RAM included but
   without any picture on the STE yet.
-* **Not done**: the STE runtime (hardware, borders, input, the IKBD and pads), the picture (the 6809's column-major
-  bitmap to planar), sound (the M6808 board), Hatari.
+* **The screen** (`tools/logic_test.py`, 2026-11-19): the STE's planar screen equals the reference's picture
+  (machine.render_pixels at x + 14, the side bands 0) after every arcade frame, 6,000 frames in each of the seeds 1,
+  2, 5, 7, 10, 13 and 18, with the RAM, palette, CMOS, view and sound commands.
+* **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
+  screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
+  Play from the keyboard has not been tried there.
+* **Not done**: sound (the M6808 board), speed work, `port.py` registration, play in Hatari.
 
 ## How it works
 
@@ -101,6 +119,19 @@ clones in their folders); `docs/rom_manifest.json` has the parent's sizes, CRCs 
 * **The boot**: the power-on tests (12.2 million cycles) are skipped: the program starts at $D738 (`ORCC #$FF; LDS
   #$BFFF; DP = $A0`, the PIAs, the RAM $9C00-$BFFF cleared), where the tests go when they pass, with the factory CMOS.
 
+### The picture (`src/defender.s`)
+
+* The arcade's bitmap (byte = (x / 2) * 256 + y, the left pixel in the high nibble) shows x 12-303, y 7-246; on the
+  STE at x + 2 (14 pixels of black on each side of 320) on screen lines 18-257 with both borders open
+  (`engine/rt/borders.s`, PIC_TOP 18, 240 lines; the palette on for the picture's lines only).
+* The bytes stay in df_mem (the program reads them).  The stores the coverage saw into the video RAM go through the
+  runtime: sites that only ever stored there call `df_vstore` (the byte, and when it changed its two pixels: in play
+  930 stores a frame, 500 change), the others `main_io_w`; PSHU into the video RAM (`video_push`) calls
+  `main_vlist`.  `vput` writes a byte's two pixels: `vtab` (per video RAM address its screen byte and the pixel pair's
+  position, built at the start) and `movep.l` of the four plane bytes, masked.
+* One screen, drawn while shown (the arcade draws while the beam runs too); the 16 pens through `ste_pal_tab`
+  (MAME's colours to the STE's 4 bits a gun; `tools/assets.py`) every VBL.
+
 ### The translation (`tools/gen.py`)
 
 * **Pages**: 6 the fixed ROM $D000-$DFFF, 7 $E000-$FFFF, 8 + view the window's code of view 1-7 (banks 1, 2, 3 and 7
@@ -117,6 +148,15 @@ clones in their folders); `docs/rom_manifest.json` has the parent's sizes, CRCs 
   move 8 bytes at a time with `PULS CC,D,DP,X,Y` / `PSHU`, and the fills set DP with `TFR A,DP`; direct addressing
   only happens with DP = $A0.  TFR into / out of DP, pushes and pulls of DP and the RTI's DP use the byte `main_dpv`.
 * **The dispatcher** takes a long a 6809 address (192 KB of tables for the 6 pages; one `move.l`, no base).
+
+## Speed
+
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 27.7 arcade frames a second, 46% of
+60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  On Musashi
+(`logic_test.py`, 6,000 frames of play) 368,000-477,000 68000 cycles an arcade frame; the profile of seed 1: `vput`
+45%, the RAM reads through `main_io_r` 16% (before its fast path), `df_vstore` 10%.  The logic alone was 112,000-
+138,000 before the screen writes.  Next: inline video stores in the translation (no call, no register saves), and
+the dirty bytes converted once a picture instead of at every store.
 
 ## Lessons
 
@@ -137,6 +177,11 @@ clones in their folders); `docs/rom_manifest.json` has the parent's sizes, CRCs 
   PIAs, reached through main_io_r).
 * **2026-11-19, the palette is written with PSHU** ($DF6E: U = $C010): pushes are memory stores in the translation,
   so the palette lives in df_mem at $C000.
+* **2026-11-19, a signed index**: `main_vlist` read the pushed bytes with `(a0,d0.w)`, and the screen clear at
+  $8000-$97FF read 32 KB too low (stale pixels in the picture's right part); video RAM addresses need a long index.
+* **2026-11-19, a translator bug** (`engine/m6809x.py`, fixed): `CLR B,X` at an I/O site kept its zero in d6, which
+  the accumulator offset's address calculation also uses: the store wrote B.  The zero is in d5 now (the I/O
+  routines keep d5).  It changes the code of every 6809 port's I/O CLRs; only Defender's tests ran after it.
 * **2026-11-19, test harness pitfalls**: the harness's stops must be self-loops (`bra.s sim_wait`), not `rts`; its
   "bad pc" range must not cover the routine after main_badpc (`m6809_daa`); a trace of 68000 label addresses misses
   6809 instructions that translate to nothing (NOPs share one address): `--wtrace` compares the frame's RAM writes

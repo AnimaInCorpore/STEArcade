@@ -4,8 +4,9 @@
     python logic_test.py [frames] [--seed N] [--tag T]
 
 Compared after the boot and every arcade frame: the RAM $0000-$BFFF (video RAM included; the 64 bytes below the stack
-pointer are dead and left out), the palette, the CMOS, the view and the sound commands of the frame.  Reports the
-68000 cycles a frame (Musashi; no drawing yet).
+pointer are dead and left out), the palette, the CMOS, the view, the sound commands of the frame and the STE screen
+(the planar picture: equal to the reference's picture, machine.render_pixels, at x + 14, the side bands 0).  Reports
+the 68000 cycles a frame (Musashi; the screen writes included).
 """
 from pathlib import Path
 import argparse
@@ -15,7 +16,19 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve
                 str(Path(__file__).resolve().parents[3] / 'engine')]
 from machine68k import Register as R
 from sim import Sim, TRAP1
-from machine import DefenderPort, factory_cmos
+from machine import DefenderPort, factory_cmos, render_pixels
+import numpy as np
+
+PIC_TOP, LB = 18, 160
+
+
+def picture(buf):
+    """the planar screen's picture lines (240 lines of 160 bytes) -> pens [240, 320]"""
+    a = np.frombuffer(buf, np.uint8).reshape(240, 20, 4, 2)
+    w = (a[..., 0].astype(np.uint16) << 8) | a[..., 1]                    # [line, group, plane] words
+    bits = (w[..., None] >> (15 - np.arange(16))) & 1                    # [line, group, plane, pixel]
+    pix = (bits * (1 << np.arange(4))[None, None, :, None]).sum(axis=2)   # [line, group, pixel]
+    return pix.reshape(240, 320).astype(np.uint8)
 from paths import ROOT, build_dir
 import cover
 
@@ -28,6 +41,8 @@ def main():
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--quiet', action='store_true')
     ap.add_argument('--tag', default='defender_sim')
+    ap.add_argument('--nopic', action='store_true', help='do not compare the screen with the reference picture')
+    ap.add_argument('--profile', action='store_true', help='where the 68000 cycles go (a sample every 200 cycles)')
     ap.add_argument('--trace', type=int, default=-1, help='compare the executed instructions of this frame')
     ap.add_argument('--wtrace', type=int, default=-1, help='compare the writes to the 6809 RAM of this frame, in order')
     args = ap.parse_args()
@@ -42,12 +57,19 @@ def main():
     rnd = random.Random(args.seed)
     cycles = [0]
 
+    import bisect, collections, re
+    names = sorted((a, n) for n, a in sym.items() if not n.startswith('.') and not re.fullmatch('M[0-9A-F]{6}(_.*)?', n))
+    naddr = [a for a, n in names]
+    prof = collections.Counter()
+
     def run_to(targets):
         total = 0
         while total < 2_000_000_000:
-            r = cpu.execute(2000).cycles
+            r = cpu.execute(200 if args.profile else 2000).cycles
             total += r
             pc = cpu.r_pc()
+            if args.profile:
+                prof[names[bisect.bisect_right(naddr, pc) - 1][1]] += 1
             if pc in targets:
                 cycles[0] += total
                 return pc
@@ -78,6 +100,16 @@ def main():
             got = bytes(mem.r_block(addr, len(ref)))
             if got != bytes(ref):
                 raise RuntimeError('frame %d: %s %s, reference %s' % (f, name, got.hex(), bytes(ref).hex()))
+        pic = picture(bytes(mem.r_block(mem.r32(sym['screen']) + PIC_TOP * LB, 240 * LB)))
+        want = np.zeros((240, 320), np.uint8)
+        want[:, 14:306] = render_pixels(m.mem)
+        if not args.nopic and (pic != want).any():
+            ys, xs = np.nonzero(pic != want)
+            y0, x0 = int(ys[0]), int(xs[0])
+            raise RuntimeError('frame %d: %d screen pixels differ from the reference picture, first (line, x) %s; '
+                               'line %d x %d-%d: screen %s, reference %s' % (
+                f, len(ys), list(zip(ys[:6].tolist(), xs[:6].tolist())), y0, x0, x0 + 11,
+                pic[y0, x0:x0 + 12].tolist(), want[y0, x0:x0 + 12].tolist()))
         if mem.r8(sym['df_view']) != m.view:
             raise RuntimeError('frame %d: view %d, reference %d' % (f, mem.r8(sym['df_view']), m.view))
         head = mem.r8(sym['snd_head'])
@@ -235,8 +267,12 @@ def main():
         resume()
         if f % 1000 == 999 and not args.quiet:
             print('%d frames exact' % (f + 1), flush=True)
-    print('PASS: %d frames (seed %d): RAM, palette, CMOS, view and sound commands exact' % (args.frames, args.seed))
-    print('68000 cycles an arcade frame (the logic, no drawing; Musashi): %d' % (cycles[0] // max(1, args.frames)))
+    print('PASS: %d frames (seed %d): RAM, palette, CMOS, view, sound commands%s exact' % (
+        args.frames, args.seed, '' if args.nopic else ' and the screen'))
+    print('68000 cycles an arcade frame (the logic and the screen writes; Musashi): %d' % (cycles[0] // max(1, args.frames)))
+    if args.profile:
+        tot = sum(prof.values())
+        print('  ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in prof.most_common(16)))
 
 
 if __name__ == '__main__':

@@ -199,7 +199,8 @@ class Program:
         # cell_ptr, as the port's io_w does there (Track & Field, Hyper Sports); other addresses call io_w.  Word
         # stores still call io_w.
         self.video_inline = None
-        # io_w_alt (set after construction): {site: label}: a byte store at that site calls this routine instead of
+        # io_w_alt (set after construction): {site: label}: a byte store (and each byte of a 16 bit store) at that site
+        # calls this routine instead of
         # <name>_io_w (a port that leaves a drawing out: the routine returns at once)
         self.io_w_alt = {}
         self.no_follow = set()                    # (set after construction) pcs whose successors discovery does not follow
@@ -1155,7 +1156,7 @@ class Emitter:
                     self.e("lsr.w #8,d5")
                 else:
                     self.e("move.b %d(sp),d5" % (off + 1))
-                self.e("bsr %s_io_w" % self.p.name)
+                self.e("bsr %s" % self.p.io_w_alt.get(v, "%s_io_w" % self.p.name))
             if a is None:
                 self.e("addq.l #2,sp")
             self.e("tst.w (sp)+")
@@ -2120,8 +2121,10 @@ class Emitter:
                 self.e("moveq #0,d6")
                 return
             if self.io_site(v, ins):
-                self.e("moveq #0,d6")
-                self.store8(v, ins, "d6")
+                # (the zero in d5: the address may use d6 for an accumulator offset, CLR B,X; the I/O routines keep
+                # d5, and the store's closing tst.b d5 gives CLR's flags)
+                self.e("moveq #0,d5")
+                self.store8(v, ins, "d5")
                 self.e("moveq #0,d6")
                 return
             self.e("clr.b %s" % self.ea(v, ins))
