@@ -41,8 +41,7 @@ DP = $A0
 MAX_PENDING = 3				; arcade frames that may be waiting (the game catches up after a slow frame)
 	endc
 ; CUT: effects simplified for speed (the game's video RAM, df_mem, stays exact; only screen work is left out): the
-; stars on odd lines and every other column pair of the scaled images into df_mem only (gen.py CUT_ODD, CUT_ALL),
-; every other particle too (df_part).  On in the STE program, off in the simulator's exact test.
+; stars on odd lines into df_mem only (gen.py CUT_ODD), every other particle too (df_part); every sprite is drawn.  On in the STE program, off in the simulator's exact test.
 	ifnd CUT
 	ifd SIM
 CUT = 0

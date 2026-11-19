@@ -208,10 +208,10 @@ def video_addr(em, v, ins, off=0):
 
 
 # CUT (src/defender.s): sites whose screen work the STE program leaves out (df_mem stays exact): the stars' draw
-# ($E0EC) on odd lines (half the stars), and every other column pair of the scaled images ($FEA0-$FEE8, `STY [,U]`:
-# enemies appearing and bursting; their erase list still clears the screen).
+# ($E0EC) on odd lines (half the stars).  (CUT_ALL: sites always left out; none: every sprite is drawn, user
+# 2026-11-19.)
 CUT_ODD = {0xE0EC}
-CUT_ALL = {0xFEA0, 0xFEB8, 0xFED0, 0xFEE8}
+CUT_ALL = set()
 
 
 def cut_open(em, v, nbytes, src):
