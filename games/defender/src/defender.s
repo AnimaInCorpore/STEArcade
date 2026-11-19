@@ -571,23 +571,193 @@ vput:
 vm_tab:	dc.l	$3F3F3F3F,$CFCFCFCF,$F3F3F3F3,$FCFCFCFC
 vv_tab:	include	"df_vv.s"
 
+; VPUT: the byte in d5 to the video RAM address in d7.l (upper word 0): into df_mem (a4) and, when it changed, its two
+; pixels onto the screen; an address at or above $9800 only into df_mem.  The tables in registers: a1 = vtab, a6 =
+; vm_tab, a3 = vv_tab.  Uses d5-d7, a0.
+VPUT	macro
+	cmp.w	#$9800,d7
+	bhs.s	.m\@
+	cmp.b	(a4,d7.l),d5
+	beq.s	.x\@
+	move.b	d5,(a4,d7.l)
+	add.l	d7,d7
+	add.l	d7,d7
+	move.l	(a1,d7.l),d6
+	beq.s	.x\@
+	move.b	(a1,d7.l),d7
+	and.w	#$C,d7
+	and.l	#$FFFFFF,d6
+	move.l	d6,a0
+	and.w	#$FF,d5
+	lsl.w	#4,d5
+	or.w	d7,d5
+	move.l	(a6,d7.w),d6
+	movep.l	0(a0),d7
+	and.l	d6,d7
+	or.l	(a3,d5.w),d7
+	movep.l	d7,0(a0)
+	bra.s	.x\@
+.m\@:	move.b	d5,(a4,d7.l)
+.x\@:
+	endm
+
+; VZERO: a zero to the video RAM address in d7.l: VPUT's work for a zero (its pixels cleared: the mask only).
+VZERO	macro
+	cmp.w	#$9800,d7
+	bhs.s	.m\@
+	tst.b	(a4,d7.l)
+	beq.s	.x\@
+	clr.b	(a4,d7.l)
+	add.l	d7,d7
+	add.l	d7,d7
+	move.l	(a1,d7.l),d6
+	beq.s	.x\@
+	move.b	(a1,d7.l),d7
+	and.w	#$C,d7
+	and.l	#$FFFFFF,d6
+	move.l	d6,a0
+	move.l	(a6,d7.w),d6
+	movep.l	0(a0),d7
+	and.l	d6,d7
+	movep.l	d7,0(a0)
+	bra.s	.x\@
+.m\@:	clr.b	(a4,d7.l)
+.x\@:
+	endm
+
+; df_terrain: native for bank 7's $C0C2-$C127 (gen.py NATIVES; view 7 only): the terrain's 152 columns.  Column k
+; (A = $98 - k) has its address at $BE20 + 2k: there the 6809 erases two bytes (STX [,Y], X = 0), pulls B and U from
+; the stream at S (LDS <$05, or <$07 when bit 5 of B is clear), stores the new address A:B and draws U there.  Here an
+; erase at the address drawn again is left out (the draw overwrites both bytes: the same RAM, two screen writes
+; fewer; 56% of the columns in play); every byte's pixels go to the screen when it changes.  Ends as the 6809 does
+; (A 0, B and U the last pulled, X 0, Y $BE20 + 304, S the stream's end, C kept, N V clear, Z set) at $C128.
+df_terrain:
+	move.w	sr,-(sp)
+	move.l	a2,-(sp)
+	move.b	$20(a3),d0		; LDD <$20; ANDB #$E0; STD <$15
+	move.b	$21(a3),d1
+	and.b	#$E0,d1
+	move.b	d0,$15(a3)
+	move.b	d1,$16(a3)
+	move.l	a5,d7			; STS <$13
+	sub.l	a4,d7
+	move.b	d7,$14(a3)
+	lsr.w	#8,d7
+	move.b	d7,$13(a3)
+	moveq	#0,d7			; LDS <$05 / <$07
+	btst	#5,d1
+	bne.s	.s5
+	move.b	$07(a3),d7
+	lsl.w	#8,d7
+	move.b	$08(a3),d7
+	bra.s	.s
+.s5:	move.b	$05(a3),d7
+	lsl.w	#8,d7
+	move.b	$06(a3),d7
+.s:	lea	(a4,d7.l),a5
+	move.l	a4,a2
+	add.l	#$BE20,a2		; Y
+	movem.l	a3/a6,-(sp)
+	lea	vtab,a1
+	lea	vm_tab,a6
+	lea	vv_tab,a3
+	move.b	#$98,d0
+.col:	moveq	#0,d2			; the old address
+	move.b	(a2),d2
+	lsl.w	#8,d2
+	move.b	1(a2),d2
+	move.b	(a5)+,d1		; PULS B,U
+	move.b	(a5)+,-(sp)
+	move.w	(sp)+,d4
+	move.b	(a5)+,d4
+	move.b	d0,(a2)			; STD ,Y
+	move.b	d1,1(a2)
+	moveq	#0,d7
+	move.b	d0,d7
+	lsl.w	#8,d7
+	move.b	d1,d7
+	cmp.w	d2,d7
+	beq	.draw			; (the erase is drawn over)
+	move.l	d2,d7			; STX [,Y]: two zeros at the old address
+	VZERO
+	move.l	d2,d7
+	addq.w	#1,d7
+	VZERO
+.draw:	moveq	#0,d7			; STU [,Y++]
+	move.b	d0,d7
+	lsl.w	#8,d7
+	move.b	d1,d7
+	move.w	d4,d5
+	lsr.w	#8,d5
+	VPUT
+	moveq	#0,d7
+	move.b	d0,d7
+	lsl.w	#8,d7
+	move.b	d1,d7
+	addq.w	#1,d7
+	move.b	d4,d5
+	VPUT
+	addq.l	#2,a2
+	subq.b	#1,d0
+	bne	.col
+	movem.l	(sp)+,a3/a6
+	moveq	#0,d2			; X
+	move.l	a2,d3			; Y
+	sub.l	a4,d3
+	move.l	(sp)+,a2
+	move.w	(sp)+,d7		; the entry's C; Z set (DECA to 0)
+	and.w	#1,d7
+	or.w	#4,d7
+	move.w	d7,ccr
+	jmp	M01E128
+
 ; main_vlist (engine/m6809x.py video_push): a PSHU wrote bytes d7.w .. d7.w + d6.w (count - 1); the video RAM's of them
-; into the screen.  Keeps every register but d6, d7.
+; onto the screen (vput's work, the registers saved once a push).  The bytes of a push are one column's lines in turn:
+; the screen byte is looked up once (vtab) and then steps a line (160 bytes) a byte while y stays shown (7-246).
+; a4 = df_mem (translated code).  Keeps every register but d6, d7.
 main_vlist:
-	movem.l	d0-d1/d5/a0,-(sp)
+	movem.l	d0-d5/a0-a3,-(sp)
 	moveq	#0,d0
-	move.w	d7,d0
-	move.w	d6,d1
-	lea	df_mem,a0
+	move.w	d7,d0			; the address
+	move.w	d6,d1			; the count - 1
+	lea	vtab,a1
+	lea	vm_tab,a2
+	lea	vv_tab,a3
+	moveq	#0,d3			; no screen byte yet
 .l:	cmp.w	#$9800,d0
-	bhs.s	.n
-	move.b	(a0,d0.l),d5		; (a long index: $8000 and above)
-	move.w	d0,d7
-	bsr	vput
+	bhs.s	.n0
+	move.b	d0,d2			; y shown?
+	sub.b	#7,d2
+	cmp.b	#240,d2
+	bhs.s	.n0
+	tst.l	d3
+	beq.s	.look
+	lea	LB(a0),a0		; (the line below the byte before)
+	bra.s	.put
+.look:	move.l	d0,d2
+	add.l	d2,d2
+	add.l	d2,d2
+	move.l	(a1,d2.l),d3		; the screen byte | position * 4 << 24, 0 where not shown (x < 12)
+	beq.s	.n0
+	move.b	(a1,d2.l),d6
+	and.w	#$C,d6			; position * 4
+	move.l	(a2,d6.w),d7		; the other pixels' bits
+	and.l	#$FFFFFF,d3
+	move.l	d3,a0
+.put:	moveq	#0,d4
+	move.b	(a4,d0.l),d4
+	lsl.w	#4,d4
+	or.w	d6,d4			; byte * 16 + position * 4
+	movep.l	0(a0),d5
+	and.l	d7,d5
+	or.l	(a3,d4.w),d5
+	movep.l	d5,0(a0)
 .n:	addq.w	#1,d0
 	dbf	d1,.l
-	movem.l	(sp)+,d0-d1/d5/a0
+	movem.l	(sp)+,d0-d5/a0-a3
 	rts
+.n0:	moveq	#0,d3			; (not shown: look up again)
+	bra.s	.n
 
 ; ---- the dispatcher: d7.w = a 6809 pc; $D000-$DFFF through page 6's table (the fixed ROM is always in slot 6's upper
 ; half), the rest through the table of the page in its slot; the CCR kept ----

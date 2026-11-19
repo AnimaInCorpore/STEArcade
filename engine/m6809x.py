@@ -208,7 +208,8 @@ class Program:
         # displacement cannot reach from VB: a3 holds PB[a3_slot] (the page's base) instead, the static accesses of the
         # slot use $<offset in the page>(a3), S = a5 - a3 + slot * $2000, the indexed ones load VB from the context
         self.a3_pb = False
-        # indirect_io (set after construction, Juno First): the pointer of an indirect operand at an I/O site is read
+        # indirect_io (set after construction, Juno First): the pointer of an indirect operand at an I/O site (a set:
+        # at these sites only, Defender) is read
         # through <cpu>_io_r (the pointer lives in a bank window's data)
         self.indirect_io = False
         # video_push (set after construction): (lo, hi): a PSHU whose bytes land in lo .. hi - 1 (the game fills the
@@ -824,7 +825,9 @@ class Emitter:
                 reads = {sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"}
                 if len(reads) == 1:
                     ptr = next(iter(reads))
-            if self.p.indirect_io and self.p.io_sites is not None and v in self.p.io_sites:
+            iio = self.p.indirect_io
+            if iio and (v in iio if isinstance(iio, (set, frozenset)) else
+                        self.p.io_sites is not None and v in self.p.io_sites):
                 # (indirect_io, Juno First: a pointer in the bank window's data: both bytes through <cpu>_io_r, which
                 # keeps d5 and d6)
                 self.e("move.w d7,-(sp)")

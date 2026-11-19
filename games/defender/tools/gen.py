@@ -36,8 +36,10 @@ RESET, IRQ = 0xD738, 0xDF17         # (RESET: the game's start after the power-o
 POWER_ON = 0xF61F
 IDLE = 0xE7C3                       # LDA <$5D; BEQ $E7C3: the foreground waits for the IRQ's frame count
 SEEDS = [int(x) for x in os.environ.get("DF_SEEDS", "").split(",") if x] or range(1, 19)
-NATIVES = {IDLE: "df_idle"}
+NATIVES = {IDLE: "df_idle",
+           0x1E0C2: "df_terrain"}         # bank 7's $C0C2-$C127: the terrain's 152 columns (src/defender.s)
 VIDEO_SITES = set()                 # (load_cover)
+WINDOW_READS = set()                # (load_cover: the sites that read $C000-$CFFF)
 NVIEWS = 8                          # (views 8-15 are empty: no code, read 0)
 SLOT6 = 6
 
@@ -143,6 +145,93 @@ m6809x.Emitter.page_cmp = page_cmp
 m6809x.Emitter.jump_to = jump_to
 
 
+# ---- the video RAM's stores inline --------------------------------------------------------------------------------
+# At the sites that only ever stored into the video RAM (VIDEO_SITES) the byte goes into df_mem and, when it changed,
+# its two pixels onto the screen right there (src/defender.s vput's work: vtab, vm_tab, vv_tab), no call; an address at
+# or above $9800 calls main_io_w.  d5 the byte, d7.l the address; d5-d7, a0, a1 are the translation's scratch.
+_store8 = m6809x.Emitter.store8
+_store16 = m6809x.Emitter.store16
+
+
+def video_put(em):
+    """the byte in d5 to the video RAM address in d7.l (upper word 0)"""
+    slow, done = em.new_label(), em.new_label()
+    e = em.e
+    e("cmp.w #$9800,d7")
+    e("bhs.s %s" % slow)
+    e("cmp.b (a4,d7.l),d5")
+    e("beq.s %s" % done)                    # (the byte is there already)
+    e("move.b d5,(a4,d7.l)")
+    e("add.l d7,d7")
+    e("add.l d7,d7")
+    e("lea vtab,a0")
+    e("move.l (a0,d7.l),d6")                # the screen byte | position * 4 << 24, or 0
+    e("beq.s %s" % done)
+    e("move.b (a0,d7.l),d7")
+    e("and.w #$C,d7")                       # position * 4
+    e("and.l #$FFFFFF,d6")
+    e("move.l d6,a0")
+    e("and.w #$FF,d5")
+    e("lsl.w #4,d5")
+    e("or.w d7,d5")                         # byte * 16 + position * 4
+    e("lea vm_tab,a1")
+    e("move.l (a1,d7.w),d6")
+    e("movep.l 0(a0),d7")
+    e("and.l d6,d7")
+    e("lea vv_tab,a1")
+    e("or.l (a1,d5.w),d7")
+    e("movep.l d7,0(a0)")
+    e("bra.s %s" % done)
+    em.lines.append(slow + ":")
+    e("bsr main_io_w")
+    em.lines.append(done + ":")
+    em._a0 = None
+
+
+def video_addr(em, v, ins, off=0):
+    a = em.static_addr(ins)
+    if a is not None:
+        em.e("moveq #0,d7")
+        em.e("move.w #$%04X,d7" % ((a + off) & 0xFFFF))
+    else:
+        em.ea_to_d7(v, ins)
+        if off:
+            em.e("addq.w #%d,d7" % off)
+
+
+def store8(self, v, ins, src, off=0):
+    if v in VIDEO_SITES and self.io_site(v, ins) and src in ("d0", "d1", "d2", "d3", "d4"):
+        self.stats["video store inline"] += 1
+        video_addr(self, v, ins, off)
+        self.e("move.b %s,d5" % src)
+        video_put(self)
+        self.e("tst.b %s" % src)
+        return
+    return _store8(self, v, ins, src, off)
+
+
+def store16(self, v, ins, src):
+    if v in VIDEO_SITES and self.io_site(v, ins) and src in ("d0", "d1", "d2", "d3", "d4"):
+        self.stats["video store inline"] += 2
+        video_addr(self, v, ins)
+        self.e("move.w d7,-(sp)")
+        self.e("move.w %s,d5" % src)
+        self.e("lsr.w #8,d5")
+        video_put(self)
+        self.e("moveq #0,d7")
+        self.e("move.w (sp)+,d7")
+        self.e("addq.w #1,d7")
+        self.e("move.b %s,d5" % src)
+        video_put(self)
+        self.e("tst.w %s" % src)
+        return
+    return _store16(self, v, ins, src)
+
+
+m6809x.Emitter.store8 = store8
+m6809x.Emitter.store16 = store16
+
+
 def load_cover():
     require_coverage("defender", ["cover%d.pkl" % s for s in SEEDS])
     exec_ = collections.Counter()
@@ -171,8 +260,12 @@ def load_cover():
         for pc, a, rw in d["io"]:
             if rw == 'w':
                 wr[pc].add(a < 0x9800)
-    global VIDEO_SITES
+    global VIDEO_SITES, WINDOW_READS
     VIDEO_SITES = {pc for pc, k in wr.items() if k == {True}}
+    WINDOW_READS = set()
+    for s in SEEDS:
+        d = pickle.loads((build_dir("defender") / ("cover%d.pkl" % s)).read_bytes())
+        WINDOW_READS |= {pc for pc, a, rw in d["io"] if rw == 'r' and 0xC000 <= a < 0xD000}
     return exec_, acc, tg, wraps, io, returns
 
 
@@ -192,7 +285,7 @@ def program(cover):
                           a3_slot=5, a4_slot=0, natives=dict(NATIVES), pid_checks=True)
     prog.io_w_alt = {v: 'df_vstore' for v in VIDEO_SITES if v in io}
     prog.video_push = (0, 0x9800)               # (PSHU into the video RAM: main_vlist puts the bytes on the screen)
-    prog.indirect_io = True                     # (JSR [A,Y] with the table in the window's data: through main_io_r)
+    prog.indirect_io = WINDOW_READS & io                     # (JSR [A,Y] with the table in the window's data: through main_io_r)
     prog.dp_data = True                         # (DP is a data byte in the block copies and fills: PSHU / PULS DP)
     prog.a3_pb = True                           # (DP $A0 and the stack in slot 5: a3 = df_mem + $A000)
     prog.fixed_slots = (0, 1, 2, 3, 4, 5, 7)

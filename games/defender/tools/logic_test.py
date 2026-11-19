@@ -58,9 +58,18 @@ def main():
     cycles = [0]
 
     import bisect, collections, re
-    names = sorted((a, n) for n, a in sym.items() if not n.startswith('.') and not re.fullmatch('M[0-9A-F]{6}(_.*)?', n))
+    names = sorted((a, n) for n, a in sym.items() if not n.startswith('.') and not re.fullmatch('M[0-9A-F]{6}(_.*)?', n)
+                   and not n.isupper())                       # (the translation's labels and the constants left out)
+    names.append((sym['main_page_tables'] - 1, 'translated code'))
+    names.sort()
+    code0 = min(a for n, a in sym.items() if re.fullmatch('M[0-9A-F]{6}', n))
+    names.append((code0, 'translated code'))
+    names.sort()
     naddr = [a for a, n in names]
     prof = collections.Counter()
+    mlabs = sorted((a, int(n[1:], 16)) for n, a in sym.items() if re.fullmatch('M[0-9A-F]{6}', n))
+    maddr = [a for a, n in mlabs]
+    prof6809 = collections.Counter()
 
     def run_to(targets):
         total = 0
@@ -69,7 +78,11 @@ def main():
             total += r
             pc = cpu.r_pc()
             if args.profile:
-                prof[names[bisect.bisect_right(naddr, pc) - 1][1]] += 1
+                nm = names[bisect.bisect_right(naddr, pc) - 1][1]
+                prof[nm] += 1
+                if nm == 'translated code':
+                    v = mlabs[bisect.bisect_right(maddr, pc) - 1][1]
+                    prof6809['%05X' % (v & ~0x3F)] += 1
             if pc in targets:
                 cycles[0] += total
                 return pc
@@ -88,6 +101,8 @@ def main():
     snd = [0]
 
     def compare(f):
+        if bytes(mem.r_block(0, 0x400)) != low0:
+            raise RuntimeError('frame %d: the 68000 vectors ($0-$3FF) were written (Hatari: a bus error at 0)' % f)
         sp = m.cpu.s
         want = bytes(m.mem[0:0xC000])
         got = bytes(mem.r_block(base, 0xC000))
@@ -121,6 +136,7 @@ def main():
 
     # the boot: to the first idle
     run_to({done})
+    low0 = bytes(mem.r_block(0, 0x400))         # (after the runtime set its vectors)
     m.frame = -1
     m.run_to_idle()
     m.booted = True
@@ -273,6 +289,7 @@ def main():
     if args.profile:
         tot = sum(prof.values())
         print('  ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in prof.most_common(16)))
+        print('  6809 code by 64-byte range: ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in prof6809.most_common(20)))
 
 
 if __name__ == '__main__':

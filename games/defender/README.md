@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 27.7 arcade frames a second (46% of the arcade's 60.10), every frame shown.
+title and attract demo): 38.5 arcade frames a second (64% of the arcade's 60.10), every frame shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
 
@@ -124,11 +124,14 @@ a bonus ship every 10,000, 1 coin 1 credit).
 * The arcade's bitmap (byte = (x / 2) * 256 + y, the left pixel in the high nibble) shows x 12-303, y 7-246; on the
   STE at x + 2 (14 pixels of black on each side of 320) on screen lines 18-257 with both borders open
   (`engine/rt/borders.s`, PIC_TOP 18, 240 lines; the palette on for the picture's lines only).
-* The bytes stay in df_mem (the program reads them).  The stores the coverage saw into the video RAM go through the
-  runtime: sites that only ever stored there call `df_vstore` (the byte, and when it changed its two pixels: in play
-  930 stores a frame, 500 change), the others `main_io_w`; PSHU into the video RAM (`video_push`) calls
-  `main_vlist`.  `vput` writes a byte's two pixels: `vtab` (per video RAM address its screen byte and the pixel pair's
-  position, built at the start) and `movep.l` of the four plane bytes, masked.
+* The bytes stay in df_mem (the program reads them).  At the sites that only ever stored into the video RAM the
+  translation does the screen's work inline (`gen.py` `video_put`: the byte, and when it changed its two pixels; in
+  play 930 stores a frame, 500 change); other stores into it go through `main_io_w` / `vput`; PSHU into the video RAM
+  (`video_push`) calls `main_vlist`, which looks a column's screen byte up once and steps a line a byte.  The screen
+  byte and the pixel pair's position come from `vtab` (per video RAM address, built at the start); `movep.l` writes
+  the four plane bytes, masked (`vm_tab`, `vv_tab`).
+* The terrain (bank 7's $C0C2-$C127: 152 columns erased and drawn every frame it moves, 608 bytes) is a native
+  (`df_terrain`): an erase at the address that is drawn again is left out (56% of the columns in play).
 * One screen, drawn while shown (the arcade draws while the beam runs too); the 16 pens through `ste_pal_tab`
   (MAME's colours to the STE's 4 bits a gun; `tools/assets.py`) every VBL.
 
@@ -151,12 +154,23 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 27.7 arcade frames a second, 46% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 38.5 arcade frames a second, 64% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  On Musashi
-(`logic_test.py`, 6,000 frames of play) 368,000-477,000 68000 cycles an arcade frame; the profile of seed 1: `vput`
-45%, the RAM reads through `main_io_r` 16% (before its fast path), `df_vstore` 10%.  The logic alone was 112,000-
-138,000 before the screen writes.  Next: inline video stores in the translation (no call, no register saves), and
-the dirty bytes converted once a picture instead of at every store.
+(`logic_test.py`, 6,000 frames) 175,000-262,000 68000 cycles an arcade frame; seed 5's profile: the translated code
+34% (its inline video stores included), `df_terrain` 31%, `main_vlist` 21%, `main_io_r` 5%.
+
+What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames):
+
+| step | Hatari frames/s | Musashi cycles a frame |
+|---|---|---|
+| every video store through `main_io_w` / `vput` (a call, saved registers, a compare chain) | 27.7 | 421,700 |
+| video stores inline at the video-only sites; `indirect_io` only where the pointer is in the window | | 328,200 |
+| `main_vlist` with `vput`'s work in its loop (registers saved once a push) | | 306,700 |
+| the terrain native (`df_terrain`) | 37.7 | 247,200 |
+| its tables in registers, the erase as a mask only; `main_vlist` steps down the column | 38.5 | 232,600 |
+
+Next: the sprite copiers ($D149-$D2D6, PULS / PSHU) as natives (most of `main_vlist`); the dirty bytes converted
+once a picture instead of at every store.
 
 ## Lessons
 
@@ -182,6 +196,10 @@ the dirty bytes converted once a picture instead of at every store.
 * **2026-11-19, a translator bug** (`engine/m6809x.py`, fixed): `CLR B,X` at an I/O site kept its zero in d6, which
   the accumulator offset's address calculation also uses: the store wrote B.  The zero is in d5 now (the I/O
   routines keep d5).  It changes the code of every 6809 port's I/O CLRs; only Defender's tests ran after it.
+* **2026-11-19, a store to 0 the simulator does not see**: `main_vlist`'s stepping version took every shown y as a
+  shown byte and wrote through a0 = 0 for the columns left of the picture (x < 12, vtab 0): Musashi wrote the
+  vectors silently, Hatari stopped with a bus error.  `logic_test.py` now checks that $0-$3FF stay as they were
+  after the boot.
 * **2026-11-19, test harness pitfalls**: the harness's stops must be self-loops (`bra.s sim_wait`), not `rts`; its
   "bad pc" range must not cover the routine after main_badpc (`m6809_daa`); a trace of 68000 label addresses misses
   6809 instructions that translate to nothing (NOPs share one address): `--wtrace` compares the frame's RAM writes
