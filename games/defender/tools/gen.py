@@ -166,20 +166,22 @@ _store16 = m6809x.Emitter.store16
 
 def video_put(em):
     """the byte in d5 to the video RAM address in d7.l (upper word 0).  The screen byte goes to a0 with vtab's top byte
-    (the position * 4) in it: the 68000's 24-bit bus ignores it; the four masks are the longs before vtab."""
-    slow, done = em.new_label(), em.new_label()
+    (the position * 4) in it: the 68000's 24-bit bus ignores it; the four masks are the longs before vtab.  An address
+    not shown has vdummy's (src/defender.s init_render): no test."""
+    fast, done = em.new_label(), em.new_label()
     e = em.e
     e("cmp.w #$9800,d7")
-    e("bhs.s %s" % slow)
+    e("blo.s %s" % fast)
+    e("bsr main_io_w")
+    e("bra.s %s" % done)
+    em.lines.append(fast + ":")
     e("cmp.b (a4,d7.l),d5")
     e("beq.s %s" % done)                    # (the byte is there already)
     e("move.b d5,(a4,d7.l)")
     e("add.l d7,d7")
     e("add.l d7,d7")
     e("lea vtab,a1")
-    e("move.l (a1,d7.l),d6")                # the screen byte | position * 4 << 24, or 0
-    e("beq.s %s" % done)
-    e("move.l d6,a0")
+    e("move.l (a1,d7.l),a0")                # the screen byte | position * 4 << 24
     e("move.b (a1,d7.l),d7")
     e("and.w #$C,d7")                       # position * 4
     e("and.w #$FF,d5")
@@ -190,9 +192,6 @@ def video_put(em):
     e("lea vv_tab,a1")
     e("or.l (a1,d5.w),d6")
     e("movep.l d6,0(a0)")
-    e("bra.s %s" % done)
-    em.lines.append(slow + ":")
-    e("bsr main_io_w")
     em.lines.append(done + ":")
     em._a0 = None
 

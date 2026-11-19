@@ -61,6 +61,7 @@ def main():
     import bisect, collections, re
     names = sorted((a, n) for n, a in sym.items() if not n.startswith('.') and not re.fullmatch('M[0-9A-F]{6}(_.*)?', n)
                    and not n.isupper())                       # (the translation's labels and the constants left out)
+    names = [(a, 'df_terrain' if re.fullmatch(r'tc\d+(_.*)?', n) else n) for a, n in names]   # (its columns' code)
     names.append((sym['main_page_tables'] - 1, 'translated code'))
     names.sort()
     code0 = min(a for n, a in sym.items() if re.fullmatch('M[0-9A-F]{6}', n))

@@ -792,6 +792,20 @@ class Emitter:
     def ea_to_d7(self, v, ins):
         """d7 = the 16 bit effective address (upper word 0) of an indexed operand, indirection included"""
         x = ins.arg
+        fp = self.p.flat_ptr
+        if (x.indirect and fp and x.kind in ("zero", "off5", "off8") and x.reg != "s" and v not in self.p.wrap_sites
+                and -128 <= (x.offset if x.kind != "zero" else 0) <= 126
+                and not ({sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"} & fp[1])):
+            iio = self.p.indirect_io
+            if not (iio and (v in iio if isinstance(iio, (set, frozenset)) else
+                             self.p.io_sites is not None and v in self.p.io_sites)):
+                # (flat_ptr: [n,X] with the pointer in the common base: read straight at n(base,X), X's upper word 0)
+                d, dr, b = (x.offset if x.kind != "zero" else 0), REG16[x.reg], fp[0]
+                self.e("moveq #0,d7")
+                self.e("move.b %d(%s,%s.l),-(sp)" % (d, b, dr))
+                self.e("move.w (sp)+,d7")
+                self.e("move.b %d(%s,%s.l),d7" % (d + 1, b, dr))
+                return
         if x.kind == "abs":
             self.e("moveq #0,d7")
             self.e("move.w #$%04X,d7" % x.addr)
@@ -1107,9 +1121,7 @@ class Emitter:
         x = ins.arg if ins.mode == "idx" else None
         if x is not None and x.kind in ("inc1", "inc2", "dec1", "dec2") and not x.indirect:
             op0 = self.ea(v, ins, 0)
-            self._inc_done = True
-            op1 = self.ea(v, ins, 1)
-            self._inc_done = False
+            op1 = self.ea_again(op0, 1)          # (the same slot: the old register's, computed once)
         else:
             op0 = self.ea(v, ins, 0)
             op1 = self.ea_again(op0, 1)

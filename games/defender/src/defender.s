@@ -574,7 +574,7 @@ init_render:
 	and.l	#$FF000000,d4
 	or.l	d4,d0
 	bra.s	.vs
-.vh:	moveq	#0,d0
+.vh:	move.l	#vdummy,d0		; (not shown: a dummy screen byte, position 0)
 .vs:	move.l	d0,(a0)+
 	dbf	d1,.vy
 	dbf	d2,.vc
@@ -600,7 +600,7 @@ df_vstore:
 .same:	rts
 
 ; vput: d7.w = a video RAM address (< $9800), d5.b = its byte: the two pixels into the screen (where shown).  vtab:
-; per address the screen byte | the pixel pair's position * 4 << 24 (0: not shown); vv_tab: per byte * 16 + position
+; per address the screen byte | the pixel pair's position * 4 << 24 (not shown: vdummy's); vv_tab: per byte * 16 + position
 ; * 4 the two pixels' bits in the four plane bytes (movep.l order), vm_tab: per position * 4 the other pixels' bits.
 ; Keeps every register but d7.
 vput:
@@ -641,9 +641,7 @@ VPUT	macro
 	move.b	d5,(a4,d7.l)
 	add.l	d7,d7
 	add.l	d7,d7
-	move.l	(a1,d7.l),d6
-	beq.s	.x\@
-	move.l	d6,a0
+	move.l	(a1,d7.l),a0		; (not shown: vdummy)
 	move.b	(a1,d7.l),d7
 	and.w	#$C,d7
 	and.w	#$FF,d5
@@ -667,9 +665,7 @@ VZERO	macro
 	clr.b	(a4,d7.l)
 	add.l	d7,d7
 	add.l	d7,d7
-	move.l	(a1,d7.l),d6
-	beq.s	.x\@
-	move.l	d6,a0
+	move.l	(a1,d7.l),a0		; (not shown: vdummy)
 	move.b	(a1,d7.l),d7
 	and.w	#$C,d7
 	movep.l	0(a0),d6
@@ -680,7 +676,7 @@ VZERO	macro
 .x\@:
 	endm
 
-; T_CLR / T_SET (df_terrain): a zero / the byte in \1 to the video RAM address d7.l (upper word 0) of the column whose
+; T_CLR / T_SET (df_scan): a zero / the byte in \1 to the video RAM address d7.l (upper word 0) of the column whose
 ; screen offset is d3 and whose vv table (the vmask long before it) is a6, y * 4 in d1: into df_mem and, when it
 ; changed, its two pixels onto the screen (tline: a hidden y's line is tdummy).  T_SET uses d2 and d6.
 T_CLR	macro
@@ -714,12 +710,12 @@ T_SET	macro
 
 ; df_terrain: native for bank 7's $C0C2-$C127 (gen.py NATIVES; view 7 only): the terrain's 152 columns.  Column k
 ; (A = $98 - k) has its address at $BE20 + 2k: there the 6809 erases two bytes (STX [,Y], X = 0), pulls B and U from
-; the stream at S (LDS <$05, or <$07 when bit 5 of B is clear), stores the new address A:B and draws U there.  Here an
-; erase at the address drawn again is left out (the draw overwrites both bytes: the same RAM, two screen writes
-; fewer); a byte already there costs a compare; a byte that changes goes to the screen through the column's terr_tab
-; entry (its screen offset and vv table; a column not shown: df_mem only; an old address in another column:
-; terr_zero).  Ends as the 6809 does (A 0, B and U the last pulled, X 0, Y $BE20 + 304, S the stream's end, C kept,
-; N V clear, Z set) at $C128.  In the loop d0 = A:B, d2 the old address, d5 / d4 U's bytes, a3 tline.
+; the stream at S (LDS <$05, or <$07 when bit 5 of B is clear), stores the new address A:B and draws U there.  The
+; columns are generated code (assets.py terr_code, tc0-tc151): a column at the same address with the same bytes costs
+; its compares; else the old bytes the draw does not overwrite are erased and the new ones written where they change,
+; each into df_mem and its line's two pixels with one movep read-modify-write (offset, mask and position baked in, the
+; lines from tline: a hidden y's line is tdummy).  Ends as the 6809 does (A 0, B and U the last pulled, X 0, Y $BE20 +
+; 304, S the stream's end, C kept, N V clear, Z set) at $C128.
 df_terrain:
 	ifd SIM
 	addq.l	#1,terr_calls		; (tools/logic_test.py --profile)
@@ -751,66 +747,12 @@ df_terrain:
 	add.l	#$BE20,a2		; Y
 	movem.l	a3/a6,-(sp)
 	lea	tline,a3
-	lea	terr_tab,a1
+	lea	vv_tab,a6
 	moveq	#0,d0
-	move.w	#$9800,d0		; A << 8
 	moveq	#0,d1
 	moveq	#0,d2
-.col:	move.w	(a2),d2			; the old address
-	move.b	(a5)+,d0		; PULS B,U
-	move.b	(a5)+,d5
-	move.b	(a5)+,d4
-	move.w	d0,(a2)+		; STD ,Y
-	cmp.w	d2,d0
-	bne.s	.ld
-	moveq	#0,d7			; (the same address and both bytes there: nothing changes)
-	move.w	d0,d7
-	cmp.b	(a4,d7.l),d5
-	bne.s	.ld
-	cmp.b	1(a4,d7.l),d4
-	bne.s	.ld
-	addq.l	#8,a1
-	bra	.next
-.ld:	movem.l	(a1)+,d3/a6		; the column's screen offset (negative: not shown), vv table
-	tst.l	d3
-	bmi	.hid
-	cmp.w	d2,d0
-	beq	.draw			; (the same address: the erase is drawn over)
-	move.w	d2,d7			; STX [,Y]: two zeros at the old address
-	eor.w	d0,d7
-	cmp.w	#$100,d7
-	bhs	.other			; (another column)
-	moveq	#0,d7			; (a byte that the draw writes again is left: y' = y + 1 the first, y' = y - 1
-	move.w	d2,d7			; the second)
-	move.b	d2,d1
-	add.w	d1,d1
-	add.w	d1,d1
-	move.w	d2,d6
-	sub.w	d0,d6
-	subq.w	#1,d6
-	beq.s	.e2
-	T_CLR
-.e2:	addq.w	#1,d7
-	addq.w	#4,d1
-	move.w	d2,d6
-	sub.w	d0,d6
-	addq.w	#1,d6
-	beq.s	.draw
-	T_CLR
-.draw:	moveq	#0,d7			; STU [,Y++]
-	move.w	d0,d7
-	moveq	#0,d1
-	move.b	d0,d1
-	add.w	d1,d1
-	add.w	d1,d1
-	T_SET	d5
-	addq.w	#1,d7
-	addq.w	#4,d1
-	T_SET	d4
-.next:	moveq	#0,d1
-	clr.b	d0
-	sub.w	#$100,d0
-	bne	.col
+	bra	tc0			; (the columns: assets.py terr_code)
+terr_done:
 	movem.l	(sp)+,a3/a6
 	move.b	-3(a5),d1		; B and U: the last pulled
 	move.b	-2(a5),-(sp)
@@ -826,25 +768,31 @@ df_terrain:
 	or.w	#4,d7
 	move.w	d7,ccr
 	jmp	M01E128
-.hid:	cmp.w	d2,d0			; (a column not shown: df_mem only)
-	beq.s	.hd
-	moveq	#0,d7
+
+; terr_hid (df_terrain's columns not shown): the erase and the draw in df_mem only (an old address in another column:
+; terr_oth).
+terr_hid:
+	cmp.w	d2,d0
+	beq.s	.d
 	move.w	d2,d7
-	clr.b	(a4,d7.l)
-	addq.w	#1,d7
-	clr.b	(a4,d7.l)
-.hd:	moveq	#0,d7
-	move.w	d0,d7
-	move.b	d5,(a4,d7.l)
-	addq.w	#1,d7
-	move.b	d4,(a4,d7.l)
-	bra.s	.next
-.other:	move.w	d2,d7			; (the old address in another column)
+	eor.w	d0,d7
+	cmp.w	#$100,d7
+	bhs.s	.o
+	clr.b	(a4,d2.l)
+	clr.b	1(a4,d2.l)
+	bra.s	.d
+.o:	bsr.s	terr_oth
+.d:	move.b	d5,(a4,d0.l)
+	move.b	d4,1(a4,d0.l)
+	rts
+
+; terr_oth (df_terrain): zeros at the old address d2 and d2 + 1 in another column (terr_zero).
+terr_oth:
+	move.w	d2,d7
 	bsr	terr_zero
 	move.w	d2,d7
 	addq.w	#1,d7
-	bsr	terr_zero
-	bra	.draw
+	bra	terr_zero
 
 ; df_cls: native for $F5DD-$F5ED (gen.py NATIVES), the loop of $F5D1: PSHU of zeros (A B X Y 0) from U = $9C00 down
 ; to 0, every byte of $0000-$9BFF cleared, 6 bytes a push.  Here df_mem's $0000-$9BFF and the picture's 240 lines
@@ -2245,6 +2193,7 @@ tdummy:		ds.b	168
 terr_calls:	ds.l	1
 spr_u:		ds.w	1
 spr_p:		ds.l	4*1024		; spr_build: per position bank 2's $CC00-$CFFF bytes as planar bits
+vdummy:		ds.b	8		; vtab's screen byte for the addresses not shown
 vtab_vm:	ds.l	4		; vm_tab's copy, right before vtab (gen.py video_put: -16(vtab, position * 4))
 vtab:		ds.l	152*256		; per video RAM address its screen byte | position * 4 << 24 (init_render)
 crash_text:	ds.b	512

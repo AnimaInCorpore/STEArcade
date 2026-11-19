@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 51.7 arcade frames a second (86% of the arcade's 60.10); in play 37.5 (62%); every frame
+title and attract demo): 52.7 arcade frames a second (88% of the arcade's 60.10); in play 41.3 (69%); every frame
 shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
@@ -159,14 +159,14 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 51.7 arcade frames a second, 86% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 52.7 arcade frames a second, 88% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
-37.5 arcade frames a second, 62%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
-play from its start at VBL 1789 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 40.6).  On Musashi
-(`logic_test.py`, 6,000 frames) the seeds with play take 139,000-160,000 68000 cycles an arcade frame (seed 7, attract only, 97,600).  Its profile:
-the translated code 39% (its inline video stores included; flat, the hottest instruction the stars' draw at $E0EC
-with 2%), `df_terrain` 33% (it runs about every other frame in play, ~75,000 cycles a call: about half its 152
-columns move and it makes ~300 screen writes), the particles (`df_part`) 5%, the sprite copiers 4%, the scanner's
+41.3 arcade frames a second, 69%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1789 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 43.6).  On Musashi
+(`logic_test.py`, 6,000 frames) the seeds with play take 126,000-146,000 68000 cycles an arcade frame (seed 7, attract only, 90,700).  Its profile
+(seed 2): the translated code 42% (its inline video stores included; flat, the hottest instruction the stars' draw at
+$E0EC with 2%), `df_terrain` 24% (it runs about every other frame in play, ~50,000 cycles a call: 57% of its 152
+columns keep their address, 43% unchanged, and a call changes ~273 bytes on the screen), the particles (`df_part`) 5%, the sprite copiers 4%, the scanner's
 terrain (`df_scan`) 2%, `main_vlist` 3%.
 
 What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames):
@@ -185,16 +185,23 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | the sprite copiers ($D131-$D2F9, 12 entries) as natives: the bytes into df_mem, then the rectangle a line and a plane byte at a time by generated code per shape and first position, the images pre-converted (`spr_rect`, `spr_p`, `assets.py` spr_code; docs/sprite-preparation.md); play 30.7 -> 34.6 | 49.7 | |
 | the scanner's terrain (bank 1's $CCF0, `df_scan`: the main terrain's per-column writes) and the particles (bank 7's $C658, `df_part`: 128 particles a frame, erased, moved and drawn through `VPUT` / `VZERO`, which now take the screen address straight from `vtab` and the masks from `vtab_vm`); an unchanged terrain column costs only its compares; play 34.6 -> 36.9 | 51.5 | |
 | the lasers' erase loops ($E621 / $E68D, `df_lzr` / `df_lzl`: the run cleared in df_mem, then on the screen a whole plane byte at a time, `hzero`), the task list walk ($E856, `df_task`: every task switch), $F522's image copy ($F53C, `df_icopy`); play 36.9 -> 37.5 | 51.7 | |
+| the terrain's 152 columns as generated code (`assets.py` terr_code): each column's screen offset, mask and position baked in, both lines' addresses from one `movem` of `tline`, the old bytes the draw does not cover erased, a byte written only where it changes (seed 2: 156,900 -> 147,100 cycles a frame); play 37.5 -> 40.7 | 52.4 | |
+| the translation: a 16-bit load with post-increment finds its slot once (`byte_operands`), `[n,X]` reads its pointer straight from the flat base (`flat_ptr`), the inline video store has no test for an address not shown (`vtab` points it at `vdummy`) and its I/O call off the straight path (seed 2: 147,100 -> 145,300); play 40.7 -> 41.3 | 52.7 | |
 
-Next: play (37.5) is the figure to raise; the profile is flat now.  Tried and dropped: the stars ($E0A2-$E0F2) as a
+Next: play (41.3) is the figure to raise.  The terrain is near its floor now: a call must change ~273 screen bytes
+(seed 2, frames 3000-3600: 57% of the columns keep their address, 14% move one line, 29% two or more), one
+read-modify-write each; grouping them by plane byte (224 a call) would save little.  Tried and dropped: the stars ($E0A2-$E0F2) as a
 native through `VPUT` / `VZERO` (seed 2: 157,300 -> 162,100 cycles a frame; their cost is the 32 screen writes a
 frame, and the translation's inline store is as lean).  Measured, not built: one byte a pixel with chunky-to-planar
 of dirty blocks.  In play (seed 2, frames 3000-3600, the reference) a frame stores ~1,070 video bytes, ~400 of them
 change, and those fall into ~235 eight-pixel blocks (1.7 bytes a block): rebuilding a block from the game's four
 bytes (four lookups and one `movep.l`, ~180 cycles) costs about what the per-byte updates cost now, the marking
 comes on top, and the game's own two-pixel bytes must stay in df_mem anyway (it reads its video RAM).  Only with
-pair tables (2 x 256 KB: two bytes a lookup) would it gain, ~10% of a frame.  Bigger steps: the terrain drawn
-another way (a third of play), or cheaper translated code (`engine/m6809x.py`).
+pair tables (2 x 256 KB: two bytes a lookup) would it gain, ~10% of a frame.  The translated code (42% of play) is flat too: by
+6809 instruction (seed 2) the stores take 40% of it (`STA [n,X]` the stars' erase and draw, `STB ,X` the lasers,
+`STY [,U]` the materialising enemies: each a video byte, ~42 cycles unchanged, ~250 changed), then the loads, calls
+and returns (`JSR` / `RTS` / `PULS ..,PC`, with the CCR saved around each).  What is left there is a percent a step:
+flag liveness across calls, or natives for those loops.
 
 ## Lessons
 
