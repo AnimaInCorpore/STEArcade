@@ -1403,6 +1403,200 @@ df_part:
 	move	#4,ccr
 	jmp	M01E698
 
+; df_lzr / df_lzl: natives for $E621-$E62E and $E68D-$E698 (gen.py NATIVES): a laser's line erased, X from $B,U a
+; column at a time right (+$100 while X <= $7,U) or left (-$100 while X >= $7,U), A = 0.  The bytes cleared in df_mem,
+; the run of columns on the screen by hzero (whole plane bytes where it can).  Ends as the 6809 does (A 0, X past the
+; run, the flags of the last CMPX) at $E69A.
+df_lzr:
+	movem.l	d1/d3-d4,-(sp)
+	bsr.s	lz_xm			; d2 = X, d6 = M
+	move.w	d2,d4			; the first column (y in its low byte)
+.l:	clr.b	(a4,d2.l)		; STA ,X
+	add.w	#$100,d2		; LEAX $100,X
+	cmp.w	d6,d2
+	bls.s	.l
+	move.w	d2,d1
+	sub.w	#$100,d1		; the last column written
+	bra.s	lz_end
+df_lzl:
+	movem.l	d1/d3-d4,-(sp)
+	bsr.s	lz_xm
+	move.w	d2,d1			; the last (rightmost) column
+.l:	clr.b	(a4,d2.l)
+	sub.w	#$100,d2		; LEAX -$100,X
+	cmp.w	d6,d2
+	bcc.s	.l
+	move.w	d2,d4
+	add.w	#$100,d4		; the first (leftmost) column written
+lz_end:	move.w	d6,-(sp)
+	move.w	d4,d0			; hzero: d0 = the first column's address, d1 = the last's
+	bsr	hzero
+	move.w	(sp)+,d6
+	moveq	#0,d0			; CLRA
+	movem.l	(sp)+,d1/d3-d4
+	cmp.w	d6,d2			; (CMPX $7,U: the flags at the end)
+	jmp	M00E69A
+
+; lz_xm: d2.l = the word at $B,U (X), d6.w = the word at $7,U.  Uses d7.
+lz_xm:	moveq	#0,d7
+	move.w	d4,d7
+	moveq	#0,d2
+	move.b	$B(a4,d7.l),-(sp)
+	move.w	(sp)+,d2
+	move.b	$C(a4,d7.l),d2
+	move.b	7(a4,d7.l),-(sp)
+	move.w	(sp)+,d6
+	move.b	8(a4,d7.l),d6
+	rts
+
+; hzero: the screen's pixel pairs of columns d0.w >> 8 to d1.w >> 8 (same y: the low byte) cleared (df_mem holds
+; zeros there now): whole plane bytes with one movep.l, the ends through their masks.  Columns outside 6-151 and y
+; outside 7-246 are not shown.  Uses d0-d1, d5-d7, a0-a1.
+hzero:	moveq	#0,d7
+	move.b	d0,d7			; y
+	cmp.w	#7,d7
+	blo.s	.x
+	cmp.w	#247,d7
+	bhs.s	.x
+	add.w	d7,d7
+	add.w	d7,d7
+	lea	vline,a0
+	move.l	(a0,d7.w),a1		; the line
+	lsr.w	#8,d0			; the columns
+	lsr.w	#8,d1
+	cmp.w	#6,d0
+	bhs.s	.c0
+	moveq	#6,d0
+.c0:	cmp.w	#151,d1
+	bls.s	.c1
+	move.w	#151,d1
+.c1:	moveq	#0,d5
+.col:	cmp.w	d1,d0
+	bhi.s	.x
+	move.w	d0,d7
+	add.w	d7,d7
+	add.w	d7,d7
+	lea	vcol,a0
+	move.l	(a0,d7.w),d6		; offset << 16 | position * 1024
+	move.l	a1,a0
+	swap	d6
+	add.w	d6,a0			; the screen byte
+	swap	d6
+	tst.w	d6
+	bne.s	.part			; (not a group's first column)
+	move.w	d0,d7
+	addq.w	#3,d7
+	cmp.w	d1,d7
+	bhi.s	.part			; (the group does not end inside the run)
+	movep.l	d5,0(a0)		; a whole plane byte
+	addq.w	#4,d0
+	bra.s	.col
+.part:	lsr.w	#8,d6			; position * 4
+	lea	vm_tab,a0
+	move.l	(a0,d6.w),d7
+	move.l	a1,a0
+	swap	d6
+	add.w	d6,a0
+	movep.l	0(a0),d6
+	and.l	d7,d6
+	movep.l	d6,0(a0)
+	addq.w	#1,d0
+	bra.s	.col
+.x:	rts
+
+; df_task: native for $E856-$E85E with $E84D-$E853 (gen.py NATIVES): the task list walk.  U = (U); at the end ($0000)
+; S = $BFFF and on at $E7BE; else DEC $4,U, and at 0 STU <$63 and JMP [$02,U] (through main_dispatch).  The flags as
+; the 6809 leaves them (LDS's / STU's N Z, V clear; C as it came).
+df_task:
+	move	sr,d5
+	and.w	#1,d5			; (C as it came)
+	moveq	#0,d7
+.n:	move.w	d4,d7			; LDU ,U
+	move.b	(a4,d7.l),-(sp)
+	move.w	(sp)+,d4
+	move.b	1(a4,d7.l),d4
+	tst.w	d4
+	beq.s	.end
+	move.w	d4,d7			; DEC $4,U
+	subq.b	#1,4(a4,d7.l)
+	bne.s	.n
+	move.b	d4,$64(a3)		; STU <$63
+	move.w	d4,d6
+	lsr.w	#8,d6
+	move.b	d6,$63(a3)
+	move.b	2(a4,d7.l),-(sp)	; JMP [$02,U]
+	move.w	(sp)+,d6
+	move.b	3(a4,d7.l),d6
+	move.w	d6,d7
+	tst.w	d4			; (STU's N Z, V clear)
+	move	sr,d6
+	and.w	#$0C,d6
+	or.w	d5,d6
+	move	d6,ccr
+	jmp	main_dispatch
+.end:	move.l	a4,a5			; LDS #$BFFF
+	add.l	#$BFFF,a5
+	moveq	#8,d6			; (N; V clear)
+	or.w	d5,d6
+	move	d6,ccr
+	jmp	M00E7BE
+
+; df_icopy: native for $F53C-$F54F (gen.py NATIVES): $F522's image copy, even heights.  A columns; per column B - 2
+; down to 0 (signed, by 2) the word at Y + B to X + B (LDU B,Y / STU B,X), then B = (1,S), X + $100, Y + B.  The image
+; is read where Y lies (the window: view 2's page; else df_mem), the bytes go through VPUT.  Ends as the 6809 does (A
+; 0, B the height, X Y past the columns, U the last word, Z from DECA, C from the last SUBB) at $F570.
+df_icopy:
+	movem.l	a2-a3,-(sp)
+	lea	vtab,a1
+	lea	vv_tab,a3
+.c:	move.l	a4,a2			; the image's base: the window or df_mem
+	cmp.w	#$C000,d3
+	blo.s	.b
+	cmp.w	#$E000,d3
+	bhs.s	.b
+	move.l	SVB+24(a6),a2
+.b:	sub.b	#2,d1			; SUBB #2
+.w:	move	sr,-(sp)		; (its C for the end)
+	move.b	d1,d6
+	ext.w	d6
+	moveq	#0,d7			; LDU B,Y
+	move.w	d3,d7
+	add.w	d6,d7
+	move.b	(a2,d7.l),-(sp)
+	move.w	(sp)+,d4
+	move.b	1(a2,d7.l),d4
+	moveq	#0,d7			; STU B,X
+	move.w	d2,d7
+	add.w	d6,d7
+	move.w	d4,-(sp)
+	move.b	(sp)+,d5
+	VPUT
+	move.b	d1,d6
+	ext.w	d6
+	moveq	#0,d7
+	move.w	d2,d7
+	add.w	d6,d7
+	addq.w	#1,d7
+	move.b	d4,d5
+	VPUT
+	addq.l	#2,sp
+	sub.b	#2,d1			; SUBB #2; BPL
+	bpl	.w
+	move	sr,-(sp)
+	move.b	1(a5),d1		; LDB 1,S
+	add.w	#$100,d2		; LEAX $100,X
+	move.b	d1,d6			; LEAY B,Y
+	ext.w	d6
+	add.w	d6,d3
+	move	(sp)+,d6		; (the last SUBB's C)
+	subq.b	#1,d0			; DECA
+	bne	.c
+	movem.l	(sp)+,a2-a3
+	and.w	#1,d6
+	or.w	#4,d6			; Z (DECA to 0), C
+	move	d6,ccr
+	jmp	M00F570
+
 ; terr_zero: a zero to the video RAM address d7.w (any column): df_mem and, when it changed, the screen (vput).  Uses
 ; d7.
 terr_zero:

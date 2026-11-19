@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 51.5 arcade frames a second (86% of the arcade's 60.10); in play 36.9 (61%); every frame
+title and attract demo): 51.7 arcade frames a second (86% of the arcade's 60.10); in play 37.5 (62%); every frame
 shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
@@ -85,7 +85,7 @@ a bonus ship every 10,000, 1 coin 1 credit).
 * **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
   screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
   Play from the keyboard has not been tried there.
-* **Not done**: sound (the M6808 board), more speed (play runs at 61%), `port.py` registration; play in Hatari
+* **Not done**: sound (the M6808 board), more speed (play runs at 62%), `port.py` registration; play in Hatari
   only with the scripted tape (`build.py --play`), not by hand.
 
 ## How it works
@@ -159,10 +159,10 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 51.5 arcade frames a second, 86% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 51.7 arcade frames a second, 86% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
-36.9 arcade frames a second, 61%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
-play from its start at VBL 1794 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 40.1).  On Musashi
+37.5 arcade frames a second, 62%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1789 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 40.6).  On Musashi
 (`logic_test.py`, 6,000 frames) the seeds with play take 139,000-160,000 68000 cycles an arcade frame (seed 7, attract only, 97,600).  Its profile:
 the translated code 39% (its inline video stores included; flat, the hottest instruction the stars' draw at $E0EC
 with 2%), `df_terrain` 33% (it runs about every other frame in play, ~75,000 cycles a call: about half its 152
@@ -184,12 +184,17 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | an indirect operand's pointer at `a4` where the site never read the window (`flat_ptr`); the inline store's screen address straight from `vtab` (the 68000 ignores the top byte) | 45.6 | 167,400 |
 | the sprite copiers ($D131-$D2F9, 12 entries) as natives: the bytes into df_mem, then the rectangle a line and a plane byte at a time by generated code per shape and first position, the images pre-converted (`spr_rect`, `spr_p`, `assets.py` spr_code; docs/sprite-preparation.md); play 30.7 -> 34.6 | 49.7 | |
 | the scanner's terrain (bank 1's $CCF0, `df_scan`: the main terrain's per-column writes) and the particles (bank 7's $C658, `df_part`: 128 particles a frame, erased, moved and drawn through `VPUT` / `VZERO`, which now take the screen address straight from `vtab` and the masks from `vtab_vm`); an unchanged terrain column costs only its compares; play 34.6 -> 36.9 | 51.5 | |
+| the lasers' erase loops ($E621 / $E68D, `df_lzr` / `df_lzl`: the run cleared in df_mem, then on the screen a whole plane byte at a time, `hzero`), the task list walk ($E856, `df_task`: every task switch), $F522's image copy ($F53C, `df_icopy`); play 36.9 -> 37.5 | 51.7 | |
 
-Next: play (36.9) is the figure to raise; the profile is flat now.  Tried and dropped: the stars ($E0A2-$E0F2) as a
+Next: play (37.5) is the figure to raise; the profile is flat now.  Tried and dropped: the stars ($E0A2-$E0F2) as a
 native through `VPUT` / `VZERO` (seed 2: 157,300 -> 162,100 cycles a frame; their cost is the 32 screen writes a
-frame, and the translation's inline store is as lean).  Left: the lasers' erase loops ($E621 / $E68D: horizontal zero
-runs, whole plane bytes at once), the image copier at $F520 (bank 2 images of any size, like the sprite copiers), the
-process list walk ($E848-$E858).
+frame, and the translation's inline store is as lean).  Measured, not built: one byte a pixel with chunky-to-planar
+of dirty blocks.  In play (seed 2, frames 3000-3600, the reference) a frame stores ~1,070 video bytes, ~400 of them
+change, and those fall into ~235 eight-pixel blocks (1.7 bytes a block): rebuilding a block from the game's four
+bytes (four lookups and one `movep.l`, ~180 cycles) costs about what the per-byte updates cost now, the marking
+comes on top, and the game's own two-pixel bytes must stay in df_mem anyway (it reads its video RAM).  Only with
+pair tables (2 x 256 KB: two bytes a lookup) would it gain, ~10% of a frame.  Bigger steps: the terrain drawn
+another way (a third of play), or cheaper translated code (`engine/m6809x.py`).
 
 ## Lessons
 

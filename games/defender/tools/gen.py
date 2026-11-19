@@ -45,7 +45,10 @@ NATIVES = {IDLE: "df_idle",
            0xD189: "nat_D189", 0xD29E: "nat_D29E", 0xD2AE: "nat_D2AE", 0xD2ED: "nat_D2ED", 0xD2F9: "nat_D2F9",
            0xD22F: "nat_D22F", 0xD26C: "nat_D26C",
            0x12CF0: "df_scan",            # bank 1's $CCF0-$CD0A: the scanner's terrain (64 columns)
-           0x1E658: "df_part"}            # bank 7's $C658-$C696: the particles (explosions)
+           0x1E658: "df_part",            # bank 7's $C658-$C696: the particles (explosions)
+           0xE621: "df_lzr", 0xE68D: "df_lzl",   # a laser's line erased (right / left)
+           0xE856: "df_task",             # $E856: the task list walk
+           0xF53C: "df_icopy"}            # $F53C-$F54F: $F522's image copy (even heights)
 VIDEO_SITES = set()                 # (load_cover)
 WINDOW_READS = set()                # (load_cover: the sites that read $C000-$CFFF)
 NVIEWS = 8                          # (views 8-15 are empty: no code, read 0)
