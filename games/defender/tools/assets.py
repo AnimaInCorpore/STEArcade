@@ -24,7 +24,7 @@ X_SHIFT = 2
 
 def ste_word(c):
     conv = lambda n: ((n >> 1) & 7) | ((n & 1) << 3)
-    r, g, b = (int(v) // 17 for v in c)
+    r, g, b = ((int(v) * 2 + 17) // 34 for v in c)     # (the nearest of the 16 levels)
     return (conv(r) << 8) | (conv(g) << 4) | conv(b)
 
 
