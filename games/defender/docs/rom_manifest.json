@@ -1,0 +1,86 @@
+[
+ {
+  "name": "defend.1",
+  "size": 2048,
+  "crc32": "c3e52d7e",
+  "sha1": "a57f5278ffe44248fc73f9925d107f4024ad981a"
+ },
+ {
+  "name": "defend.4",
+  "size": 2048,
+  "crc32": "9a72348b",
+  "sha1": "ed6ce796702ff32209ced3cb1ba3837dbafa526f"
+ },
+ {
+  "name": "defend.2",
+  "size": 4096,
+  "crc32": "89b75984",
+  "sha1": "a9481478da38f99efb67f0ecf82d084e14b93b42"
+ },
+ {
+  "name": "defend.3",
+  "size": 4096,
+  "crc32": "94f51e9b",
+  "sha1": "a24cfc55de56a72758c76fe2a55f1ec6c353b16f"
+ },
+ {
+  "name": "defend.9",
+  "size": 2048,
+  "crc32": "6870e8a5",
+  "sha1": "67ccc194b1753a18af0c85f5e603355549c4f727"
+ },
+ {
+  "name": "defend.12",
+  "size": 2048,
+  "crc32": "f1f88938",
+  "sha1": "26e48dfeefa0766837b1e762695b9532dbc8bc5e"
+ },
+ {
+  "name": "defend.8",
+  "size": 2048,
+  "crc32": "b649e306",
+  "sha1": "9d7bc3c89e5a53c575946f06702c722b864b1ff0"
+ },
+ {
+  "name": "defend.11",
+  "size": 2048,
+  "crc32": "9deaf6d9",
+  "sha1": "59b018ba0f3fe6eadfd387dc180ac281460358bc"
+ },
+ {
+  "name": "defend.7",
+  "size": 2048,
+  "crc32": "339e092e",
+  "sha1": "2f89951dbe55d80df43df8dcf497171f73e726d3"
+ },
+ {
+  "name": "defend.10",
+  "size": 2048,
+  "crc32": "a543b167",
+  "sha1": "9292b94b0d74e57e03aada4852ad1997c34122ff"
+ },
+ {
+  "name": "defend.6",
+  "size": 2048,
+  "crc32": "65f4efd1",
+  "sha1": "a960fd1559ed74b81deba434391e49fc6ec389ca"
+ },
+ {
+  "name": "video_sound_rom_1.ic12",
+  "size": 2048,
+  "crc32": "fefd5b48",
+  "sha1": "ceb0d18483f0691978c604db94417e6941ad7ff2"
+ },
+ {
+  "name": "decoder.2",
+  "size": 512,
+  "crc32": "8dd98da5",
+  "sha1": "da979604f7a2aa8b5a6d4a5debd2e80f77569e35"
+ },
+ {
+  "name": "decoder.3",
+  "size": 512,
+  "crc32": "c3f45f70",
+  "sha1": "d19036cbc46b130548873597b44b8b70758f25c4"
+ }
+]

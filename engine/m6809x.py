@@ -214,6 +214,10 @@ class Program:
         # video RAM with the user stack pointer) lists their cells: `bsr <name>_vlist` with d7.w = the lowest address
         # and d6.w = the byte count - 1 (the cells as video_store lists them; the other addresses are left out)
         self.video_push = None
+        # dp_data (set after construction, Defender): DP is also a data register: TFR into / out of DP, PSHx / PULx DP
+        # and the RTI's DP use the runtime's byte <name>_dpv; direct addressing still uses the static DP (the program
+        # addresses directly only while DP has its usual value)
+        self.dp_data = False
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -1698,7 +1702,10 @@ class Emitter:
         self.e("bpl.s %s" % skip)                       # E (bit 7)
         self.e("move.b (a5)+,d0")
         self.e("move.b (a5)+,d1")
-        self.e("addq.l #1,a5")                          # DP (the program's constant)
+        if self.p.dp_data:
+            self.e("move.b (a5)+,%s_dpv" % self.p.name)
+        else:
+            self.e("addq.l #1,a5")                      # DP (the program's constant)
         for r in ("d2", "d3", "d4"):
             if self.p.c030:
                 self.e("move.w (a5)+,%s" % r)
@@ -1761,6 +1768,8 @@ class Emitter:
                 self.e("move.b %s,-(%s)" % (src, sp))
                 self.e("move.w %s,-(sp)" % src)         # (the high byte through the stack: no shift)
                 self.e("move.b (sp)+,-(%s)" % sp)
+            elif r == "dp" and self.p.dp_data:
+                self.e("move.b %s_dpv,-(%s)" % (self.p.name, sp))
             elif r == "dp":
                 dp = self.p.dp_at(v)
                 self.e("move.b #$%02X,-(%s)" % (dp, sp) if dp else "clr.b -(%s)" % sp)
@@ -1816,6 +1825,8 @@ class Emitter:
                 self.e("move.b (%s)+,d0" % sp)
             elif r == "b":
                 self.e("move.b (%s)+,d1" % sp)
+            elif r == "dp" and self.p.dp_data:
+                self.e("move.b (%s)+,%s_dpv" % (sp, self.p.name))
             elif r == "dp":
                 self.e("addq.l #1,%s" % sp)
             elif r in ("x", "y", "us"):
@@ -2448,7 +2459,10 @@ class Emitter:
         if dst == "cc":
             if src == "cc":
                 return
-            if src == "dp":
+            if src == "dp" and self.p.dp_data:
+                self.e("moveq #0,d7")
+                self.e("move.b %s_dpv,d7" % self.p.name)
+            elif src == "dp":
                 self.e("moveq #$%02X,d7" % self.p.dp_at(v))
             else:
                 self.e("move.b %s,d7" % REG8[src])
@@ -2457,6 +2471,12 @@ class Emitter:
             self.e("move.w d7,ccr")
             return
         if src == "cc":
+            if dst == "dp" and self.p.dp_data:
+                def b():
+                    self.cc_byte_d7()
+                    self.e("move.b d7,%s_dpv" % self.p.name)
+                self.preserve_all(v, b)
+                return
             if dst == "dp":
                 self.stats["tfr dp"] += 1
                 return
@@ -2465,6 +2485,13 @@ class Emitter:
                 self.cc_byte_d7()
                 self.e("move.b d7,%s" % REG8[dst])
             self.preserve_all(v, b)
+            return
+        if src == "dp" and self.p.dp_data:
+            if dst != "dp":
+                self.preserve_all(v, lambda: self.e("move.b %s_dpv,%s" % (self.p.name, REG8[dst])))
+            return
+        if dst == "dp" and self.p.dp_data:
+            self.preserve_all(v, lambda: self.e("move.b %s,%s_dpv" % (REG8[src], self.p.name)))
             return
         if src == "dp":
             if dst != "dp":
