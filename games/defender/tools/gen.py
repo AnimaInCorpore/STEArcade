@@ -37,7 +37,9 @@ POWER_ON = 0xF61F
 IDLE = 0xE7C3                       # LDA <$5D; BEQ $E7C3: the foreground waits for the IRQ's frame count
 SEEDS = [int(x) for x in os.environ.get("DF_SEEDS", "").split(",") if x] or range(1, 19)
 NATIVES = {IDLE: "df_idle",
-           0x1E0C2: "df_terrain"}         # bank 7's $C0C2-$C127: the terrain's 152 columns (src/defender.s)
+           0x1E0C2: "df_terrain",         # bank 7's $C0C2-$C127: the terrain's 152 columns (src/defender.s)
+           0xF5DD: "df_cls",              # $F5D1's loop: the video RAM and $9800-$9BFF cleared with PSHU
+           0xF5FF: "df_clsb"}             # $F5F1's loop: the same below the scanner (y $2A-$FF of every column)
 VIDEO_SITES = set()                 # (load_cover)
 WINDOW_READS = set()                # (load_cover: the sites that read $C000-$CFFF)
 NVIEWS = 8                          # (views 8-15 are empty: no code, read 0)
@@ -154,7 +156,8 @@ _store16 = m6809x.Emitter.store16
 
 
 def video_put(em):
-    """the byte in d5 to the video RAM address in d7.l (upper word 0)"""
+    """the byte in d5 to the video RAM address in d7.l (upper word 0).  The screen byte goes to a0 with vtab's top byte
+    (the position * 4) in it: the 68000's 24-bit bus ignores it; the four masks are the longs before vtab."""
     slow, done = em.new_label(), em.new_label()
     e = em.e
     e("cmp.w #$9800,d7")
@@ -164,23 +167,20 @@ def video_put(em):
     e("move.b d5,(a4,d7.l)")
     e("add.l d7,d7")
     e("add.l d7,d7")
-    e("lea vtab,a0")
-    e("move.l (a0,d7.l),d6")                # the screen byte | position * 4 << 24, or 0
+    e("lea vtab,a1")
+    e("move.l (a1,d7.l),d6")                # the screen byte | position * 4 << 24, or 0
     e("beq.s %s" % done)
-    e("move.b (a0,d7.l),d7")
-    e("and.w #$C,d7")                       # position * 4
-    e("and.l #$FFFFFF,d6")
     e("move.l d6,a0")
+    e("move.b (a1,d7.l),d7")
+    e("and.w #$C,d7")                       # position * 4
     e("and.w #$FF,d5")
     e("lsl.w #4,d5")
     e("or.w d7,d5")                         # byte * 16 + position * 4
-    e("lea vm_tab,a1")
-    e("move.l (a1,d7.w),d6")
-    e("movep.l 0(a0),d7")
-    e("and.l d6,d7")
+    e("movep.l 0(a0),d6")
+    e("and.l -16(a1,d7.w),d6")              # (vtab_vm: the other pixels' bits)
     e("lea vv_tab,a1")
-    e("or.l (a1,d5.w),d7")
-    e("movep.l d7,0(a0)")
+    e("or.l (a1,d5.w),d6")
+    e("movep.l d6,0(a0)")
     e("bra.s %s" % done)
     em.lines.append(slow + ":")
     e("bsr main_io_w")
@@ -263,9 +263,20 @@ def load_cover():
     global VIDEO_SITES, WINDOW_READS
     VIDEO_SITES = {pc for pc, k in wr.items() if k == {True}}
     WINDOW_READS = set()
+    kinds, views = collections.defaultdict(set), collections.defaultdict(set)
     for s in SEEDS:
         d = pickle.loads((build_dir("defender") / ("cover%d.pkl" % s)).read_bytes())
         WINDOW_READS |= {pc for pc, a, rw in d["io"] if rw == 'r' and 0xC000 <= a < 0xD000}
+        for pc, a, rw in d["io"]:
+            kinds[pc].add((rw, 0xC000 <= a < 0xD000))
+        for (pc, view), n in d["views"].items():
+            views[pc].add(view)
+    # the sites that only read the window and only in a bank's view (1-7): memory reads through slot 6's page (the
+    # context's: the view's bank), not main_io_r; a pull through S stays (S is a flat pointer, a5 = df_mem + S)
+    pb = page_bytes_fn()
+    BANK_READS = {pc for pc, k in kinds.items() if k == {('r', True)} and 0 not in views[pc]
+                  and pb(pc >> 13)[pc & 0x1FFF] not in (0x35, 0x37)}       # (PULS / PULU: the stack ops' own path)
+    io -= BANK_READS
     return exec_, acc, tg, wraps, io, returns
 
 
@@ -286,6 +297,7 @@ def program(cover):
     prog.io_w_alt = {v: 'df_vstore' for v in VIDEO_SITES if v in io}
     prog.video_push = (0, 0x9800)               # (PSHU into the video RAM: main_vlist puts the bytes on the screen)
     prog.indirect_io = WINDOW_READS & io                     # (JSR [A,Y] with the table in the window's data: through main_io_r)
+    prog.flat_ptr = ("a4", {6})                 # (every slot's VB but 6's is df_mem: a pointer outside the window at a4)
     prog.dp_data = True                         # (DP is a data byte in the block copies and fills: PSHU / PULS DP)
     prog.a3_pb = True                           # (DP $A0 and the stack in slot 5: a3 = df_mem + $A000)
     prog.fixed_slots = (0, 1, 2, 3, 4, 5, 7)

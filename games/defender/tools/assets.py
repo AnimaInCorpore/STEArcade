@@ -9,6 +9,9 @@
 * vvals: per position (4) and byte (256) the two pixels' bits in the four plane bytes (plane 0 in the long's top byte:
   movep.l order); the left pixel (high nibble) is the position's higher bit.
 * vmask: per position the bits of the other six pixels in each plane byte.
+* tvv: df_terrain's per position: the vmask long, then the 256 vvals longs.
+* terr_tab: df_terrain's columns (A = $98 down to 1): the screen offset of the column's byte in a line (-1 where not
+  shown) and its tvv table (after the vmask).
 """
 from pathlib import Path
 import sys
@@ -68,6 +71,21 @@ def build():
         lines.append(name + ':')
         for i in range(0, len(data), 8):
             lines.append('\tdc.l ' + ','.join('$%08X' % w for w in data[i:i + 8]))
+    lines.append('tvv:')                 # df_terrain: per position its vmask, then its vvals (256 longs)
+    vv, vm = vvals(), vmask()
+    for pos in range(4):
+        lines.append('	dc.l $%08X' % vm[pos])
+        for i in range(0, 256, 8):
+            lines.append('	dc.l ' + ','.join('$%08X' % w for w in vv[pos * 256 + i:pos * 256 + i + 8]))
+    lines.append('terr_tab:')            # df_terrain: per column A = $98 .. 1 the screen offset (-1: not shown), its tvv
+    vc = vcol()
+    for a in range(0x98, 0, -1):
+        e = vc[a] if a < 152 else 0xFFFFFFFF
+        if e == 0xFFFFFFFF:
+            lines.append('	dc.l -1,tvv+4')
+        else:
+            pos = (e & 0xFFFF) >> 10
+            lines.append('	dc.l %d,tvv+%d' % (e >> 16, pos * 1028 + 4))
     (build_dir('defender') / 'df_assets.s').write_text('\n'.join(lines) + '\n')
     vv = vvals()                     # [position][byte] -> vv_tab[byte * 4 + position] (vput's index: byte * 16 + pos * 4)
     order = [vv[p * 256 + v] for v in range(256) for p in range(4)]

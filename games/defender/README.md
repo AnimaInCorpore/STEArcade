@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 38.5 arcade frames a second (64% of the arcade's 60.10), every frame shown.
+title and attract demo): 45.6 arcade frames a second (76% of the arcade's 60.10), every frame shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
 
@@ -19,6 +19,7 @@ python games/defender/ref/mame_cmp_defender.py [frame ...] [--factory] [--keep D
 python games/defender/ref/cover.py <seed> [frames]      # coverage: seeds 1-18, 30,000 frames each -> build/defender/cover<seed>.pkl
 python games/defender/tools/build.py --sim              # the translation (tools/gen.py) -> run/defender_sim/DEFENDER.PRG
 python games/defender/tools/logic_test.py [frames] [--seed N] [--trace F | --wtrace F] [--profile]   # lock-step on Musashi
+                                                        # (--profile with DF_PROFINS=N: the N hottest 6809 instructions)
 python games/defender/tools/build.py                    # the STE program -> run/defender/DEFENDER.PRG
 powershell -ExecutionPolicy Bypass -File games/defender/tools/hatari.ps1 -Frames 3400   # hidden Hatari: a still and the speed
 ```
@@ -154,10 +155,13 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 38.5 arcade frames a second, 64% of
-60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  On Musashi
-(`logic_test.py`, 6,000 frames) 175,000-262,000 68000 cycles an arcade frame; seed 5's profile: the translated code
-34% (its inline video stores included), `df_terrain` 31%, `main_vlist` 21%, `main_io_r` 5%.
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 45.6 arcade frames a second, 76% of
+60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  Play has
+not been timed in Hatari; on Musashi (`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 125,000 68000
+cycles an arcade frame and the seeds with play 164,000-190,000 (they were 178,000-204,000 before this round).  Seed 2's profile (play,
+3,000 frames): the translated code 48% (its inline video stores included, the hottest instruction 2%),
+`df_terrain` 24% (it runs every other frame, about 68,000 cycles a call: in play about half the 152 columns move and
+each moved one changes about three bytes), `main_vlist` 14% (the sprite copiers' pushes).
 
 What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames):
 
@@ -168,9 +172,13 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | `main_vlist` with `vput`'s work in its loop (registers saved once a push) | | 306,700 |
 | the terrain native (`df_terrain`) | 37.7 | 247,200 |
 | its tables in registers, the erase as a mask only; `main_vlist` steps down the column | 38.5 | 232,600 |
+| `main_vlist` clips a push once and looks its column up once (`vcol`, `vline`, a position's `vvals`); the terrain through a table per column (`terr_tab`, `tvv`, `tline`: a hidden line writes to `tdummy`) | | |
+| the bank reads as memory: the 95 sites that read the window only in views 1-7 read slot 6's page, not `main_io_r` | | |
+| the screen clears $F5D1 / $F5F1 as natives (`df_cls`, `df_clsb`: movem; they had pushed 40 KB a byte at a time) | | |
+| an indirect operand's pointer at `a4` where the site never read the window (`flat_ptr`); the inline store's screen address straight from `vtab` (the 68000 ignores the top byte) | 45.6 | 167,400 |
 
-Next: the sprite copiers ($D149-$D2D6, PULS / PSHU) as natives (most of `main_vlist`); the dirty bytes converted
-once a picture instead of at every store.
+Next: the translated code's video stores and indirect operands are its biggest single costs, but its profile is flat;
+the sprite copiers ($D149-$D2D6) as natives would shorten `main_vlist`'s calls.  Play needs a Hatari measurement.
 
 ## Lessons
 
@@ -200,6 +208,15 @@ once a picture instead of at every store.
   shown byte and wrote through a0 = 0 for the columns left of the picture (x < 12, vtab 0): Musashi wrote the
   vectors silently, Hatari stopped with a bus error.  `logic_test.py` now checks that $0-$3FF stay as they were
   after the boot.
+* **2026-11-19, `movem` loads in register order**, not in the order the registers are named: `movem.l (a1)+,d3/d6/a6`
+  fills d3, d6, a6 from the lowest address up.  The terrain's table had the vv pointer before the mask and the
+  terrain drew with the wrong table (a screen difference from frame 1539 on).
+* **2026-11-19, a macro named like an instruction**: vasm takes `TST` as a macro for `tst.l` too (names are not case
+  sensitive): every `tst` in the file expanded into the macro, and the RAM differed.  The terrain's macros are
+  `T_CLR` / `T_SET`.
+* **2026-11-19, measure the play, not only the attract**: the terrain native rewritten around a cheap unchanged
+  column was faster in seed 5 (mostly attract) and slower in play, where about half the columns move every call;
+  per byte work inline (no call) won in both.
 * **2026-11-19, test harness pitfalls**: the harness's stops must be self-loops (`bra.s sim_wait`), not `rts`; its
   "bad pc" range must not cover the routine after main_badpc (`m6809_daa`); a trace of 68000 label addresses misses
   6809 instructions that translate to nothing (NOPs share one address): `--wtrace` compares the frame's RAM writes

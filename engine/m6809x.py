@@ -220,6 +220,10 @@ class Program:
         # and the RTI's DP use the runtime's byte <name>_dpv; direct addressing still uses the static DP (the program
         # addresses directly only while DP has its usual value)
         self.dp_data = False
+        # flat_ptr (set after construction, Defender): (base, slots): an indirect operand's pointer at a site whose
+        # coverage read none of these slots is read at base (an expression: every other slot's VB is that one) instead
+        # of its slot's VB looked up at run time
+        self.flat_ptr = None
         self.dp = dp                              # the direct page register's usual value
         self.dp_sites = dict(dp_sites or {})      # {virtual pc: DP} where the coverage saw another (constant there)
         self.dynamic_stack = dynamic_stack        # S may move to another slot: the context's SSLOT / SBASE say where
@@ -840,7 +844,10 @@ class Emitter:
                 self.e("or.w (sp)+,d7")
                 self.e("addq.l #2,sp")
                 return
-            if ptr is not None and self.cached(ptr):
+            fp = self.p.flat_ptr
+            if ptr is None and fp and not ({sl for rw, sl, pg, odd in self.p.acc_cover.get(v, ()) if rw == "r"} & fp[1]):
+                b = fp[0]                     # (flat_ptr: the site never read those slots: the common base)
+            elif ptr is not None and self.cached(ptr):
                 b = self.cached(ptr)
             elif ptr is not None:
                 self.e("move.l %d(a6),a0" % (VB_OFF + 4 * ptr))

@@ -10,6 +10,7 @@ the 68000 cycles a frame (Musashi; the screen writes included).
 """
 from pathlib import Path
 import argparse
+import os
 import random
 import sys
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / 'ref'),
@@ -70,6 +71,8 @@ def main():
     mlabs = sorted((a, int(n[1:], 16)) for n, a in sym.items() if re.fullmatch('M[0-9A-F]{6}', n))
     maddr = [a for a, n in mlabs]
     prof6809 = collections.Counter()
+    profcall = collections.Counter()
+    profins = collections.Counter()
 
     def run_to(targets):
         total = 0
@@ -83,6 +86,12 @@ def main():
                 if nm == 'translated code':
                     v = mlabs[bisect.bisect_right(maddr, pc) - 1][1]
                     prof6809['%05X' % (v & ~0x3F)] += 1
+                    profins[v] += 1
+                elif nm in ('main_io_r', 'main_io_w', 'main_vlist', 'main_dispatch'):
+                    ra = mem.r32(cpu.r_reg(R.A7) + (36 if nm == 'main_vlist' else 0)) - 2  # (the caller: roughly)
+                    i = bisect.bisect_right(maddr, ra) - 1
+                    if i >= 0:
+                        profcall['%s %05X' % (nm, mlabs[i][1])] += 1
             if pc in targets:
                 cycles[0] += total
                 return pc
@@ -290,6 +299,11 @@ def main():
         tot = sum(prof.values())
         print('  ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in prof.most_common(16)))
         print('  6809 code by 64-byte range: ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in prof6809.most_common(20)))
+        if os.environ.get('DF_PROFINS'):
+            print('  6809 instructions: ' + ', '.join('%05X %.2f%%' % (n, 100 * k / tot) for n, k in profins.most_common(int(os.environ['DF_PROFINS']))))
+        if 'terr_calls' in sym:
+            print('  df_terrain calls a frame: %.2f' % (mem.r32(sym['terr_calls']) / args.frames))
+        print('  routines by 6809 caller (roughly): ' + ', '.join('%s %.1f%%' % (n, 100 * k / tot) for n, k in profcall.most_common(16)))
 
 
 if __name__ == '__main__':
