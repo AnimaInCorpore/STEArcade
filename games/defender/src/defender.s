@@ -631,8 +631,8 @@ vm_tab:	dc.l	$3F3F3F3F,$CFCFCFCF,$F3F3F3F3,$FCFCFCFC
 vv_tab:	include	"df_vv.s"
 
 ; VPUT: the byte in d5 to the video RAM address in d7.l (upper word 0): into df_mem (a4) and, when it changed, its two
-; pixels onto the screen; an address at or above $9800 only into df_mem.  The tables in registers: a1 = vtab, a6 =
-; vm_tab, a3 = vv_tab.  Uses d5-d7, a0.
+; pixels onto the screen; an address at or above $9800 only into df_mem.  a1 = vtab (its top byte, the position * 4,
+; is ignored by the 68000's 24-bit bus; the masks are the 4 longs before it: vtab_vm), a3 = vv_tab.  Uses d5-d7, a0.
 VPUT	macro
 	cmp.w	#$9800,d7
 	bhs.s	.m\@
@@ -643,18 +643,16 @@ VPUT	macro
 	add.l	d7,d7
 	move.l	(a1,d7.l),d6
 	beq.s	.x\@
+	move.l	d6,a0
 	move.b	(a1,d7.l),d7
 	and.w	#$C,d7
-	and.l	#$FFFFFF,d6
-	move.l	d6,a0
 	and.w	#$FF,d5
 	lsl.w	#4,d5
 	or.w	d7,d5
-	move.l	(a6,d7.w),d6
-	movep.l	0(a0),d7
-	and.l	d6,d7
-	or.l	(a3,d5.w),d7
-	movep.l	d7,0(a0)
+	movep.l	0(a0),d6
+	and.l	-16(a1,d7.w),d6
+	or.l	(a3,d5.w),d6
+	movep.l	d6,0(a0)
 	bra.s	.x\@
 .m\@:	move.b	d5,(a4,d7.l)
 .x\@:
@@ -671,14 +669,12 @@ VZERO	macro
 	add.l	d7,d7
 	move.l	(a1,d7.l),d6
 	beq.s	.x\@
+	move.l	d6,a0
 	move.b	(a1,d7.l),d7
 	and.w	#$C,d7
-	and.l	#$FFFFFF,d6
-	move.l	d6,a0
-	move.l	(a6,d7.w),d6
-	movep.l	0(a0),d7
-	and.l	d6,d7
-	movep.l	d7,0(a0)
+	movep.l	0(a0),d6
+	and.l	-16(a1,d7.w),d6
+	movep.l	d6,0(a0)
 	bra.s	.x\@
 .m\@:	clr.b	(a4,d7.l)
 .x\@:
@@ -760,16 +756,26 @@ df_terrain:
 	move.w	#$9800,d0		; A << 8
 	moveq	#0,d1
 	moveq	#0,d2
-.col:	movem.l	(a1)+,d3/a6		; the column's screen offset (negative: not shown), vv table
-	move.w	(a2),d2			; the old address
+.col:	move.w	(a2),d2			; the old address
 	move.b	(a5)+,d0		; PULS B,U
 	move.b	(a5)+,d5
 	move.b	(a5)+,d4
 	move.w	d0,(a2)+		; STD ,Y
+	cmp.w	d2,d0
+	bne.s	.ld
+	moveq	#0,d7			; (the same address and both bytes there: nothing changes)
+	move.w	d0,d7
+	cmp.b	(a4,d7.l),d5
+	bne.s	.ld
+	cmp.b	1(a4,d7.l),d4
+	bne.s	.ld
+	addq.l	#8,a1
+	bra	.next
+.ld:	movem.l	(a1)+,d3/a6		; the column's screen offset (negative: not shown), vv table
 	tst.l	d3
 	bmi	.hid
 	cmp.w	d2,d0
-	beq.s	.draw			; (the same address: the erase is drawn over)
+	beq	.draw			; (the same address: the erase is drawn over)
 	move.w	d2,d7			; STX [,Y]: two zeros at the old address
 	eor.w	d0,d7
 	cmp.w	#$100,d7
@@ -1206,6 +1212,196 @@ spr_build:
 	cmp.w	#4096,d2
 	bne.s	.p
 	rts
+
+; df_scan: native for bank 1's $CCF0-$CD0A (gen.py NATIVES; view 1 only): the scanner's terrain, columns A = $30 to
+; $6F.  Per column the 6809 erases two bytes at the address in (Y) (STX [,Y], X = 0), pulls B and X from U (the bank's
+; list), stores A:B at (Y) and draws X there (STX [,Y++]); two columns a loop, until A = $70.  As df_terrain: an
+; erase the draw overwrites is left out, a byte already there costs a compare, the screen through the column's
+; terr_tab entry (an old address in another column: terr_zero).  Ends as the 6809 does (A $70, B and X the last
+; pulled, Y and U past the columns, Z set by CMPA #$70) at $CD0C.  In the loop d0 = A:B, d2 the old address, d5 / d4
+; X's bytes, a2 = U (in view 1's page), a5 = Y (a pointer), a1 the column's terr_tab entry, a3 tline.
+df_scan:
+	movem.l	a2-a3/a5-a6,-(sp)
+	move.l	SVB+24(a6),a2
+	moveq	#0,d7
+	move.w	d4,d7
+	add.l	d7,a2			; U
+	moveq	#0,d7
+	move.w	d3,d7
+	lea	(a4,d7.l),a5		; Y
+	lea	tline,a3
+	moveq	#0,d7			; terr_tab + ($98 - A) * 8
+	move.b	#$98,d7
+	sub.b	d0,d7
+	lsl.w	#3,d7
+	lea	terr_tab,a1
+	add.w	d7,a1
+	moveq	#0,d6
+	move.b	d0,d6
+	lsl.w	#8,d6
+	move.l	d6,d0			; A << 8
+	moveq	#0,d1
+	moveq	#0,d2
+.col:	movem.l	(a1),d3/a6		; the column's screen offset, vv table
+	subq.l	#8,a1
+	move.b	(a5),-(sp)		; the old address
+	move.w	(sp)+,d2
+	move.b	1(a5),d2
+	move.b	(a2)+,d0		; PULU B,X
+	move.b	(a2)+,d5
+	move.b	(a2)+,d4
+	move.w	d0,-(sp)		; STD ,Y
+	move.b	(sp)+,(a5)+
+	move.b	d0,(a5)+
+	cmp.w	d2,d0
+	beq.s	.draw
+	move.w	d2,d7
+	eor.w	d0,d7
+	cmp.w	#$100,d7
+	bhs	.other
+	moveq	#0,d7
+	move.w	d2,d7
+	move.b	d2,d1
+	add.w	d1,d1
+	add.w	d1,d1
+	move.w	d2,d6
+	sub.w	d0,d6
+	subq.w	#1,d6
+	beq.s	.e2
+	T_CLR
+.e2:	addq.w	#1,d7
+	addq.w	#4,d1
+	move.w	d2,d6
+	sub.w	d0,d6
+	addq.w	#1,d6
+	beq.s	.draw
+	T_CLR
+.draw:	moveq	#0,d7			; STX [,Y++]
+	move.w	d0,d7
+	moveq	#0,d1
+	move.b	d0,d1
+	add.w	d1,d1
+	add.w	d1,d1
+	T_SET	d5
+	addq.w	#1,d7
+	addq.w	#4,d1
+	T_SET	d4
+	moveq	#0,d1
+	clr.b	d0
+	add.w	#$100,d0		; INCA
+	cmp.w	#$7000,d0
+	bne	.col
+	move.l	a5,d3			; Y
+	sub.l	a4,d3
+	move.b	-3(a2),d1		; B, X: the last pulled (X's upper word 0: the translation indexes with it)
+	moveq	#0,d2
+	move.b	-2(a2),-(sp)
+	move.w	(sp)+,d2
+	move.b	-1(a2),d2
+	move.l	a2,d4
+	movem.l	(sp)+,a2-a3/a5-a6
+	sub.l	SVB+24(a6),d4		; U
+	moveq	#$70,d0
+	move	#4,ccr			; (CMPA #$70: Z)
+	jmp	M012D0C
+.other:	move.w	d2,d7			; (the old address in another column)
+	bsr	terr_zero
+	move.w	d2,d7
+	addq.w	#1,d7
+	bsr	terr_zero
+	bra	.draw
+
+; df_part: native for bank 7's $C658-$C696 (gen.py NATIVES; view 7 only): the particles (explosions), 10 bytes each
+; from Y up to $B800.  Each: the 2 x 2 bytes at its address U = (Y) cleared (X = 0), the y sum (Y+8)+(Y+4) kept when A
+; is at least $2A ((Y+4), (Y+1)), the x sum (Y+6)+(Y+2) when A is at most $98 ((Y+2), (Y)), then drawn: $BB $BB in
+; its column (B's bit 7 clear) or $0B $0B / $B0 $B0 across two columns.  The bytes through VPUT / VZERO.  Ends as the
+; 6809 does (Y $B800, U the last address loaded, A B the last sum or pattern, Z set by CMPY) at $C698.
+PZ	macro				; a zero at U + \1
+	moveq	#0,d7
+	move.w	d4,d7
+	add.w	#\1,d7
+	VZERO
+	endm
+PB	macro				; the byte \2 at U + \1
+	moveq	#0,d7
+	move.w	d4,d7
+	add.w	#\1,d7
+	move.b	#\2,d5
+	VPUT
+	endm
+df_part:
+	movem.l	a2-a3/a6,-(sp)
+	moveq	#0,d7
+	move.w	d3,d7
+	lea	(a4,d7.l),a2		; Y
+	lea	vtab,a1
+	lea	vv_tab,a3
+.p:	moveq	#0,d4			; LDU ,Y
+	move.b	(a2),-(sp)
+	move.w	(sp)+,d4
+	move.b	1(a2),d4
+	PZ	0			; STX ,U; STX $100,U
+	PZ	1
+	PZ	$100
+	PZ	$101
+	move.b	8(a2),d0		; LDD 8,Y; ADDD 4,Y
+	move.b	9(a2),d1
+	add.b	5(a2),d1
+	move.b	4(a2),d6
+	addx.b	d6,d0
+	cmp.b	#$2A,d0
+	bcs	.n
+	move.b	d0,4(a2)
+	move.b	d1,5(a2)
+	move.b	d0,1(a2)
+	move.b	6(a2),d0		; LDD 6,Y; ADDD 2,Y
+	move.b	7(a2),d1
+	add.b	3(a2),d1
+	move.b	2(a2),d6
+	addx.b	d6,d0
+	cmp.b	#$98,d0
+	bhi	.n
+	move.b	d0,2(a2)
+	move.b	d1,3(a2)
+	move.b	d0,(a2)
+	tst.b	d1
+	bmi	.two
+	move.b	#$BB,d0			; STD [,Y]
+	move.b	#$BB,d1
+	moveq	#0,d7			; (the address (Y): VPUT uses d6)
+	move.b	(a2),-(sp)
+	move.w	(sp)+,d7
+	move.b	1(a2),d7
+	move.b	d0,d5
+	VPUT
+	moveq	#0,d7
+	move.b	(a2),-(sp)
+	move.w	(sp)+,d7
+	move.b	1(a2),d7
+	addq.w	#1,d7
+	move.b	d0,d5
+	VPUT
+	bra	.n
+.two:	moveq	#0,d4			; LDU ,Y
+	move.b	(a2),-(sp)
+	move.w	(sp)+,d4
+	move.b	1(a2),d4
+	PB	0,$0B
+	PB	1,$0B
+	PB	$100,$B0
+	PB	$101,$B0
+	move.b	#$B0,d0
+	move.b	#$B0,d1
+.n:	lea	10(a2),a2		; LEAY $A,Y; CMPY #$B800
+	move.l	a2,d7
+	sub.l	a4,d7
+	cmp.w	#$B800,d7
+	bne	.p
+	movem.l	(sp)+,a2-a3/a6
+	moveq	#0,d3
+	move.w	#$B800,d3
+	move	#4,ccr
+	jmp	M01E698
 
 ; terr_zero: a zero to the video RAM address d7.w (any column): df_mem and, when it changed, the screen (vput).  Uses
 ; d7.

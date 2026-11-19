@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 49.7 arcade frames a second (83% of the arcade's 60.10); in play 34.6 (58%); every frame
+title and attract demo): 51.5 arcade frames a second (86% of the arcade's 60.10); in play 36.9 (61%); every frame
 shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
@@ -85,7 +85,7 @@ a bonus ship every 10,000, 1 coin 1 credit).
 * **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
   screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
   Play from the keyboard has not been tried there.
-* **Not done**: sound (the M6808 board), more speed (play runs at 58%), `port.py` registration; play in Hatari
+* **Not done**: sound (the M6808 board), more speed (play runs at 61%), `port.py` registration; play in Hatari
   only with the scripted tape (`build.py --play`), not by hand.
 
 ## How it works
@@ -159,15 +159,15 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 49.7 arcade frames a second, 83% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 51.5 arcade frames a second, 86% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
-34.6 arcade frames a second, 58%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
-play from its start at VBL 1798 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 38.2).  On Musashi
-(`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 106,000 68000 cycles an arcade frame and the seeds with
-play 148,000-170,000.  Seed 2's profile (attract and play, 3,000 frames, 129,000 cycles a frame): the translated
-code 49% (its inline video stores included, the hottest instruction 2%), `df_terrain` 27% (it runs every other
-frame, about 68,000 cycles a call: in play about half the 152 columns move and each moved one changes about three
-bytes), the sprite copiers (`spr_rect` and its routines) about 5%, `main_vlist` 2%.
+36.9 arcade frames a second, 61%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1794 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 40.1).  On Musashi
+(`logic_test.py`, 6,000 frames) the seeds with play take 139,000-160,000 68000 cycles an arcade frame (seed 7, attract only, 97,600).  Its profile:
+the translated code 39% (its inline video stores included; flat, the hottest instruction the stars' draw at $E0EC
+with 2%), `df_terrain` 33% (it runs about every other frame in play, ~75,000 cycles a call: about half its 152
+columns move and it makes ~300 screen writes), the particles (`df_part`) 5%, the sprite copiers 4%, the scanner's
+terrain (`df_scan`) 2%, `main_vlist` 3%.
 
 What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames):
 
@@ -183,10 +183,13 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | the screen clears $F5D1 / $F5F1 as natives (`df_cls`, `df_clsb`: movem; they had pushed 40 KB a byte at a time) | | |
 | an indirect operand's pointer at `a4` where the site never read the window (`flat_ptr`); the inline store's screen address straight from `vtab` (the 68000 ignores the top byte) | 45.6 | 167,400 |
 | the sprite copiers ($D131-$D2F9, 12 entries) as natives: the bytes into df_mem, then the rectangle a line and a plane byte at a time by generated code per shape and first position, the images pre-converted (`spr_rect`, `spr_p`, `assets.py` spr_code; docs/sprite-preparation.md); play 30.7 -> 34.6 | 49.7 | |
+| the scanner's terrain (bank 1's $CCF0, `df_scan`: the main terrain's per-column writes) and the particles (bank 7's $C658, `df_part`: 128 particles a frame, erased, moved and drawn through `VPUT` / `VZERO`, which now take the screen address straight from `vtab` and the masks from `vtab_vm`); an unchanged terrain column costs only its compares; play 34.6 -> 36.9 | 51.5 | |
 
-Next: play (34.6) is the figure to raise.  The translated code's video stores and indirect operands are its biggest
-single costs, but its profile is flat; the object drawers that store through pointer lists ($FEB5: `STY [,U]`) and
-the stars ($E0A3) are the next drawing routines that could write the STE screen directly.
+Next: play (36.9) is the figure to raise; the profile is flat now.  Tried and dropped: the stars ($E0A2-$E0F2) as a
+native through `VPUT` / `VZERO` (seed 2: 157,300 -> 162,100 cycles a frame; their cost is the 32 screen writes a
+frame, and the translation's inline store is as lean).  Left: the lasers' erase loops ($E621 / $E68D: horizontal zero
+runs, whole plane bytes at once), the image copier at $F520 (bank 2 images of any size, like the sprite copiers), the
+process list walk ($E848-$E858).
 
 ## Lessons
 
@@ -225,6 +228,13 @@ the stars ($E0A3) are the next drawing routines that could write the STE screen 
 * **2026-11-19, measure the play, not only the attract**: the terrain native rewritten around a cheap unchanged
   column was faster in seed 5 (mostly attract) and slower in play, where about half the columns move every call;
   per byte work inline (no call) won in both.
+* **2026-11-19, a native's registers must look like the translation's**: the translated code indexes memory with X,
+  Y and U as longs (`(a4,d2.l)`), so their upper words must be 0.  `df_scan` left the garbage of a `movep.l` scratch
+  in d2's upper word under the X it returned: the scanner blips read their object list from the wrong place
+  (frame 1442).  And a macro's scratch register is not a place to keep an address across it (`df_part` kept the
+  draw address in d6, which `VPUT` uses).
+* **2026-11-19, instrumentation in the simulator costs too**: a counter in the terrain's write macros (`addq.l` under
+  `SIM`) made seed 2 4,000 cycles a frame slower; remove such counters before measuring.
 * **2026-11-19, test harness pitfalls**: the harness's stops must be self-loops (`bra.s sim_wait`), not `rts`; its
   "bad pc" range must not cover the routine after main_badpc (`m6809_daa`); a trace of 68000 label addresses misses
   6809 instructions that translate to nothing (NOPs share one address): `--wtrace` compares the frame's RAM writes

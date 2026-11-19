@@ -214,6 +214,11 @@ def main():
                     if names[i][1] != last:
                         print('   ', t, 'd7=%08x a5-df_mem=%04x' % (cpu.r_reg(R.D7), (cpu.r_reg(R.A5) - base) & 0xFFFF) if x == ring[-1] else '')
                     last = names[i][1]
+            if os.environ.get('DF_WMIN'):              # (only the writes at or above this address: the inline video
+                lo, _, hi = os.environ['DF_WMIN'].partition('-')   # stores leave out a byte that is there already;
+                lo, hi = int(lo, 16), int(hi or 'FFFF', 16)          # LO-HI: only those)
+                refw = [w for w in refw if lo <= w[0] <= hi]
+                gotw = [w for w in gotw if lo <= w[0] <= hi]
             k = None
             i = 0
             while i < min(len(refw), len(gotw)):
@@ -225,6 +230,9 @@ def main():
                     k = i
                     break
             print('writes: reference %d, translation %d, first difference at %s' % (len(refw), len(gotw), k))
+            if os.environ.get('DF_WALL'):
+                print('  reference:', ' '.join('%04X=%02X@%04X' % (a, v, pc) for a, v, pc, view in refw))
+                print('  translation:', ' '.join('%04X=%02X' % x for x in gotw))
             if k is None and len(gotw) < len(refw):
                 for a, v, pc, view in refw[max(0, len(gotw) - 6):len(gotw) + 4]:
                     print('  ref %04X=%02X by %04X (view %d) %s' % (a, v, pc, view, m6809dis.decode(m.rd, pc, 0xA0).text))
