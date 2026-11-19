@@ -97,6 +97,7 @@ start:
 	bsr	init_hardware
 	bsr	init_render
 	bsr	init_main
+	bsr	spr_build
 	lea	ctx_views,a6
 	lea	df_mem+$A000,a3		; (PB of slot 5: the direct page and the stack, engine/m6809x.py a3_pb)
 	lea	df_mem,a4
@@ -912,6 +913,300 @@ df_clsb:
 	move	#4,ccr
 	jmp	M00F61D
 
+; ---- the sprite copiers ($D0F9-$D35E, gen.py NATIVES): rectangles of W columns by H lines (8, 6 or 4: one PULS /
+; PSHU a column, LEAU $100 + H to the next) from an image at S, or zeros.  The 6809 enters their unrolled sequences
+; part way (the entry sets W).  Here the bytes go into df_mem and the rectangle onto the screen at once ----
+
+; SPR_I / SPR_Z W,H: the rectangle from the image at S / of zeros (spr_rect); the entry's SR on the stack
+SPR_I	macro
+	move.w	sr,-(sp)
+	moveq	#\1,d6
+	moveq	#\2,d7
+	moveq	#1,d5
+	lea	spr_t_i\1\2,a0
+	bsr	spr_rect
+	endm
+SPR_Z	macro
+	move.w	sr,-(sp)
+	moveq	#\1,d6
+	moveq	#\2,d7
+	moveq	#0,d5
+	lea	spr_t_z\1\2,a0
+	bsr	spr_rect
+	endm
+
+; the 8-line image copiers ($D149 4 columns, $D159 2, $D1A3 5; PULS CC,D,DP,X,Y): CC, A, B, DP, X, Y the last column's
+; bytes, then on at $D165 (LDS $A077)
+SPR_FIN8 macro
+	move.b	-8(a5),d5		; CC
+	move.b	d5,SCCHI(a6)
+	move.b	-7(a5),d0
+	move.b	-6(a5),d1
+	move.b	-5(a5),main_dpv
+	move.b	-4(a5),-(sp)
+	move.w	(sp)+,d2
+	move.b	-3(a5),d2
+	move.b	-2(a5),-(sp)
+	move.w	(sp)+,d3
+	move.b	-1(a5),d3
+	addq.l	#2,sp			; (the entry's SR)
+	and.w	#$0F,d5
+	move.w	d5,ccr
+	jmp	M00D165
+	endm
+nat_D149:
+	SPR_I	4,8
+	SPR_FIN8
+nat_D159:
+	SPR_I	2,8
+	SPR_FIN8
+nat_D1A3:
+	SPR_I	5,8
+	SPR_FIN8
+
+; the 8-line erases ($D131 5 columns, $D17D 4, $D189 2): the registers 0, the flags kept; on at $D191 (PULS DP,X,PC)
+nat_D131:
+	SPR_Z	5,8
+	move	(sp)+,ccr
+	jmp	M00D191
+nat_D17D:
+	SPR_Z	4,8
+	move	(sp)+,ccr
+	jmp	M00D191
+nat_D189:
+	SPR_Z	2,8
+	move	(sp)+,ccr
+	jmp	M00D191
+
+; the 6-line image copiers ($D29E 8 columns, $D2AE 6; PULS D,X,Y): A, B, X, Y the last column's bytes, the flags kept;
+; on at $D2DA (LDS <$77)
+SPR_FIN6 macro
+	move.b	-6(a5),d0
+	move.b	-5(a5),d1
+	move.b	-4(a5),-(sp)
+	move.w	(sp)+,d2
+	move.b	-3(a5),d2
+	move.b	-2(a5),-(sp)
+	move.w	(sp)+,d3
+	move.b	-1(a5),d3
+	move	(sp)+,ccr
+	jmp	M00D2DA
+	endm
+nat_D29E:
+	SPR_I	8,6
+	SPR_FIN6
+nat_D2AE:
+	SPR_I	6,6
+	SPR_FIN6
+
+; the 6-line erases ($D2ED 8 columns, $D2F9 6): on at $D319 (PULS X,PC)
+nat_D2ED:
+	SPR_Z	8,6
+	move	(sp)+,ccr
+	jmp	M00D319
+nat_D2F9:
+	SPR_Z	6,6
+	move	(sp)+,ccr
+	jmp	M00D319
+
+; the 4-line image copier ($D22F, 6 columns; PULS D,X): A, B, X the last column's bytes; on at $D25B (LDS <$77)
+nat_D22F:
+	SPR_I	6,4
+	move.b	-4(a5),d0
+	move.b	-3(a5),d1
+	move.b	-2(a5),-(sp)
+	move.w	(sp)+,d2
+	move.b	-1(a5),d2
+	move	(sp)+,ccr
+	jmp	M00D25B
+; the 4-line erase ($D26C, 6 columns): on at $D28C (PULS D,X,U,PC)
+nat_D26C:
+	SPR_Z	6,4
+	move	(sp)+,ccr
+	jmp	M00D28C
+
+; spr_rect: d4.w = U at the first column (its bytes U - H .. U - 1), d6 = W, d7 = H, d5 = 1: the image at S (a5, which
+; moves on by W * H), 0: zeros; a0 = the shape's routines (spr_t_*, per first position).  The bytes into df_mem as the
+; pushes store them; d4.w = U at the last column's bytes.  On the screen through the shape's routine (assets.py
+; spr_code: every column shown, y 7-246, no column wrap, the image in $CC00-$CFFF), else column by column through
+; main_vlist.  Keeps every register but d4.w, d5-d7, a0, a1, a5.
+spr_rect:
+	movem.l	d0-d3/a2-a3/a6,-(sp)
+	move.w	d4,d0
+	sub.w	d7,d0			; the first column's first byte
+	move.w	d6,d2
+	subq.w	#1,d2
+	lsl.w	#8,d2
+	add.w	d0,d2
+	move.w	d2,spr_u		; U at the end: the last column's first byte
+	move.l	a5,d1
+	sub.l	a4,d1			; S
+	cmp.b	d7,d4			; (U's low byte below H: the column wraps)
+	blo	.slow
+	move.w	d0,d2
+	lsr.w	#8,d2			; the first column
+	cmp.w	#6,d2
+	blo	.slow
+	move.w	d2,d3
+	add.w	d6,d3
+	cmp.w	#152,d3
+	bhi	.slow
+	moveq	#0,d3
+	move.b	d0,d3			; y0
+	cmp.w	#7,d3
+	blo	.slow
+	move.w	d3,d4
+	add.w	d7,d4
+	cmp.w	#247,d4
+	bhi	.slow
+	tst.b	d5
+	beq.s	.cz
+	cmp.l	#$CC00,d1
+	blo	.slow
+	move.w	d6,d4
+	mulu	d7,d4
+	add.l	d1,d4
+	cmp.l	#$D000,d4
+	bhi	.slow
+	moveq	#0,d4			; the image into df_mem: a column's H bytes (8, 6 or 4) straight
+	move.w	d0,d4
+	lea	(a4,d4.l),a1
+	move.w	d6,d4
+	subq.w	#1,d4
+	lea	256(a1),a2		; (the next column)
+	cmp.w	#6,d7
+	beq.s	.ci6
+	blo.s	.ci4
+.ci8:	rept	8
+	move.b	(a5)+,(a1)+
+	endr
+	move.l	a2,a1
+	lea	256(a2),a2
+	dbf	d4,.ci8
+	bra	.draw
+.ci6:	rept	6
+	move.b	(a5)+,(a1)+
+	endr
+	move.l	a2,a1
+	lea	256(a2),a2
+	dbf	d4,.ci6
+	bra	.draw
+.ci4:	rept	4
+	move.b	(a5)+,(a1)+
+	endr
+	move.l	a2,a1
+	lea	256(a2),a2
+	dbf	d4,.ci4
+	bra	.draw
+.cz:	moveq	#0,d4			; zeros into df_mem
+	move.w	d0,d4
+	lea	(a4,d4.l),a1
+	move.w	d6,d4
+	subq.w	#1,d4
+	moveq	#0,d5
+	cmp.w	#6,d7
+	beq.s	.cz6
+	blo.s	.cz4
+.cz8:	rept	8
+	move.b	d5,(a1)+
+	endr
+	lea	256-8(a1),a1
+	dbf	d4,.cz8
+	bra.s	.draw
+.cz6:	rept	6
+	move.b	d5,(a1)+
+	endr
+	lea	256-6(a1),a1
+	dbf	d4,.cz6
+	bra.s	.draw
+.cz4:	rept	4
+	move.b	d5,(a1)+
+	endr
+	lea	256-4(a1),a1
+	dbf	d4,.cz4
+.draw:	add.w	d2,d2			; the screen: the first column's offset and position
+	add.w	d2,d2
+	lea	vcol,a1
+	move.l	(a1,d2.w),d4		; offset << 16 | position * 1024
+	move.w	d4,d2
+	lsr.w	#8,d2			; position * 4
+	move.l	(a0,d2.w),a6		; the shape's routine for it
+	swap	d4			; the offset
+	add.w	d3,d3
+	add.w	d3,d3
+	lea	vline,a1
+	move.l	(a1,d3.w),d3		; y0's line
+	move.l	d3,a1
+	add.w	d4,a1			; the groups' screen bytes (a byte on: + 1 from an even one, + 7 from an odd one)
+	moveq	#1,d2
+	btst	#0,d4
+	beq.s	.g1
+	moveq	#7,d2
+.g1:	add.w	d2,d4
+	move.l	d3,a2
+	add.w	d4,a2
+	moveq	#1,d2
+	btst	#0,d4
+	beq.s	.g2
+	moveq	#7,d2
+.g2:	add.w	d2,d4
+	move.l	d3,a3
+	add.w	d4,a3
+	sub.l	#$CC00,d1		; the image's planar bytes
+	add.l	d1,d1
+	add.l	d1,d1
+	lea	spr_p,a0
+	add.l	d1,a0
+	moveq	#0,d5
+	jsr	(a6)
+.ret:	movem.l	(sp)+,d0-d3/a2-a3/a6
+	move.w	spr_u,d4
+	rts
+.slow:	move.w	d6,d1			; column by column: the bytes (16-bit addresses), then main_vlist
+	subq.w	#1,d1
+	move.w	d7,a3
+.sc:	move.w	d7,d3
+	subq.w	#1,d3
+	move.w	d0,d2
+.sb:	and.l	#$FFFF,d2
+	tst.b	d5
+	beq.s	.sz
+	move.b	(a5)+,(a4,d2.l)
+	bra.s	.sn
+.sz:	clr.b	(a4,d2.l)
+.sn:	addq.w	#1,d2
+	dbf	d3,.sb
+	cmp.w	#$9800,d0
+	bhs.s	.sx
+	movem.w	d6-d7,-(sp)
+	move.w	d0,d7
+	move.w	a3,d6
+	subq.w	#1,d6
+	bsr	main_vlist
+	movem.w	(sp)+,d6-d7
+.sx:	add.w	#$100,d0
+	dbf	d1,.sc
+	bra.s	.ret
+
+; spr_build (init): spr_p per position (1024 longs each) the planar bits of bank 2's $CC00-$CFFF bytes (vvals)
+spr_build:
+	lea	spr_p,a1
+	lea	vvals,a2
+	moveq	#0,d2			; position * 1024
+.p:	lea	df_mem+$CC00,a0
+	move.w	#1024-1,d1
+.b:	moveq	#0,d0
+	move.b	(a0)+,d0
+	add.w	d0,d0
+	add.w	d0,d0
+	add.w	d2,d0
+	move.l	(a2,d0.w),(a1)+
+	dbf	d1,.b
+	add.w	#1024,d2
+	cmp.w	#4096,d2
+	bne.s	.p
+	rts
+
 ; terr_zero: a zero to the video RAM address d7.w (any column): df_mem and, when it changed, the screen (vput).  Uses
 ; d7.
 terr_zero:
@@ -1558,6 +1853,8 @@ vline:		ds.l	256		; per y the screen address of its line, 0 where not shown (ini
 tline:		ds.l	257		; df_terrain: per y (0-256) vline's, tdummy where not shown
 tdummy:		ds.b	168
 terr_calls:	ds.l	1
+spr_u:		ds.w	1
+spr_p:		ds.l	4*1024		; spr_build: per position bank 2's $CC00-$CFFF bytes as planar bits
 vtab_vm:	ds.l	4		; vm_tab's copy, right before vtab (gen.py video_put: -16(vtab, position * 4))
 vtab:		ds.l	152*256		; per video RAM address its screen byte | position * 4 << 24 (init_render)
 crash_text:	ds.b	512

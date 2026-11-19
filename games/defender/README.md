@@ -6,7 +6,7 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 45.6 arcade frames a second (76% of the arcade's 60.10); in play 30.7 (51%); every frame
+title and attract demo): 49.7 arcade frames a second (83% of the arcade's 60.10); in play 34.6 (58%); every frame
 shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
@@ -85,7 +85,7 @@ a bonus ship every 10,000, 1 coin 1 credit).
 * **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
   screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
   Play from the keyboard has not been tried there.
-* **Not done**: sound (the M6808 board), more speed (play runs at 51%), `port.py` registration; play in Hatari
+* **Not done**: sound (the M6808 board), more speed (play runs at 58%), `port.py` registration; play in Hatari
   only with the scripted tape (`build.py --play`), not by hand.
 
 ## How it works
@@ -159,14 +159,15 @@ a bonus ship every 10,000, 1 coin 1 credit).
 
 ## Speed
 
-**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 45.6 arcade frames a second, 76% of
+**2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 49.7 arcade frames a second, 83% of
 60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
-30.7 arcade frames a second, 51%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
-play from its start at VBL 1854 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 34.9).  On Musashi (`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 125,000 68000
-cycles an arcade frame and the seeds with play 164,000-190,000 (they were 178,000-204,000 before this round).  Seed 2's profile (play,
-3,000 frames): the translated code 48% (its inline video stores included, the hottest instruction 2%),
-`df_terrain` 24% (it runs every other frame, about 68,000 cycles a call: in play about half the 152 columns move and
-each moved one changes about three bytes), `main_vlist` 14% (the sprite copiers' pushes).
+34.6 arcade frames a second, 58%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1798 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 38.2).  On Musashi
+(`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 106,000 68000 cycles an arcade frame and the seeds with
+play 148,000-170,000.  Seed 2's profile (attract and play, 3,000 frames, 129,000 cycles a frame): the translated
+code 49% (its inline video stores included, the hottest instruction 2%), `df_terrain` 27% (it runs every other
+frame, about 68,000 cycles a call: in play about half the 152 columns move and each moved one changes about three
+bytes), the sprite copiers (`spr_rect` and its routines) about 5%, `main_vlist` 2%.
 
 What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames):
 
@@ -181,9 +182,11 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | the bank reads as memory: the 95 sites that read the window only in views 1-7 read slot 6's page, not `main_io_r` | | |
 | the screen clears $F5D1 / $F5F1 as natives (`df_cls`, `df_clsb`: movem; they had pushed 40 KB a byte at a time) | | |
 | an indirect operand's pointer at `a4` where the site never read the window (`flat_ptr`); the inline store's screen address straight from `vtab` (the 68000 ignores the top byte) | 45.6 | 167,400 |
+| the sprite copiers ($D131-$D2F9, 12 entries) as natives: the bytes into df_mem, then the rectangle a line and a plane byte at a time by generated code per shape and first position, the images pre-converted (`spr_rect`, `spr_p`, `assets.py` spr_code; docs/sprite-preparation.md); play 30.7 -> 34.6 | 49.7 | |
 
-Next: the translated code's video stores and indirect operands are its biggest single costs, but its profile is flat;
-the sprite copiers ($D149-$D2D6) as natives would shorten `main_vlist`'s calls.  Play (30.7) is the figure to raise: the terrain runs every other frame there.
+Next: play (34.6) is the figure to raise.  The translated code's video stores and indirect operands are its biggest
+single costs, but its profile is flat; the object drawers that store through pointer lists ($FEB5: `STY [,U]`) and
+the stars ($E0A3) are the next drawing routines that could write the STE screen directly.
 
 ## Lessons
 
