@@ -176,7 +176,12 @@ prepared stefastbobs2's way.  Check every port with two tile layers, palette eff
 * **Lose no cycles on a cache hit**: a `movem` of 14 registers around a hashed lookup cost more than the lookup; look up
   first with two or three registers and save the rest only to bake.
 * **Pre-coloured data**: per-pen masks became the arcade's bit planes (`porting-guide.md`, "Memory"); R-Type pre-colours
-  every sprite definition at build time (1 MB on the development machine).
+  every sprite definition at build time (1 MB on the development machine) and, since 2026-11-10, converts the
+  recordings' tiles there too (573 KB: a new map column cost 90-290k cycles in one picture, most of it first-time
+  conversions; a picture -6..-14% together with the next item).
+* **Copy composed cells as whole 16-pixel groups** (R-Type, 2026-11-10): once a display buffer is synchronised it
+  equals the clean one, so a changed 8-pixel cell may be copied with its neighbour - no end mask, no destination
+  read; merge a column's cells into one entry (look at more than the last entry where twin copies alternate).
 
 ### Sprites
 
@@ -324,7 +329,7 @@ not been re-measured in Hatari since).
 | Roc'n Rope | 92% / 29.3 play with sound | n/a (flat) | sound: 6 | both + `RET_WEIGHTS` | idle only | `video_inline` + `video_push` (PSHU) | n/a (idle native) |
 | Gauntlet | 98-100% / 32.6 light play | n/a (native 68010) | n/a | n/a | n/a | playfield blocks, text | n/a |
 | Xevious | 44-53% (26-32 arcade fps, mean 28.8) / 6.6-8.0 pictures, 20,000 VBLs of autoplay (2026-11-08, after the sprite passes and 4 natives; 35% / 5.4 before) | n/a | leaves in place kept; narrow copy rejected (exact, 5% slower in Hatari) | n/a | 51XX (translated), 50XX at the interface | vwriters | - |
-| R-Type | 63% / 18.4 (stage 2, 14 MB) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
+| R-Type | 71% / 18.1 (stage 2, 14 MB, 2026-11-10) | n/a | leaf calls 12 | - | ~35 | 64-byte | ? |
 | Mr. HELI | 41% / 2.0 play (14 MB) | n/a | on, none listed | - | - | 64-byte | ? |
 | Splatterhouse | ~23% / 6.4 play | n/a | - | both | 4 | `tile_written` | ? |
 | Galaga '88 | ~20% / 6.1 BENCH | n/a | - | both | - | `tile_marks` | ? |

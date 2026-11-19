@@ -145,6 +145,22 @@ m72r_init:
 	addq.w	#1,d1
 	cmp.w	#256,d1
 	blo.s	.pc
+	lea	st_tpre,a0		; the tiles made at build time: the hash table after the colourings, then the data
+	moveq	#0,d1
+	move.w	(a0),d1
+	lsl.l	#4,d1
+	lea	8(a0,d1.l),a1
+	move.l	a1,st_tphash
+	moveq	#0,d1
+	move.w	2(a0),d1
+	addq.l	#1,d1
+	lsl.l	#3,d1
+	add.l	d1,a1
+	move.l	a1,st_tpdata
+	lea	st_tcid,a0		; (no tile row's colouring known)
+	moveq	#16/2-1,d1
+.tc:	move.l	d0,(a0)+
+	dbf	d1,.tc
 	move.w	#-1,st_fgk0		; (the FG rows' pieces: none made)
 	move.w	#-1,st_bgk0
 	bsr	st_preins
@@ -372,7 +388,16 @@ st_palette:
 	clr.l	st_hrowchg
 	lea	v30_image+$42D34,a0	; the records (words native)
 	lea	st_rtgt,a1		; the targets the rows show
-	moveq	#0,d5			; the row
+	moveq	#0,d0			; (most pictures: none changed - 32 compares in a row)
+n	set	0
+	rept	32
+	move.b	1+12*n(a0),d0
+	cmp.w	2*n(a1),d0
+	bne	.scan
+n	set	n+1
+	endr
+	bra	.pal
+.scan:	moveq	#0,d5			; the row
 	moveq	#0,d6			; (rows whose target changed)
 .t:	moveq	#0,d0
 	move.b	1(a0),d0		; (word 0's low byte)
@@ -518,7 +543,8 @@ st_palette:
 	lea	st_rcid,a0
 	move.w	d0,(a0,d1.w)
 	bra.s	.rw
-.tl:	bsr	st_rowcells
+.tl:	bsr	st_tcidset
+	bsr	st_rowcells
 .rw:	addq.w	#1,d5
 	cmp.w	#32,d5
 	blo.s	.row
@@ -554,6 +580,42 @@ st_palette:
 	addq.w	#2,d1
 	dbf	d0,.d
 .dx:	rts
+
+; st_tcidset: d5 = a tile colour row (16-31) whose indices changed: its colouring's number in st_tpre's list (the row's
+; 16 st_pidx bytes among the list's), -1 when not there - st_tile takes such a row's tiles from st_tpre.  All kept
+st_tcidset:
+	movem.l	d0-d1/a0-a2,-(sp)
+	lea	st_pidx,a0
+	move.w	d5,d0
+	lsl.w	#4,d0
+	add.w	d0,a0
+	lea	st_tpre,a1
+	move.w	(a1),d1			; the colourings
+	addq.l	#8,a1
+	moveq	#0,d0
+	bra.s	.n
+.l:	move.l	a0,a2
+	cmpm.l	(a2)+,(a1)+
+	bne.s	.d1
+	cmpm.l	(a2)+,(a1)+
+	bne.s	.d2
+	cmpm.l	(a2)+,(a1)+
+	bne.s	.d3
+	cmpm.l	(a2)+,(a1)+
+	beq.s	.f
+	bra.s	.nx
+.d1:	addq.l	#4,a1
+.d2:	addq.l	#4,a1
+.d3:	addq.l	#4,a1
+.nx:	addq.w	#1,d0
+.n:	dbf	d1,.l
+	moveq	#-1,d0
+.f:	lea	st_tcid-32,a1
+	move.w	d5,d1
+	add.w	d1,d1
+	move.w	d0,(a1,d1.w)
+	movem.l	(sp)+,d0-d1/a0-a2
+	rts
 
 ; st_scene: the scene whose reference has the most tile-row targets equal to the rows' (st_rtgt 16-31; the first of
 ; equals; tools/stage_assets.py choose_scene): d0 = 1 when it becomes the scene (st_scn) - the first time, or when it
@@ -2361,40 +2423,49 @@ st_wallfix:
 .x:	movem.l	(sp)+,d0-d7/a0-a6
 	rts
 
-; st_logcell: d0 = the cell's offset: a log entry (offset, the byte's masks), merged with the entry before when it is
-; the cell above at the same offset
+; st_logcell: d0 = the cell's offset: a log entry (the offset of its 16-pixel group, lines): the whole group is
+; copied, without a mask (2026-11-10: after st_sync a display buffer equals the clean one, so the group's other cell
+; may be copied with it - no destination read, 8 lines a pass).  Merged with one of this picture's last four entries
+; when it is the cell above at the same offset (a cell's copies - the twin column, the BG scroll mode's lines 512
+; below - alternate, so the entry before is rarely the one above) or the group's other cell.  Scratch d1-d4, a0
 st_logcell:
+	bclr	#0,d0
 	move.w	st_loghead,d1
 	lea	st_log,a0
 	move.w	d1,d2
+	moveq	#4-1,d4
+.s:	cmp.w	st_logstart,d2		; (only an entry of this picture: no display buffer has copied it yet)
+	beq.s	.new
 	subq.w	#1,d2
 	and.w	#ST_LOG-1,d2
-	lsl.w	#3,d2
-	move.l	(a0,d2.w),d3		; the entry before: offset, lines
-	moveq	#0,d4
-	move.w	4(a0,d2.w),d4
-	mulu	#ST_LB,d4
-	add.l	d4,d3
-	cmp.l	d3,d0
-	bne.s	.new
-	cmp.w	st_logstart,d1		; (only an entry of this picture: no display buffer has copied it yet)
-	beq.s	.new
-	addq.w	#8,4(a0,d2.w)		; (8 lines more)
-	rts
-.new:	move.w	d1,d2
+	move.w	d2,d3
+	lsl.w	#3,d3
+	lea	(a0,d3.w),a0
+	move.l	d0,d3
+	sub.l	(a0),d3			; (below its first line, in its column)
+	bmi.s	.n
+	move.w	d3,-(sp)
+	and.w	#ST_LB-1,(sp)+
+	bne.s	.n
+	lsr.l	#8,d3			; (/ ST_LB: the lines below)
+	lsr.l	#1,d3
+	cmp.w	4(a0),d3
+	beq.s	.ext
+	blo.s	.x			; (inside it: the group's other cell, logged already)
+.n:	lea	st_log,a0
+	dbf	d4,.s
+.new:	lea	st_log,a0
+	move.w	d1,d2
 	lsl.w	#3,d2
 	move.l	d0,(a0,d2.w)
 	move.w	#8,4(a0,d2.w)
-	move.w	#$FF00,d3
-	btst	#0,d0
-	beq.s	.m
-	move.w	#$00FF,d3
-.m:	move.w	d3,6(a0,d2.w)
 	addq.w	#1,d1
 	and.w	#ST_LOG-1,d1
 	move.w	d1,st_loghead
 	addq.l	#1,st_logn
 	rts
+.ext:	addq.w	#8,4(a0)		; (8 lines more)
+.x:	rts
 
 ; st_tile: d1 = the code word, d2 = the colour row (0-15): a0 = its 8 rows converted (longs for movep), cached
 st_tile:
@@ -2422,7 +2493,38 @@ st_tile:
 	add.l	d3,a0
 	movem.l	d1-d7/a1-a3,-(sp)
 	move.l	a0,a3
-	moveq	#0,d0
+	move.w	d2,d0			; made at build time (tools/stage_assets.py pretiles: st_tpre)?  The row's
+	add.w	d0,d0			; colouring (st_tcidset), the key (colouring << 16 | code) + 1
+	lea	st_tcid,a1
+	move.w	(a1,d0.w),d0
+	bmi.s	.cv
+	move.w	d0,d4
+	swap	d4
+	move.w	d1,d4
+	addq.l	#1,d4
+	mulu	#12289,d0		; the slot: (40503 * code + 12289 * colouring) & the mask, linear probing
+	move.w	d1,d5			; (sequential codes spread: no runs to probe through)
+	mulu	#40503,d5
+	add.w	d5,d0
+	move.w	st_tpre+2,d6
+	move.l	st_tphash,a1
+.pp:	and.w	d6,d0
+	moveq	#0,d5
+	move.w	d0,d5
+	lsl.l	#3,d5
+	move.l	(a1,d5.l),d7
+	beq.s	.cv			; (not there: converted here)
+	cmp.l	d7,d4
+	beq.s	.pf
+	addq.w	#1,d0
+	bra.s	.pp
+.pf:	move.l	4(a1,d5.l),a1
+	add.l	st_tpdata,a1
+	rept	8
+	move.l	(a1)+,(a3)+
+	endr
+	bra	.done
+.cv:	moveq	#0,d0
 	move.w	d1,d0
 	and.w	#$0FFF,d0		; (4096 tiles)
 	lsl.l	#5,d0
@@ -2572,12 +2674,15 @@ st_sync:
 	dbf	d7,.cr
 	move.w	#$0203,BLT_HOP.w
 .cx:	movem.l	(sp)+,d6-d7/a3
-	; the log: a group's 4 plane words a line, the byte's mask, 8 lines a pass
+	; the log: a group's 4 plane words a line, no mask (st_logcell), 8 lines a pass (32 words: 256 bus cycles)
 	move.w	#4,BLT_XC.w
 	move.w	#ST_LB-6,BLT_SYI.w
 	move.w	#ST_LB-6,BLT_DYI.w
-	moveq	#0,d4			; (the masks loaded: none yet)
-	move.w	#4,a1			; (lines a pass: 4 with a mask - it reads the destination: 16 words, 256 bus cycles)
+	moveq	#-1,d0
+	move.w	d0,BLT_END1.w
+	move.w	d0,BLT_END2.w
+	move.w	d0,BLT_END3.w
+	moveq	#8,d3
 .l:	cmp.w	d6,d7
 	beq.s	.lx
 	move.w	d6,d2
@@ -2587,23 +2692,11 @@ st_sync:
 	move.l	a0,BLT_SRC.w
 	lea	(a6,d0.l),a0
 	move.l	a0,BLT_DST.w
-	move.w	6(a3,d2.w),d3		; the byte's mask
-	cmp.w	d3,d4
-	beq.s	.m
-	move.w	d3,d4
-	move.w	d3,BLT_END1.w
-	move.w	d3,BLT_END2.w
-	move.w	d3,BLT_END3.w
-	move.w	#4,a1
-	cmp.w	#-1,d3
-	bne.s	.m
-	move.w	#8,a1			; (no mask: 8 lines, 32 words)
-.m:	move.w	4(a3,d2.w),d1		; lines
+	move.w	4(a3,d2.w),d1		; lines
     ifd DEBUG
 	addq.l	#1,st_nlog
 	add.l	d1,st_nlogl
     endc
-	move.w	a1,d3
 	ST_PASSES
 	addq.w	#1,d6
 	and.w	#ST_LOG-1,d6
@@ -3558,22 +3651,30 @@ st_bardraw:
 	tst.b	st_bardirty
 	beq	.x			; (nothing of the bar changed)
 	sf	st_bardirty		; only the cells the game changed (st_vram: st_bardc)
-	lea	st_bardc,a4
-	moveq	#0,d5
-.dr:	moveq	#0,d6
-.dc:	tst.b	(a4)
+	lea	st_bardc,a4		; (four cells' flags at a time)
+	moveq	#0,d7			; the long's first cell
+.dl:	tst.l	(a4)+
 	beq.s	.dn
-	clr.b	(a4)
-	movem.l	d5-d6/a4,-(sp)
-	bsr	st_barcell
-	movem.l	(sp)+,d5-d6/a4
-.dn:	addq.l	#1,a4
-	addq.w	#1,d6
+	subq.l	#4,a4
+	moveq	#4-1,d4
+.db:	tst.b	(a4)+
+	beq.s	.dnb
+	clr.b	-1(a4)
+	moveq	#3,d6			; the cell: its row and column
+	sub.w	d4,d6
+	add.w	d7,d6
+	moveq	#0,d5
 	cmp.w	#40,d6
-	blo.s	.dc
-	addq.w	#1,d5
-	cmp.w	#2,d5
-	blo.s	.dr
+	blo.s	.dd
+	sub.w	#40,d6
+	moveq	#1,d5
+.dd:	movem.l	d4/d7/a4,-(sp)
+	bsr	st_barcell
+	movem.l	(sp)+,d4/d7/a4
+.dnb:	dbf	d4,.db
+.dn:	addq.w	#4,d7
+	cmp.w	#80,d7
+	blo.s	.dl
 	rts
 .mv:	sf	st_bardirty
 	addq.l	#1,st_nbarfull
@@ -3683,9 +3784,34 @@ st_barcell:
 ; st_bartile: d1 = the code word, d2 = the colour row: a0 = 8 longs (movep order) in the status bar's indices
 ; (st_htt / st_httf: the status bar's tables)
 st_bartile:
+	move.l	d3,-(sp)		; the cache (2026-11-10: the beam meter's and the score's few tiles, a cell or two
+	move.w	d1,d0			; most pictures): the key as st_barkey's, inverted (0: an empty slot)
+	swap	d0
+	move.w	d2,d0
+	lsl.w	#8,d0
+	move.b	st_hver,d0
+	not.l	d0
+	move.w	d1,d3
+	eor.w	d2,d3
+	and.w	#ST_BCN-1,d3
+	lsl.w	#2,d3
+	lea	st_bckey,a0
+	cmp.l	(a0,d3.w),d0
+	beq.s	.hit
+	move.l	d0,(a0,d3.w)
+	lsl.w	#3,d3
+	lea	st_bcdata,a0
+	add.w	d3,a0
+	move.l	(sp)+,d3
 	movem.l	d1-d7/a1-a3,-(sp)
-	lea	st_bartmp,a3
-	moveq	#0,d0
+	move.l	a0,a3
+	bra.s	.conv
+.hit:	lsl.w	#3,d3
+	lea	st_bcdata,a0
+	add.w	d3,a0
+	move.l	(sp)+,d3
+	rts
+.conv:	moveq	#0,d0
 	move.w	d1,d0
 	and.w	#$0FFF,d0
 	lsl.l	#5,d0
@@ -3752,6 +3878,8 @@ SC_DEDC		= SC_DEDN+2+4*8		; 256 targets x 8 words: each dedicated pen's STE colo
 SC_FRZ		= SC_DEDC+256*8*2	; a word: the frozen tile rows (bits 0-15; stage_assets FROZEN_ROWS)
 SC_SIZE		= SC_FRZ+2
 SCENE_MATCH	= 12
+st_tpre:	incbin	"stage_pretile.bin"	; (the tile conversions made at build time: tools/stage_assets.py pretiles)
+	even
 st_tiles:	incbin	"stage_tiles.bin"
 	even
 st_tmask:	incbin	"stage_tmask.bin"	; (the FG tiles' opaque pixels: st_cell over a BG strip)
@@ -3966,7 +4094,12 @@ st_bz:		ds.b	4096		; (the BG scroll mode's cells whose places hold zeros: never 
 st_fgpcs:	ds.b	64*ST_FROW
 st_fgmsk:	ds.b	512*128
 st_fgimg:	ds.b	512*ST_LB
-st_bartmp:	ds.l	8
+st_tphash:	ds.l	1		; (st_tpre's hash table, its data)
+st_tpdata:	ds.l	1
+st_tcid:	ds.w	16		; (the tile rows' colourings in st_tpre, -1 none: st_tcidset)
+ST_BCN		= 64		; (st_bartile's cache: a power of 2)
+st_bckey:	ds.l	ST_BCN
+st_bcdata:	ds.b	ST_BCN*32
 st_mkr:		ds.l	16
 st_barkey:	ds.l	80		; (the bar's cells as drawn: code << 16 | colour << 8 | st_hver)
 st_bardc:	ds.b	80		; (the bar's cells the game changed)

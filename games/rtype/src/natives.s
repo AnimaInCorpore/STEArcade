@@ -2373,18 +2373,100 @@ nat_h86ea:
 ; overwrite flags before using them. Odd BP uses the original byte-safe translation.
 
 	section text,code
+; 2026-11-10: a run of stars (stage 1: up to 86 of the 96 objects, neighbours in the object list - one priority) in
+; one loop here (SPRITE_LIST): a star called by the object loop (0040:0266: the return IP 026Ah on the stack) moves,
+; writes its record and, when it stays (x >= 140h; the kind [BP+32h] = 832Ch: x < 2C0h), the loop's RET, POP BP,
+; MOV AW,[BP+1Ch], CMP AW,0FFFFh follow here; when the next object is a star at an even BP its PUSH BP and CALL too
+; (the same words on the V30 stack) and it runs on.  The list's pointer [2EFCh] is stored when the run ends; a star
+; that leaves, a full list and every other object continue in the translation with the arcade's registers and
+; flags.  The stars cannot be left out: they take slots of the one object pool (0040:03A6) and numbers of the one
+; random generator (0040:EDE9), so the enemies would differ.
 nat_nh_e5cd:
 	btst #0,d6
 	bne R0E9CD_t
 	tst.b $2FC5(a3)
 	bne R0E9F7
-	lea (a4,d6.l),a0
+    ifd SPRITE_LIST
+	cmp.w #$026A,(a5)
+	beq .run
+    endc
+.one:	lea (a4,d6.l),a0
 	move.w $30(a0),d0
 	POSADD 4,$30
 	move.w $34(a0),d3
 	move.w #$E5E0,-2(a5)
 	EMIT1_BODY -4
 	jmp R0E9E0
+    ifd SPRITE_LIST
+.run:	move.w $2EFC(a3),d4		; the list's end (IX of each star: its record)
+	lea m72_slots,a0
+	adda.l d4,a0
+	move.w #$E5E0,-2(a5)		; (each star's CALL 1FCCh and its PUSH DS0: the same words)
+	move.w 6(a6),-4(a5)
+.s:	lea (a4,d6.l),a1
+	move.w $34(a1),d3		; BW: the definition
+	moveq #8,d7			; the list's end after it
+	btst #6,4(a2,d3.l)
+	beq.s .sz
+	moveq #16,d7
+.sz:	add.w d4,d7
+	cmp.w #$3C8,d7
+	bcc .full
+	move.w $30(a1),d0		; x + the speed (POSADD 4,$30)
+	move.b 2(a1),d5
+	add.b d0,d5
+	move.b d5,2(a1)
+	move.b $30(a1),d0
+	ext.w d0
+	move.w 4(a1),d1
+	addx.w d0,d1
+	move.w d1,4(a1)			; CW: x
+	move.w 8(a1),d2			; DW: y
+	move.w 4(a2,d3.l),d0		; the entry's word, AL = [BP+6] (BP even)
+	move.b 7(a1),d0
+	move.w d3,(a0)+			; the record
+	move.b #1,(a0)+
+	move.b d0,(a0)+
+	move.w d1,(a0)+
+	move.w d2,(a0)+
+	btst #14,d0
+	beq.s .r1
+	clr.w (a0)
+	addq.l #8,a0
+.r1:	cmp.w #$832C,$32(a1)		; the edge
+	beq .k2
+	cmp.w #$140,d1
+	bcs .out
+.nxt:	move.w $1C(a1),d0		; (RET, POP BP) MOV AW,[BP+1Ch]
+	cmp.w #$FFFF,d0
+	beq .end
+	btst #0,d0
+	bne .nx
+	move.w d0,d5
+	cmp.w #$E5CD,(a4,d5.l)
+	bne .nx
+	move.w d0,d6			; MOV BP,AW; PUSH BP; CALL (the return IP stays)
+	move.w d6,2(a5)
+	move.w d7,d4
+	bra .s
+.k2:	cmp.w #$2C0,d1
+	bcs.s .nxt
+.out:	move.w d7,$2EFC(a3)		; (it leaves: the translation's edge tests and cleanup)
+	move.w d4,d5
+	jmp R0E9E0
+.nx:	move.w d7,$2EFC(a3)		; (another object next)
+	move.w d4,d5
+	addq.l #4,a5
+	cmp.w #$FFFF,d0			; (the CMP's flags)
+	jmp R00673
+.end:	move.w d7,$2EFC(a3)		; (the list's last object)
+	move.w d4,d5
+	addq.l #4,a5
+	cmp.w #$FFFF,d0
+	jmp R00677
+.full:	move.w d4,$2EFC(a3)		; (the sprite list full: the single path)
+	bra .one
+    endc
 
 ; ---------------------------------------------------------------------------------------------------------------------
 ; Native equivalents of the three E873/E890/E8AD tile-RAM initialization loops.

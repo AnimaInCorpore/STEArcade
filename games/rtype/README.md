@@ -9,9 +9,9 @@ kept in a ring), so there is no sound. The picture is the stage renderer (`src/s
 the 384-pixel picture, 16 colours per scene by the shared default fitter with checker pairs, the status bar with its
 own palette; parallax, colour cycling and palette fades are dropped where they only cost work (the user's rule: keep
 the gameplay). Status: Incomplete (sound not implemented); not released: development targets a 14 MB ST RAM machine
-(the user, 2026-10-31; `tools/release.py` NOT_RELEASED). Latest speed (2026-11-07, Hatari 14 MB, `tools/bench.sh`
-REPLAY FAST, recorded play, `-D INVULN -D DEBUG`): stage 2 34.5 arcade frames a second (63% of the arcade's 55.02 Hz),
-18.4 pictures a second; stage 7 27.0 (49%) and 17.3; every stage in Speed.
+(the user, 2026-10-31; `tools/release.py` NOT_RELEASED). Latest speed (2026-11-10, Hatari 14 MB, recorded play,
+`-D INVULN -D DEBUG`): stage 2 38.8 arcade frames a second (71% of the arcade's 55.02 Hz), 18.1 pictures a second;
+stage 7 28.6 (52%) and 17.5; every stage in Speed.
 
 ## Build and run
 
@@ -55,10 +55,10 @@ MAME's defaults (3 lives, demo sounds on, coin mode 1).
   whole (every 2nd frame, 14,150 pictures) and stages 1, 2, 7 at every frame and every 3rd (2026-11-07).
 * Missing: sound (the plan below, agreed 2026-11-01, not started).
 * Not released (`tools/release.py` NOT_RELEASED; until 0.6 it was in `OVER_LOAD`, passed with a warning): RTYPE.PRG
-  is 6.1 MB (TOS load with BSS 13.8 MB), far over the 3.7 MB release limit; how to fit the game back into 4 MB
+  is 6.2 MB (text, data and BSS 13.2 MB in the 2026-11-10 replay builds), far over the 3.7 MB release limit; how to fit the game back into 4 MB
   (per-stage loading, packing) is decided later.
 * Speed: below the goal (a steady 25 pictures a second at the port's full 50 arcade frames a second): every stage's
-  recorded play runs at 22-42 arcade frames a second (stage 3's warship and stage 7 the slowest).
+  recorded play runs at 23-44 arcade frames a second (stage 3's warship and stage 7 the slowest).
 * Agreed omissions (the user's rule: keep the gameplay, drop what only costs work): palette fades (FADE_SNAP), stage
   6's BG, the parallax of stages 5 and 7 (the BG as a strip locked to the FG), stage 8's colour cycling (frozen rows),
   the stars (BG star tiles and the star sprites $AF2-$AF7). The display cuts the left part of "1P-" and of the title's
@@ -105,6 +105,10 @@ interpreter stops at).
 * **The movement script** (`nat_mscr`, 0040:F5C1), the fade rows at their target compared in longs.
 * **2026-11-03** ([native-results.md](docs/native-results.md)): the corrected red-channel word cache, the E5CD
   object's movement / emission combined (`EMIT1_BODY`), tile-RAM clears filled and marked in bulk.
+* **2026-11-10**: the star run. A star (0040:E5CD) called by the object loop moves, writes its record and, when it
+  stays on the screen, the loop's return and the next object's call are done in the native as long as the next
+  object is a star too (stars share a priority, so they are neighbours in the list); the same words go on the V30
+  stack, and a leaving star, a full sprite list and every other object continue in the translation.
 * **2026-11-04** ([native-structure-results.md](docs/native-structure-results.md)): one-entry sprite emission,
   collision-query endpoints reused on no-hit returns, PC-relative terrain-cache fields, ADDX for inline 24-bit
   movement, cached word-pair copies for changed fades, existing MOVE / logical result flags, an unrolled DMA copy.
@@ -167,6 +171,16 @@ sprites over the tiles, fixed colours; bgscroll draws both layers at their own s
   lines, the first 256 again below: 896-line buffers), and the FG walls are drawn over it each picture like sprites
   (OP 3 copy passes from a FG image with the opaque pixels as end masks, a pass list per FG row made again when the
   row or the window's first chunk changes: `st_fgdraw`, `st_fgbuild`).
+* **Composed cells copied as whole 16-pixel groups** (2026-11-10): a composed cell's log entry is its group, copied
+  without a mask (after `st_sync` a display buffer equals the clean one, so the group's other cell may be copied with
+  it): no destination reads, 8 lines a pass; a column's cells merge into one entry per copy (`st_logcell` looks at
+  this picture's last four entries: a cell's twin copies alternate). Before: a masked byte column per cell, 66
+  entries for a new column.
+* **Tiles converted at build time** (2026-11-10; `tools/stage_assets.py` pretiles, `stage_pretile.bin`, `st_tpre`): a
+  tile's conversion depends on its code word and its colour row's 16 index pairs (a colouring); the recordings' 9,701
+  (colouring, code) pairs of 58 colourings are converted in Python (573 KB with the hash table). `st_tile` takes a
+  missing tile from there (`st_tcidset` finds a row's colouring when its indices change) and converts only what the
+  recordings never showed. The status bar's tiles have a 64-entry cache of their own (`st_bartile`).
 * **Short Blitter passes** (2026-11-03): `st_rect` cuts restore and clear rectangles into column strips of at most 32
   words, masked log passes take 4 lines (8 when the mask is `$FFFF`), `ST_RUN` is 6; `BLIT_STATS=256
   renderer_audit.py` over the stage recordings: longest pass 256 bus cycles, none over (Lessons, 2026-11-03).
@@ -210,28 +224,33 @@ The goal (the user): a steady 25 pictures a second at the arcade's full speed (5
 schedule). The rule: keep the gameplay, drop what only costs work (effects, parallax, colour cycling); the logic stays
 exact.
 
-Current figures, Hatari 14 MB (`tools/bench.sh` REPLAY=seed:start:end FAST=true, recorded play, seeds 8+ with `-D
-INVULN`; the corrected timing after the sprite DMA fix,
-[sprite-dma-results.md](docs/sprite-dma-results.md#uninstrumented-corrected-timing), and the runs since), and the
-logic per stage window (Musashi, 600 frames of seed 10, 2026-11-04,
+Current figures, 2026-11-10: Hatari 14 MB, STE, TOS 2.06, cycle-exact, fast forward, recorded play (seed:start-end,
+`-D STAGE -D PLAYBACK -D DEBUG`, seeds 8+ with `-D INVULN`), each window with the renderer before and after the
+2026-11-10 changes in the same Hatari; zero late border or palette events in all 16 runs. The Hatari is F030Arcade's
+`build-ucrt64` of 2026-11-09 (not the build pinned in [sprite-dma-results.md](docs/sprite-dma-results.md): its "before"
+column repeats the earlier figures within 1%), started with the replay folder as drive C and `--auto` (it no longer
+starts a program given by its host path). The logic per stage window is Musashi's (600 frames of seed 10, 2026-11-04,
 [native-structure-results.md](docs/native-structure-results.md#fixed-workload-logic-results)):
 
-| stage (recording) | date | arcade frames/s | % of 55.02 Hz | pictures/s | logic, cycles an arcade frame |
-|---|---|---|---|---|---|
-| early play (4 600-3600) | 2026-11-03 | 41.77 | 76% | 33.70 | |
-| 1 (8 3000-8000) | 2026-11-03 | 34.04 | 62% | 20.61 | 94.3k (10 / 3000) |
-| 2 (10 11000-13000) | 2026-11-07 | 34.5 | 63% | 18.4 | 66.0k |
-| 3 warship (1 12600-14400) | 2026-11-04 | 22.28 | 40% | 17.36 | 89.7k (warship, 1800 frames); stage 3 10 / 22000: 124.3k |
-| 4 (10 33000-36000) | 2026-11-03 | 42.10 | 77% | 22.66 | 65.9k |
-| 5 (10 46500-49500) | 2026-11-03 | 30.09 | 55% | 19.76 | 93.1k |
-| 6 (10 56000-59000) | 2026-11-03 | 38.15 | 69% | 20.80 | 59.0k |
-| 7 (10 64500-67500) | 2026-11-07 | 27.0 | 49% | 17.3 | 113.8k (10 / 65000) |
-| 8 (10 74000-77000) | 2026-11-03 | 28.19 | 51% | 20.28 | 61.2k |
+| stage (recording) | arcade frames/s before -> now | % of 55.02 Hz | pictures/s before -> now | logic, cycles an arcade frame |
+|---|---|---|---|---|
+| 1 (8 3000-8000) | 34.30 -> 36.63 | 67% | 20.77 -> 21.60 | 94.3k (10 / 3000) |
+| 2 (10 11000-13000) | 34.31 -> 38.84 | 71% | 18.38 -> 18.09 | 66.0k |
+| 3 warship (1 12600-14400) | 21.83 -> 23.44 | 43% | 17.25 -> 17.98 | 89.7k (warship, 1800 frames); stage 3 10 / 22000: 124.3k |
+| 4 (10 33000-36000) | 41.83 -> 43.99 | 80% | 22.69 -> 24.89 | 65.9k |
+| 5 (10 46500-49500) | 30.19 -> 33.23 | 60% | 19.89 -> 21.01 | 93.1k |
+| 6 (10 56000-59000) | 41.14 -> 42.63 | 77% | 20.17 -> 21.68 | 59.0k |
+| 7 (10 64500-67500) | 26.81 -> 28.56 | 52% | 17.29 -> 17.49 | 113.8k (10 / 65000) |
+| 8 (10 74000-77000) | 28.56 -> 33.24 | 60% | 20.61 -> 20.17 | 61.2k |
 
-The 2026-11-03 rows predate the 2026-11-04 natives (+0.6-1.5% logic throughput in Hatari) and the 2026-11-07 contour
-restores (+1-4%). The 2026-11-07 runs add `-D DEBUG`. Where the time went on 2026-11-01 (VBLs sampled, before the DMA
-fix): the logic the largest share in every play stage (30-46%), then the sprites (16-30%), the log copy into the three
-buffers (sync, 12-20%), the compositions (5-16%). Logic profiles of every stage (`profile.py`, 30 frames, 2026-11-01):
+Early play (4 600-3600) was 41.77 arcade frames/s and 33.70 pictures/s on 2026-11-03 and has not been run again.
+Where a picture's time goes (2026-11-10, Musashi, CPU + Blitter, 600 pictures a stage drawing every 2nd arcade frame,
+before that day's changes): the objects' drawing 25-51% (stage 1: 23 objects, 65k CPU + 56k Blitter), their erasing
+13-26%, stage 3's layer pieces 25%, composing 8-33% (a new map column 90-290k in one picture), the log copy 4-12%, the
+status bar, the palette rows and the video RAM scan together 10-19k. The budget (the same day): the STE gives about
+6.5M Musashi-equivalent cycles a second; 50 arcade frames and 25 pictures a second need 6.75M (stage 6) to 11.6M
+(stage 3) at the old costs - in stages 1, 3 and 7 the logic alone is 4.5-5.7M. Logic profiles of every stage
+(`profile.py`, 30 frames, 2026-11-01):
 the cave crawler's handler 19% of stage 1 (four tile probes a crawler a frame), stage 4's fades whose targets change
 every frame, the object loops' computed CALL / RET (0040:0600-06FF) 7-10% everywhere, the game's own dispatch. The
 hottest stage-7 handler accounts for 37% of sampled logic, but only 10% is its translated code; 27% is already native
@@ -239,6 +258,20 @@ work ([logic-level-results.md](docs/logic-level-results.md)).
 
 What made it fast, newest first:
 
+* 2026-11-10: the star run (`nat_nh_e5cd`, Natives): consecutive stars in one native loop, without the object
+  loop's PUSH / CALL / RET / POP per star and with the list's pointer stored once. Logic, Musashi, seed 10 frames
+  3000-3120 (the star field, 74 stars a frame): 110.9k -> 89.9k cycles an arcade frame (-19%). Lock-step identical
+  (`--snap --list`): seed 10 to 10000, seed 8 to 8000, seeds 1 and 4 to 6000. Hatari, the windows with a start
+  point here hold few stars: stage 1 (8 3000-8000) 36.67 -> 36.89 arcade frames/s, early play (4 600-3600) 43.1
+  arcade frames/s both, 36.2 -> 37.2 pictures/s.
+* 2026-11-10: composed cells copied as whole groups, tiles converted at build time, the status bar's tile cache, the
+  palette rows compared in a row before the scan (Picture). `stage_test.py`, every 2nd arcade frame of the nine
+  recordings (18,150 pictures, all exact), mean CPU + Blitter a picture, before -> now: attract 184.0k -> 165.1k
+  (-10.3%), stage 3 257.6k -> 235.1k (-8.7%), stage 1 167.5k -> 154.1k (-8.0%), 2 261.4k -> 246.1k (-5.9%), 4 156.4k
+  -> 143.8k (-8.0%), 5 208.3k -> 186.4k (-10.5%), 6 166.9k -> 154.5k (-7.4%), 7 236.3k -> 222.6k (-5.8%), 8 237.9k ->
+  204.2k (-14.2%); the 90th percentile -4% to -15% (stage 5: 403k -> 341k). Hatari: the table above (arcade frames/s
+  +3.6% to +16%). The first hash for the build-time tiles (code + 37 x colouring) clustered - sequential codes made
+  long probe runs and a stage-5 window 20% slower; both factors multiplied now, and the builder asserts the probes.
 * 2026-11-07: sprites restored by contour (96e834f): Musashi, frames 300-1500 every 2nd, mean CPU + Blitter a picture,
   rectangles -> contours: stage 1 -1.2%, 2 -5.0%, 3 -0.3%, 4 -1.9%, 5 -1.9%, 6 -2.0%, 7 -1.9%, 8 -1.5%. Hatari (-D
   INVULN -D DEBUG): stage 2 33.1 -> 34.5 arcade frames/s, 18.0 -> 18.4 pictures/s, erase words -24%; stage 7 26.7 ->
@@ -290,6 +323,15 @@ Measured, not kept:
   the same width as three pictures' movement (three buffers) and cost on every picture. Patch kept outside the tree.
 * 2026-11-07, estimated, not tried: restoring only what the sprite's new position leaves uncovered (1.5-9% of the
   contour's words, the same slot's sprite 6 frames later).
+* 2026-11-10, counted, not tried: the halftone RAM for restores. No background repeats: of the picture without
+  sprites (20 pictures a stage) 0-0.1% lies in 16 x 16 cells equal to all eight neighbours and not black; black is
+  77-83% in stages 3, 4, 6 and 59% in stage 8 (HOP 0 clears already cost a write a word). Tiles tracked by position
+  instead: the window holds 85-297 distinct FG tiles (the 10 most used cover 4-18%, stage 4 68%), and loading a
+  16 x 8 cell's 32 words into the halftone RAM (two loads of 16 words, ~160 cycles each) costs more than copying them
+  (256 bus cycles) unless one load serves three or more cells.
+* 2026-11-10, an upper bound, not tried: objects left alone when their image and buffer position equal the same
+  buffer's last picture: 8-24% of the objects (stages 1, 2, 8: 19-24%; stage 3: under 2%), before the test that
+  nothing changed overlaps them.
 * 2026-11-04: the higher-level logic audit ([logic-level-results.md](docs/logic-level-results.md)): exact shared
   collision queries, compiled two-command motion transitions and query construction hoisted out of collision scans:
   2.13% fewer logic cycles over the stage-3 warship replay, 3.22% / 3.47% in the seed-10 stage-3 / 7 samples; all
@@ -324,6 +366,25 @@ Measured, not kept:
 Open, in order: the logic (68-150k 68000 cycles an arcade frame, stage 7 117-150k, near a whole STE frame: profile the
 heavy stages with `tools/profile.py`, `logic_test.py --render-profile`, and make their hot routines natives or leaf
 calls); stage 3's warship (the scene with two full layers); then the sprites and the log copy into the three buffers.
+
+Logic profiles, 2026-11-10 (`profile.py`, 120 frames of seed 10, the `--snap --list` build; the object loop is
+0040:0266): frame 3000 (stage 1's star field) 110.9k cycles a frame, 22000 (stage 3) 128.5k, 65000 (stage 7) 107.9k.
+The translated code is 40-45% of it at 18 cycles a V30 instruction (2,400-3,200 instructions a frame); CALL and RET
+together 11-14% (a handler's `call [bp+0]` 80 cycles, its RET 56).
+* Stage 1: 74 of the 83 objects a frame are the E5CD decorative objects (the stars, which the port does not draw):
+  `nat_nh_e5cd` 29.3% plus their dispatch, compares and RET, about 620 cycles a star, 41% of the logic there. The
+  stage-1 recording has more than 20 stars in 32% of its frames (up to 86); no other stage has any. They cannot be
+  left out (the user asked, 2026-11-10): a star takes a slot of the one pool of 96 objects (0040:03A6, 192 call
+  sites) and three numbers of the one random generator (0040:EDE9, 75 call sites) when it appears, so the enemies'
+  spawns and choices would differ for the same inputs. Made cheaper instead (the star run, below): 413 cycles a star.
+* Stage 3: the collision tests `leaf_eco2` 10.8%, `nat_coll24` 6.4%, `es_build` 2.2%, `nat_box` 1.5%; `leaf_emit1`
+  6.7%, `leaf_bgtile` 4.0%.
+* Stage 7: `leaf_ecoll` 13.4% for about 16 calls a frame nearly all rejected (some 900 cycles a call, by the nearest
+  label: to be looked at), `es_build` 4.0%; `nat_mscr` 7.2%, `leaf_emit1` 7.2%, `leaf_bgtile` 6.9%.
+* `m72_sprite_dma` 2.2-3.7% (every arcade frame's list is copied since the DMA fix).
+On this PC the coverage in `build/rtype` holds seed 10 only in windows (`cover_10_port*.pkl`, 7 capture windows, no
+seeds 11-12): a build made here reaches untranslated code at seed 10's frame 23157 (stage 3, BADPC 0DCDE; the
+lock-step equal until then). `port.py cover rtype` has to be run here before a build is played through.
 
 Techniques other ports use that may apply:
 [speed.md](../../docs/speed.md#techniques-that-look-applicable-elsewhere-2026-11-07).

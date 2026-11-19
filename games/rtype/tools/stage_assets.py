@@ -525,6 +525,105 @@ def strips():
         (build_dir("rtype") / ("stage_strip_%s.bin" % name)).write_bytes(bytes(out))
 
 
+def pretiles(paths=None):
+    """build/rtype/stage_pretile.bin (src/stage.s st_tpre, 2026-11-10): the tile conversions the recordings need, made
+    here instead of on the STE (st_tile: ~2.6k cycles each, a new map column 33-66 of them in one picture).  A
+    conversion depends on the tile's code word (flips, bit 12 a BG tile) and its colour row's 16 packed index pairs (a
+    "colouring": the scene's premap of the row's target, dedicated pens, frozen rows - as src/stage.s st_palette sets
+    st_pidx).  Collected from the recordings, every 4th state and every state whose tile targets change: the FG map's
+    cells, the BG map's that are not empty (not in a no-BG scene), a strip scene's strip.  What is missing here is
+    converted on the STE as before.  Big-endian: a word the colourings N, a word the hash table's mask, a long the
+    entries; N x 16 bytes; (mask + 1) x (key long: (colouring << 16 | code) + 1, 0 empty; a long: its data's offset),
+    slot (40503 * code + 12289 * colouring) & mask, linear probing; the entries' 32 bytes (8 longs, movep order)."""
+    out = build_dir("rtype")
+    scn = load_scenes()
+    refs = [s[0] for s in scn]
+    star = np.frombuffer((out / "stage_bgstar.bin").read_bytes(), np.uint8)
+    pens = (out / "stage_tiles.bin").read_bytes()
+    strip_pairs = {}
+    for i, name in enumerate(BG_STRIPS):
+        a = np.frombuffer((out / ("stage_strip_%s.bin" % name)).read_bytes()[2:], ">u2").reshape(-1, 2)
+        a = a[a[:, 0] != 0xFFFF]
+        strip_pairs[i] = np.unique(a[:, 0].astype(np.uint32) | ((a[:, 1].astype(np.uint32) & 15) << 16))
+    pairs = set()
+    for path in sorted(paths if paths is not None else out.glob("stage_states_*.pkl")):
+        cur, tiles_t = None, None
+        for i, (_, item) in enumerate(pickle.load(open(path, "rb"))):
+            st = pickle.loads(zlib.decompress(item))
+            t = np.frombuffer(st["recs"], np.uint8).astype(np.int32)
+            changed = tiles_t is None or (t[16:] != tiles_t).any()
+            if changed:
+                cur = choose_scene(t[16:], refs, cur)
+                tiles_t = t[16:].copy()
+            elif i % 4:
+                continue
+            ref, _, _, _, tpm, _, flags, ded, frz = scn[cur]
+            rows = []
+            for r in range(16):
+                b = [int(x) for x in tpm[ref[r] if frz >> r & 1 else t[16 + r]]]
+                for row, pen, idx in ded:
+                    if row == 16 + r:
+                        b[pen] = idx * 17
+                rows.append(bytes(b))
+            fg = np.frombuffer(st["fg"], "<u2").reshape(-1, 2)
+            found = [np.unique((fg[:, 0].astype(np.uint32) & 0xCFFF) | ((fg[:, 1].astype(np.uint32) & 15) << 16))]
+            if not flags & 32:
+                bg = np.frombuffer(st["bg"], "<u2").reshape(-1, 2)
+                bg = bg[star[bg[:, 0] & 0xFFF] == 0]
+                found.append(np.unique((bg[:, 0].astype(np.uint32) & 0xCFFF) | 0x1000 |
+                                       ((bg[:, 1].astype(np.uint32) & 15) << 16)))
+            if flags & 2:
+                found.append(strip_pairs[flags >> 6 & 3])
+            for u in found:
+                for v in u.tolist():
+                    pairs.add((rows[v >> 16], v & 0xFFFF))
+    cols = sorted({c for c, _ in pairs})
+    cid = {c: k for k, c in enumerate(cols)}
+    tl = [((i & 1) << 25) | (((i >> 1) & 1) << 17) | (((i >> 2) & 1) << 9) | (((i >> 3) & 1) << 1) for i in range(16)]
+    tr = [v >> 1 for v in tl]
+
+    def convert(col, code):
+        """src/stage.s st_tile with st_mktab's tables: a source row's parity picks each pair's nibble (the left pen
+        the high one on even rows), pen 0 is index 0; X-flipped: the row's bytes backwards, the pens' bits swapped"""
+        base = (code & 0xFFF) * 32 + (4096 * 32 if code & 0x1000 else 0)
+        data = bytearray()
+        for srow in (range(7, -1, -1) if code & 0x8000 else range(8)):
+            ph = srow & 1
+            row = pens[base + 4 * srow:base + 4 * srow + 4]
+            d = 0
+            for b in (reversed(row) if code & 0x4000 else row):
+                lp, rp = b >> 4, b & 15
+                li = 0 if not lp else (col[lp] & 15 if ph else col[lp] >> 4)
+                ri = 0 if not rp else (col[rp] >> 4 if ph else col[rp] & 15)
+                d = ((d << 2) | ((tr[li] | tl[ri]) if code & 0x4000 else (tl[li] | tr[ri]))) & 0xFFFFFFFF
+            data += d.to_bytes(4, "big")
+        return bytes(data)
+
+    size = 1024
+    while size < 3 * len(pairs):
+        size *= 2
+    assert size <= 65536 and len(cols) < 32768
+    table = [(0, 0)] * size
+    data = bytearray()
+    probes = 0
+    for col, code in sorted(pairs, key=lambda x: (cid[x[0]], x[1])):
+        slot = (40503 * code + 12289 * cid[col]) & (size - 1)
+        while table[slot][0]:
+            slot = (slot + 1) & (size - 1)
+            probes += 1
+        table[slot] = (((cid[col] << 16) | code) + 1, len(data))
+        probes += 1
+        data += convert(col, code)
+    blob = bytearray(len(cols).to_bytes(2, "big") + (size - 1).to_bytes(2, "big") + len(pairs).to_bytes(4, "big"))
+    for c in cols:
+        blob += c
+    for key, off in table:
+        blob += key.to_bytes(4, "big") + off.to_bytes(4, "big")
+    (out / "stage_pretile.bin").write_bytes(bytes(blob + data))
+    assert probes < 2 * len(pairs), "st_tpre's hash table clusters: %d probes" % probes
+    return len(pairs), len(cols)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--png", action="store_true")
@@ -532,6 +631,7 @@ def main():
     tiles()
     stage_pal()
     scenes(args.png)
+    print("pre-converted tiles: %d, colourings %d" % pretiles())
 
 
 def ensure():
@@ -555,12 +655,14 @@ def ensure():
     key = digest.hexdigest()
     stamp = out / 'stage_default.sha256'
     required = ['stage_scenes.bin', 'stage_tiles.bin', 'stage_tmask.bin', 'stage_fgempty.bin',
-                'stage_bgstar.bin', 'stage_pal.s', 'stage_sprites.s', 'stage_sstream.bin', 'stage_precol.bin']
+                'stage_bgstar.bin', 'stage_pal.s', 'stage_sprites.s', 'stage_sstream.bin', 'stage_precol.bin',
+                'stage_pretile.bin']
     if stamp.exists() and stamp.read_text().strip() == key and all((out / p).exists() for p in required):
         return
     tiles()
     stage_pal()
     scenes()
+    pretiles(sprite_states)
     stage_sprites.build([str(p) for p in paths])
     stamp.write_text(key + '\n')
 
