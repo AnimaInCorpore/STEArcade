@@ -6,7 +6,8 @@ pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The
 to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
 **started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
 simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 45.6 arcade frames a second (76% of the arcade's 60.10), every frame shown.
+title and attract demo): 45.6 arcade frames a second (76% of the arcade's 60.10); in play 30.7 (51%); every frame
+shown.
 
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
 
@@ -22,6 +23,8 @@ python games/defender/tools/logic_test.py [frames] [--seed N] [--trace F | --wtr
                                                         # (--profile with DF_PROFINS=N: the N hottest 6809 instructions)
 python games/defender/tools/build.py                    # the STE program -> run/defender/DEFENDER.PRG
 powershell -ExecutionPolicy Bypass -File games/defender/tools/hatari.ps1 -Frames 3400   # hidden Hatari: a still and the speed
+& games/defender/tools/hatari.ps1 -Frames 9000 -Name defender_play -Extra @('--play','5')   # (in PowerShell) play speed:
+                                                        # build.py --play SEED replays ref/cover.py's inputs of that seed
 ```
 
 Coverage of all seeds (about 2.5 minutes each, run them in parallel):
@@ -82,7 +85,8 @@ a bonus ship every 10,000, 1 coin 1 credit).
 * **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
   screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
   Play from the keyboard has not been tried there.
-* **Not done**: sound (the M6808 board), speed work, `port.py` registration, play in Hatari.
+* **Not done**: sound (the M6808 board), more speed (play runs at 51%), `port.py` registration; play in Hatari
+  only with the scripted tape (`build.py --play`), not by hand.
 
 ## How it works
 
@@ -156,8 +160,9 @@ a bonus ship every 10,000, 1 coin 1 credit).
 ## Speed
 
 **2026-11-19 (Hatari, 3,400 VBLs from the start: title and attract demo): 45.6 arcade frames a second, 76% of
-60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  Play has
-not been timed in Hatari; on Musashi (`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 125,000 68000
+60.10**, every arcade frame shown (no picture is skipped: the video RAM is drawn as the game writes it).  **In play
+30.7 arcade frames a second, 51%** (Hatari, `hatari.ps1 -Frames 9000 -Extra @('--play','5')`: seed 5's scripted
+play from its start at VBL 1854 to VBL 9000, lives held at 5; the run's whole 9,000 VBLs 34.9).  On Musashi (`logic_test.py`, 6,000 frames) the attract-only seed 7 takes 125,000 68000
 cycles an arcade frame and the seeds with play 164,000-190,000 (they were 178,000-204,000 before this round).  Seed 2's profile (play,
 3,000 frames): the translated code 48% (its inline video stores included, the hottest instruction 2%),
 `df_terrain` 24% (it runs every other frame, about 68,000 cycles a call: in play about half the 152 columns move and
@@ -178,7 +183,7 @@ What made it faster (Hatari, the same 3,400 VBLs; Musashi, seed 5's 4,000 frames
 | an indirect operand's pointer at `a4` where the site never read the window (`flat_ptr`); the inline store's screen address straight from `vtab` (the 68000 ignores the top byte) | 45.6 | 167,400 |
 
 Next: the translated code's video stores and indirect operands are its biggest single costs, but its profile is flat;
-the sprite copiers ($D149-$D2D6) as natives would shorten `main_vlist`'s calls.  Play needs a Hatari measurement.
+the sprite copiers ($D149-$D2D6) as natives would shorten `main_vlist`'s calls.  Play (30.7) is the figure to raise: the terrain runs every other frame there.
 
 ## Lessons
 

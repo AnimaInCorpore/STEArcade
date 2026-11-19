@@ -216,6 +216,9 @@ df_idle:
 .deliver:
 	subq.b	#1,vbl_pending
 	addq.w	#1,isr_count
+	ifd PLAY
+	bsr	play_tape
+	endc
 	movem.l	(sp)+,d0-d4/a2-a6
 	move.b	#1,df_pass
 	lea	pass_low,a0
@@ -376,6 +379,8 @@ quit:
 	lea	shot_buf+32+PIC_W_LINES*LB,a1	; then the VBLs (long) and the arcade frames (word) so far
 	move.l	frame_counter,(a1)+
 	move.w	isr_count,(a1)+
+	move.l	play_vbl,(a1)+		; (-D PLAY: the VBLs and arcade frames when play began; 0 otherwise)
+	move.w	play_pic,(a1)+
 	bsr	restore_hardware
 	clr	-(sp)			; Fcreate
 	pea	shot_name
@@ -384,7 +389,7 @@ quit:
 	addq	#8,sp
 	move	d0,d6
 	pea	shot_buf		; Fwrite
-	move.l	#32+PIC_W_LINES*LB+6,-(sp)
+	move.l	#32+PIC_W_LINES*LB+12,-(sp)
 	move	d6,-(sp)
 	move	#$40,-(sp)
 	trap	#1
@@ -403,6 +408,43 @@ quit:
 	addq	#6,sp
 	clr	-(sp)
 	trap	#1
+
+	ifd PLAY
+; play_tape (-D PLAY=1, build.py --play SEED: ref/cover.py's inputs as a tape): at the start of arcade frame f (isr_count
+; = f + 1, as tools/logic_test.py sets them) its inputs; flags bit 0: the cheat of seeds 5-11 (lives and smart bombs
+; held at 5), bit 1: play has begun (the first such frame's VBLs and arcade frames go into SCREEN.BIN).  Keeps all.
+play_tape:
+	movem.l	d0/a0,-(sp)
+	moveq	#0,d0
+	move.w	isr_count,d0
+	subq.w	#1,d0
+	cmp.w	#TAPE_N,d0
+	bhs.s	.x
+	lsl.l	#2,d0
+	lea	tape,a0
+	add.l	d0,a0
+	move.b	(a0)+,io_in0
+	move.b	(a0)+,io_in1
+	move.b	(a0)+,io_in2
+	move.b	(a0),d0
+	btst	#0,d0
+	beq.s	.c
+	move.b	#5,df_mem+$A1C9
+	move.b	#5,df_mem+$A1CB
+.c:	btst	#1,d0
+	beq.s	.x
+	tst.l	play_vbl
+	bne.s	.x
+	move.l	frame_counter,play_vbl
+	move.w	isr_count,play_pic
+.x:	movem.l	(sp)+,d0/a0
+	rts
+	section data,data
+tape:	incbin	"df_tape.bin"
+TAPE_N = (*-tape)/4
+	even
+	section text,code
+	endc
 
 hbl:
 	rte
@@ -427,6 +469,7 @@ vbl:
 	move.w	(a1,d0.w),(a2)+
 	dbf	d1,.pal
 	ifnd SIM
+	ifnd PLAY
 	bsr	jagpad_poll
 	move.b	kbd_in0,d0		; the inputs the program reads (active high)
 	or.b	joy_in0,d0
@@ -439,6 +482,7 @@ vbl:
 	move.b	kbd_in2,d0
 	or.b	jp_in+2,d0
 	move.b	d0,io_in2
+	endc
 	addq.b	#1,vbl_pending		; one arcade frame a VBL, and a second one every 5th: 60 a second
 	subq.b	#1,vbl_phase
 	bpl.s	.ph
@@ -1520,7 +1564,7 @@ crash_text:	ds.b	512
 	even
 screen_mem:	ds.b	SCR_LINES*LB+256
 	ifd SHOT
-shot_buf:	ds.b	32+PIC_W_LINES*LB+6
+shot_buf:	ds.b	32+PIC_W_LINES*LB+12
 	endc
 	even
 
@@ -1531,6 +1575,8 @@ idle_sr:	ds.w	1
 badpc:		ds.w	1
 dispatch_pc:	ds.w	1
 isr_count:	ds.w	1
+play_pic:	ds.w	1
+play_vbl:	ds.l	1
 df_view:	ds.b	1
 main_dpv:	ds.b	1		; DP as data (engine/m6809x.py dp_data; 0 at the reset)
 df_pass:	ds.b	1		; 1: the line-128 pass was delivered, the line-0 pass is next

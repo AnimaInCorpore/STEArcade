@@ -1,5 +1,5 @@
 """SCREEN.BIN (src/defender.s -D SHOT=1: the 16 STE colour words, the picture's 240 planar lines, the VBLs and the
-arcade frames) -> a PNG, and the speed.
+arcade frames; -D PLAY: when play began) -> a PNG, and the speed (of the play too).
 
     python tools/shot.py SCREEN.BIN out.png
 """
@@ -30,6 +30,13 @@ def main():
         frames = int.from_bytes(rest[4:6], 'big')
         print("VBLs %d, arcade frames %d: %.1f a second (%.0f%% of the arcade's 60.10)" % (
             vbls, frames, 50 * frames / vbls, 100 * 50 * frames / vbls / 60.10))
+    if len(rest) >= 12:
+        pv = int.from_bytes(rest[6:10], 'big')
+        pf = int.from_bytes(rest[10:12], 'big')
+        if pv and vbls > pv:
+            v, f = vbls - pv, frames - pf
+            print("play (from VBL %d, arcade frame %d): VBLs %d, arcade frames %d: %.1f a second (%.0f%%)" % (
+                pv, pf, v, f, 50 * f / v, 100 * 50 * f / v / 60.10))
 
 
 if __name__ == '__main__':
