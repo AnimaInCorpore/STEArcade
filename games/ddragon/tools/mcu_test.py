@@ -6,6 +6,7 @@ The port's schedule (machine.DDragonPort, the coverage's inputs of ref/cover.py)
 write; the model does the same job on a copy of the shared RAM before it: the shared RAM after it and the MCU's RAM
 $40-$66 must be equal (the stack bytes above are not part of the job's result).
 """
+import os
 import sys
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def main():
                 model.first = False
         M.DDragonPort.mcu_job = job
         try:
-            cover.run(seed, frames, out=Path("/dev/null"))
+            cover.run(seed, frames, out=Path(os.devnull))
         finally:
             M.DDragonPort.mcu_job = orig
         print("seed %d: %d jobs, %d sprite entries" % (seed, stats["jobs"], stats["sprites"]))
