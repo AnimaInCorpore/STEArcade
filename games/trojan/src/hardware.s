@@ -1,5 +1,6 @@
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -76,6 +77,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	bsr	snd_off
 	lea	old_exceptions,a0
 	lea	$08.w,a1

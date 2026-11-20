@@ -82,7 +82,7 @@ G_MCRAM = g_ram+$7C00			; $FC00-$FFFF: the RAM shared with the MCU
 TOKEN = $FE7F				; $7FFE on the Z80 stack, byte swapped
 
 ; Early, synchronized border events tolerate the renderer's short HOG passes.
-	include "borders.s"
+	include "game_borders.s"
 
 	section text,code
 
@@ -245,6 +245,7 @@ init_table:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -314,6 +315,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	bsr	cs_off
 
 	movem.l	old_palette,d0-d7

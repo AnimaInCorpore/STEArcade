@@ -366,15 +366,18 @@ strips, allowing interrupts between pieces. The former `wait_borders` policy is 
 and early handlers. Verify actual timing in the pinned Hatari build: Musashi has no MFP timer model. Debug counters
 record fallback arming and late border/palette events; `BLIT_STATS=256` reports oversized or non-HOG passes.
 
-Mega STE at 16 MHz with cache enabled has a separate automatically selected pulse path.  The first VBL
-looks for TOS's `_MCH` cookie (`bd_speed_poll`); by then a port may have reused TOS's memory, so the jar pointer must
-be even and below 4 MB and at most 32 cookies are read (2026-11-07: an unbounded scan crashed Donkey Kong and
-Gauntlet on a plain STE).
-It warms compact delay kernels after Blitter cache invalidation and masks other MFP sources
-during the bounded HBL approach, preventing an ACIA/Timer C interrupt from waking STOP on
-the wrong part of a line. It never writes the CPU/cache control register. The legacy 8 MHz
-path remains available. [Mega STE timing verification](megaste-border-timing.md) records the
-pulse windows, mixed-HOG load test, cache-placement sweeps and the physical-hardware limit.
+Each playable port includes `engine/rt/game_borders.s` and calls `bd_game_init` during
+hardware takeover, before the first video interrupt. On a Mega STE it saves the CPU/cache
+and MFP active-edge registers, selects 16 MHz with cache on, and counts falling display-enable
+edges. This also detects Gauntlet's machine before the arcade image overwrites the cookie jar.
+The exit path calls `bd_game_restore` while interrupts are masked. Ordinary STE hardware
+uses its 8 MHz pulse routine.
+
+The cached kernels use CIRCLE's upper U078/W08 and lower D101/W17 settings. Timer B
+polls one falling edge earlier and waits a cached scanline before issuing the lower pulse.
+The game arms this interrupt four lines early when the preceding HUD event leaves room.
+Palette and display-address switches retain their planned lines. See the
+[Mega STE timing measurements](megaste-border-timing.md).
 
 Known full-mask, unskewed copies/fills use `blit_go_copy`; HOP 0 fills with arbitrary masks use
 `blit_go_fill`. Both can budget 32 words per piece because there are at most two bus accesses per word.

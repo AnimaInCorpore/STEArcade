@@ -27,7 +27,7 @@ MAX_PENDING = 3				; arcade frames that may wait (a game behind by more runs slo
 	section bss,bss
 ring_area: ds.b RING_AREA		; (the display rings: render.s)
 	section text,code
-	include "borders.s"
+	include "game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): P1, P2, EXTRA bits as in key_table (bytes 0-2 of each long)
 JP_SH1 = 24

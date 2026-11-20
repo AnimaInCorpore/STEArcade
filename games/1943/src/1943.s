@@ -14,7 +14,7 @@ BD_PALETTE = 1                   ; (Timer B: the palette on at the picture's fir
     section bss,bss
 screen_area: ds.b 3*RING_SIZE+256    ; (the screen buffer: render.s)
     section text,code
-    include "borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
+    include "game_borders.s"          ; (engine/rt: the border events come early and sync themselves; blit_go)
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
 JP_SH1 = 16

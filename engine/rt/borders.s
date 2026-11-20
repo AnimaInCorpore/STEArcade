@@ -106,9 +106,30 @@ BD_FAST_TOP_DELAY = 78
 BD_FAST_TOP_PULSE = 8
 BD_FAST_LOW_PULSE = 17
 
+	; Arm just the bottom interrupt earlier in cached mode. The MFP reload
+	; and the elapsed edges each change by the extra lead, hence the factor
+	; of two for the polling target. Other palette events keep their cadence.
+bd_arm_low macro
+	ifd BD_CIRCLE
+	iflt BD_K-4
+	tst.b bd_fast
+	beq.s .normal\@
+	move.b #(\1)-(4-BD_K),$fffffa21.w
+	bra.s .armed\@
+.normal\@:
+	endc
+	endc
+	move.b #\1,$fffffa21.w
+.armed\@:
+	endm
+
 borders_vbl	macro
 	clr.b	$fffffa1b.w		; Timer B: counts this frame's lines from the first
-	move.b	#BD_FIRST-BD_K,$fffffa21.w
+	if BD_PALETTE
+	move.b #BD_FIRST-BD_K,$fffffa21.w
+	else
+	bd_arm_low BD_FIRST-BD_K
+	endc
 	move.b	#8,$fffffa1b.w
 	if BD_HUD
 	move.l	#bd_evs,bd_ev_ptr
@@ -393,6 +414,30 @@ bd_speed_poll:
 	movem.l (sp)+,d0-d1/a0
 	rts
 
+	ifd BD_CIRCLE
+; Enter with interrupts masked and the TOS cookie jar still intact.
+bd_game_init:
+	clr.b bd_speed_known
+	clr.b bd_is_mste
+	clr.b bd_fast
+	bsr bd_speed_poll
+	tst.b bd_is_mste
+	beq.s .done
+	move.b $ffff8e21.w,bd_old_cpu
+	or.b #3,$ffff8e21.w
+	move.b $fffffa03.w,bd_old_aer
+	bclr #3,$fffffa03.w
+	st bd_fast
+.done:	rts
+
+bd_game_restore:
+	tst.b bd_is_mste
+	beq.s .done
+	move.b bd_old_aer,$fffffa03.w
+	move.b bd_old_cpu,$ffff8e21.w
+.done:	rts
+	endc
+
 	if BD_HUD
 ; Timer B with the HUD palette: the events bd_hud_plan laid out (bd_evs: the counter's value at the event's line end,
 ; the next event's count (0: none), the kind: 0 shown_pal, 4 hud_pal, 8 black_pal, 12 the bottom border).
@@ -428,10 +473,10 @@ timer_b:
 	if BD_VSWITCH
 	bsr	.next			; (the switching code: out of a short branch's reach)
 	else
-	bsr.s	.next
+	bsr	.next
 	endc
 	else
-	bsr.s	.next
+	bsr	.next
 	endc
 	bd_check_late bd_late_on
 	if BD_VSWITCH
@@ -458,7 +503,7 @@ timer_b:
 	if BD_VSWITCH
 	bsr	.next			; (the switching code: out of a short branch's reach)
 	else
-	bsr.s	.next
+	bsr	.next
 	endc
 	bd_check_late bd_late_on
 	movem.l	(sp)+,d0-d7/a0-a6
@@ -474,10 +519,10 @@ timer_b:
 	if BD_VSWITCH
 	bsr	.next			; (the switching code: out of a short branch's reach)
 	else
-	bsr.s	.next
+	bsr	.next
 	endc
 	else
-	bsr.s	.next
+	bsr	.next
 	endc
 	bd_check_late bd_late_low
 	if BD_VSWITCH
@@ -576,6 +621,26 @@ bd_hud_plan:
 	endc
 	bra.s	.c
 .last:	clr.b	1(a1)
+	ifd BD_CIRCLE
+	iflt BD_K-4
+	; HUD positions vary. Advance the bottom interrupt only when the
+	; preceding event leaves a full reload and four DE edges to poll.
+	tst.b bd_fast
+	beq.s .planned
+	lea bd_evs,a0
+.find_low:
+	cmp.w #12,BD_EVSZ+2(a0)
+	beq.s .advance_low
+	adda.w #BD_EVSZ,a0
+	bra.s .find_low
+.advance_low:
+	cmp.b #4+(4-BD_K),1(a0)
+	bls.s .planned
+	subq.b #4-BD_K,1(a0)
+	subq.b #2*(4-BD_K),BD_EVSZ(a0)
+.planned:
+	endc
+	endc
 	movem.l	(sp)+,d0-d4/a0-a1
 	rts
 	if BD_VSWITCH
@@ -626,6 +691,14 @@ timer_b:
 	else
 	move.b	#BD_LOW-2*BD_K,d0
 	endc
+	ifd BD_CIRCLE
+	iflt BD_K-4
+	tst.b bd_fast
+	beq.s .low_target
+	subq.b #2*(4-BD_K),d0
+.low_target:
+	endc
+	endc
 	bd_low_open			; Remove the bottom border
 	clr.b	$fffffa19.w		; Timer A to the next frame's top border
 	move.b	#BD_TA_P1,$fffffa1f.w
@@ -646,7 +719,7 @@ timer_b:
 	bd_poll
 	movem.l	d2-d7/a1-a2,$ffff8240.w
 	clr.b	$fffffa1b.w
-	move.b	#BD_LOW-BD_ON-BD_K,$fffffa21.w
+	bd_arm_low BD_LOW-BD_ON-BD_K
 	move.b	#8,$fffffa1b.w
 	move.b	#1,bd_tb_state
 	bd_check_late bd_late_on
@@ -904,6 +977,10 @@ bd_rname:
 	endm
 
 borders_vars	macro
+	ifd BD_CIRCLE
+bd_old_aer: ds.b 1
+bd_old_cpu: ds.b 1
+	endc
 bd_speed_known: ds.b 1
 bd_is_mste: ds.b 1
 bd_fast: ds.b 1

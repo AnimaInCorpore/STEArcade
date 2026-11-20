@@ -186,10 +186,9 @@ runs to completion, returning to the scheduler's scan at 00B0, and the tasks it 
   and off around the picture; the palette off is line-exact.  64-word pieces still let a palette event start late now
   and then, so passes over 32 words run in pieces.  The DEBUG build counts late events (`-D BD_PCLOG=1` logs the
   interrupted PCs of late events).  The VBL writes the video counter too (see Lessons).
-  Gun.Smoke now requests a three-line Timer B lead (`BD_K=3`) and a 240-iteration poll bound: rare palette lateness
-  appeared under live keyboard stress with the two-line lead, and cached 16 MHz polls need the larger bound to wait
-  through three lines. The synchronized output lines and short HOG limit stay the same; other ports retain their
-  existing shared defaults. The [focused validation](docs/megaste-test.md) includes video-pulse traces.
+  Gun.Smoke arms Timer B four lines early with a 320-iteration poll bound. The extra line
+  lets the cached lower routine wait for the preceding falling edge under drawing load.
+  The [focused validation](docs/megaste-test.md) includes gameplay video-pulse traces.
 
 ### Colours
 

@@ -11,7 +11,7 @@ BD_PALETTE = 1
     section bss,bss
 ring_area: ds.b 3*RING_SIZE+256  ; (the ring buffers: render.s)
     section text,code
-    include "borders.s"
+    include "game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
 JP_SH1 = 16

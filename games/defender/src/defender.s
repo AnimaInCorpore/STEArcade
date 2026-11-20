@@ -57,7 +57,7 @@ TA_NOPS = 84
 PIC_TOP = 18				; the picture's first displayed line (240 of them, centred in the 276 the open borders show)
 PIC_LINES = PIC_W_LINES
 BD_PALETTE = 1
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): bytes 0-2 of each long are IN0, IN1, IN2 (key_table's columns), active high.
 ; IN0: fire 0, thrust 1, smart bomb 2, hyperspace 3, start 2 4, start 1 5, reverse 6, down 7; IN1: up 0;
@@ -267,6 +267,7 @@ df_idle:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -331,6 +332,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
 	move.b	old_res,$ffff8260.w

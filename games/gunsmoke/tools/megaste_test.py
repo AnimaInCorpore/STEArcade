@@ -17,7 +17,7 @@ def capture_assets():
 
 def build(out):
     subprocess.run([sys.executable,str(Path(__file__).with_name('build.py'))],check=True)
-    paths=[ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',ROOT/'games/gunsmoke/src/megaste_capture.s',ROOT/'games/gunsmoke/src/render.s',ROOT/'games/gunsmoke/src/circle_borders.i',ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']
+    paths=[ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',ROOT/'games/gunsmoke/src/megaste_capture.s',ROOT/'games/gunsmoke/src/render.s',ROOT/'engine/rt/circle_borders.i',ROOT/'engine/rt/game_borders.s',ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']
     hashes={str(p.relative_to(ROOT)):sha(p) for p in paths}
     defines=['DEBUG=1','MSTE_TEST=1','MSTE_CAPTURE=1','BD_PCLOG=1']
     identity=hashlib.sha256(json.dumps(dict(source=hashes,defines=defines),sort_keys=True).encode()).hexdigest()[:16]
@@ -179,7 +179,7 @@ def package(out):
     message=(ROOT/'games/gunsmoke/docs/darklord-message.txt').read_text()
     (out/'DARKLORD.TXT').write_bytes(message.replace('\n','\r\n').encode('ascii'))
     with zipfile.ZipFile(out/'SOURCE.ZIP','w',zipfile.ZIP_DEFLATED) as z:
-        for p in [ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',ROOT/'games/gunsmoke/src/megaste_capture.s',ROOT/'games/gunsmoke/src/render.s',ROOT/'games/gunsmoke/src/circle_borders.i',Path(__file__),Path(__file__).with_name('megaste_bench.py'),Path(__file__).with_name('megaste_input_test.py'),Path(__file__).with_name('megaste_capture.py'),Path(__file__).with_name('megaste_capture_test.py'),ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']:
+        for p in [ROOT/'games/gunsmoke/src/gunsmoke.s',ROOT/'games/gunsmoke/src/megaste_test.s',ROOT/'games/gunsmoke/src/megaste_capture.s',ROOT/'games/gunsmoke/src/render.s',ROOT/'engine/rt/circle_borders.i',ROOT/'engine/rt/game_borders.s',Path(__file__),Path(__file__).with_name('megaste_bench.py'),Path(__file__).with_name('megaste_input_test.py'),Path(__file__).with_name('megaste_capture.py'),Path(__file__).with_name('megaste_capture_test.py'),ROOT/'engine/rt/borders.s',ROOT/'engine/rt/ikbd.s',ROOT/'engine/rt/jagpad.s']:
             z.write(p,p.relative_to(ROOT))
         z.write(build_dir('gunsmoke')/'mt_build.i','build/gunsmoke/mt_build.i')
     names=['GUNSMOKE.TOS','GUNSMOKE.MAP','BUILD.JSN','README.TXT','DARKLORD.TXT','SOURCE.ZIP']

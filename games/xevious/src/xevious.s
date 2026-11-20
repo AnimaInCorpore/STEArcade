@@ -58,7 +58,7 @@ SHARE_LO = $7900			; the work RAM both CPUs use, in their own halves
 SHARE_HI = $8000
 
 BD_PALETTE = 0
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): jp_in bytes: in0 (joystick), in1 (fire, starts, coins), in2 (bit 0: the bomb button)
 JP1_RIGHT = $02<<24
@@ -234,6 +234,7 @@ dswb:	dc.b	DSWB
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -303,6 +304,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	bsr	snd_off
 
 	movem.l	old_palette,d0-d7

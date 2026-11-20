@@ -28,7 +28,7 @@ TA_NOPS = 84
 PIC_TOP = 20				; the picture's first displayed line
 PIC_LINES = 224
 BD_PALETTE = 1
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): byte 0 = IN0, byte 1 = IN1, byte 2 = IN2 of the key_table's longs (active high there).
 ; IN0: button 2 (bit 1), down (2), P2 down (3), P2 right (4), coin 1 (5), start 1 (6), service (7); IN1: button 3 (0),
@@ -153,6 +153,7 @@ load_cpu:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -213,6 +214,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	clr.b	$ffff8901.w		; (the DMA sound off)
 	moveq	#8,d0			; the YM2149 silent
 .silence:

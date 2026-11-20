@@ -27,7 +27,7 @@ TA_DATA = 98
 TA_NOPS = 84
 	endc
 BD_PALETTE = 0
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): IN0 and IN1 bits as in key_table (bytes 0-1 of each long; active high there).  Either
 ; pad moves Pac-Man (upright: the players take turns); the fire buttons have nothing to do.
@@ -121,6 +121,7 @@ start:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -181,6 +182,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	moveq	#8,d0			; the YM2149 silent
 .silence:
 	move.b	d0,$ffff8800.w

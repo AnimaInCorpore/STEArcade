@@ -57,7 +57,7 @@ TA_DATA = 98
 TA_NOPS = 84
 PIC_LINES = 240
 BD_PALETTE = 1				; (render.s: shown_pal, black_pal)
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; arcade inputs (the words at $803000-$803006, active low)
 IN_UP = $80
@@ -194,11 +194,13 @@ mem_clear:				; the clear routine's move.w (6,a7),d0; movea.l (8,a7),a0 (+4: the
 ; Esc: the STE's reset (TOS's reset vector: $0-$7 read the ROM)
 reset_ste:
 	move	#$2700,sr
+	jsr bd_game_restore
 	move.l	$4.w,a0
 	jmp	(a0)
 
 ; ---- the machine -------------------------------------------------------------------------------------------------
 init_hardware:
+	jsr bd_game_init
 	clr.b	$fffffa07.w		; MFP: no interrupts but the ACIA's
 	clr.b	$fffffa09.w
 	clr.b	$fffffa13.w

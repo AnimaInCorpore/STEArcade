@@ -30,7 +30,7 @@ TILE_ROWS = 1				; (and the fixed layers' rows they wrote only)
 PIC_EVERY = 2				; (arcade frames a picture at most: the logic's share against the picture rate)
       endc
 	include	"ikbd.s"
-	include	"borders.s"
+	include	"game_borders.s"
 shown_pal = ren_vbl_pal
 hud_pal = ren_vbl_hpal
 hud_top = ren_vbl_htop
@@ -468,6 +468,7 @@ write_counters:
 ; ---- the hardware: the VBL (borders, the picture, the ticks), the timers (borders.s), the ACIA (keys, joystick) ----
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -523,6 +524,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	clr.b	$fffffa19.w
 	clr.b	$fffffa1b.w
 	lea	old_mfp,a0

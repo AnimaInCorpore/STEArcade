@@ -26,7 +26,7 @@ MAX_BEHIND = 3				; (ticks behind before arcade frames are dropped: the game slo
 PIC_EVERY = 2				; (arcade frames a picture at most)
       endc
 	include	"ikbd.s"
-	include	"borders.s"
+	include	"game_borders.s"
     endc
 
 	section text,code
@@ -327,6 +327,7 @@ write_counters:
 ; ---- the hardware: the VBL (borders, the picture, the ticks), the timers (borders.s), the ACIA (keys, joystick) ----
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -384,6 +385,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	clr.b	$fffffa19.w
 	clr.b	$fffffa1b.w
 	lea	old_mfp,a0

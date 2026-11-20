@@ -55,7 +55,7 @@ JP_START2 = $02<<24
 JP_COIN1 = $04<<24
 JP_COIN2 = $08<<24
 	include	"ikbd.s"
-	include	"borders.s"
+	include	"game_borders.s"
 	include	"jagpad.s"
 shown_pal = m72r_vbl_pal
 hud_pal = m72r_vbl_hpal
@@ -281,6 +281,7 @@ write_counters:
 ; joysticks) ----
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -342,6 +343,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	ifd	PROF
 	move.l	old_timer_c,$114.w
 	endc

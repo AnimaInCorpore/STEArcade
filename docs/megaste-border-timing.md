@@ -1,5 +1,42 @@
 # Mega STE 16 MHz/cache-on border timing
 
+## Playable ports, 2026-11-20
+
+Darklord saw the full CIRCLE card with correct colours on each fresh start at U078/W08
+and D101/W17. All 38 playable ports now use those settings on the Mega STE. The game
+selects 16 MHz with cache on during takeover and restores the desktop mode on exit.
+Pac-Mania currently consists of reference work and has no STE executable.
+
+In the pinned Hatari, 26 game executables each passed 1,790 consecutive frame checks
+after startup, with both frequency pulses in their scanline windows. The verifier
+read back cache-on mode during the run and observed the return to the 8 MHz desktop.
+The runs exercise attract and keyboard input on a 50 Hz display. They cover portions
+of each game. Physical evidence for these settings comes from the CIRCLE card.
+
+Hatari ran 23 of those games with 4 MB. Dragon Spirit, Mr. Heli and R-Type used their
+14 MB development configuration. Dragon Spirit needed shorter background Blitter passes
+under load. R-Type's refillable sprite colour pool is 128 KiB smaller to leave room for
+the current executable and TOS. Ordinary 8 MHz STE checks on 1942, Donkey Kong and
+Kung-Fu Master observed both border pulses and zero writes to the Mega STE speed register.
+
+The following ports have the common runtime changes and still need an executable
+test with their ROMs: Defender, Dig Dug, Donkey Kong 3, Jail Break, Juno First, Mario
+Bros., Mikie, Roc'n Rope, Rolling Thunder, Super Basketball, Xevious and Yie Ar Kung-Fu.
+Each uses a border configuration exercised by at least one of the other ports.
+
+To repeat a game check with locally supplied assets:
+
+```sh
+venv/bin/python games/1942/tools/build.py
+venv/bin/python tools/megaste_game_test.py 1942 run/1942/1942.PRG
+```
+
+The tool writes the executable hash, timing exceptions, clock observations and a
+screen capture under `build/megaste-rollout/<game>/`. Use `--ram 14` for the
+larger development builds.
+
+## Original automatic timing selection (November 2026)
+
 The shared `engine/rt/borders.s` now selects a separate top/bottom timing path
 when `_MCH` identifies a Mega STE and `$FF8E21 & 3` is 3. It reads that register;
 it never writes it. Foreground code, Blitter drawing and the border handlers
@@ -360,3 +397,42 @@ trigger from a fault that requires repeated pulses. Testing recovery
 through a desktop mode transition and, if available, a second video path
 would help distinguish the Atari video state from converter/display state.
 The report is retained in `build/darklord-bottom-2026-11-17/BOTTOM.TXT`.
+
+## Physical interactive PULSE return (2026-11-18)
+
+Darklord returned five complete numbered session logs for build
+`84826d544c50299b`. The ZIP SHA256 is
+`edd7c0ff1598a36050e10d60ad85a177b02b6b04000b0ba45fde52ffac159059`.
+There were 8 single-pulse trials (5 marked clean, 3 marked corrupted) and
+two repeats (500 pulses each, both marked corrupted). Each trial used
+family 0, the fixed P01 preset with width count 17. Its displayed D101
+does not enter the legacy pulse timing. The report confirms cache-on
+16 MHz during the trials, a Timer-B falling edge, and all 41 masked
+restoration checks passing in each session. Timer D was unavailable for
+video counter sampling. A single P01 pulse can reproduce the fault by the
+operator's classification, and two full repeats failed the visual goal.
+
+The phone clip shows the P01 repeat without obvious corruption of the
+upper grid. At about 20 s its lower band starts white, red, green and
+blue and lines up with the grid. At about 22 s and 28 s it reaches one
+16-pixel cell farther left and starts grey, black, grey, white, salmon,
+red and light green. After the repeat, TOP crops that band and the upper
+grid looks clean. This clip shows a separate, local alignment symptom
+from the persistent upper-picture scramble seen in the earlier sweep.
+
+The band uses palette indices 1 through 14. If the Shifter consumes the
+interleaved data starting one 16-bit word ahead, each group combines the
+last three planes from the current cell with the first plane from the
+next cell. The predicted indices from the preceding black margin are
+8, 0, 9, 1, 10, 2, 11, 3, 12, 4, 13, 5, 14, 6, 7. The visible sequence
+and extra cell agree with that model. This is evidence for a two-byte
+slip in the displayed extension. It does not measure the physical write
+cycles or identify the exact cause of the slip.
+
+The five runs validate the P01 baseline. To compare timing methods in
+the next run, confirm clean TOP, press P once to select the adjustable
+reference (the P01 prefix disappears), leave D101/W17, and fire one
+pulse. Run the repeat only after a clean single pulse. Report whether
+the lower band stays aligned and keeps its expected colour order for
+all ten seconds. The logs are retained under
+`build/darklord-pulse-2026-11-18/`.

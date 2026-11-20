@@ -37,9 +37,7 @@ BD_K = 4				; CIRCLE polls one edge earlier; retain lead time under game load
 	ifnd BD_POLL
 BD_POLL = 320				; cover the four-line lead at 16 MHz
 	endc
-BD_CIRCLE = 1
-	include "circle_borders.i"
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
 JP_SH1 = 16
@@ -265,6 +263,7 @@ gs_latch:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -318,8 +317,6 @@ init_hardware:
 	move.l	#timer_b,$120.w
 	move.l	#timer_a,$134.w
 
-	move.b $fffffa03.w,old_aer
-	bclr #3,$fffffa03.w		; Count display-enable falling edges, as in CIRCLE.
 	bset	#0,$fffffa07.w		; Timer B
 	bset	#0,$fffffa13.w
 	bset	#5,$fffffa07.w		; Timer A
@@ -340,6 +337,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 
 	movem.l	old_palette,d0-d7
 	movem.l	d0-d7,$ffff8240.w
@@ -352,7 +350,6 @@ restore_hardware:
 	move.b	old_screen+2,$ffff8203.w
 	move.b	old_screen+3,$ffff820d.w
 
-	move.b old_aer,$fffffa03.w
 	move.b	old_fa07,$fffffa07.w
 	move.b	old_fa09,$fffffa09.w
 	move.b	old_fa13,$fffffa13.w
@@ -1014,7 +1011,6 @@ old_timer_a:	ds.l	1
 old_res:	ds.b	1
 old_hz:		ds.b	1
 old_linewid:	ds.b	1
-old_aer: ds.b 2
 old_fa07:	ds.b	1
 old_fa09:	ds.b	1
 old_fa13:	ds.b	1

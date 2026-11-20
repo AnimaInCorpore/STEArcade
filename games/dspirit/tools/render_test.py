@@ -39,7 +39,8 @@ VIO_SIZE = 0x28000
 LINEB, PIC_H, PIC_W = 424, 288, 224
 
 HARNESS = r"""
-; render.s alone, for tools/render_test.py
+; Render with the production Blitter splitter.
+	include "borders.s"
 	section text,code
 start:	clr.l	-(sp)
 	move	#$20,-(sp)
@@ -47,9 +48,11 @@ start:	clr.l	-(sp)
 	addq	#6,sp
 	lea	h_stack_top,sp
 h_wait:	bra.s	h_wait
+	borders_blit_go
 	include	"render.s"
 	section	bss,bss
 	even
+	borders_vars
 tile_written:	ds.b	5
 	even
 vio:	ds.b	$28000

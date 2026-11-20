@@ -406,8 +406,8 @@ ren_window:
 .black:	st	ren_wblack
 	rts
 
-; ---- the picture black (the window's SHOWN lines, the 21 groups from the columns' offset): HOG passes of 3 lines (84
-; words each: 252 bus cycles), HOP 0 / OP 0 ----
+; ---- the picture black (the window's SHOWN lines, the 21 groups from the columns' offset): 84
+; words per line, HOP 0 / OP 0; split horizontally for the border interrupts ----
 ren_clear:
 	lea	$ffff8a28.w,a0
 	move.w	#-1,(a0)+
@@ -427,11 +427,8 @@ ren_clear:
 	move.w	#84,(a0)+		; X count
 	clr.w	$ffff8a3a.w		; HOP 0, OP 0
 	clr.b	$ffff8a3d.w
-	moveq	#(SHOWN+2)/3-1,d0
-.l:	move.w	#3,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w	; (the address runs on)
-	dbf	d0,.l
-	rts
+	move.w	#SHOWN,$ffff8a38.w
+	bra	blit_go_fill
 
 ; ---- the buffer's window (the picture's rows CROP_TOP .. in its lines ren_vs ..; screen x 0 at its column ren_xo):
 ; ren_vcur follows layer 0's row base B (unwrapped: the twin lines hold the rows a scroll keeps), ren_vmod = it mod
@@ -693,7 +690,7 @@ ren_tblock:
 
 ; last time's damage of this buffer restored from the twins: per row shown of that picture (its window from line
 ; ren_tvs of the buffer), the groups drawn on (ren_dspan): their 4 plane words of the twin line (the line + VP, or -
-; VP), copied in pieces of up to 64 words (128 bus cycles)
+; VP), copied in pieces of up to 30 words (60 source/destination accesses)
 ren_trestore:
 	move.w	ren_cur,d0
 	mulu	#2*SHOWN,d0
@@ -738,10 +735,10 @@ ren_trestore:
 	add.l	d0,d3
 	move.l	d3,$ffff8a24.w
 	move.l	d2,$ffff8a32.w
-.pc:	move.w	d1,d4			; pieces of 64 words
-	cmp.w	#64,d4
+.pc:	move.w	d1,d4			; pieces of 30 words
+	cmp.w	#30,d4
 	bls	.p1
-	moveq	#64,d4
+	moveq	#30,d4
 .p1:	move.w	d4,$ffff8a36.w
 	move.w	#1,$ffff8a38.w
 	move.b	#$c0,$ffff8a3c.w	; (the addresses run on)
@@ -1592,7 +1589,7 @@ ren_pstream:
 	addq.l	#1,a2
 	move.l	d1,$ffff8a32.w
 	move.w	#4,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w
+	bsr	blit_go
 	tst.b	ren_dmgon		; (the damage: its row, its groups)
 	beq	.n
 	move.w	d2,d0			; (the line's start is group 0)
@@ -1664,16 +1661,32 @@ ren_block:
 
 ; a segment of the block: d0.w = its first source column, d5.w = its picture column, d1.w = its length
 ren_bseg:
+	; Terrain rows span up to 512 pixels. Split on a destination group
+	; boundary so each single line fits the HOG budget even with skew.
+	cmp.w	#320,d1
+	bls.s	.segment
+	move.w	d5,d2
+	and.w	#15,d2
+	move.w	#256,d3
+	sub.w	d2,d3			; first segment ends on a group boundary
+	movem.l	d0-d1/d3/d5,-(sp)
+	move.w	d3,d1
+	bsr.s	.segment
+	movem.l	(sp)+,d0-d1/d3/d5
+	add.w	d3,d0
+	sub.w	d3,d1
+	add.w	d3,d5
+.segment:
 	move.l	ren_lpp,a6
 	move.w	LP_ROWB(a6),d6		; the source steps to the next image row, the destination to the next line
 	move.w	#LINEB,d7
 	bsr	ren_bsetup		; a0 / a1 = the source / destination of plane 0, d4 = the X count
-	move.w	d4,d0			; lines a pass: 256 / (2 n + 3) bus cycles a line
+	move.w	d4,d0			; lines per pass: allow 60 four-cycle accesses plus bus arbitration
 	add.w	d0,d0
 	addq.w	#3,d0
-	move.l	#256,d1
+	moveq	#60,d1
 	divu	d0,d1
-	move.w	d1,d6			; lines a pass
+	move.w	d1,d6			; at most 21 words per segment, so at least one line
 	moveq	#4-1,d5			; the planes
 .pl:	move.l	a0,$ffff8a24.w
 	move.l	a1,$ffff8a32.w
@@ -2503,7 +2516,7 @@ ren_blit_run:
 	move.l	a0,$ffff8a24.w
 	move.l	a1,$ffff8a32.w
 	move.w	#4,$ffff8a38.w
-	move.b	#$c0,$ffff8a3c.w	; HOG: at most 21 words x 4 planes read and written
+	bsr	blit_go
 	tst.b	ren_prec		; (a fixed layer's pass recorded: ren_pstream)
 	beq	.r
 	cmp.w	#PC_MAX,ren_pnum

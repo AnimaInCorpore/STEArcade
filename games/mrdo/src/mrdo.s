@@ -29,7 +29,7 @@ TA_NOPS = 84
 PIC_TOP = 18				; the picture's first displayed line (240 lines centred as the 256 of the other ports at 10)
 PIC_LINES = 240
 BD_PALETTE = 1
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): P2 ($A001), P1 ($A000) bits as in key_table (bytes 0-1 of each long; active high)
 JP_SH1 = 16
@@ -124,6 +124,7 @@ start:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
 	move.b	$ffff8260.w,old_res
@@ -186,6 +187,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	clr.b	$ffff8901.w		; (the DMA sound off)
 	moveq	#8,d0			; the YM2149 silent
 .silence:

@@ -49,7 +49,7 @@ ST_NBUF		= 3
 	endc
 ST_DMG		= 600			; erase rectangles a buffer (more: the whole buffer copied)
 ST_LOG		= 2048			; clean-buffer changes kept (a power of 2)
-ST_POOL		= 1024*1024		; the sprite colour cache
+ST_POOL		= 896*1024		; refillable sprite colour cache; leave space for TOS on 14 MB
 ST_HASH		= 65536			; (14 MB development system: room for the pre-coloured sprites)
 ST_TCN		= 4096			; tile conversions cached
 ST_PHASE	= 256*16*4		; second bank of source-parity colour tables

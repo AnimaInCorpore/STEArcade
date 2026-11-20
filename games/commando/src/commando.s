@@ -34,7 +34,7 @@ TA_NOPS = 84
 PIC_TOP = 10				; the picture's first displayed line (the display starts this many lines above the window)
 PIC_LINES = 256
 BD_PALETTE = 1
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
 JP_SH1 = 16
@@ -151,6 +151,7 @@ start:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -222,6 +223,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 
 	moveq	#8,d0			; the YM2149 silent (the volumes of its three channels)
 .silence:

@@ -40,7 +40,7 @@ FRAMES = 0				; quit after n frames (0 = never), for measurements
 ; may start at any time: none waits.  Passes longer than BLIT_PIECE words run in pieces (blit_go, there).
 
 BD_PALETTE = 0
-	include	"borders.s"
+	include	"game_borders.s"
 
 ; the pads (engine/rt/jagpad.s): IN0, IN2 bits as in key_table (bytes 0-1 of each long); both pads play player 1
 JP1_RIGHT = $01<<24
@@ -152,6 +152,7 @@ load_roms:
 
 init_hardware:
 	move	#$2700,sr
+	jsr bd_game_init
 
 	movem.l	$ffff8240.w,d0-d7
 	movem.l	d0-d7,old_palette
@@ -225,6 +226,7 @@ init_hardware:
 
 restore_hardware:
 	move	#$2700,sr
+	jsr bd_game_restore
 	bsr	stop_sound
 
 	movem.l	old_palette,d0-d7
