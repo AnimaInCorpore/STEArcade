@@ -1,0 +1,21 @@
+Hi Darklord,
+
+Thanks again for testing. I've made CIRCLE.PRG to replace PULSE. It shows
+a circle, grid and colour strips at the top and bottom. That should make
+it easier to see whether a timing change shifts any of the colours.
+
+Please run CIRCLE.PRG from CIRCLE.ZIP on the same setup. With both
+borders open, look for both strips, steady colours and no flicker.
+It runs at 16 MHz with cache on.
+
+Tap 1 or 2 to move the top pulse earlier or later, and 3 or 4 for the
+bottom pulse. 5 and 6 adjust the bottom pulse width, and 7 and 8 adjust
+the top width. 0 restores the starting settings. The README has the
+full key list.
+
+If you get a clean full-height picture, press C to mark it. If it
+scrambles, press X to record it and close the lower border. Check whether
+the remaining picture clears. Press R to save and exit. Could you send the CIRCnn.TXT logs and a photo of any setting that
+shows both strips cleanly?
+
+Many thanks!

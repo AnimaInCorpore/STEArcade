@@ -22,7 +22,11 @@ LABEL_HEIGHT = 16
 	include "bottomprobe.i"
 	endc
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+	include "circle.i"
+	else
 	include "pulseprobe.i"
+	endc
 	endc
 FRAMES = SECONDS*50
 STRIDE = 256
@@ -135,6 +139,9 @@ start:
 	bsr bp_load_phase
 	endc
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+	bsr circle_init
+	endc
 	bsr ip_hud
 	else
 	bsr draw_hud
@@ -794,7 +801,11 @@ restored_values:
 	dc.l old_cd
 	ifd BOTTOM_PROBE
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+filename: dc.b 'CIRC00.TXT',0
+	else
 filename: dc.b 'PULSE00.TXT',0
+	endc
 	else
 filename: dc.b 'BOTTOM.TXT',0
 	endc
@@ -805,7 +816,11 @@ digits: dc.b '0123456789ABCDEF'
 eol: dc.b 13,10,0
 	ifd BOTTOM_PROBE
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+title: dc.b 'CIRCLE 1 - Mega STE border timing test card',13,10
+	else
 title: dc.b 'PULSE 1 - Mega STE interactive bottom-border probe',13,10
+	endc
 	else
 title: dc.b 'BOTTOM 1 - Mega STE bottom-border pulse probe',13,10
 	endc
@@ -826,7 +841,11 @@ end_text: dc.b 'DONE completed (1=yes,0=Esc abort): ',0
 	endc
 	ifd BOTTOM_PROBE
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+exists_text: dc.b 'All CIRC00-CIRC99 log slots are used.',13,10,0
+	else
 exists_text: dc.b 'All PULSE00-PULSE99 log slots are used.',13,10,0
+	endc
 	else
 exists_text: dc.b 'BOTTOM.TXT exists. Use a fresh folder for another run.',13,10,0
 	endc
@@ -837,8 +856,13 @@ unsupported_text: dc.b 'VIDCTRL needs a Mega STE. Settings unchanged.',13,10,0
 busy_text: dc.b 'Timer A/B busy. Please clean-boot and retry. Settings unchanged.',13,10,0
 	ifd BOTTOM_PROBE
 	ifd INTERACTIVE_PULSE
+	ifd CIRCLE_PROBE
+disk_text: dc.b 'Cannot save CIRC log. Check free space/write protection.',13,10,0
+done_text: dc.b 'CIRCLE finished. Results saved in the next numbered CIRC log.',13,10,0
+	else
 disk_text: dc.b 'Cannot save PULSE log. Check free space/write protection.',13,10,0
 done_text: dc.b 'PULSE finished. Results saved in the next numbered PULSE log.',13,10,0
+	endc
 	else
 disk_text: dc.b 'Cannot save BOTTOM.TXT. Check free space/write protection.',13,10,0
 done_text: dc.b 'BOTTOM finished. Please return BOTTOM.TXT and phone video.',13,10,0
