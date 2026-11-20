@@ -29,6 +29,8 @@ def test(out):
                'joy0_state', 'joy1_state', 'p1_joy', 'p2_joy',
                'sys_kbd', 'p1_kbd', 'p2_kbd', 'in_sys', 'in_p1', 'in_p2']
     allowed = {sym[name] for name in scalars}
+    if 'mc_pending' in sym:
+        allowed.add(sym['mc_pending'])
     allowed.update(range(sym['mt_joysticks'], sym['mt_joysticks'] + 2 + 128 + 128))
 
     def trace(mode, width, addr, value):
@@ -77,11 +79,16 @@ def test(out):
             packet(port, raw, 0x34)
             cases += 1
         packet(port, 0, 0xff)
-    for code in [0x06, 0x02, 0x4d, 0x4b, 0x50, 0x48, 0x1d, 0x39, 0x38]:
+    keys = [0x06, 0x02, 0x4d, 0x4b, 0x50, 0x48, 0x1d, 0x39, 0x38]
+    if 'mc_pending' in sym:
+        keys.append(0x44)
+    for code in keys:
         byte(code, 0x34)
         byte(code | 0x80, 0xff)
         assert sim.mem.r8(sym['mt_pressed'] + code) == 0xff
         assert sim.mem.r8(sym['mt_released'] + code) == 0xff
+    if 'mc_pending' in sym:
+        assert sim.mem.r8(sym['mc_pending']) == 0xff
     byte(0x01, 0x34)
     byte(0x81, 0xff)
     assert sim.mem.r8(sym['quit_flag']) == 0xff

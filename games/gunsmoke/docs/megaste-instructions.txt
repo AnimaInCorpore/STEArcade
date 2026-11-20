@@ -1,10 +1,12 @@
-GUN.SMOKE - MEGA STE TEST 2
+GUN.SMOKE - MEGA STE TEST 4
 =========================
 
 Thank you for helping us test one playable game on the Mega STE.
 This build has normal controls: no autoplay, recorded inputs or lives cheat.
-Version 2 fixes an out-of-bounds write in the diagnostic joystick logger.
-Please tell us whether the graphics corruption changes with this version.
+This build uses the border timing that showed the whole CIRCLE card on
+your Mega STE. Upper timing is U078/W08 and lower timing is D101/W17.
+The settings stay fixed while you play. Please watch the bottom of the
+playfield, the player's starting position and the colours while scrolling.
 
 1. PREPARE
 ----------
@@ -32,7 +34,21 @@ Tap 5 once to insert a coin. Tap 1 to start player 1.
 Use the arrow keys to move in all four directions.
 Shoot LEFT with Ctrl or Z, STRAIGHT with Space or X, RIGHT with Alt or C.
 Please try all three shooting directions, then play for a few minutes.
+To CONTINUE during the countdown: tap 5 for another credit, then tap 1
+before the timer expires. Fire, Enter and Return are not the start button.
 The mouse is not a game controller in this port; mouse movement is ignored.
+
+3A. CAPTURE THE CORRUPTION
+------------------------
+One picture is captured automatically after startup. During play, preferably when a glitch is visible,
+tap F10 and allow a second for capture. You can tap F10 once more
+for a third picture. At most three captures are kept. Capturing briefly
+pauses the foreground game, while interrupts and border handlers continue.
+
+Please photograph the monitor around a manual capture if possible. The
+BMP records framebuffer RAM; the photo records what reached the display.
+We need both to separate drawing errors from Shifter/monitor problems.
+Files are written only after a normal Esc exit, so please wait for that.
 
 4. OPTIONAL STANDARD JOYSTICK
 ----------------------------
@@ -59,12 +75,19 @@ Please ZIP and return:
   BUILD.JSN    - identifies this exact build
   LATEPC.BIN   - interrupt locations, if the build produced it
   CRASH.TXT    - only if a crash produced it
+  GSCAP*.BIN  - captured planar pixels, palette and matching reference state
+  GSCAP*.BMP  - the same captured RAM picture as a normal 320x256 BMP
+
+Please return all GSCAP files together; do not substitute old captures.
+The BMPs may look correct on a PC even if the monitor picture was corrupt.
 
 GUNTEST.TXT phase 01 means normal exit; 00 means startup only; 02 means crash.
 On Mega STE, selected/final FF8E21 values must have low bits 3. Upper bits
 may vary. Enhanced pads enabled must be 00. Exception-vector restore
 mismatches should be 0000. Missing joystick events mean NOT EXERCISED if
 no joystick was used. The key list uses hexadecimal Atari scancodes.
+RAM captures should be 0003 after two manual F10 captures; save errors
+should be 0000. One automatic capture alone is still useful.
 
 Please also tell us whether coin, start, movement, all three shots and sound
 worked. If the screen is unstable or cropped, a photo is helpful. The absence

@@ -152,6 +152,9 @@ BD_TOP_PULSE = 14			; nops between the 60 Hz and the 50 Hz write (9 before)
 bd_low_open	macro
 	tst.b bd_fast
 	beq.s .slow\@
+	ifd BD_CIRCLE
+	bd_circle_low
+	else
 	move.l .pulse\@(pc),d2
 	move.l .pulse\@+4(pc),d2
 	move.l .pulse\@+8(pc),d2
@@ -164,6 +167,7 @@ bd_low_open	macro
 .delay\@:
 	dbf d2,.delay\@
 	move.b #2,$ffff820a.w
+	endc
 	bra.s .done\@
 .slow\@:
 	bd_poll
@@ -318,6 +322,10 @@ bd_ta_fast:
 	movem.l (sp)+,d0-d3/a0
 	rte
 
+	ifd BD_CIRCLE
+bd_fast_top:
+	bd_circle_top
+	else
 bd_fast_top:
 	lea .wait(pc),a0
 	move.l (a0),d0
@@ -341,6 +349,8 @@ bd_fast_top:
 	dbf d2,.pulse
 	move.b #2,$ffff820a.w
 	rts
+
+	endc
 
 ; bd_speed_poll: the first VBL looks for TOS's _MCH cookie (a Mega STE: $00010010).  By then the port owns the
 ; machine and may have reused TOS's memory (Gauntlet does): the jar pointer must be even and below 4 MB, at most 32

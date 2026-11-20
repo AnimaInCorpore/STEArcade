@@ -188,6 +188,9 @@ render_frame:
  lsl.w #3,d1
  add.l d1,d0
  move.l d0,flip_addr
+	ifd MSTE_CAPTURE
+	bsr mc_capture_frame
+	endc
  move.w draw_idx,d0
  addq.b #1,d0
  move.b d0,frame_ready

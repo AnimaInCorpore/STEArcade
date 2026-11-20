@@ -10,10 +10,10 @@ Run from the repository root with the locally supplied ROMs and normal toolchain
 
 ```sh
 venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
-  --out build/gunsmoke-megaste/package-v2
+  --out build/gunsmoke-circle
 ```
 
-Output: `build/gunsmoke-megaste/package-v2/GUNMSTE.ZIP`. Give Darklord this archive and its
+Output: `build/gunsmoke-circle/GUNMSTE.ZIP`. Give Darklord this archive and its
 [operator instructions](megaste-instructions.txt). The executable is `GUNSMOKE.TOS`, avoiding the GEM desktop mouse
 pointer. `BUILD.JSN` contains its SHA256, source hashes, build ID and flags; `GUNSMOKE.MAP` identifies native crash
 addresses. `SOURCE.ZIP` retains the diagnostic hooks and shared timing/input source. The package contains no autoplay,
@@ -139,6 +139,8 @@ actual ACIA ISR with a separate interrupt for every header and payload. It cover
 on both ports, all 256 payload values on both ports, register preservation, bounded RAM writes, keyboard make/break
 events and Esc release. It fails on the delivered version 1 binary and passes after the correction.
 
+The following historical test 2 reproduction uses commit `2af9094`; the current builder produces test 3.
+
 ```sh
 venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
   --out build/gunsmoke-megaste/package-v2
@@ -162,3 +164,125 @@ scaling the game into a VGA raster: see the [manufacturer's timing explanation](
 and [Centurion's ST2VGA r4 specification](https://centuriontech.eu/product/st2vga-r4/). The exact Dell model and its
 input status remain useful for checking cropping/scaling. Do not blame the monitor for a confirmed diagnostic
 memory write or infer full 50 Hz overscan compatibility merely because an older cropped game displays.
+
+## Test 2 return, 2026-11-11
+
+`GS_TEST.ZIP` SHA256 `193c568614236470191fbfd2ad1f298a450c02250ecc5efabddb5f26def3b27b` contains the exact test 2
+manifest. The return records a Mega STE with US TOS 2.06, original/restored 60 Hz desktop, normal exit, zero
+exception-vector mismatches and enhanced pads disabled. CPU samples are `$1C / $1F / $1F / $1C`: the diagnostic
+selected 16 MHz/cache on and restored its original low mode bits 0 afterward.
+
+There are 9959 VBLs (about 199 seconds at nominal 50 Hz), 11195 arcade ticks, 6758 pictures, 293281 split Blitter
+passes, two startup fallbacks, zero late events and zero late-PC entries. Coin/start make and break events are now
+present (`06`, `02`); joystick port 1 OR mask `$8F` includes all directions and fire. Port 0 records `$06`. This
+confirms the corrected input log is functioning on the physical machine; it does not prove that every control or
+sound was exercised. The report and manifest were retained under `build/darklord-gunsmoke-2026-11-11/`.
+
+Darklord reports persistent colour/pattern corruption and a flickering, partly visible bottom border. Therefore
+fixing the real logger bug did **not** resolve the display fault. Zero late-event counters over this longer run
+still do not certify Shifter fetch alignment or the sub-line 50/60 Hz pulse windows. Neither a defective Mega STE
+nor an incompatible Dell monitor has been established. Do not replace the renderer or apply an unmeasured delay
+change from these symptoms alone.
+
+### Continuing the game
+
+The original [Romstar/Capcom operator manual](https://arcarc.xmission.com/PDF_Arcade_Manuals_and_Schematics/Gunsmoke.pdf),
+Game Operation / Buy-In Feature (also available as [searchable manual text](https://www.scribd.com/document/1006042005/gunsmoke-manual-arcade)),
+requires a credit followed by Start before the continue timer expires. The port's player-1 sequence is **tap 5,
+then tap 1**. Fire, Enter and Return do not map to Start. The authoritative MAME 0.286 driver permits continues
+with DSW2 bit `$40`, which is set in the port's `$FF` default. The manual establishes the intended control sequence;
+this investigation does not claim a newly completed native continue regression.
+
+### Test 3: compare RAM with scanout
+
+Test 3 leaves the border constants and renderer algorithm unchanged and retains 16 MHz/cache on during play. It
+captures a completed, unpublished frame plus the state that produced it, avoiding a comparison against newer game
+logic or a different triple buffer. No disk calls occur during gameplay. One capture is automatic at/after arcade
+tick 700; **F10** requests up to two more. Capture copying briefly delays the foreground, while video interrupts
+continue. Files are saved only after restoring the hardware on exit:
+
+* `GSCAP0.BIN` through `GSCAP2.BIN`: 96-byte big-endian header, 43008 bytes of planar picture (336 pixels, 256 rows,
+  168 bytes/row), 2048 bytes of text RAM and the 512-byte latched sprite list. The header includes fine scroll,
+  tick/VBL, draw/display addresses, control/layer/scroll state, selected CPU mode and the 16-colour palette.
+* Matching `.BMP`: ordinary Windows 4bpp, bottom-up, 320×256 image with a 16-entry palette. The fine-scroll crop is
+  applied, and STE palette bit ordering is converted to RGB. File size 41078 bytes; raw `.BIN` size 45664 bytes.
+
+The capture is **RAM, not monitor scanout**. A photograph remains necessary for the visible corruption; the capture
+also permits independent CPU rendering of the exact scene instead of guessing at a screenshot's game state.
+
+```sh
+venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
+  --out build/gunsmoke-megaste/package-v3
+venv/bin/python games/gunsmoke/tools/megaste_capture.py returned/GSCAP0.BIN
+venv/bin/python games/gunsmoke/tools/megaste_capture_test.py build/gunsmoke-megaste/package-v3
+```
+
+The analyser requires the locally prepared, matching Gun.Smoke graphics/palette assets. It checks the native BMP
+against captured planar RAM, reconstructs text, scroll/layers and the arcade sprite latch, then compares the
+320×256 RAM picture (including clean side bands) against `tools/video.py` through the approved colour map. It
+writes a small JSON report and independent reference PNG; a mismatch also writes a difference image and fails.
+`BUILD.JSN` records the reference asset hashes; place it beside returned captures so the analyser checks its local
+assets before deciding whether the picture differs. Missing asset provenance is marked in the JSON report.
+
+Native capture/BMP conversion passed all 16 fine-scroll values, alternating whole-word offsets and a 64 KB source
+crossing; registers are preserved and the program requests 3495426 bytes including its basepage, below 3.7 MB.
+Both normal and simulated 60 Hz startup Mega STE runs produced three exact RAM/BMP/reference captures and zero
+late counters. Their warmed video traces checked 7824 and 7825 pulses inside the existing top/bottom windows.
+One earlier instrumented 60 Hz startup run recorded one late-top event; its three RAM captures were also exact.
+That run is retained under `first-v3-60start/` in the investigation folder and is not discarded by the later passes.
+Capture copying/cache layout can perturb timing; this diagnostic does not establish uninterrupted physical
+scanout or resolve that intermittent emulator event. The synthetic 60 Hz startup still uses DE TOS/PAL master
+clock, not a US oscillator model. Physical test 3 results remain outstanding.
+
+Test 3 build ID `05bfd5bcf9a03493`, executable SHA256
+`38b1ad968706130b4cd457d4631484f46bf95865c7ff40b6a3dae66af387f0cd`. The non-diagnostic program is byte-for-byte
+identical to its pre-capture build. Negative controls deliberately corrupt a RAM pixel and its matching BMP pixel
+and confirm that the independent renderer rejects them; palette words/RGB are also checked against the approved
+palette, rather than colouring both sides with a potentially corrupted captured palette.
+
+## Test 3 return, received 2026-11-14
+
+`GS_TEST(1).zip`, SHA256 `8fb40d191e1c6191de5aad991d640a841d9a0aa0f1ead5b4986bdde673859ef6`, includes the exact
+delivered executable, map, manifest and source archive; all six bundled file hashes match. The manifest's eight
+reference asset hashes also match the local reference inputs. Returned files and analyser output are retained in
+`build/darklord-gunsmoke-2026-11-14/`.
+
+All three returned captures pass independent comparison: **zero differing pixels out of 81920 per image**, correct
+palette words/RGB, and BMPs identical to the decoded planar RAM. This includes the 48-pixel side bands. Each header
+records CPU mode `$1F` (low bits 3), physical text base `$40564`, fine scroll 0 and hardware line-width/fine-scroll
+readback `$30/$00`. The programmed 48 extra words plus the 160 visible bytes give the renderer's 256-byte stride.
+The first image is an attract/title picture; the second is the ranking screen; the third is gameplay. These are
+physical-machine framebuffer results, not substituted Hatari screenshots.
+
+Capture provenance needs care. The final `GUNTEST.TXT` records **one** capture, with no F10 make/break event. Slot 0
+is the automatic capture (tick 701, VBL 704). Slots 1 and 2 have earlier DOS modification times (88 seconds before
+slot 0), matching an earlier run rather than this final report; they remain valid renderer evidence. Do not claim
+that all three were captured in the final run or that a phone photograph is pixel-aligned with any of them.
+
+The final run has 3554 VBLs (about 71 seconds at nominal 50 Hz), 3736 arcade ticks, 1981 pictures and 111466 split
+Blitter passes. It exits normally, restores CPU/video state and exception vectors, and records three top-border
+fallbacks, **one late top event**, and zero late palette-on/bottom/palette-off events. `LATEPC.BIN` has zero entries
+because that existing logger covers late Timer B events, not the late Timer A top event. Its empty log does not
+contradict the top counter.
+
+Together with Darklord's corrupted live-screen photographs, the clean, reference-exact RAM images narrow this
+failure to the path from a completed picture to visible output. Screen-base/counter updates, fetch/plane alignment,
+border pulses, live palette writes and the adapter/display remain candidates. They do not yet identify a specific
+cycle error, prove a Hatari defect, or certify the full renderer for every frame. A renderer replacement is not
+supported by this result.
+
+The next useful control is the same frozen picture, address, stride and palette at 16 MHz/cache on, comparing
+ordinary 50 Hz video, top opening alone, then top plus bottom opening. Compare the common visible region and record
+video-counter/fetch alignment as well as event lateness. This isolates display changes without changing the drawing
+algorithm or using an 8 MHz fallback. No timing constants have been changed on the strength of these photos.
+
+
+## Test 4 on the Mega STE
+
+Gun.Smoke uses CIRCLE's warmed top pulse at U078/W08 and its delayed bottom
+pulse at D101/W17 when running at 16 MHz with cache enabled. Timer B counts
+falling display-enable edges. The delayed routine polls one edge earlier and
+waits one cached scanline before the bottom pulse. Gameplay exposed one late
+bottom event with the old three-line interrupt lead. The game now arms the
+handler four lines ahead and allows enough polls for that lead. The border
+pulse settings stay fixed throughout play.

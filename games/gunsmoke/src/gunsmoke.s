@@ -32,11 +32,13 @@ PIC_TOP = 10
 PIC_LINES = 256
 BD_PALETTE = 1
 	ifnd BD_K
-BD_K = 3				; one extra lead line for palette events under live IKBD load
+BD_K = 4				; CIRCLE polls one edge earlier; retain lead time under game load
 	endc
 	ifnd BD_POLL
-BD_POLL = 240				; cached 16 MHz polls faster: cover the full three-line lead
+BD_POLL = 320				; cover the four-line lead at 16 MHz
 	endc
+BD_CIRCLE = 1
+	include "circle_borders.i"
 	include	"borders.s"
 
 ; the pads (engine/rt/jagpad.s): SYSTEM, P1, P2 bits as in key_table (bytes 0-2 of each long)
@@ -316,6 +318,8 @@ init_hardware:
 	move.l	#timer_b,$120.w
 	move.l	#timer_a,$134.w
 
+	move.b $fffffa03.w,old_aer
+	bclr #3,$fffffa03.w		; Count display-enable falling edges, as in CIRCLE.
 	bset	#0,$fffffa07.w		; Timer B
 	bset	#0,$fffffa13.w
 	bset	#5,$fffffa07.w		; Timer A
@@ -348,6 +352,7 @@ restore_hardware:
 	move.b	old_screen+2,$ffff8203.w
 	move.b	old_screen+3,$ffff820d.w
 
+	move.b old_aer,$fffffa03.w
 	move.b	old_fa07,$fffffa07.w
 	move.b	old_fa09,$fffffa09.w
 	move.b	old_fa13,$fffffa13.w
@@ -960,6 +965,9 @@ z80_unsupported:
 	ifd MSTE_TEST
 	include "megaste_test.s"
 	endc
+	ifd MSTE_CAPTURE
+	include "megaste_capture.s"
+	endc
 	include "render.s"
 
 ; ------------------------------------------------------------------------------
@@ -1006,6 +1014,7 @@ old_timer_a:	ds.l	1
 old_res:	ds.b	1
 old_hz:		ds.b	1
 old_linewid:	ds.b	1
+old_aer: ds.b 2
 old_fa07:	ds.b	1
 old_fa09:	ds.b	1
 old_fa13:	ds.b	1

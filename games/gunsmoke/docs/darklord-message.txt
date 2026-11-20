@@ -1,28 +1,16 @@
 Hi Darklord,
 
-Thank you for the photos and results - they are very useful, and there is
-no need to apologise. Coin/start and the joystick working is good news.
+Thank you for the CIRCLE logs and photos. This Gun.Smoke test uses the
+same border timing that gave you a clean picture when CIRCLE started.
+It keeps your Mega STE at 16 MHz with cache on.
 
-I found a bug in my test's joystick logger that can write into unrelated
-game memory. This version corrects that bug. It may explain some corruption,
-but I still need your comparison to establish that. It keeps the CPU at
-16 MHz with cache enabled during drawing and border opening.
+Please extract GUNMSTE.ZIP into a fresh writable folder and run
+GUNSMOKE.TOS. Press 5 for a coin and 1 to start. Can you see the
+gunman as soon as he appears, and do the bottom of the playfield and
+the colours stay steady as you move and shoot?
 
-Would you please extract GUNMSTE.ZIP into a new, writable folder and run
-GUNSMOKE.TOS? It needs 4 MB RAM and a colour display that accepts 50 Hz,
-including on a US machine. Native 60 Hz border opening is not included yet.
-
-This is a playable test: press 5 for a coin, 1 to start, and use the arrow
-keys to move. Ctrl, Space and Alt shoot left, straight and right. A standard
-joystick in port 1 also works for movement and the straight shot; please use
-the keyboard for coin and start. The mouse is deliberately ignored.
-
-Please play for a few minutes, try all three shooting directions, and tap
-and release Esc to exit normally. Then please ZIP and return GUNTEST.TXT,
-COUNTERS.BIN, RATE.BIN and BUILD.JSN, plus LATEPC.BIN and CRASH.TXT if present.
-README.TXT has the full steps and explains what to expect.
-
-Please also let me know whether the controls, sound and full-height picture
-worked correctly. A photo would help if the picture is unstable or cropped.
+If it glitches, please tap F10 and take a photo of the monitor. If it
+stays clean, an F10 capture during play would be helpful too. Tap Esc
+to save, then ZIP the reports and captures listed in README.TXT.
 
 Many thanks for your help!

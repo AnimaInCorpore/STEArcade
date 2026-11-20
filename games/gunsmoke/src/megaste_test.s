@@ -33,6 +33,14 @@ mt_begin:
 	bra mt_report
 
 mt_key:
+	ifd MSTE_CAPTURE
+	cmp.b #$44,d1	; F10: request a capture of the next completed picture
+	bne.s .ordinary
+	tst.b d2
+	bmi.s .ordinary
+	st mc_pending
+.ordinary:
+	endc
 	move.w d1,d0	; IKBD macro already framed the byte and removed release bit
 	lea mt_pressed,a0
 	tst.b d2
@@ -75,6 +83,9 @@ mt_finish:
 	addq.w #1,mt_vector_bad
 .same:
 	dbf d0,.compare
+	ifd MSTE_CAPTURE
+	bsr mc_finish
+	endc
 	bra mt_report
 
 mt_report:
@@ -165,6 +176,16 @@ mt_report:
 	move.w mt_vector_bad,d1
 	bsr hex_word
 	bsr mt_eol
+	ifd MSTE_CAPTURE
+	lea mc_report_text,a1
+	bsr mt_text
+	move.w mc_n,d1
+	bsr hex_word
+	move.b #' ',(a0)+
+	move.w mc_save_bad,d1
+	bsr hex_word
+	bsr mt_eol
+	endc
 	move.l a0,d7
 	sub.l #mt_buffer,d7
 	clr.w -(sp)

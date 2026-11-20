@@ -31,8 +31,8 @@ For Darklord's identified, human-playable Mega STE package:
 
 ```sh
 venv/bin/python games/gunsmoke/tools/megaste_test.py --verify --verify-machine megaste \
-  --out build/gunsmoke-megaste/package-v2
-# -> build/gunsmoke-megaste/package-v2/GUNMSTE.ZIP
+  --out build/gunsmoke-circle
+# -> build/gunsmoke-circle/GUNMSTE.ZIP
 ```
 
 This `.TOS` selects 16 MHz/cache on only on a Mega STE, records inputs and machine state, and restores the original
@@ -40,7 +40,10 @@ CPU/video settings on exit. It uses normal controls, without replay or cheats. I
 accepting **50 Hz**, including on US machines; native 60 Hz open borders are not provided. See the
 [operator instructions](docs/megaste-instructions.txt) and [validation notes](docs/megaste-test.md).
 Version 2 fixes a diagnostic joystick-logging memory write exposed by Darklord's return. For its focused Mega STE
-validation use `--verify --verify-machine megaste --out build/gunsmoke-megaste/package-v2`. The ordinary STE path
+validation use `--verify --verify-machine megaste`. Version 3 adds native 320x256 BMP/RAM captures and matching
+renderer state: one automatic capture, then F10 for up to two more. It retains 16 MHz/cache on, without changing
+border constants. Version 4 uses CIRCLE's upper U078/W08 and lower D101/W17 pulses during gameplay.
+The Hatari verifier checks scrolling, pulse timing and captured pixels. The ordinary STE path
 has an intermittent top-border event under live-input stress; see the [return investigation](docs/megaste-test.md#darklords-return-2026-11-09).
 
 ## Controls
@@ -51,6 +54,10 @@ for the attract mode before inserting a coin.  Jaguar pad / PowerPad (STE enhanc
 [architecture.md "Input"](../../docs/architecture.md#input-all-ports)): pad A player 1, pad B player 2, the D-pad
 moves, **A / B / C** shoot left / straight / right, **Option** coin, **Pause** start, keypad **1/2** start, **5/6**
 coin, **\*** + **#** quit.
+
+During the Continue countdown, tap **5**, then **1** before it expires (a credit followed by player 1 Start).
+Joystick fire and Return do not replace Start. The original operator manual describes this buy-in sequence;
+see the [return investigation](docs/megaste-test.md#test-2-return-2026-11-11).
 
 **Mega STE:** use the keyboard or standard 9-pin joystick ports on the detached keyboard. It has no STE enhanced
 15-pin ports, so the Jaguar-pad controls above do not apply. Keyboard coin/start remain necessary with a standard
