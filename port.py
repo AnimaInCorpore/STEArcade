@@ -443,8 +443,10 @@ def main():
             return 2
         games=list(GAMES) if a[1]=="all" else [a[1]]
         results=[]
+        sys.path.insert(0,str(ROOT/"engine"))
+        from ppo_profiles import profile
         for g in games:
-            if g in ("galaga", "pacman"):
+            if profile(g).get("deferred"):
                 print("%s: no PPO profile yet (engine/ppo_profiles.py)" % g)
                 results.append(dict(game=g,status="deferred"))
                 if a[1]!="all":return 2

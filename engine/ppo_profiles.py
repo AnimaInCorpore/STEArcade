@@ -1,6 +1,7 @@
 """Explicit native-input and RAM contracts for the registered ports.
 
 Galaga has no profile yet (its real 51xx/54xx MCU ROMs are in since 2026-10-22; blank ones never stand in).
+Pac-Man and the ports registered after the profiles (Gauntlet on) are deferred too until a profile is written.
 PPO is supplemental exploration; the curated translator coverage is never replaced.
 """
 from pathlib import Path
@@ -42,6 +43,9 @@ def profile(game):
                          directions=[1,2,8,4],buttons=[16,32,64],ram=[(0,0x1000,'g_mem')],
                          rom=[(0x4000,0xffff)]),
     }
+    for g in ('gauntlet','gyruss','timeplt','dkongjr','trackfld','hyperspt','pooyan','mrdo','mpatrol','mario',
+              'mikie','yiear','sbasketb','jailbrek','digdug','dkong3','junofrst','xevious','rocnrope','rthunder'):
+        changes.setdefault(g, dict(deferred='No RAM/input profile yet (registered after the PPO profiles).'))
     if game not in changes: raise ValueError(f'No PPO contract for {game}')
     common.update(changes[game])
     return common

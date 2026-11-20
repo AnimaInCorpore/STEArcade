@@ -3,8 +3,9 @@
 PPO is the standard **supplemental input generator** for new port exploration. The shared entry point works for
 the games that have a profile in `engine/ppo_profiles.py` (2026-11-08: Donkey Kong, Bubble Bobble, 1942, 1943, Black
 Tiger, Commando, Gun.Smoke, R-Type, Kung-Fu Master, Trojan, Double Dragon). Galaga (its real Namco 51xx/54xx MCU ROMs
-are in since 2026-10-22) and Pac-Man are marked deferred (no RAM/input profile yet); every other port, including the
-newer ones, has no profile and `engine/ppo_profiles.py` refuses it ("No PPO contract") until one is written.
+are in since 2026-10-22), Pac-Man and the 20 ports registered after the profiles (Gauntlet, Gyruss, Time Pilot and
+on, 2026-11-20) are marked deferred (no RAM/input profile yet) until one is written; a name outside `port.GAMES` is
+refused ("No PPO contract").
 Unregistered work-in-progress boards are not silently treated as finished ports.
 
 Keep the curated `port.py cover` runs, scripted stage/boss/ending tests and existing search recordings. A short
@@ -34,8 +35,8 @@ venv/bin/python port.py ppo all test --steps 256 --frames 2100
 ```
 
 `test` trains, saves/reloads the model, records, repeats the recording in a fresh native MAME process, and runs
-an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips Galaga and Pac-Man
-(deferred); a port without a profile counts as failed. A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
+an isolated native Hatari playback. `all` runs serially to bound RAM and SSD use, records failures, and skips the deferred
+ports; a single deferred port given by name is refused. A failed port is never reported as tested. `PPO_PYTHON`, `MAME`, `HATARI` and `TOS` override
 the optional interpreter and emulator paths. MAME 0.289 and the project's pinned Hatari build are used locally.
 `--steps` counts 12-frame decisions and rounds up to a 256-decision PPO rollout. `--frames` includes bootstrap;
 it must extend beyond the profile's boot interval. No pretrained universal game-playing model is assumed.
