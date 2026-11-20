@@ -1,16 +1,13 @@
 # Mr. HELI no Daibouken (Irem, 1987) on the Atari STE
 
-STE port of the MAME set `mrheli` (Irem M72, `irem/m72.cpp`). The main CPU's NEC V30 program is translated R-Type's
-way (`engine/v30x.py`; [R-Type's README](../rtype/README.md)) and is exact against the reference board in lock-step to
-40000 frames; the i8751 MCU runs as a native model (`src/mcu.s`); the Z80 sound CPU and the PIC do not run, so there is
-no sound. The picture is the shared M72 renderer (`engine/rt/m72render.s`, R-Type's legacy renderer: the centred
-320-pixel window, the top panel as its own screen, scene colours), the exact baseline. **Rule violation, to be
-converted:** that renderer draws FG over BG with AND + OR Blitter passes (a BG copy, the FG opaque plane ANDed out,
-the FG planes ORed in), which AGENTS.md forbids; R-Type's stage renderer, the planned replacement, has none. Status:
-Experimental / deferred (logic exact, about 2 pictures a second; R-Type's stage renderer and natives next); not
-registered in `port.py`, not released. Latest speed (2026-11-07, Hatari 14 MB, `-D DEBUG`): attract 28.8 arcade
-frames a second (52% of the arcade's 55.02 Hz; 58% of the port's 50), 1.9 pictures a second; invulnerable play 22.5
-(41%; 45%), 2.0 pictures a second.
+**Status: Experimental / deferred**
+
+* Irem's cute side-scrolling helicopter shooter.
+* The game's logic matches the arcade exactly in tests, and the attract mode and play run on the STE without crashing.
+* No sound yet, and the picture is very slow: about 2 pictures a second, the game itself at 41-52% of the arcade's
+  speed (measured 2026-11-07). The picture is not yet checked against the arcade pixel by pixel.
+* Next: R-Type's faster picture drawing and speed-ups for the game's logic.
+* Not released: while it is developed it needs an STE with 14 MB of memory.
 
 ## Build and run
 
@@ -52,6 +49,17 @@ the helicopter in the hangar under the top panel; not checked against the refere
 * The picture is not checked against the reference pixel by pixel in Hatari.
 
 ## How it works
+
+STE port of the MAME set `mrheli` (Irem M72, `irem/m72.cpp`). The main CPU's NEC V30 program is translated R-Type's
+way (`engine/v30x.py`; [R-Type's README](../rtype/README.md)) and is exact against the reference board in lock-step to
+40000 frames; the i8751 MCU runs as a native model (`src/mcu.s`); the Z80 sound CPU and the PIC do not run, so there is
+no sound. The picture is the shared M72 renderer (`engine/rt/m72render.s`, R-Type's legacy renderer: the centred
+320-pixel window, the top panel as its own screen, scene colours), the exact baseline. **Rule violation, to be
+converted:** that renderer draws FG over BG with AND + OR Blitter passes (a BG copy, the FG opaque plane ANDed out,
+the FG planes ORed in), which AGENTS.md forbids; R-Type's stage renderer, the planned replacement, has none. Not
+registered in `port.py`, not released; development runs on a 14 MB Hatari (`bench.sh`). Latest speed (2026-11-07,
+Hatari 14 MB, `-D DEBUG`): attract 28.8 arcade frames a second (52% of the arcade's 55.02 Hz; 58% of the port's 50),
+1.9 pictures a second; invulnerable play 22.5 (41%; 45%), 2.0 pictures a second.
 
 ### The board and the reference
 

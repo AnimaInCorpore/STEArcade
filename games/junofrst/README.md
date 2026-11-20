@@ -1,19 +1,15 @@
 # Juno First (Konami, 1983) on the Atari STE
 
-MAME set `junofrst` (Konami GX310, `konami/junofrst.cpp` with `tutankhm_v.cpp`).  The main CPU, a KONAMI-1 (an MC6809
-with encrypted opcodes: ROM $A000-$FFFF and sixteen 4 KB banks in a window at $9000-$9FFF, nine of them with code) is
-statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitmap of 4 bpp turned as MAME's ROT90
-turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
-here both draw into the planar STE picture directly.  The sound board is translated too: its Z80 driver runs on
-the 68000 against an emulated AY-3-8910 whose three channels are the YM2149's, and the i8039's effects were rendered
-offline to PCM for the DMA sound.  Status: **Experimental / deferred** (root README): logic, picture and the sound board's state are exact against
-their references (the translated program against the reference machine, the sound driver against a Python Z80 model),
-the program runs at about 58% speed in Hatari (MAX_SKIP 2, 16 pictures a second: not yet playable by the 90% / 20 pictures target), and the sound has never been compared with MAME's audio or listened to.
-
 ![Juno First on the STE (Hatari)](docs/screenshot.png)
 
-Speed (Hatari, STE, 4 MB, `hatari.ps1 -Frames 4000`, `MAX_SKIP` 2, 2026-11-08, dirty-cell picture): 34.8 arcade frames
-a second (58% of 60.6) and 16.4 pictures a second.
+**Status: Experimental / deferred**
+
+Konami's 1983 space shooter, where you fly over a scrolling grid and fight waves of aliens.  The picture and colours
+match the arcade exactly in tests, and the game's logic matches the arcade exactly in tests.  The music and effects are
+produced by the game's own sound program, but nobody has listened to them or compared them with the arcade's sound yet,
+and two digitised effects come out silent or buzzing.  It is too slow to call playable: about 58% of the arcade's speed,
+16 pictures a second (2026-11-08); the dotted background grid is the biggest cost and could be dropped if wanted.  Play
+was only watched in the first wave, and no complete game has been played through.
 
 ## Build and run
 
@@ -55,7 +51,7 @@ Layout: `tools/` (prepare, machine, gen, assets, build, logic_test, render_test,
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1 -Frames 4000`, looked at by eye, not compared):
   title screen and score table (all 256 lines, the colours as MAME's) and the first wave's warp intro; no crash, no
   late border event in 4,001 VBLs (2 fallbacks of the top border).  Play beyond the first seconds of wave 1 was not
-  watched there.
+  watched there.  Long runs of 20,001 VBLs (2026-11-08): no crash, no bad pc, no late border event (Verification).
 * **Sound** (`tools/logic_test.py --sound`, `tools/sound.py`, `tools/sndgen.py`, `src/sound.s`): the translated Z80 driver
   (1,853 instructions, `tools/sndgen.py` from `ref/cover_sound.py`'s coverage of the game's commands and random ones) runs
   every arcade frame on the sim; after each frame the AY's 16 registers, the YM registers written, the driver's RAM
@@ -143,6 +139,16 @@ Logic = Musashi cycles a frame (seed 1, 3,000 frames, with sound); Hatari = `hat
 | whole-shape natives ($9EE0, $B3xx, $98EA, $CA00) | not done | next lever: `vram_wr` is ~40% of play |
 
 ## How it works
+
+MAME set `junofrst` (Konami GX310, `konami/junofrst.cpp` with `tutankhm_v.cpp`).  The main CPU, a KONAMI-1 (an MC6809
+with encrypted opcodes: ROM $A000-$FFFF and sixteen 4 KB banks in a window at $9000-$9FFF, nine of them with code) is
+statically translated to 68000 code.  The picture is the arcade's 256 x 256 bitmap of 4 bpp turned as MAME's ROT90
+turns it (224 x 256, centred in the 320-pixel screen, borders open); the CPU and the 16 x 16 blitter draw into it, and
+here both draw into the planar STE picture directly.  Status **Experimental / deferred** (root README): logic, picture
+and the sound board's state are exact against their references (the translated program against the reference machine,
+the sound driver against a Python Z80 model); the program runs at about 58% speed in Hatari (`MAX_SKIP` 2, 16 pictures
+a second, 2026-11-08: below the 90% / 20 pictures target), and the sound has never been compared with MAME's audio or
+listened to.
 
 ### The board and the reference (`tools/machine.py`)
 

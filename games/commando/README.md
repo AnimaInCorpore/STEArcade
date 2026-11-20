@@ -2,15 +2,15 @@
 
 ![Commando on the STE (Hatari)](docs/screenshot.png)
 
-The `commando` set (World), MAME's `capcom/commando.cpp`.  The main Z80 (encrypted opcodes) is translated to 68000
-code; the sound Z80 is not run: the output of its driver is recorded per command, the effects (the SSG) as register
-tables and the music (FM on two YM2203) as square-wave streams, both played on the YM2149.  The picture uses three
-virtual screens scrolled by the video address (twin lines, damage restored from them), sprites by generated Blitter
-code with a per-slot cache, characters with `movep.l`, and one 16-colour palette from the shared default fitter with
-checker pairs (2026-11-05).  Status: **Verification pending** (full-game Hatari verification pending).  Speed (Hatari,
-`bench.sh PLAY=1`: the recorded play from VBL 900, 6000 VBLs, 4 MB, 2026-11-01): 100% of the arcade's rate (59.6
-arcade frames a second) and 27.0 pictures a second, the slowest 100 VBLs 54 arcade frames and 19 pictures a second;
-not re-measured since the colour change of 2026-11-05.
+**Status: Verification pending**
+
+Capcom's run-and-gun classic: Super Joe fights his way up the screen with a rifle and grenades.  The game's logic
+matches the arcade exactly in tests, and the pictures match the arcade's apart from colours: 16 on screen, with fine
+two-colour patterns standing in for the rest.  Sound effects are played back from recordings and the music as simpler
+square-wave tones; when both sound chips play effects at once, only one is heard.  Keyboard, joysticks and Jaguar
+pads work for one or two players.  It runs at the arcade's full speed with 27 pictures a second in play (emulator,
+2026-11-01; not re-measured since the colour change of 2026-11-05), dropping to about 19 in the busiest scenes.  A full
+playthrough and real hardware are still to be checked.
 
 ## Build and run
 
@@ -61,6 +61,15 @@ quit.
   SSG period scaling is derived, not measured against MAME's output; a natural full playthrough.
 
 ## How it works
+
+The `commando` set (World), MAME's `capcom/commando.cpp`.  The main Z80 (encrypted opcodes) is translated to 68000
+code; the sound Z80 is not run: the output of its driver is recorded per command, the effects (the SSG) as register
+tables and the music (FM on two YM2203) as square-wave streams, both played on the YM2149.  The picture uses three
+virtual screens scrolled by the video address (twin lines, damage restored from them), sprites by generated Blitter
+code with a per-slot cache, characters with `movep.l`, and one 16-colour palette from the shared default fitter with
+checker pairs (2026-11-05).  Speed (Hatari, `bench.sh PLAY=1`: the recorded play from VBL 900, 6000 VBLs, 4 MB,
+2026-11-01): 100% of the arcade's rate (59.6 arcade frames a second) and 27.0 pictures a second, the slowest 100 VBLs
+54 arcade frames and 19 pictures a second; not re-measured since the colour change of 2026-11-05.
 
 The shared pieces: [architecture.md](../../docs/architecture.md), the method:
 [porting-guide.md](../../docs/porting-guide.md).

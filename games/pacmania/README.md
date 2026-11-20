@@ -1,10 +1,10 @@
 # Pac-Mania (Namco, 1987) on the Atari STE
 
-Reference work only, no STE program. The MAME set is `pacmania` (Namco System 1, `namco/namcos1.cpp`: three MC6809E
-and the HD63701 MCU, as Splatterhouse, Galaga '88 and Dragon Spirit). The shared reference board `engine/namcos1.py`
-renders its picture and is compared with MAME's; nothing is translated (`src/` is empty), there is no picture or sound
-path on the STE and no speed figure. Status in the root README's table: Experimental / deferred, early implementation
-/ reference work (2026-11-07).
+**Status: Experimental / deferred**
+
+Namco's 1987 Pac-Man in a tilted 3D-looking maze, where Pac-Man can jump over the ghosts.  Only groundwork exists so
+far: the arcade ROMs are checked, and a PC-side model of the arcade board draws the game's picture for comparison
+with the arcade's.  There is no STE program yet, so nothing runs on the STE: no picture, no sound, no speed figure (2026-11-07).
 
 ## Build and run
 
@@ -18,6 +18,12 @@ ROM: the MAME set `pacmania` (`assets/roms/pacmania.zip`, unpacked to `assets/ro
 repository's.
 
 ## State
+
+Reference work only, no STE program.  The MAME set is `pacmania` (Namco System 1, `namco/namcos1.cpp`: three MC6809E
+and the HD63701 MCU, as Splatterhouse, Galaga '88 and Dragon Spirit).  The shared reference board `engine/namcos1.py`
+renders its picture and is compared with MAME's; nothing is translated (`src/` is empty), there is no picture or sound
+path on the STE and no speed figure.  Status in the root README's table: Experimental / deferred, early implementation
+/ reference work (2026-11-07).
 
 * Present (2026-11-07): the ROM manifest (`docs/rom_manifest.json`), `tools/prepare.py`, and
   `ref/mame_cmp_pacmania.py` (`engine/namcos1_mame.py`: the shared Namco System 1 reference renderer against MAME's

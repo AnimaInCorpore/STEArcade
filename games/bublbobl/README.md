@@ -2,17 +2,16 @@
 
 ![Bubble Bobble on the STE (Hatari)](docs/screenshot.png)
 
-The MAME set `bublbobl` (Japan, with the protection MCU; driver `taito/bublbobl.cpp`): three Z80s and an MC6801 whose
-own firmware (`a78-01.17`) is in the set.  The main and the sub Z80 are translated to 68000 code (`tools/gen.py`,
-`engine/z80x.py`), with three native routines in place of hot Z80 code; the MCU's VBL interrupt is native 68000 code,
-its firmware translated (`engine/m6801x.py`) for the boot and as a stand-in; the sound Z80 is not run: its driver's
-output is recorded per command and played on the YM2149.  Frames in layers (the play, the demo, the title) are drawn
-by the sprite renderer (Blitter sprites from cached unshifted images, a static picture of 8 x 8 cells, 16 x 4 block
-copies), the others by the general tile renderer; a fixed fitted palette of 13 colours plus two lent to flashing
-entries.
-Logic and pictures are exact against the reference.  Status: **Incomplete** (root README): significant gameplay
-slowdown.  Latest speed (Hatari, 4 MB, `ROUNDS=1 tools/bench.sh 3600`, scripted play, rounds 1200-2700, 2026-10-12):
-26.6 arcade frames a second (45% of the arcade's 59.19), 12.2 pictures a second.
+**Status: Incomplete**
+
+* Taito's bubble-blowing platform game for one or two players.
+* The picture, the music and the sound effects work, and the game's logic and pictures match the arcade exactly in
+  tests; the colours are a fixed set of 16 chosen to fit the game, so a few shades come out slightly off.
+* The game plays much too slowly: about 45% of the arcade's speed, 12 pictures a second in play (measured
+  2026-10-12).  It needs to become several times faster before it counts as playable at arcade pace.
+* Missing: a complete playthrough check, the flipped screen, the arcade's limit of sprites per line, the test and
+  service modes.
+* Runs on a plain 4 MB STE.
 
 ## Build and run
 
@@ -78,6 +77,17 @@ jump, **B** (or up) bubble, **Option** coin, **Pause** start, keypad **1/2** sta
   reference machine (`ref/cover.py 4 20000`).
 
 ## How it works
+
+The MAME set `bublbobl` (Japan, with the protection MCU; driver `taito/bublbobl.cpp`): three Z80s and an MC6801 whose
+own firmware (`a78-01.17`) is in the set.  The main and the sub Z80 are translated to 68000 code (`tools/gen.py`,
+`engine/z80x.py`), with three native routines in place of hot Z80 code; the MCU's VBL interrupt is native 68000 code,
+its firmware translated (`engine/m6801x.py`) for the boot and as a stand-in; the sound Z80 is not run: its driver's
+output is recorded per command and played on the YM2149.  Frames in layers (the play, the demo, the title) are drawn
+by the sprite renderer (Blitter sprites from cached unshifted images, a static picture of 8 x 8 cells, 16 x 4 block
+copies), the others by the general tile renderer; a fixed fitted palette of 13 colours plus two lent to flashing
+entries.  Logic and pictures are exact against the reference.  Latest speed (Hatari, 4 MB, `ROUNDS=1 tools/bench.sh
+3600`, scripted play, rounds 1200-2700, 2026-10-12): 26.6 arcade frames a second (45% of the arcade's 59.19), 12.2
+pictures a second.
 
 ### The board and the reference
 
@@ -270,7 +280,7 @@ ROMs (`load_roms` copies them, 132 KB) and the dispatch entries (`gen.py`'s `bb_
 `init_table`) are the last thing in the data section, from `tcache` on, and the rest of the cache is the first thing
 in the BSS (`tcache_tail`; the data's end is aligned to the BSS's 256 so that the two meet, which the start checks).
 The tables are built right after `load_roms`, before `init_render`'s `tc_flush` marks every cache entry empty.  The
-48- instruction leaves (2026-11-02) added 0.8 KB.
+48-instruction leaves (2026-11-02) added 0.8 KB.
 
 ## Speed
 

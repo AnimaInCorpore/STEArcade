@@ -2,16 +2,15 @@
 
 ![Black Tiger on the STE (Hatari)](docs/screenshot.png)
 
-STE port of MAME set `blktiger` (driver `capcom/blktiger.cpp`) for a 4 MB STE.  The unmodified main Z80 is translated
-bank-aware (`tools/gen.py` on `translate.compile_code` with `z80x.FAST`), with window guards at the coverage's sites,
-every block copy guarded and 87 extra roots from F030Arcade's replays; the i8751 protection MCU runs its dumped
-firmware in an interpreter (`src/mcu.s`, synchronous transactions); the sound Z80 and its two YM2203s are not run: the
-driver's effects and music are recorded and played on the YM2149.  The picture: the background in two display rings
-and a clean screen used as virtual screens (hardware scroll on both axes), sprites clipped at the band words, the text
-as OP 3 copy pieces, 16 colours from the shared default fitter with checker pairs.  Status **Verification pending**:
-full-game Hatari verification is pending; a MARP replay leaves the recorded game in stage 7.  Speed (Hatari, 4 MB, the
-MARP game's inputs, 2026-10-24): logic 98% of the arcade's 59.6 ticks a second (about 58.4 arcade frames a second),
-25.5 pictures a second; the AUTOPLAY bench (2026-10-23) 57.9 ticks (97%) and 29.3 pictures a second.
+**Status: Verification pending**
+
+Capcom's scrolling fantasy platform adventure: a barbarian fights through dungeons, buying weapons and armour on the
+way.  The game's logic, including its protection chip, matches the arcade exactly in tests, and the pictures match
+the arcade's apart from colours: 16 on screen, with fine two-colour patterns standing in for the rest.  Music and
+sound effects are played back from recordings.  Keyboard, joysticks and Jaguar pads work for one or two players.  It
+runs at about 98% of the arcade's speed with 25 to 26 pictures a second when replaying a recorded expert game
+(emulator, 2026-10-24).  That replay follows the expert's game through seven of the eight stages before it goes off
+track; a full playthrough and real hardware are still to be checked.
 
 ## Build and run
 
@@ -66,6 +65,16 @@ pad B player 2, the D-pad moves, **A** attack, **B** jump, **Option** coin, **Pa
   within the release's 3,700,000.
 
 ## How it works
+
+STE port of MAME set `blktiger` (driver `capcom/blktiger.cpp`) for a 4 MB STE.  The unmodified main Z80 is translated
+bank-aware (`tools/gen.py` on `translate.compile_code` with `z80x.FAST`), with window guards at the coverage's sites,
+every block copy guarded and 87 extra roots from F030Arcade's replays; the i8751 protection MCU runs its dumped
+firmware in an interpreter (`src/mcu.s`, synchronous transactions); the sound Z80 and its two YM2203s are not run: the
+driver's effects and music are recorded and played on the YM2149.  The picture: the background in two display rings
+and a clean screen used as virtual screens (hardware scroll on both axes), sprites clipped at the band words, the text
+as OP 3 copy pieces, 16 colours from the shared default fitter with checker pairs.  Speed (Hatari, 4 MB, the MARP
+game's inputs, 2026-10-24): logic 98% of the arcade's 59.6 ticks a second (about 58.4 arcade frames a second), 25.5
+pictures a second; the AUTOPLAY bench (2026-10-23) 57.9 ticks (97%) and 29.3 pictures a second.
 
 ### The board and the reference
 

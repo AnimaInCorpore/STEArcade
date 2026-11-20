@@ -2,16 +2,17 @@
 
 ![R-Type on the STE (Hatari)](docs/screenshot.png)
 
-STE port of the MAME set `rtype` (Irem M72, `irem/m72.cpp`). The main CPU's NEC V30 program is statically translated
-to 68000 code (`engine/v30x.py`, `tools/gen.py`) with natives for the hottest routines, exact against the reference
-board (`engine/m72board.py`) through all eight stages and the ending; the Z80 sound CPU is not run (its commands are
-kept in a ring), so there is no sound. The picture is the stage renderer (`src/stage.s`): the centred 320 pixels of
-the 384-pixel picture, 16 colours per scene by the shared default fitter with checker pairs, the status bar with its
-own palette; parallax, colour cycling and palette fades are dropped where they only cost work (the user's rule: keep
-the gameplay). Status: Incomplete (sound not implemented); not released: development targets a 14 MB ST RAM machine
-(the user, 2026-10-31; `tools/release.py` NOT_RELEASED). Latest speed (2026-11-10, Hatari 14 MB, recorded play,
-`-D INVULN -D DEBUG`): stage 2 38.8 arcade frames a second (71% of the arcade's 55.02 Hz), 18.1 pictures a second;
-stage 7 28.6 (52%) and 17.5; every stage in Speed.
+**Status: Incomplete**
+
+* Irem's side-scrolling space shooter, all eight stages and the ending.
+* The picture works in every stage and the game's logic matches the arcade exactly in tests; the picture shows the
+  middle 320 of the arcade's 384 pixels, in 16 colours per scene.
+* There is no sound yet (planned, not started).
+* To save time some purely decorative effects are left out: the background stars, the colour fades, some parallax
+  scrolling and stage 6's background. The gameplay is unchanged.
+* Speed (measured 2026-11-10): between 43% (stage 3's giant warship) and 80% (stage 4) of the arcade's speed, 17 to
+  25 pictures a second.
+* Not released: while it is developed it needs an STE with 14 MB of memory; fitting it back into 4 MB comes later.
 
 ## Build and run
 
@@ -55,16 +56,28 @@ MAME's defaults (3 lives, demo sounds on, coin mode 1).
   whole (every 2nd frame, 14,150 pictures) and stages 1, 2, 7 at every frame and every 3rd (2026-11-07).
 * Missing: sound (the plan below, agreed 2026-11-01, not started).
 * Not released (`tools/release.py` NOT_RELEASED; until 0.6 it was in `OVER_LOAD`, passed with a warning): RTYPE.PRG
-  is 6.2 MB (text, data and BSS 13.2 MB in the 2026-11-10 replay builds), far over the 3.7 MB release limit; how to fit the game back into 4 MB
-  (per-stage loading, packing) is decided later.
+  is 6.2 MB (text, data and BSS 13.2 MB in the 2026-11-10 replay builds), far over the 3.7 MB release limit; how to
+  fit the game back into 4 MB (per-stage loading, packing) is decided later.
 * Speed: below the goal (a steady 25 pictures a second at the port's full 50 arcade frames a second): every stage's
-  recorded play runs at 23-44 arcade frames a second (stage 3's warship and stage 7 the slowest).
+  recorded play runs at 23-44 arcade frames a second and 17-25 pictures a second (2026-11-10; stage 3's warship and
+  stage 7 the slowest).
 * Agreed omissions (the user's rule: keep the gameplay, drop what only costs work): palette fades (FADE_SNAP), stage
   6's BG, the parallax of stages 5 and 7 (the BG as a strip locked to the FG), stage 8's colour cycling (frozen rows),
   the stars (BG star tiles and the star sprites $AF2-$AF7). The display cuts the left part of "1P-" and of the title's
   "R" (x 32-351 of the 384 pixels).
 
 ## How it works
+
+STE port of the MAME set `rtype` (Irem M72, `irem/m72.cpp`). The main CPU's NEC V30 program is statically translated
+to 68000 code (`engine/v30x.py`, `tools/gen.py`) with natives for the hottest routines, exact against the reference
+board (`engine/m72board.py`) through all eight stages and the ending; the Z80 sound CPU is not run (its commands are
+kept in a ring), so there is no sound. The picture is the stage renderer (`src/stage.s`): the centred 320 pixels of
+the 384-pixel picture, 16 colours per scene by the shared default fitter with checker pairs, the status bar with its
+own palette; parallax, colour cycling and palette fades are dropped where they only cost work (the user's rule: keep
+the gameplay). Not released: development targets a 14 MB ST RAM machine (the user, 2026-10-31; `tools/release.py`
+NOT_RELEASED). Latest speed (2026-11-10, Hatari 14 MB, recorded play, `-D INVULN -D DEBUG`): stage 2 38.8 arcade
+frames a second (71% of the arcade's 55.02 Hz), 18.1 pictures a second; stage 7 28.6 (52%) and 17.5; every stage in
+Speed.
 
 ### The board and the reference
 
@@ -376,7 +389,7 @@ together 11-14% (a handler's `call [bp+0]` 80 cycles, its RET 56).
   stage-1 recording has more than 20 stars in 32% of its frames (up to 86); no other stage has any. They cannot be
   left out (the user asked, 2026-11-10): a star takes a slot of the one pool of 96 objects (0040:03A6, 192 call
   sites) and three numbers of the one random generator (0040:EDE9, 75 call sites) when it appears, so the enemies'
-  spawns and choices would differ for the same inputs. Made cheaper instead (the star run, below): 413 cycles a star.
+  spawns and choices would differ for the same inputs. Made cheaper instead (the star run, above): 413 cycles a star.
 * Stage 3: the collision tests `leaf_eco2` 10.8%, `nat_coll24` 6.4%, `es_build` 2.2%, `nat_box` 1.5%; `leaf_emit1`
   6.7%, `leaf_bgtile` 4.0%.
 * Stage 7: `leaf_ecoll` 13.4% for about 16 calls a frame nearly all rejected (some 900 cycles a call, by the nearest

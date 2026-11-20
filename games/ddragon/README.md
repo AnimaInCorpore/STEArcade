@@ -2,16 +2,15 @@
 
 ![Double Dragon on the STE (Hatari)](docs/screenshot.png)
 
-STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`).  The main CPU, an HD6309E
-running 6809 code, is translated whole and bank-aware (`engine/m6809x.py`) with natives for the collision; the sprite
-MCU (HD63701Y0) is not run: its job is a native routine; the sound MC6809 is not run either: the YM2151's music and
-effects are recorded and played on the YM2149, the ADPCM voices and hits decoded at build time and played on the DMA
-sound.  The picture: the background, the sprites and the text on the STE's 16 colours (the default fitter with
-checker pairs), all 240 lines in the open borders.  Status **Incomplete**: significant gameplay slowdown, the logic
-would have to get about 2 times cheaper.  Speed (Hatari, the recorded play, 4 MB, 2026-11-07): 32.3 arcade frames a
-second (56% of the arcade's 57.44), 7.1 pictures a second over the recording; in play 25-31 arcade frames a second
-(about 50%) and ~3 pictures a second.  Developed with 14 MB in Hatari (the user, 2026-11-07); the release still has to
-fit the 4 MB load budget.
+**Status: Incomplete**
+
+* Technos' street-fighting classic for one or two players, the Japanese version.
+* The picture, the music, the sound effects and the punches, hits and voices all work, and the game's logic matches
+  the arcade exactly in tests through all four missions.  The music is simplified to the STE's three voices.
+* The game plays too slowly: about half the arcade's speed in play, with only about 3 pictures a second (measured
+  2026-11-07).  The game's logic would have to become about twice as fast.
+* Missing: the cocktail cabinet's flipped screen, and a complete playthrough check.
+* While it is developed it runs with 14 MB of memory; the program itself still fits a 4 MB STE.
 
 ## Build and run
 
@@ -69,6 +68,16 @@ to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the re
   [porting-guide.md "Memory and release"](../../docs/porting-guide.md#memory-and-release)).
 
 ## How it works
+
+STE port of MAME set `ddragonj` (Double Dragon, Japan set 1; driver `technos/ddragon.cpp`).  The main CPU, an HD6309E
+running 6809 code, is translated whole and bank-aware (`engine/m6809x.py`) with natives for the collision; the sprite
+MCU (HD63701Y0) is not run: its job is a native routine; the sound MC6809 is not run either: the YM2151's music and
+effects are recorded and played on the YM2149, the ADPCM voices and hits decoded at build time and played on the DMA
+sound.  The picture: the background, the sprites and the text on the STE's 16 colours (the default fitter with
+checker pairs), all 240 lines in the open borders.  Speed (Hatari, the recorded play, 4 MB, 2026-11-07): 32.3 arcade
+frames a second (56% of the arcade's 57.44), 7.1 pictures a second over the recording; in play 25-31 arcade frames a
+second (about 50%) and ~3 pictures a second.  Developed with 14 MB in Hatari (the user, 2026-11-07); the release has
+to stay within the 4 MB load budget (State).
 
 ### The board and the reference
 

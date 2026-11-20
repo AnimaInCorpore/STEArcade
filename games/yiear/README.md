@@ -2,18 +2,17 @@
 
 ![Yie Ar Kung-Fu on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `yiear` (version I; Konami GX407, `konami/yiear.cpp`).  The only CPU, a plain MC6809E (32 KB of ROM at $8000,
-no encrypted opcodes), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board
-in lock-step; its idle point is a native that delivers the eight NMIs and the IRQ of an arcade frame.  The board has no
-sound CPU: the main CPU's NMI handler drives an SN76489A and a VLM5030 speech chip, so the SN's tones and noise play on
-the STE's YM2149 and the VLM's phrases (rendered offline) on the DMA sound.  The picture is MAME's, 256 x 224, centred in
-the 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`),
-exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.
-Status: **Incomplete** (logic and picture exact in lock-step with the reference, screen flip and cocktail included; a
-21,000-VBL Hatari run through the stages by cheat without a crash; no unaided full playthrough, high-score entry not reached).
-Speed: 98% of the arcade's rate (59.6 arcade frames a second), 41.6 pictures a second, with the sound over 21,000 VBLs
-of cheated play from stage 1; 96.7% / 43 pictures in attract (Hatari, `tools/hatari.ps1 -Sound 1`, DEBUG build, 4 MB,
-2026-11-08).
+**Status: Incomplete**
+
+Konami's 1985 one-on-one martial-arts game: Oolong fights eleven masters of kung-fu weapons and styles.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow),
+  including the cocktail-table screen flip.
+* Music, sound effects and the speech play, close to the arcade's but not identical; nobody has listened to them side
+  by side yet.
+* It runs at about 98% of the arcade's speed, 42 pictures a second with sound (measured 2026-11-08).
+* All eleven opponents have been reached and run without a crash, but only with cheats: nobody has played a complete
+  game yet, and the high-score entry has never been reached.
 
 ## Build and run
 
@@ -101,6 +100,19 @@ the third button, **Option** coin, **Pause** start.  DIP switches: MAME's defaul
   Nobody has listened to either.
 
 ## How it works
+
+MAME set `yiear` (version I; Konami GX407, `konami/yiear.cpp`).  The only CPU, a plain MC6809E (32 KB of ROM at $8000,
+no encrypted opcodes), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board
+in lock-step; its idle point is a native that delivers the eight NMIs and the IRQ of an arcade frame.  The board has no
+sound CPU: the main CPU's NMI handler drives an SN76489A and a VLM5030 speech chip, so the SN's tones and noise play on
+the STE's YM2149 and the VLM's phrases (rendered offline) on the DMA sound.  The picture is MAME's, 256 x 224, centred in
+the 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`),
+exact against the reference in the shown colours; one 16-colour palette by the bounded flat fit, black and 15.  Logic
+and picture are exact in lock-step with the reference, screen flip and cocktail included; a 21,000-VBL Hatari run
+through the stages by cheat ended without a crash; no unaided full playthrough, the high-score entry not reached.
+Speed: 98% of the arcade's rate (59.6 arcade frames a second), 41.6 pictures a second, with the sound over 21,000 VBLs
+of cheated play from stage 1; 96.7% / 43 pictures in attract (Hatari, `tools/hatari.ps1 -Sound 1`, DEBUG build, 4 MB,
+2026-11-08).
 
 ### The board and the reference
 
@@ -190,7 +202,7 @@ length in arcade frames, not the chip's cycle-exact time.
 
 The logic is cheap (the whole IRQ handler plus eight NMIs is ~4,100 + 8 x 240 6809 cycles of 25,344); a picture is the
 cost.  What went into it: the playfield compare scans the 2 KB of video RAM every picture (512 longs); a screen change
-converts and draws its changed tiles once (first use per tile and flips).  The compare was 33k of the picture's 79k CPU cycles (64 cycles a long); eight `cmpm.l` + `bne.s` pairs a block (Duff's device, re-entered after a change) make it ~14k: the picture 79.1k -> 62.2k CPU, 34.2 -> 37.7 pictures a second in Hatari, exact in `render_test.py` (seeds 1, 2, 24) and `sprite_test.py`. Nothing else was optimized beyond what Mario Bros.' and
+converts and draws its changed tiles once (first use per tile and flips).  The compare was 33k of the picture's 79k CPU cycles (64 cycles a long); eight `cmpm.l` + `bne.s` pairs a block (Duff's device, re-entered after a change) make it ~14k: the picture 79.1k -> 62.2k CPU, 34.2 -> 36.4 pictures a second in Hatari (37.7 after the speed audit below), exact in `render_test.py` (seeds 1, 2, 24) and `sprite_test.py`.  Before the speed audit below, nothing else was optimized beyond what Mario Bros.' and
 Track & Field's renderer already do; the pictures a second are the 50 Hz VBLs' share left after the logic.
 
 Measured, not kept: nothing. Not tried: writer marks for the video RAM (its stores are plain `move.b` into the flat block, not I/O sites, so `video_inline` does not apply), dropping the arcade's own effects (none is costly: one layer, no scrolling, no colour cycling).

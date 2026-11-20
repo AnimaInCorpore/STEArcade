@@ -2,16 +2,16 @@
 
 ![Gyruss on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `gyruss` (Konami GX347, `konami/gyruss.cpp`).  Both game CPUs are statically translated to 68000 code: the
-main Z80 (24 KB, inline leaves) and the sub CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 8 KB) that projects the
-objects and multiplexes the sprites by racing the beam (a beam model in the translation; its hottest routines are
-natives).  The sound board's Z80 driver is translated as well and plays its five AY-3-8910s on the YM2149 (three of the
-fifteen channels); the i8039's sampled effects are rendered offline and played through the DMA sound.  The picture is
-MAME's ROT90 picture, 224 x 256, centred in the 320-pixel screen, top and bottom borders open, sprites by generated
-sprite code (`engine/sprite_programs.py`).  Logic and picture are exact against the reference; status **Incomplete**:
-the flip screen (cocktail) and the service mode are not done.  Speed (2026-11-02, Hatari, 4 MB STE, `bench.sh 4000`
-AUTOPLAY): 33.4 arcade frames a second (55% of the arcade's 60.61) and 12.7 pictures a second; the three translated
-CPUs, not the picture, limit it.  The program loads 3.47 MB (the budget 3.7 MB).
+**Status: Incomplete**
+
+Konami's 1983 space shooter in which your ship circles the edge of the screen on its way from Neptune to Earth.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow).
+* The music and the sound effects play, including the sampled effects; the arcade's sound filtering is not imitated.
+* It is slow: about 55% of the arcade's speed, 12.7 pictures a second (measured 2026-11-02).  The game's three
+  processors are the limit, not the picture.
+* Not yet done: the cocktail-table screen flip and the service mode.
+* It fits a plain 4 MB STE, but only just.
 
 ## Build and run
 
@@ -65,6 +65,16 @@ quit.  DIP switches: MAME's defaults (3 lives, bonus 30k / 90k / every 60k, diff
   No recorded-play bench yet.
 
 ## How it works
+
+MAME set `gyruss` (Konami GX347, `konami/gyruss.cpp`).  Both game CPUs are statically translated to 68000 code: the
+main Z80 (24 KB, inline leaves) and the sub CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 8 KB) that projects the
+objects and multiplexes the sprites by racing the beam (a beam model in the translation; its hottest routines are
+natives).  The sound board's Z80 driver is translated as well and plays its five AY-3-8910s on the YM2149 (three of the
+fifteen channels); the i8039's sampled effects are rendered offline and played through the DMA sound.  The picture is
+MAME's ROT90 picture, 224 x 256, centred in the 320-pixel screen, top and bottom borders open, sprites by generated
+sprite code (`engine/sprite_programs.py`).  Speed (2026-11-02, Hatari, 4 MB STE, `bench.sh 4000` AUTOPLAY): 33.4
+arcade frames a second (55% of the arcade's 60.61) and 12.7 pictures a second; the three translated CPUs, not the
+picture, limit it.  The program loads 3.47 MB (the budget 3.7 MB).
 
 ### The board and the reference
 

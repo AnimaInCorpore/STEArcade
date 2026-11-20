@@ -2,15 +2,14 @@
 
 ![Donkey Kong on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `dkong` (`nintendo/dkong.cpp`, `dkong_v.cpp`, `dkong_a.cpp`).  The main Z80 is statically translated to
-68000 code (`engine/z80x.py` FAST) and checked in lock-step against a reference machine (`tools/machine.py`); the
-8257 sprite DMA is a runtime routine.  The 8035 sound board is recorded in MAME and played as 8-bit DMA sound clips;
-the discrete walk, jump and stomp circuits are YM2149 patches measured from the same recordings.  The picture is the
-project's first renderer: the tile map compared with a shadow, generated Blitter code per sprite line; it equals the
-reference renderer and MAME pixel for pixel.  Status: **Verification pending** (assisted loop replay verified;
-full-game checks pending).  Speed: one arcade frame per 50 Hz VBL, 50 arcade frames a second (83% of the arcade's
-60.6 Hz), 50 pictures a second in play, 0.8% of the frames late (Hatari, `-D TIMES=1 -D AUTOSTART=150`, 3000
-frames, 4 MB, 2026-10-12).
+**Status: Verification pending**
+
+Nintendo's 1981 classic: Mario climbs the girders to rescue Pauline from the ape.  The picture matches the arcade
+pixel for pixel, the game's logic matches the arcade exactly in tests, and it plays with keyboard, joysticks or pads.
+The music and effects are played back from recordings of the arcade board; walking, jumping and stomping are
+imitated by the STE's sound chip and sound a little brighter than on the arcade.  It runs at about 83% of the
+arcade's speed with a smooth 50 pictures a second in play (measured 2026-10-12).  A helped run reached the game's
+repeating final levels; a natural full playthrough with picture, sound and controls checked is still to be done.
 
 ## Build and run
 
@@ -57,6 +56,16 @@ joysticks and both pads move Mario (fire jumps).  Jaguar pad / PowerPad (STE enh
   the sprite wrap-around of the arcade hardware; the arcade's full rate (one NMI per 50 Hz VBL: 83%).
 
 ## How it works
+
+MAME set `dkong` (`nintendo/dkong.cpp`, `dkong_v.cpp`, `dkong_a.cpp`).  The main Z80 is statically translated to
+68000 code (`engine/z80x.py` FAST) and checked in lock-step against a reference machine (`tools/machine.py`); the
+8257 sprite DMA is a runtime routine.  The 8035 sound board is recorded in MAME and played as 8-bit DMA sound clips;
+the discrete walk, jump and stomp circuits are YM2149 patches measured from the same recordings.  The picture is the
+project's first renderer: the tile map compared with a shadow, generated Blitter code per sprite line; it equals the
+reference renderer and MAME pixel for pixel.  Verification pending: assisted loop replay verified, full-game checks
+pending.  Speed: one arcade frame per 50 Hz VBL, 50 arcade frames a second (83% of the arcade's 60.6 Hz), 50
+pictures a second in play, 0.8% of the frames late (Hatari, `-D TIMES=1 -D AUTOSTART=150`, 3000 frames, 4 MB,
+2026-10-12).
 
 ### The board and the reference
 

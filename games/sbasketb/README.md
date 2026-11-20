@@ -2,25 +2,14 @@
 
 ![Super Basketball on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `sbasketb` (Konami GX405, version I, encrypted; `konami/sbasketb.cpp`).  The main CPU, a KONAMI-1 (an MC6809
-with encrypted opcodes, 40 KB of ROM), is statically translated to 68000 code (`engine/m6809x.py`) and checked
-against a reference board in lock-step; its foreground loop's head is a native that delivers the IRQ.  The sound board
-(a Z80 with an SN76489A, a VLM5030 and a DAC: the Track & Field / Hyper Sports board with its own driver ROM) is not
-run: MAME plays each sound command alone and the recording is played on the STE's DMA channel (`src/sound.s`, as Mario
-Bros. does).  The picture
-is MAME's ROT90 picture, 224 x 256 (portrait, not the 256 x 224 of the other Konami sports games), centred in the
-320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
-against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  Status:
-**Incomplete** (sound by recordings, one clip at a time, its timing and levels checked against MAME's in Hatari's audio
-capture, never listened to; the logic at 100% of the arcade's speed and 20-27 pictures a second in play in Hatari; the
-games of the scripted runs end at the first game over, no later stage was reached).
-Speed (Hatari, `tools/hatari.ps1 -Frames 20000`, the AUTOPLAY script, sound build with its audio off, DEBUG build, 4 MB,
-2026-11-08, the final build): 20,000 VBLs without a crash, 2 border fallbacks and no late border event; 58.3 arcade
-frames a second (97%) and 34.1 pictures a second over the run (the attract and game-over screens are drawn at 50 a second).
-In play (the 101 hundred-VBL intervals with fewer than 40 pictures a second): the logic 98% (mean; 84% in the worst
-interval), the pictures 23.5 a second (median 22.0, 10th percentile 17.5, worst 13.5).  The first 5,000 VBLs: 89% and
-24.5 pictures a second including the program's start (VBLs 0-200: the boot, 24 arcade frames in the first 300); VBLs
-1,000-5,000: 97% and 27.6.
+**Status: Incomplete**
+
+Konami's 1984 basketball game, shown upright in its tall arcade picture.  The picture matches the arcade exactly in
+tests, and the game's logic matches the arcade exactly in tests.  Sound is played back from recordings of the arcade,
+one sound at a time; its timing and loudness were compared with the arcade's, but nobody has listened to it yet, and a
+few rare sounds are missing.  In play the game runs at about 98% of the arcade's speed with 22 to 24 pictures a second
+(2026-11-08).  The test runs only played until the first game over: no later round or opponent has been seen, and no
+complete game has been played through.  A plain 4 MB STE is enough.
 
 ## Build and run
 
@@ -102,6 +91,17 @@ kept, easy, demo sounds on).
   ignores latch Q0); the arcade's self-test is not run.
 
 ## How it works
+
+MAME set `sbasketb` (Konami GX405, version I, encrypted; `konami/sbasketb.cpp`).  The main CPU, a KONAMI-1 (an MC6809
+with encrypted opcodes, 40 KB of ROM), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a
+reference board in lock-step; its foreground loop's head is a native that delivers the IRQ.  The sound board (a Z80 with
+an SN76489A, a VLM5030 and a DAC: the Track & Field / Hyper Sports board with its own driver ROM) is not run: MAME plays
+each sound command alone and the recording is played on the STE's DMA channel (`src/sound.s`, as Mario Bros. does).  The
+picture is MAME's ROT90 picture, 224 x 256 (portrait, not the 256 x 224 of the other Konami sports games), centred in
+the 320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
+against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  Status
+**Incomplete**: sound by recordings, one clip at a time, its timing and levels checked against MAME's in Hatari's audio
+capture, never listened to; the games of the scripted runs end at the first game over, no later stage was reached.
 
 ### The board and the reference
 
@@ -193,6 +193,14 @@ $FF).  The commands the game sends (coverage): 0, effects $01-$40 (17 values), p
   still lack).
 
 ## Speed
+
+Latest (Hatari, `tools/hatari.ps1 -Frames 20000`, the AUTOPLAY script, sound build with its audio off, DEBUG build, 4 MB,
+2026-11-08, the final build): 20,000 VBLs without a crash, 2 border fallbacks and no late border event; 58.3 arcade
+frames a second (97%) and 34.1 pictures a second over the run (the attract and game-over screens are drawn at 50 a second).
+In play (the 101 hundred-VBL intervals with fewer than 40 pictures a second): the logic 98% (mean; 84% in the worst
+interval), the pictures 23.5 a second (median 22.0, 10th percentile 17.5, worst 13.5).  The first 5,000 VBLs: 89% and
+24.5 pictures a second including the program's start (VBLs 0-200: the boot, 24 arcade frames in the first 300); VBLs
+1,000-5,000: 97% and 27.6.
 
 | Date | Setup | Logic | Pictures | Musashi cycles |
 |---|---|---|---|---|
@@ -291,6 +299,6 @@ Measured, not kept: nothing yet.  Techniques other ports use that may apply:
 
 No playtest beyond the AUTOPLAY script (coin, start, moving and shooting) in Hatari; the lock-step seeds play at random
 with the stick and the buttons, two players and the service mode included, never a whole game with its ending and the
-high-score entry on purpose.  Nothing here claims a complete playthrough.  No PPO profile.
+high-score entry on purpose.  No PPO profile.
 
 Full-game verification follows the [status policy](../../docs/port-status.md); nothing here claims a complete playthrough.

@@ -2,17 +2,14 @@
 
 ![Jail Break on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `jailbrek` (Konami GX507; `konami/jailbrek.cpp`, `k005849.cpp`; the clones `jailbrekb`, `manhatan` are not
-used).  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 32 KB of ROM), is statically translated to 68000
-code (`engine/m6809x.py`, 6,052 instructions) and checked against a reference board in lock-step; its idle point is a
-native that delivers the Konami 005849's interrupts (eight NMIs and the IRQ a frame).  The VLM5030's BSY pin, which
-the game polls, is modelled (in the reference and in the runtime); the SN76489A plays on the YM2149 and the
-VLM5030's 24 phrases on the DMA sound (sound is new: Hatari-checked, not heard by a person).  The picture is MAME's, 240 x 224, at screen x 48-287 with the top and bottom borders open, sprites by
-generated code (`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette
-by the shared default fitter.  Status: **Incomplete** (no full-game verification; sound judged by measurement only).
-Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, the AUTOPLAY script, DEBUG build, sound on, 2026-11-08): over the whole
-3,001-VBL run (boot and attract mode included) 40.5 arcade frames a second (67% of 60.6) and 15.4 pictures a second; in
-play-only windows before the audit (2026-11-07) 46-54 frames (76-90%) and 11-13 pictures; see Speed.
+**Status: Incomplete**
+
+Konami's 1986 police action game, where you walk the streets freeing hostages.  The picture matches the arcade
+exactly in tests, and the game's logic matches the arcade exactly in tests.  Music, effects and speech play; their
+loudness and timing were compared with the arcade's, but nobody has listened to them yet, and one of the four music
+voices is dropped when all four sound together.  It runs at about 83% of the arcade's speed with 19 pictures a second
+over a long recorded game (2026-11-08); busy fights are slower.  All test play stayed in the first stage, so the later
+stages are unchecked and no complete game has been played through.  It needs a 4 MB STE (the program is about 3.6 MB).
 
 ## Build and run
 
@@ -34,7 +31,7 @@ python games/jailbrek/ref/mame_cmp_jailbrek.py [frame ...]  # the reference agai
 
 Supply `assets/roms/jailbrek.zip` (MAME's parent set; `docs/rom_manifest.json` has the files' sizes, CRCs and
 SHA-1s).  Nothing ROM-derived is in git: the graphics, colours and ROM image are made into `build/jailbrek/` and
-assembled into the program.  The program is 3,583,298 bytes (with the 262 KB of speech) (text + data + BSS + 256) to load (`tools/release.py` MAX_LOAD 3,700,000).  Paths
+assembled into the program.  The program is 3,583,298 bytes to load (text + data + BSS + 256, the 262 KB of speech included) (`tools/release.py` MAX_LOAD 3,700,000).  Paths
 are relative to this folder; `engine/`, `tools/`, `port.py` and `docs/` at the top are the repository's.
 
 ## Controls
@@ -60,7 +57,8 @@ Checked (2026-11-08): the key table's bits are MAME's `jailbrek` ports (SYSTEM $
   equals MAME (How it works).
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot (the RAM test), attract, coin, start, play (the scripted walk and fire: score 0 -> 400 in
   the stills, the 1UP, the lives, the weapon box, the car, enemies and shots), the score ranking; no crash, no late border event in 3,001 VBLs (2 border
-  fallbacks).  Colours as the arcade's (a 16-colour fit).
+  fallbacks); the recorded play (seed 13, `-D PLAYBACK=1`) ran 20,002 VBLs with no crash, no bad pc and no late border
+  event (2026-11-08, Verification).  Colours as the arcade's (a 16-colour fit).
 * **Sound** (2026-11-07, Hatari with `hatari.ps1 -Sound 1`, audio extracted from the AVI): silent through the boot, then
   the attract mode's tones (peaks in the spectrum at the SN's periods, e.g. 1,508 / 2,980 Hz for periods 32 / 16 at
   1.536 MHz, held for seconds as in the reference's register log); a phrase asked at the start (`-D SPEECHTEST=144`)
@@ -72,6 +70,17 @@ Checked (2026-11-08): the key table's bits are MAME's `jailbrek` ports (SYSTEM $
   set by the game, not in `render.s`); the service mode; speed (below).
 
 ## How it works
+
+MAME set `jailbrek` (Konami GX507; `konami/jailbrek.cpp`, `k005849.cpp`; the clones `jailbrekb`, `manhatan` are not
+used).  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 32 KB of ROM), is statically translated to 68000
+code (`engine/m6809x.py`, 6,052 instructions) and checked against a reference board in lock-step; its idle point is a
+native that delivers the Konami 005849's interrupts (eight NMIs and the IRQ a frame).  The VLM5030's BSY pin, which the
+game polls, is modelled (in the reference and in the runtime); the SN76489A plays on the YM2149 and the VLM5030's 24
+phrases on the DMA sound (Hatari-checked, not heard by a person).  The picture is MAME's, 240 x 224, at screen x 48-287
+with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact against the
+reference in the shown colours; one 16-colour palette by the shared default fitter.  Status **Incomplete** (no full-game
+verification; sound judged by measurement only).  Speed: see Speed (the newest, 2026-11-08: 83% of the arcade's 60.6
+frames a second and 19.1 pictures a second over 20,002 VBLs of recorded play).
 
 ### The board and the reference
 
@@ -236,7 +245,7 @@ cycles an arcade frame (108,000 before the SN native), a picture 78,000 CPU cycl
 
 ## Verification
 
-Playtest evidence: the Musashi tests above; the hidden Hatari run (`tools/hatari.ps1`: `tools/hatari.ps1`: coin, start and play to a score of 400 and beyond, in 3,001 VBLs, no crash, no late border event; the
+Playtest evidence: the Musashi tests above; the hidden Hatari run (`tools/hatari.ps1`: coin, start and play to a score of 400 and beyond, in 3,001 VBLs, no crash, no late border event; the
 stills are in `run/jailbrek_hatari/` (not in git)).  The full-game
 status stays **Incomplete** (no playthrough; sound by measurement only); see the [status policy](../../docs/port-status.md).
 

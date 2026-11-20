@@ -2,16 +2,15 @@
 
 ![Pooyan on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `pooyan` (the Konami parent, `konami/pooyan.cpp`; the zip also holds the clones `pooyans` and `pootan`).  The
-board is Time Pilot's sibling (MAME: "very similar to Time Pilot"), so the port follows [Time
-Pilot's](../timeplt/README.md): the 3.072 MHz main Z80 is statically translated to 68000 code with inline leaves and
-checked in lock-step, the runtime delivers the NMI at the game's idle point.  The sound board (Time Pilot's,
-`shared/timeplt_a.cpp`) has its Z80 driver translated too; its two AY-3-8910s are mixed onto the YM2149.  The picture is
-the turned 224 x 256 picture centred in the 320-pixel screen, drawn by a Blitter renderer with generated sprite code
-(`engine/sprite_programs.py`).  Status **Verification pending**: logic and picture exact against the reference, full
-speed; full-game checks pending.  Speed (2026-10-29, Hatari, 4 MB STE, `bench.sh 6000` AUTOPLAY with sound): 58.3
-arcade frames a second (96% of the arcade's 60.6, the boot and attract mode included; 60 in most of play) and 43.5
-pictures a second (median 46.5, 10th percentile 32.0).
+**Status: Verification pending**
+
+Konami's 1982 shooting game in which a mother pig in a basket defends her piglets from balloon-riding wolves.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow); the
+  attract mode equals a recording of the arcade frame for frame.
+* Music and sound effects play as on the arcade (the board's sound filters are not imitated).
+* It runs at the arcade's full speed in most of play, about 43 pictures a second with sound (measured 2026-10-29).
+* Still to do: the cocktail-table screen flip, and a check of a complete game.
 
 ## Build and run
 
@@ -75,6 +74,17 @@ As Time Pilot's: **5/6** coin 1 / 2, **1/2** start, **up / down arrows** move th
   loudly at `z80_unsupported`.
 
 ## How it works
+
+MAME set `pooyan` (the Konami parent, `konami/pooyan.cpp`; the zip also holds the clones `pooyans` and `pootan`).  The
+board is Time Pilot's sibling (MAME: "very similar to Time Pilot"), so the port follows [Time
+Pilot's](../timeplt/README.md): the 3.072 MHz main Z80 is statically translated to 68000 code with inline leaves and
+checked in lock-step, the runtime delivers the NMI at the game's idle point.  The sound board (Time Pilot's,
+`shared/timeplt_a.cpp`) has its Z80 driver translated too; its two AY-3-8910s are mixed onto the YM2149.  The picture is
+the turned 224 x 256 picture centred in the 320-pixel screen, drawn by a Blitter renderer with generated sprite code
+(`engine/sprite_programs.py`).  Logic and picture exact against the reference, full speed; full-game checks pending.
+Speed (2026-10-29, Hatari, 4 MB STE, `bench.sh 6000` AUTOPLAY with sound): 58.3 arcade frames a second (96% of the
+arcade's 60.6, the boot and attract mode included; 60 in most of play) and 43.5 pictures a second (median 46.5, 10th
+percentile 32.0).
 
 ### The board and the reference
 

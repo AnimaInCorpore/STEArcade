@@ -2,15 +2,15 @@
 
 ![1943 on the STE (Hatari)](docs/screenshot.png)
 
-The `1943` set (Euro), MAME's `capcom/1943.cpp`, registered as `1943`.  The main Z80 is translated to 68000 code
-(14,314 instructions from the fixed ROM and banks 0, 1, 4, 6), the task kernel's scan for a ready task is a native
-routine.  The i8751 protection MCU runs its dumped firmware, translated (`tools/mcux.py`), with its VBL interrupt
-(INT1) as a native routine.  The sound Z80 is not run: the output of its driver is recorded per command (effects on
-the SSG, the music from FM as square waves) and played on the YM2149.  The picture is a hardware scrolled Blitter
-renderer with twin-line virtual screens and one 16-colour palette.  Status: **Incomplete** (busy scenes are slow; the
-arcade's clipping of sprites at the raw 256-pixel edges is not done).  Speed (Hatari, `bench.sh`: DEBUG + AUTOPLAY,
-6000 VBLs, 4 MB, 2026-10-12): 51.2 arcade frames a second (85%) and 7.9 pictures a second; the logic has since become
-~20% cheaper in Musashi (the MCU's INT1 native, the kernel's scan native, inline leaves), not measured in Hatari.
+**Status: Incomplete**
+
+Capcom's vertical-scrolling shoot-'em-up sequel to 1942, set over the Pacific.  The game's logic, including its
+protection chip, matches the arcade exactly in tests, and the pictures match the arcade's in one 16-colour palette (a
+few pixels differ where certain sprites overlap).  Sound effects and music are played back from recordings, the music
+as simpler square-wave tones.  Keyboard, joysticks and Jaguar pads work for one or two players.  The game runs at
+about 85% of the arcade's speed, but shows only about 8 pictures a second in play (emulator, 2026-10-12; the game's
+logic has become faster since, not yet measured there), so busy scenes are jerky.  Not yet done: the arcade's exact
+cropping of sprites at the screen edges and the flip screen; no full playthrough or real-hardware test yet.
 
 ## Build and run
 
@@ -72,6 +72,15 @@ moves, **A** fire, **B** button 2, **Option** coin, **Pause** start, keypad **1/
   default colour fitter has not been tried.
 
 ## How it works
+
+The `1943` set (Euro), MAME's `capcom/1943.cpp`, registered as `1943`.  The main Z80 is translated to 68000 code
+(14,314 instructions from the fixed ROM and banks 0, 1, 4, 6), the task kernel's scan for a ready task is a native
+routine.  The i8751 protection MCU runs its dumped firmware, translated (`tools/mcux.py`), with its VBL interrupt
+(INT1) as a native routine.  The sound Z80 is not run: the output of its driver is recorded per command (effects on
+the SSG, the music from FM as square waves) and played on the YM2149.  The picture is a hardware scrolled Blitter
+renderer with twin-line virtual screens and one 16-colour palette.  Speed (Hatari, `bench.sh`: DEBUG + AUTOPLAY, 6000
+VBLs, 4 MB, 2026-10-12): 51.2 arcade frames a second (85%) and 7.9 pictures a second; the logic has since become ~20%
+cheaper in Musashi (the MCU's INT1 native, the kernel's scan native, inline leaves), not measured in Hatari.
 
 Hardware facts from the MAME source: [docs/hardware-notes.md](docs/hardware-notes.md).  The shared pieces:
 [architecture.md](../../docs/architecture.md), the method: [porting-guide.md](../../docs/porting-guide.md).

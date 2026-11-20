@@ -2,16 +2,14 @@
 
 ![Galaga on the STE (Hatari)](docs/screenshot.png)
 
-The MAME set `galaga` (driver `namco/galaga.cpp`, video `namco/galaga_v.cpp`, sound `namco/galaga_a.cpp`): three Z80s
-at 3.072 MHz, the Namco 51XX (inputs, coins, credits) and 54XX (the explosion sound) on the 06XX bus, the 05XX
-starfield.  All three Z80s are translated to 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX's own program
-(`namco51.zip`) is translated by `engine/mb88x.py` (one native path, the read at its main loop); the 54XX is
-simulated (its explosion as YM noise); the 05XX starfield is computed by the renderer.  The picture: Blitter sprites
-with generated code per shape (`engine/sprite_codegen.py`), characters by the CPU, the stars as single pixels, all
-exact against the reference renderer at frozen moments; the sound: the WSG's three voices as the YM2149's square
-waves.  Status: **Verification pending** (root README): the whole game is translated and drawn, no full natural
-playthrough has been checked.  Latest speed (Hatari, 4 MB, `tools/bench.sh 9000`, attract mode, 2026-10-21): 50
-arcade frames a second (one a VBL, 82% of the arcade's 60.6), 31.1 pictures a second on average.
+**Status: Verification pending**
+
+Namco's 1981 space shooter, with the enemy formations that dive and capture your fighter.  The whole game is there,
+including the arcade's own coin and control chip; the picture, starfield included, matches the arcade pixel for
+pixel in tests.  The music and effects are imitated by the STE's own sound chip; the explosions are an imitation
+too, not the arcade's own explosion circuit.  It runs at about 82% of the arcade's speed, with 31 pictures a second
+on average in the attract mode and 17-21 while the enemy formation fills the screen (measured October 2026).
+11 of the arcade's 288 lines do not fit on the STE's screen.  Still to do: a complete playthrough by hand.
 
 ## Build and run
 
@@ -77,6 +75,17 @@ joysticks and both pads move the fighter.  Jaguar pad / PowerPad (STE enhanced p
 * Open: the starfield change of 2026-11-02 is not measured in Hatari; no PPO profile yet (`engine/ppo_profiles.py`).
 
 ## How it works
+
+The MAME set `galaga` (driver `namco/galaga.cpp`, video `namco/galaga_v.cpp`, sound `namco/galaga_a.cpp`): three Z80s
+at 3.072 MHz, the Namco 51XX (inputs, coins, credits) and 54XX (the explosion sound) on the 06XX bus, the 05XX
+starfield.  All three Z80s are translated to 68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX's own program
+(`namco51.zip`) is translated by `engine/mb88x.py` (one native path, the read at its main loop); the 54XX is
+simulated (its explosion as YM noise); the 05XX starfield is computed by the renderer.  The picture: Blitter sprites
+with generated code per shape (`engine/sprite_codegen.py`), characters by the CPU, the stars as single pixels, all
+exact against the reference renderer at frozen moments; the sound: the WSG's three voices as the YM2149's square
+waves.  Verification pending (root README): the whole game is translated and drawn, no full natural playthrough has
+been checked.  Latest Hatari speed (4 MB, `tools/bench.sh 9000`, attract mode, 2026-10-21): 50 arcade frames a second
+(one a VBL, 82% of the arcade's 60.6), 31.1 pictures a second on average.
 
 ### The board and the reference
 
@@ -480,6 +489,6 @@ Musashi's `render_test.py` finds 0.
 ## Verification
 
 Hatari runs of the attract mode (9,000 VBLs), random keys with `-D RESETTRAP=1`, the name entry with a forced score;
-coverage seeds 1-7 (20,000-30,000 frames). No recorded natural play and no full playthrough; no PPO profile.
+coverage seeds 1-7 (20,000-30,000 frames).  No recorded natural play and no full playthrough; no PPO profile.
 
 Full-game verification follows the [status policy](../../docs/port-status.md); nothing here claims a complete playthrough.

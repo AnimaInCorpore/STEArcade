@@ -2,17 +2,15 @@
 
 ![Gauntlet on the STE (Hatari)](docs/screenshot.png)
 
-STE port of the MAME set `gauntlet` (rev 14; driver `atari/gauntlet.cpp`). Unlike the other ports nothing is
-translated: the arcade's main CPU is an MC68010, and its own program runs on the STE's 68000, patched in place; the
-sound board's 6502 does not run: its driver is modelled at the level of its voices (music and effects on the YM2149,
-speech synthesized offline and played by the DMA sound), and its four replies to the main CPU come from the runtime.
-The picture is 320 of the 336 pixels (the side panel moved left), all 240 lines, 16 colours by the shared default
-fitter with checker pairs. Status: Verification pending (full-game Hatari verification pending). Latest speed (Hatari,
-4 MB, 2026-10-26, a scripted game in level 1 and the attract mode): the game's logic at the arcade's 60 frames a second
-(98-100% of the arcade's 59.92 Hz), 32.6 pictures a second in light play, 16.0 in the attract mode (busy scenes cost
-up to twice as much). Needs a 4 MB STE and the whole machine: the program takes TOS's memory, so **Esc resets** the
-STE (there is no return to the desktop and no CRASH.TXT; a crash turns the screen red and keeps its record at
-$3C1000).
+**Status: Verification pending**
+
+* Atari Games' four-player dungeon crawler, played with the keyboard, joysticks or Jaguar pads.
+* Picture, music, sound effects and the famous speech all work; the playfield is very slightly narrower than the
+  arcade's (the side panel moved left) and shown in 16 colours.
+* The game runs at the arcade's full speed (measured 2026-10-26); the picture keeps up at about 33 pictures a second
+  in light play and about 16 in busy scenes such as the title screen.
+* The game's logic matches the arcade exactly in tests; a complete playthrough has not been checked yet.
+* Needs a 4 MB STE and takes the whole machine: **Esc resets** the STE instead of returning to the desktop.
 
 ## Build and run
 
@@ -63,6 +61,17 @@ PowerPad: pad A player 1, pad B player 2, **A** fire, **B / C** magic, **Option*
 * Speed: busy scenes (the attract mode's title, three-player levels) cost up to twice a light scene's picture.
 
 ## How it works
+
+STE port of the MAME set `gauntlet` (rev 14; driver `atari/gauntlet.cpp`). Unlike the other ports nothing is
+translated: the arcade's main CPU is an MC68010, and its own program runs on the STE's 68000, patched in place; the
+sound board's 6502 does not run: its driver is modelled at the level of its voices (music and effects on the YM2149,
+speech synthesized offline and played by the DMA sound), and its four replies to the main CPU come from the runtime.
+The picture is 320 of the 336 pixels (the side panel moved left), all 240 lines, 16 colours by the shared default
+fitter with checker pairs. Latest speed (Hatari, 4 MB, 2026-10-26, a scripted game in level 1 and the attract mode):
+the game's logic at the arcade's 60 frames a second (98-100% of the arcade's 59.92 Hz), 32.6 pictures a second in
+light play, 16.0 in the attract mode (busy scenes cost up to twice as much). The program takes TOS's memory, so Esc
+resets the STE (there is no return to the desktop and no CRASH.TXT; a crash turns the screen red and keeps its record
+at $3C1000).
 
 ### The board and the reference
 

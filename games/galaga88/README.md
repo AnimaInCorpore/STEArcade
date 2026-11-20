@@ -1,16 +1,12 @@
 # Galaga '88 (Namco, 1987) on the Atari STE
 
-Atari STE port (4 MB) of the MAME set `galaga88` (Namco System 1, `namco/namcos1.cpp`, ROT270), built the way
-Splatterhouse is ([its README](../splatter/README.md)). The main and sub MC6809E programs are translated to 68000 code
-(`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) and run in lock-step with the reference board `engine/namcos1.py`
-(its renderer pixel-exact against MAME); the CUS64 MCU (HD63701) runs as Splatterhouse's native model of the same
-program; the sound CPU is not run (its handshake is answered). The picture is the arcade's turned to 224 x 288
-portrait (`src/render.s`); the last 11 rows (lives, stage flags) are not shown, the HUD has no palette of its own,
-there is no sound. Status: Experimental / deferred (early implementation / reference work); not registered in
-`port.py`, not released. Latest speed: Hatari BENCH (scripted game, arcade frames 600-1600, 4 MB) 12.14 arcade frames
-a second (20% of the arcade's 60.606 Hz), 6.08 pictures a second, measured on 2026-10-17 with the bank maps as the
-`REN_BANKDIFF` prototype (the default since 2026-11-02, not measured in Hatari again); logic 100.7k Musashi cycles a
-frame (2026-11-02).
+**Status: Experimental / deferred**
+
+Namco's 1987 sequel to Galaga, a space shooter with warps between dimensions, shown upright as on the arcade
+cabinet.  On the STE the game's logic matches the arcade exactly in tests and so does the picture, apart from the
+bottom rows with the lives and stage flags, which are not shown, and the score area, which has no colours of its own.
+There is no sound.  It runs at about a fifth of the arcade's speed, 6 pictures a second in a scripted game
+(2026-10-17), far too slow to play; the star fields are the biggest cost.  It fits a 4 MB STE.
 
 ## Build and run
 
@@ -45,6 +41,15 @@ Arrows, space / Z fire, 1 start, 5 / 6 coin, Esc quits (writes COUNTERS.BIN); jo
 * Speed: 20% of the arcade's rate in the BENCH game; the stars cost 37.5% of a picture, the logic ~0.8 VBL a frame.
 
 ## How it works
+
+Atari STE port (4 MB) of the MAME set `galaga88` (Namco System 1, `namco/namcos1.cpp`, ROT270), built the way
+Splatterhouse is ([its README](../splatter/README.md)).  The main and sub MC6809E programs are translated to 68000 code
+(`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) and run in lock-step with the reference board `engine/namcos1.py`
+(its renderer pixel-exact against MAME); the CUS64 MCU (HD63701) runs as Splatterhouse's native model of the same
+program; the sound CPU is not run (its handshake is answered).  The picture is the arcade's turned to 224 x 288
+portrait (`src/render.s`).  Not registered in `port.py`, not released.  Latest speed: Hatari BENCH 12.14 arcade frames
+a second (20% of 60.606 Hz), 6.08 pictures a second (2026-10-17, with the bank maps as the `REN_BANKDIFF` prototype,
+the default since 2026-11-02 and not measured in Hatari again); logic 100.7k Musashi cycles a frame (2026-11-02).
 
 ### The board and the reference
 

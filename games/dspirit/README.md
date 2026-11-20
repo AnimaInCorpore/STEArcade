@@ -1,15 +1,12 @@
 # Dragon Spirit (Namco, 1987) on the Atari STE
 
-Atari STE port of the MAME set `dspirit` (Namco System 1, `namco/namcos1.cpp`, ROT90), built from Galaga '88's
-([its README](../galaga88/README.md)) and Splatterhouse's ([its README](../splatter/README.md)). The main and sub
-MC6809E programs are translated to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) with three natives,
-and are identical to the reference board `engine/namcos1.py` over 7700 frames on six seeds; the CUS64 MCU (HD63701)
-runs as Splatterhouse's native model; the sound CPU is not run. The picture is upright and widened to the STE's 320
-pixels (`src/render.s`, exact against the reference model); there is no sound. Status: Experimental / deferred (logic
-exact, 320-pixel renderer, no sound); not registered in `port.py`, not released, and the program needs more than the
-4 MB release budget: it is developed with 14 MB in Hatari (the user, 2026-11-07). Latest speed (2026-11-08, Hatari
-14 MB, BENCH game: the intro, then stage 1): 8.32 arcade frames a second (14% of the arcade's 60.606 Hz), 2.93
-pictures a second; logic 83.9k Musashi cycles a frame (seed 5).
+**Status: Experimental / deferred**
+
+Namco's 1987 vertical shooter in which you fly a dragon over land and sea.  On the STE the game's logic and its picture
+match the arcade exactly in tests; the picture is upright and widened to fill the STE's whole screen.  There is no
+sound, and only the first stage or two have been reached in tests.  It runs at about a seventh of the arcade's speed,
+3 pictures a second in the intro and stage 1 (2026-11-08), far too slow to play.  It does not fit a 4 MB STE yet: it is
+developed on an emulated STE with 14 MB.
 
 ## Build and run
 
@@ -52,6 +49,16 @@ button both air shot and bomb.
 * Speed: 14% of the arcade's rate; the logic alone takes ~0.81 VBL an arcade frame in Hatari.
 
 ## How it works
+
+Atari STE port of the MAME set `dspirit` (Namco System 1, `namco/namcos1.cpp`, ROT90), built from Galaga '88's
+([its README](../galaga88/README.md)) and Splatterhouse's ([its README](../splatter/README.md)).  The main and sub
+MC6809E programs are translated to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) with nine natives,
+and are identical to the reference board `engine/namcos1.py` over 7700 frames on six seeds; the CUS64 MCU (HD63701)
+runs as Splatterhouse's native model; the sound CPU is not run.  The picture is upright and widened to the STE's 320
+pixels (`src/render.s`, exact against the reference model).  Not registered in `port.py`, not released; the program
+needs more than the 4 MB release budget and is developed with 14 MB in Hatari (the user, 2026-11-07).  Latest speed
+(2026-11-08, Hatari 14 MB, BENCH game: the intro, then stage 1): 8.32 arcade frames a second (14% of 60.606 Hz), 2.93
+pictures a second; logic 83.9k Musashi cycles a frame (seed 5).
 
 ### The board and the reference
 
@@ -108,7 +115,9 @@ vio's starting content, core.s; snapshot_ctx.bin the CPUs', the key custom's and
 
 `src/natives.s`, `tools/gen.py` NATIVES (`NO_NATIVES=1` builds without; R-Type's exact natives, 2026-11-07): the
 object-slot loop $C37F (empty slots skipped), the tile-column fill $7A54 and the 4 x 4 tile block $C0DB (the stage's
-tile streaming). Their test is `logic_test.py` (it runs the built program: `build.py --sim` first).
+tile streaming); six more on 2026-11-08 (the enemy-slot collision scans $F4B0 / $F6C7, $836C, $8277, $9222,
+the tile streaming $C025, and a `dbra` slot skip in $C37F; Speed). Their test is `logic_test.py` (it runs the built
+program: `build.py --sim` first).
 
 ### Schedule
 

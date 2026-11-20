@@ -2,15 +2,15 @@
 
 ![Kung-Fu Master on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `kungfum` (Irem M62, `irem/m62.cpp`, `m62_v.cpp`, the sound board `irem/audio/irem.cpp`).  The main Z80
-program (32 KB, flat) is statically translated to 68000 code with inline leaves, run on idle hooks.  The sound board's
-M6803 driver is translated too and plays its two AY-3-8910s on the YM2149 (three of the six channels); the MSM5205
-ADPCM voices are decoded offline and played through the DMA sound.  The picture (all 256 x 256 arcade pixels, centred
-in the 320-pixel screen, top and bottom borders open) is drawn by `src/render.s`: a hardware-scrolled playfield in
-twin-column rings, Blitter sprites with generated sprite code (`engine/sprite_programs.py`), the score panel as an image
-of its own.  Logic and picture are exact against the reference; status **Incomplete**: the flip screen (cocktail) and
-the service mode are not done.  Speed (2026-11-02, Hatari, 4 MB STE, recorded play): 52.6 arcade frames a second (93% of
-the arcade's 56.34) and 33.6 pictures a second.  The program loads 3.17 MB (the budget 3.7 MB).
+**Status: Incomplete**
+
+* Irem's side-scrolling martial-arts game: five floors of the temple, their bosses and the ending.
+* The whole arcade picture, the music, the sound effects and the shouts and screams work; the game's logic and its
+  pictures match the arcade exactly in tests (in the STE's 16 colours per floor).
+* Runs at about 93% of the arcade's speed, close to full speed in play, with 34 pictures a second (measured
+  2026-11-02).  Short stutters come when a new floor starts.
+* Missing: the cocktail cabinet's flipped screen and the service mode.
+* Runs on a plain 4 MB STE.
 
 ## Build and run
 
@@ -69,6 +69,16 @@ pad A player 1, pad B player 2, the D-pad moves, **A** punch, **B** kick, **Opti
   poke reaches only the reference.
 
 ## How it works
+
+MAME set `kungfum` (Irem M62, `irem/m62.cpp`, `m62_v.cpp`, the sound board `irem/audio/irem.cpp`).  The main Z80
+program (32 KB, flat) is statically translated to 68000 code with inline leaves, run on idle hooks.  The sound board's
+M6803 driver is translated too and plays its two AY-3-8910s on the YM2149 (three of the six channels); the MSM5205
+ADPCM voices are decoded offline and played through the DMA sound.  The picture (all 256 x 256 arcade pixels, centred
+in the 320-pixel screen, top and bottom borders open) is drawn by `src/render.s`: a hardware-scrolled playfield in
+twin-column rings, Blitter sprites with generated sprite code (`engine/sprite_programs.py`), the score panel as an image
+of its own.  Logic and picture are exact against the reference.  Speed (2026-11-02, Hatari, 4 MB STE, recorded play):
+52.6 arcade frames a second (93% of the arcade's 56.34) and 33.6 pictures a second.  The program loads 3.17 MB (the
+budget 3.7 MB).
 
 ### The board and the reference
 

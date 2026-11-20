@@ -2,17 +2,17 @@
 
 ![Track & Field on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `trackfld` (Konami GX361; `konami/trackfld.cpp`, `trackfld_a.cpp`).  The main CPU, a KONAMI-1 (an MC6809
-with encrypted opcodes, 40 KB of ROM), is statically translated to 68000 code (`engine/m6809x.py`) and checked
-against a reference board in lock-step; its idle point is a native that delivers the IRQ.  The sound board's Z80
-driver is translated too: its SN76489A's tones and noise play on the STE's YM2149, the VLM5030's speech and the DAC
-tunes are rendered offline and played on the DMA sound (Hyper Sports uses the same player).  The picture is MAME's,
-256 x 224, centred in the 320-pixel screen with the top and bottom borders open, sprites by generated code
-(`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette by the shared
-default fitter, flat.  Status: **Incomplete** (full speed, 20-50 pictures a second; no full-game verification yet).
-Speed: 95% of the arcade's rate (median 60 arcade frames a second), 41.9 pictures a second on average, median 47.5,
-10th percentile 23, with the sound (Hatari, `tools/bench.sh 6000`, the AUTOPLAY script, DEBUG build, 4 MB,
-2026-10-29); the 2026-11-02 changes (logic -6%, a picture -12.5% on Musashi) are not yet measured in Hatari.
+**Status: Incomplete**
+
+Konami's 1983 athletics game: hammer the run buttons through the 100 m dash, long jump, javelin, hurdles, hammer throw
+and high jump.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow).
+* Sound effects, speech and the music play; a few short sounds outside the tunes are still missing.
+* It runs at about 95% of the arcade's speed, 42 pictures a second on average with sound, dipping briefly when the
+  screen changes (measured 2026-10-29; later speed-ups are not yet measured on the STE).
+* Not yet done: a check of a complete game, the cocktail-table screen flip, the service mode and players 3 and 4.
+* It fits on one 720 KB floppy.
 
 ## Build and run
 
@@ -69,6 +69,18 @@ continues after the last event, no bonus, the records kept, normal difficulty, d
   flip; the service mode; players 3 and 4 (IN1).
 
 ## How it works
+
+MAME set `trackfld` (Konami GX361; `konami/trackfld.cpp`, `trackfld_a.cpp`).  The main CPU, a KONAMI-1 (an MC6809
+with encrypted opcodes, 40 KB of ROM), is statically translated to 68000 code (`engine/m6809x.py`) and checked
+against a reference board in lock-step; its idle point is a native that delivers the IRQ.  The sound board's Z80
+driver is translated too: its SN76489A's tones and noise play on the STE's YM2149, the VLM5030's speech and the DAC
+tunes are rendered offline and played on the DMA sound (Hyper Sports uses the same player).  The picture is MAME's,
+256 x 224, centred in the 320-pixel screen with the top and bottom borders open, sprites by generated code
+(`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette by the shared
+default fitter, flat.  Speed: 95% of the arcade's rate (median 60 arcade frames a second), 41.9 pictures a second on
+average, median 47.5, 10th percentile 23, with the sound (Hatari, `tools/bench.sh 6000`, the AUTOPLAY script, DEBUG
+build, 4 MB, 2026-10-29); the 2026-11-02 changes (logic -6%, a picture -12.5% on Musashi) are not yet measured in
+Hatari.
 
 ### The board and the reference
 

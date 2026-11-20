@@ -2,15 +2,15 @@
 
 ![Donkey Kong Junior on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `dkongjr` (US set F-2; `nintendo/dkong.cpp`, `dkongjr_map`).  Junior runs on Donkey Kong's board, so the port
-is Donkey Kong's ([its README](../dkong/README.md)) with this game's ROMs, tile bank, PROMs and sound pins.  The main
-Z80 is statically translated to 68000 code (`engine/z80x.py`) and checked in lock-step against a reference machine;
-the 8257 sprite DMA is Donkey Kong's runtime routine.  The 8035 sound board is recorded in MAME and played as DMA
-sound clips; the five discrete sounds are YM2149 patches.  The picture is Donkey Kong's renderer with the tile bank;
-the reference picture equals MAME's RGB and the STE's screen equals the reference.  Status: **Verification pending**
-(picture equal to MAME; full-game checks pending).  Speed: one arcade frame per 50 Hz VBL, 50 arcade frames a second
-(83% of the arcade's 60.6 Hz) and 50 pictures a second; a frame takes 35% of the 50 Hz frame on average, 0.9% of the
-frames late (Hatari, `-D AUTOSTART=150 -D TIMES=1`, 3000 frames, 4 MB, 2026-10-29).
+**Status: Verification pending**
+
+Nintendo's 1982 sequel, in which Junior climbs vines and chains to free his father, Donkey Kong.  It is built on the
+Donkey Kong port, since both games ran on the same arcade board.  The picture matches the arcade pixel for pixel on
+all four stages and the title, the game's logic matches the arcade exactly in tests, and it plays with keyboard,
+joysticks or pads.  Music and effects are played back from recordings of the arcade board; jumping, climbing and
+falling are imitated by the STE's sound chip, and the walking clicks are a little louder than the arcade's.  It runs
+at about 83% of the arcade's speed with a smooth 50 pictures a second (measured 2026-10-29).  Still to do: a full
+playthrough of all four stages and the ending, and listening against the arcade.
 
 ## Build and run
 
@@ -55,6 +55,16 @@ turns: both joysticks and both pads move Junior.  Jaguar pad / PowerPad: the D-p
   redraw each): skip it if it matters.  `$8000`/`$8003` (the service input's jumps) stay `z80_badpc` stubs.
 
 ## How it works
+
+MAME set `dkongjr` (US set F-2; `nintendo/dkong.cpp`, `dkongjr_map`).  The port is Donkey Kong's
+([its README](../dkong/README.md)) with this game's ROMs, tile bank, PROMs and sound pins.  The main Z80 is statically
+translated to 68000 code (`engine/z80x.py`) and checked in lock-step against a reference machine; the 8257 sprite DMA
+is Donkey Kong's runtime routine.  The 8035 sound board is recorded in MAME and played as DMA sound clips; the five
+discrete sounds are YM2149 patches.  The picture is Donkey Kong's renderer with the tile bank; the reference picture
+equals MAME's RGB and the STE's screen equals the reference.  Verification pending: picture equal to MAME, full-game
+checks pending.  Speed: one arcade frame per 50 Hz VBL, 50 arcade frames a second (83% of the arcade's 60.6 Hz) and
+50 pictures a second; a frame takes 35% of the 50 Hz frame on average, 0.9% of the frames late (Hatari,
+`-D AUTOSTART=150 -D TIMES=1`, 3000 frames, 4 MB, 2026-10-29).
 
 ### The board and the reference
 

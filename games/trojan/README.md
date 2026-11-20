@@ -2,14 +2,15 @@
 
 ![Trojan on the STE (Hatari)](docs/screenshot.png)
 
-STE port of MAME set `trojanr` (Trojan, Romstar, set 1; driver `capcom/lwings.cpp`, machine `trojan`).  The main Z80
-is translated whole and bank-aware (Black Tiger's scheme), with in-place table helpers and one native copy loop; the
-sound Z80 and its two YM2203s are not run: the driver's output is recorded per command and played on the YM2149; the
-ADPCM Z80 and its MSM5205 (the shouts) are omitted.  The picture: the three tile layers, the 96 sprites and the text
-on the STE's 16 colours, all 240 lines in the open borders of a 4 MB STE.  Status **Incomplete**: the ADPCM voices
-are missing and the game runs below the arcade's speed.  Speed (Hatari, 2026-10-16): logic 50.0 arcade frames a
-second (90% of the arcade's 55.4) in the recorded play and in AUTOPLAY, 10.4 pictures a second in the recorded play,
-18.0 in AUTOPLAY.
+**Status: Incomplete**
+
+Capcom's sword-and-shield action game: Trojan fights his way through a ruined post-apocalyptic city.  The game's
+logic matches the arcade exactly in tests, and the pictures match the arcade's in one 16-colour palette, using the
+full 240-line arcade picture.  Music and sound effects are played back from recordings; the spoken shouts are
+missing.  Keyboard, joysticks and Jaguar pads work for one or two players.  It runs at about 90% of the arcade's speed
+but shows only 10 to 18 pictures a second (emulator, 2026-10-16), so it looks jerky.  Known fault: in the emulator
+the attract mode stops with an error after about two minutes (2026-11-07), because some of the game's code was never
+reached in testing.  The flip screen is missing, and no full playthrough or real-hardware test has been done.
 
 ## Build and run
 
@@ -57,6 +58,14 @@ attack, **B** jump, **Option** coin, **Pause** start, keypad **1/2/5/6**, **\***
 * Coverage is random play: code no seed reached stops at `z80_badpc` (CRASH.TXT names the bank and pc).
 
 ## How it works
+
+STE port of MAME set `trojanr` (Trojan, Romstar, set 1; driver `capcom/lwings.cpp`, machine `trojan`).  The main Z80
+is translated whole and bank-aware (Black Tiger's scheme), with in-place table helpers and one native copy loop; the
+sound Z80 and its two YM2203s are not run: the driver's output is recorded per command and played on the YM2149; the
+ADPCM Z80 and its MSM5205 (the shouts) are omitted.  The picture: the three tile layers, the 96 sprites and the text
+on the STE's 16 colours, all 240 lines in the open borders of a 4 MB STE.  Speed (Hatari, 2026-10-16): logic 50.0
+arcade frames a second (90% of the arcade's 55.4) in the recorded play and in AUTOPLAY, 10.4 pictures a second in the
+recorded play, 18.0 in AUTOPLAY.
 
 ### The board and the reference
 

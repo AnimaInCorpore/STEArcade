@@ -1,19 +1,15 @@
 # Mario Bros. (Nintendo, 1983) on the Atari STE
 
-MAME `mario`, US revision E (`nintendo/mario.cpp`).  Z80 at 4 MHz, a Z80 DMA for the sprite copy, a sound MCU (M58715,
-internal ROM not dumped) with discrete sound.  256 x 224, horizontal, 59.185 Hz.  Status: **Incomplete** (root README):
-the logic and the picture are exact against the reference, the sound is checked in the simulator only, there is no
-full-game verification.
-
 ![Mario Bros. on the STE (Hatari)](docs/screenshot.png)
 
-Speed (Hatari, STE, 4 MB, `tools/hatari.ps1`, `-D AUTOPLAY=1`, 3000 VBLs, 2026-11-08): 57.9 arcade frames a second
-(98% of 59.185) and 29.9 pictures a second; 2 border fallbacks, no late border events.
+**Status: Incomplete**
 
-Long run (Hatari, `-D AUTOPLAY=1 -D CHEAT=1`: the lives cheat keeps the game going, 30,000 VBLs = 10 minutes, no video,
-2026-11-08): no crash, 59.8 arcade frames a second (the schedule's 60 against the arcade's 59.185: 1% fast) and 30.3
-pictures a second.  The scripted input only walks and jumps, so it does not clear phases: the later phases are not
-reached in Hatari yet.
+Nintendo's 1983 original Mario game: Mario and Luigi flip pests in the sewer pipes.  The picture matches the arcade
+pixel for pixel in tests and the game's logic matches the arcade exactly in tests.  The music and effects are played
+back from recordings of the arcade board, but nobody has listened to them yet; the footsteps and the ice sound
+could not be recorded and are not played.  It runs at the arcade's full speed (98-100%) with about 30 pictures a
+second (measured 2026-11-08), and a ten-minute automatic run had no crash.  The later phases have not been reached
+yet, and no one has played the game through.
 
 ## Build and run
 
@@ -49,6 +45,11 @@ player 2; Jaguar pads as the other ports.
 
 ## How it works
 
+MAME `mario`, US revision E (`nintendo/mario.cpp`).  Z80 at 4 MHz, a Z80 DMA for the sprite copy, a sound MCU (M58715,
+internal ROM not dumped) with discrete sound.  256 x 224, horizontal, 59.185 Hz.  Incomplete (root README): the logic
+and the picture are exact against the reference, the sound is checked in the simulator only, there is no full-game
+verification.
+
 ### The board and the reference
 
 Memory map and latch bits: the header of `tools/machine.py`.  The game programs the Z80 DMA once per frame (`$6900` ->
@@ -80,7 +81,15 @@ clip at a time, the newest wins.  The walk pulses and the ice sound are silent i
 
 ## Speed
 
-Hatari 2026-11-08, see the top.  Musashi: logic about 39k cycles an arcade frame; a picture about 96k CPU cycles + 45k
+Hatari (STE, 4 MB, `tools/hatari.ps1`, `-D AUTOPLAY=1`, 3000 VBLs, 2026-11-08): 57.9 arcade frames a second (98% of
+59.185) and 29.9 pictures a second; 2 border fallbacks, no late border events.
+
+Long run (Hatari, `-D AUTOPLAY=1 -D CHEAT=1`: the lives cheat keeps the game going, 30,000 VBLs = 10 minutes, no video,
+2026-11-08): no crash, 59.8 arcade frames a second (the schedule's 60 against the arcade's 59.185: 1% fast) and 30.3
+pictures a second.  The scripted input only walks and jumps, so it does not clear phases: the later phases are not
+reached in Hatari yet.
+
+Musashi: logic about 39k cycles an arcade frame; a picture about 96k CPU cycles + 45k
 Blitter bus cycles (113k + 45k before the speed work).  `tools/profile.py` shows the rest: sprites about 60% of the
 picture's CPU, row copies 15%, the tile compare 8%.  Applied: a fast skip of the unused sprite entries (-8k), the tile
 compare with `cmpm.l` / `dbne` (-8.5k).  Not tried: writer marks for the video RAM, the baking cost, the sprite setup in

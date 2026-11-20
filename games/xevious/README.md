@@ -2,22 +2,15 @@
 
 ![Super Xevious in Hatari (a still of tools/hatari.ps1's AVI, the picture area)](docs/screenshot.png)
 
-The MAME set **`sxevious`** (Super Xevious, a clone of `xevious`; driver `namco/galaga.cpp` (`xevious_state`), video
-`namco/xevious.cpp`, machine `namco/xevious_m.cpp`).  `assets/roms/` has `sxevious.zip` and the device sets
-`namco50.zip` ... `namco54.zip` but no `xevious.zip`, so the base game was not ported; the 26 files of
-`docs/rom_manifest.json` equal the CRCs and SHA-1s of MAME's `ROM_START( sxevious )`.  Board: three Z80s at 3.072 MHz
-(main, sub, sound) on Galaga's board family, the Namco 06XX bus with the **50XX** (a score keeper that Xevious only uses
-for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (explosion noise), two scrolling tile layers
-(background with a pattern ROM logic, foreground characters) and 3-bit sprites.  All three Z80 programs are translated to
-68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
-the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
-three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental / deferred** (root README): the logic is exact in lock-step and the picture is exact against the
-reference renderer, which equals MAME's picture, but only one explosion sound exists and the speed is low (the picture was drawn by the CPU at the time of this status
-line; the sprites and the foreground are Blitter passes since 2026-11-08, see Speed).
+**Status: Experimental / deferred**
 
-Speed (Hatari, 4 MB STE, `tools/bench.ps1`, invincible build, `AUTOPLAY`, `MAX_SKIP` 3, 2026-11-08, after the natives): 26-32
-arcade frames a second (mean 28.8 over 20,000 VBLs, 47% of the arcade's 60.6) and 6.6-8.0 pictures a second (mean 7.2).  After the
-sprite passes alone (same day): 27-29 and 6.6-7.4; before them (2026-11-07, attract mode): about 21.5 and 5.4.
+Namco's 1984 flying shooter (here its harder Super Xevious version), where you bomb ground targets and shoot down
+aircraft over a scrolling landscape.  The picture matches the arcade exactly in tests, and the game's logic matches the
+arcade exactly in tests.  The music plays, with plainer tones than the arcade's, but of the noise effects only the
+player's explosion exists: shots and other explosions are silent.  It is far too slow to play well: about 47% of the
+arcade's speed and 7 pictures a second (2026-11-08); by the measurements, full speed is out of reach for this game on
+a standard STE.  A long test run with cheats got far into the game (probably the sixth area); no real game has been
+played through.
 
 ## Build and run
 
@@ -67,7 +60,8 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
 * Hatari (F030Arcade's build, 4 MB STE, cycle-exact; `tools/hatari.ps1`: hidden, AUTOPLAY coin / start / pattern, AVI, stills):
   2,500 VBLs, no `CRASH.TXT`; stills show the title, the ready screen, scrolling forest and the area edge, the sprites and
   the foreground text in the right colours.  The autoplay's crude pattern keeps losing Solvalou (the game then reads PLAYER
-  ONE / TWO READY), so a long Hatari play with the ship alive and shooting was not looked at.
+  ONE / TWO READY), so a long Hatari play with the ship alive and shooting was not looked at.  A 20,000-VBL run of the invincible
+  autoplay build (2026-11-08) had no `CRASH.TXT` and reached area byte 6 (Verification).
 * Coverage (`ref/cover.py`): CPU1 7,187 translated instructions, CPU2 762, CPU3 555; no unsupported, no missing target.
 * Sound (`tools/logic_test.py`): every frame the sound CPU's WSG registers equal the reference's and the YM2149's registers
   equal `tools/sound.py`'s image of them (the model of Galaga's port with Xevious's waveform PROM).  Against MAME's audio
@@ -79,8 +73,8 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   squares), and the 54XX's effects (shots, explosions other than the player's, the tone under the play) are missing.  The
   in-game part of the capture was not compared (a 24 s Hatari AVI is 1.5 GB: the SSD rule).  **Nobody listened.**
 * Missing, most important first: the 54XX's other noises (only the player's explosion, commands $1x / $2x, is a noise burst, as in Galaga's port; MAME's
-  discrete circuit and the ground-target explosions are not modelled); a full natural playthrough; **speed** (below); the Blitter's masked sprite passes of
-  `AGENTS.md` (older statement: sprites and the foreground were merged by the CPU: `render.s`, `blit_row`; done 2026-11-08, see Speed); the cocktail flip, a foreground
+  discrete circuit and the ground-target explosions are not modelled); a full natural playthrough; **speed** (below; the Blitter's masked sprite passes of
+  `AGENTS.md` are done since 2026-11-08); the cocktail flip, a foreground
   scroll and a vertical background scroll other than 0 (the game uses none: `ref/pens.py` saw one value of registers 1-3);
   per-area palettes (one 16-colour fit for all areas); the 54XX's program; the 50XX's own program (translating it needs
   `mb88x` for the MB8842's 128 nibbles of RAM).
@@ -89,6 +83,23 @@ quit.  The second button reaches the program through the DIP switch bank ($6800 
   `$7900-$7C7F`, `$7F00`).
 
 ## How it works
+
+The MAME set **`sxevious`** (Super Xevious, a clone of `xevious`; driver `namco/galaga.cpp` (`xevious_state`), video
+`namco/xevious.cpp`, machine `namco/xevious_m.cpp`).  `assets/roms/` has `sxevious.zip` and the device sets
+`namco50.zip` ... `namco54.zip` but no `xevious.zip`, so the base game was not ported; the 26 files of
+`docs/rom_manifest.json` equal the CRCs and SHA-1s of MAME's `ROM_START( sxevious )`.  Board: three Z80s at 3.072 MHz
+(main, sub, sound) on Galaga's board family, the Namco 06XX bus with the **50XX** (a score keeper that Xevious only uses
+for a start-up check), the **51XX** (inputs, coins, credits) and the **54XX** (explosion noise), two scrolling tile layers
+(background with a pattern ROM logic, foreground characters) and 3-bit sprites.  All three Z80 programs are translated to
+68000 code (`tools/gen.py`, `engine/z80x.py`); the 51XX runs its own translated program (`engine/mb88x.py`, as in Galaga);
+the 50XX is **simulated** at the register interface for the three commands the game sends; the sound is the Namco WSG's
+three voices as the YM2149's square waves and the player's explosion as noise (as in Galaga).  Status: **Experimental / deferred** (root README): the logic is exact in lock-step and the picture is exact against the
+reference renderer, which equals MAME's picture, but only one explosion sound exists and the speed is low (the sprites and the foreground are Blitter passes since
+2026-11-08, see Speed).
+
+Speed (Hatari, 4 MB STE, `tools/bench.ps1`, invincible build, `AUTOPLAY`, `MAX_SKIP` 3, 2026-11-08, after the natives): 26-32
+arcade frames a second (mean 28.8 over 20,000 VBLs, 47% of the arcade's 60.6) and 6.6-8.0 pictures a second (mean 7.2).  After the
+sprite passes alone (same day): 27-29 and 6.6-7.4; before them (2026-11-07, attract mode): about 21.5 and 5.4.
 
 ### The board and the reference
 
@@ -136,8 +147,9 @@ pixels wide (chunk 3 of the 320 pixel line), 288 lines; one 16-colour palette fi
 (`ref/pens.py`, `engine/palette_quantize.py`, flat); tiles and sprites in display orientation (`bgt.bin`, `fgt.bin`,
 `spt.bin`).  `src/render.s`: the background is a ring of 512 lines (plus 288 behind it) updated from the tile RAM writes
 (shadow copies tell the changed cells), the picture is one Blitter copy of 288 lines from `(20 + scroll) & 511`, the
-sprites and the foreground are drawn by the CPU row by row (pens' masks from the three bit planes, shifted, merged,
-clipped at the picture's edges), the foreground from a list of cells with pixels.
+sprites and the foreground characters are baked images drawn by Blitter row passes (HOP 2 / OP 3, the opaque pixels as
+end masks, since 2026-11-08; before that the CPU drew them row by row: pens' masks from the three bit planes, shifted,
+merged, clipped at the picture's edges), the foreground from a list of cells with pixels.
 
 ### Sound
 
@@ -146,7 +158,8 @@ noises are not modelled.  The checks are in State ("Sound").
 
 ## Speed
 
-**Current (2026-11-08, after the sprite passes)**: Hatari (`tools/bench.ps1`, `MAX_SKIP` 3): attract and autoplay now 27-32 arcade frames a second (of 60.6) and 6.8-8.0
+**After the sprite passes (2026-11-08; the newest figures, after the natives, are in Verification, "Playable?": a mean of
+28.8 arcade frames (47%) and 7.2 pictures a second over 20,000 VBLs, the logic 140.9k cycles a frame)**: Hatari (`tools/bench.ps1`, `MAX_SKIP` 3): attract and autoplay now 27-32 arcade frames a second (of 60.6) and 6.8-8.0
 pictures a second, against 21.5 and 5.4 before.  The logic (176k cycles a frame, ~4.9M of the 8M a second) now takes more
 than the pictures (~440k each, of which the picture copy is ~130k Blitter bus cycles).  Further gains: natives at the hot
 logic routines (no routine profile yet), a higher `MAX_SKIP` (the user's call), the picture copy (hardware scroll, see the

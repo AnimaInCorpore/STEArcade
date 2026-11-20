@@ -2,16 +2,14 @@
 
 ![Pac-Man on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `pacman` (Pac-Man (Midway), `pacman/pacman.cpp`, `pacman_v.cpp`); the closest existing port is
-[Galaga](../galaga/README.md) (the same Namco tile and sprite hardware, the same WSG sound chip).  The one Z80 is
-statically translated to 68000 code with inline leaves and runs in lock-step with the reference, the IRQ delivered at
-the task loop's spin; the boot's ROM / RAM tests are patched out.  The WSG's three voices play as square waves on the
-YM2149 (Galaga's method).  The picture is MAME's ROT90 picture, 224 x 288 at screen x 48-271, 274 of its 288 lines shown
-(Hatari's lines with both borders open), tiles from the translated writers' marks, sprites by generated sprite code
-(`engine/sprite_programs.py`), the colours the arcade's own indices.  Status **Verification pending**: logic and picture
-exact against the reference, full speed; full-game checks pending.  Speed (2026-10-29, Hatari, 4 MB STE, AUTOPLAY with
-sound, 3001 VBLs): 3492 arcade frames and 2877 pictures, 58.2 arcade frames a second (96% of the arcade's 60.606, ~109
-frames lost at the boot, then full speed) and 47.9 pictures a second.
+**Status: Verification pending**
+
+Namco's 1980 maze classic, in Midway's US version.  The picture matches the arcade pixel for pixel in tests (14 of its
+288 lines, all but one rarely used, do not fit the STE's screen and are left out), and the game's logic matches the
+arcade exactly in tests.  The sound is imitated by the STE's own sound chip, so the tones are plainer than the
+arcade's; it has not yet been compared by ear.  It runs at the arcade's full speed with about 48 pictures a second
+(measured 2026-10-29); the arcade's start-up memory test is skipped, so the game starts sooner.  Still to do: the
+controls tried by hand and a natural playthrough of the levels and intermissions.
 
 ## Build and run
 
@@ -76,6 +74,17 @@ keypad **1** / **2** start, **5** / **6** coin, **\*** + **#** quit.
   port has no switch for it).  No PPO profile (`engine/ppo_profiles.py`: deferred).
 
 ## How it works
+
+MAME set `pacman` (Pac-Man (Midway), `pacman/pacman.cpp`, `pacman_v.cpp`); the closest existing port is
+[Galaga](../galaga/README.md) (the same Namco tile and sprite hardware, the same WSG sound chip).  The one Z80 is
+statically translated to 68000 code with inline leaves and runs in lock-step with the reference, the IRQ delivered at
+the task loop's spin; the boot's ROM / RAM tests are patched out.  The WSG's three voices play as square waves on the
+YM2149 (Galaga's method).  The picture is MAME's ROT90 picture, 224 x 288 at screen x 48-271, 274 of its 288 lines
+shown (Hatari's lines with both borders open), tiles from the translated writers' marks, sprites by generated sprite
+code (`engine/sprite_programs.py`), the colours the arcade's own indices.  Verification pending: logic and picture
+exact against the reference, full speed; full-game checks pending.  Speed (2026-10-29, Hatari, 4 MB STE, AUTOPLAY with
+sound, 3001 VBLs): 3492 arcade frames and 2877 pictures, 58.2 arcade frames a second (96% of the arcade's 60.606, ~109
+frames lost at the boot, then full speed) and 47.9 pictures a second.
 
 ### The board and the reference
 

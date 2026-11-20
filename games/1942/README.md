@@ -2,15 +2,14 @@
 
 ![1942 on the STE (Hatari)](docs/screenshot.png)
 
-The `1942` set (Revision B), MAME's `capcom/1942.cpp`.  The main Z80 is translated to 68000 code (15,469 instructions
-since the task roots of 2026-10-20) and runs the arcade's cooperative task kernel; the scheduler's scan is a native
-routine.  The sound Z80 is not run: the output of its driver (two AY-3-8910) is recorded per tune and effect and
-played on the YM2149, three of its six channels.  The picture is the arcade's rotated raster in hardware scrolled
-768-line rings (three draw rings and a clean one), sprites by generated Blitter code, one 16-colour palette per
-palette bank.  Status: **Verification pending** (the assisted ending replay is verified; full-game checks are
-pending).  Speed (Hatari, `bench.sh`: DEBUG + AUTOPLAY with MAME's cheats, 6000 VBLs, 4 MB, 2026-10-12): 58.1 arcade
-frames a second (98% of the arcade's 59.6) and 35.7 pictures a second; the inline leaves of 2026-11-02 (logic -2.7% in
-Musashi) have not been measured in Hatari.
+**Status: Verification pending**
+
+Capcom's vertical-scrolling World War II shoot-'em-up.  The game's logic matches the arcade exactly in tests, and the
+pictures match the arcade's apart from colours: 16 on screen, chosen afresh for each of the arcade's colour sets.
+Sound and music are played back from recordings, on three of the arcade's six sound channels.  Keyboard, joysticks
+and Jaguar pads work for one or two players.  It runs at about 98% of the arcade's speed with 36 pictures a second in
+play (emulator, 2026-10-12).  A run helped by cheats reached the ending; a full natural playthrough and real hardware
+are still to be checked, and the flip screen and the service mode are missing.
 
 ## Build and run
 
@@ -57,6 +56,15 @@ quit.  Tap the coin key: the game ignores a coin held for 40 ticks (the referenc
   fitter has not been tried.
 
 ## How it works
+
+The `1942` set (Revision B), MAME's `capcom/1942.cpp`.  The main Z80 is translated to 68000 code (15,469 instructions
+since the task roots of 2026-10-20) and runs the arcade's cooperative task kernel; the scheduler's scan is a native
+routine.  The sound Z80 is not run: the output of its driver (two AY-3-8910) is recorded per tune and effect and
+played on the YM2149, three of its six channels.  The picture is the arcade's rotated raster in hardware scrolled
+768-line rings (three draw rings and a clean one), sprites by generated Blitter code, one 16-colour palette per
+palette bank.  Speed (Hatari, `bench.sh`: DEBUG + AUTOPLAY with MAME's cheats, 6000 VBLs, 4 MB, 2026-10-12): 58.1
+arcade frames a second (98% of the arcade's 59.6) and 35.7 pictures a second; the inline leaves of 2026-11-02 (logic
+-2.7% in Musashi) have not been measured in Hatari.
 
 `src/`: `1942.s` (start, schedule, input, timers), `render.s` (video, palette banks, baking), `bg.s`, `chr.s` +
 `chr2.s`, `spr.s`, `frame.s` (one frame, data, variables), `sound.s` (the YM2149).  `tools/`: `machine.py` (the

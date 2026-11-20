@@ -2,14 +2,19 @@
 
 ![Mikie on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `mikie` (Konami GX469; `konami/mikie.cpp`).  The main CPU, a plain MC6809E (not KONAMI-1: the opcodes are not
-encrypted), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
-lock-step.  The picture is MAME's ROT270 picture (**the monitor is turned: 224 x 256, portrait**), centred in the
-320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
-against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat; the sound board's Z80
-driver translated too, its two SN76489As on the YM2149 (three of the eight voices at a time).  Status: **Incomplete** (root README): the
-picture, the logic and the sound driver are verified (below), the YM mix-down (three voices of eight) is a reduction by
-design, and no full-game play has been verified.
+**Status: Incomplete**
+
+Konami's 1984 school-chase game: Mikie runs through classrooms, hallways and the canteen collecting hearts while
+teachers chase him.  The picture is upright (portrait), as on the arcade's turned monitor.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow).
+* Music and sound effects play, but the STE can sound only three of the arcade's eight voices at once, so the loudest
+  win; nobody has listened to the result yet.
+* It runs at about 92% of the arcade's speed, 35 pictures a second in the first classroom; in the later rooms 89-94%,
+  20-45 pictures a second (measured 2026-11-08).
+* The later rooms have been tested only by skipping to them: no one has yet cleared a classroom by play.
+* Not done: the cocktail-table screen flip; the service mode is left out on purpose; the ending and the high-score
+  entry are untested.
 
 ## Build and run
 
@@ -54,7 +59,7 @@ defaults (3 lives, upright, bonus 20k 70k 50k+, easy, demo sounds on; DSW3 flip 
   timing differs); only the unpatched board is.  The foreground is a task loop (`$61BC`, queue `$2A40`); its idle point
   `$61C5` and the `CWAI #$EF` of `$6FFF` (a task waiting for the frame) are natives that deliver the IRQ at the vertical
   blank (`mk_idle`, `mk_cwai` in `src/mikie.s`; the CWAI pushes its state at once as the 6809 does).
-* **Translation** (2026-11-08): 12159 instructions, none unsupported or missing (8540 before the later rooms were covered) (the CWAI is the native).  One instruction that
+* **Translation** (2026-11-08): 12159 instructions, none unsupported or missing (8540 before the later rooms were covered; the CWAI is the native).  One instruction that
   static descent reached, an `LBRA $D791` into zero padding at `$6E80` that never runs, is a `main_dead` hook
   (`gen.py` DEAD); this needed a small, backwards compatible addition to `engine/m6809x.py` (`Program.no_follow`: pcs whose
   successors discovery does not follow).
@@ -168,6 +173,15 @@ Hatari (`tools/hatari.ps1 -Frames 3000 -Sound 1`, attract, coin, first room): 54
 spread over sprites (36 entries a picture), the sound and the damage restore.
 
 ## How it works
+
+MAME set `mikie` (Konami GX469; `konami/mikie.cpp`).  The main CPU, a plain MC6809E (not KONAMI-1: the opcodes are not
+encrypted), is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
+lock-step.  The picture is MAME's ROT270 picture (the monitor is turned: 224 x 256, portrait), centred in the
+320-pixel screen with the top and bottom borders open, sprites by generated code (`engine/sprite_programs.py`), exact
+against the reference in the shown colours; one 16-colour palette by the shared default fitter, flat.  The sound
+board's Z80 driver is translated too, its two SN76489As on the YM2149 (three of the eight voices at a time).  The
+picture, the logic and the sound driver are verified (State); the YM mix-down (three voices of eight) is a reduction by
+design, and no full-game play has been verified.
 
 * **Memory** (`machine.py`): RAM $0000-$00FF, sprite RAM $2800-$288F (36 sprites of attribute, y, code, x), RAM
   $2890-$37FF, colour RAM $3800-$3BFF, video RAM $3C00-$3FFF, ROM $6000-$FFFF; the LS259 latch at $2000-$2007 (Q0 / Q1 coin

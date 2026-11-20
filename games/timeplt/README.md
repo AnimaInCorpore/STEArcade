@@ -2,16 +2,16 @@
 
 ![Time Pilot on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `timeplt` (`konami/timeplt.cpp`).  The main Z80 program (24 KB) is statically translated to 68000 code
-(`engine/z80x.py`, with natives for the cloud routine and three ROM checksums) and checked against a reference board in
-lock-step; the sound board (a Z80 and two AY-3-8910s) is not run yet.  The picture is MAME's ROT90 picture, 224 x 256,
-centred in the 320-pixel screen with the top and bottom borders open, sprites by generated code
-(`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette by the shared
-default fitter, flat.  Status: **Incomplete** (sound not implemented; full speed, 24-33 pictures a second in play).
-Speed: 100% of the arcade's rate (59.9 arcade frames a second); in play 32.5 pictures a second (median of 2-s windows),
-26.5 (10th percentile), 24.5 at the least, 50 in the attract mode (Hatari, `PLAY=1 tools/bench.sh 9000`, the recorded
-play, DEBUG build, 4 MB, 2026-10-25).  Started 2026-10-25 from F030Arcade's Falcon port (`F030Arcade/games/timeplt`:
-its executed-pc roots, the cloud-reuse capture, the scanline-255 schedule).
+**Status: Incomplete**
+
+Konami's 1982 shoot-'em-up in which your plane fights through five eras of air war, from biplanes to UFOs.
+
+* The game plays exactly like the arcade: its logic and its picture match the arcade's in tests, colours included
+  (squeezed into the STE's 16 colours).
+* There is no sound yet.
+* It runs at the arcade's full speed, typically 32 pictures a second in play and never fewer than 24; 50 in the attract
+  mode (measured 2026-10-25).
+* Not yet done: the cocktail-table (two players facing each other) screen flip and the Space Pilot bootleg.
 
 ## Build and run
 
@@ -64,6 +64,16 @@ port 1 player 1, port 0 player 2; Jaguar pads as in the other ports.  DIP switch
   `$109F`-`$1195` run in MAME's schedule only.
 
 ## How it works
+
+MAME set `timeplt` (`konami/timeplt.cpp`).  The main Z80 program (24 KB) is statically translated to 68000 code
+(`engine/z80x.py`, with natives for the cloud routine and three ROM checksums) and checked against a reference board in
+lock-step; the sound board (a Z80 and two AY-3-8910s) is not run yet.  The picture is MAME's ROT90 picture, 224 x 256,
+centred in the 320-pixel screen with the top and bottom borders open, sprites by generated code
+(`engine/sprite_programs.py`), exact against the reference in the shown colours; one 16-colour palette by the shared
+default fitter, flat.  Speed: 100% of the arcade's rate (59.9 arcade frames a second); in play 32.5 pictures a second
+(median of 2-s windows), 26.5 (10th percentile), 24.5 at the least, 50 in the attract mode (Speed).  Started 2026-10-25
+from F030Arcade's Falcon port (`F030Arcade/games/timeplt`: its executed-pc roots, the cloud-reuse capture, the
+scanline-255 schedule).
 
 ### The board and the reference
 

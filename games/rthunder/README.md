@@ -2,14 +2,14 @@
 
 ![Rolling Thunder on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `rthunder` (rev 3; `namco/namcos86.cpp`).  Two MC6809E (the main program and the sub program) are statically
-translated to 68000 code (`engine/m6809x.py`) and run in lock step with a reference board; the HD63701 MCU, which keeps the
-inputs, the coins and the credits and runs the sound engine, is a **native model of its mailbox** (checked against its
-firmware); the CUS42 / CUS43 tilemaps scroll by the Shifter (video address, fine scroll, line width) over display buffers made
-incrementally from the tile RAM, the sprites and the fixed layer (HUD, text) are drawn over them with HOP 2 / OP 3 Blitter
-passes (`src/render.s`, `src/sprites.s`); 288 x 224 picture in a 320-pixel window, one fixed 16-colour palette.
-Status: **Not playable** (see State): exact picture and logic in the tests, but about a third of the arcade's speed, a few
-pictures a second, no sound, and the translation does not cover everything a long game runs.
+**Status: Not playable**
+
+Namco's 1986 spy action game, in which agent Albatross runs, ducks and jumps between two floors.  On the STE the
+picture and the game's logic match the arcade exactly in tests, and a scripted game gets from the coin and the start
+into the first area without a crash.  There is no sound yet, playing by hand on the keyboard, joystick or pad has not
+been tried, and a long game can still stop where it reaches parts of the program no test has run.  It runs at about
+70% of the arcade's speed in play, 10.6 pictures a second (half the arcade's speed over a whole 2-minute run with the
+slow title screens; 2026-11-08).  It fits a plain 4 MB STE.
 
 ## Build and run
 
@@ -68,9 +68,19 @@ $D7: 3 lives, 1 coin 1 credit, no level select).
 random play, 6000 frames each; seed 100, the benchmark's play); a run that goes further finds code nobody has run
 (`cpu_badpc`: the autoplay play reached such a place about 1,380 frames after the start, at 6809 pc `$6338` in a banked page
 of the sub program: found by `logic_test.py --autoplay` and by Hatari, closed by coverage seed 100); no run of 20,000 VBLs
-reaching later stages exists, no cheat or recorded play reaches the later areas, no sound, no speed near the targets.
+reaching later stages exists, no cheat or recorded play reaches the later areas, no sound, no speed near the targets (50% overall, 70% in play,
+2026-11-08: Speed).
 
 ## How it works
+
+MAME set `rthunder` (rev 3; `namco/namcos86.cpp`).  Two MC6809E (the main program and the sub program) are statically
+translated to 68000 code (`engine/m6809x.py`) and run in lock step with a reference board; the HD63701 MCU, which keeps the
+inputs, the coins and the credits and runs the sound engine, is a **native model of its mailbox** (checked against its
+firmware); the CUS42 / CUS43 tilemaps scroll by the Shifter (video address, fine scroll, line width) over display buffers made
+incrementally from the tile RAM, the sprites and the fixed layer (HUD, text) are drawn over them with HOP 2 / OP 3 Blitter
+passes (`src/render.s`, `src/sprites.s`); 288 x 224 picture in a 320-pixel window, one fixed 16-colour palette.  Exact
+picture and logic in the tests; 50% of the arcade's speed over 6,000 VBLs (70% in play), no sound, and the translation
+does not cover everything a long game runs.
 
 ### The board and the reference
 
@@ -122,7 +132,7 @@ firmware (`tools/mcuexp*.py`-style scripts, one-off), then checked on random inp
 All figures 2026-11-08.  Musashi (`tools/perf_test.py`, translation + renderer, 68000 cycles; an STE frame is 160k, one
 arcade frame 132k): logic 55-84k (both CPUs, a stage-1 stretch 84k), the MCU model 13k, a picture 300-350k (renderer 22-26k,
 sprites + fixed layer 220-260k, Blitter 60k) in play-like frames with 8-12 sprites, ~1M with the 127-sprite title logo.
-**Hatari** (STE, 4 MB, TOS 2.06, AUTOPLAY build, 3000 VBLs): 6001 VBLs of the AUTOPLAY script (coin, start, then moves and shots; 2026-11-08, with coverage seed 100): 3614 arcade frames = **30.1 a second (50% of 60.6)**, 930 pictures made = 7.7 a second, no crash; from VBL ~2100 to 6000 (the game running) 42 arcade frames a second (70%) and about 10.6 pictures a second.  Not yet run: the 20,000 VBLs the brief asks for.  The attract mode's 127-sprite logo screens are the slowest stretches (~1M cycles a picture)
+**Hatari** (STE, 4 MB, TOS 2.06, AUTOPLAY build): 6001 VBLs of the AUTOPLAY script (coin, start, then moves and shots; 2026-11-08, with coverage seed 100): 3614 arcade frames = **30.1 a second (50% of 60.6)**, 930 pictures made = 7.7 a second, no crash; from VBL ~2100 to 6000 (the game running) 42 arcade frames a second (70%) and about 10.6 pictures a second.  Not yet run: the 20,000 VBLs the brief asks for.  The attract mode's 127-sprite logo screens are the slowest stretches (~1M cycles a picture).
 
 Where a picture's time goes (the profile, a stage-1 stretch): sprite passes (`spr_blit`) 35%, the sprite list (`spr_build`, 127
 entries every picture) 13%, the fixed layer 12% + 5%, the damage list and restore 8%, the tile marks and sync 10%.  What was tried

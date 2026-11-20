@@ -2,16 +2,16 @@
 
 ![Gun.Smoke on the STE (Hatari)](docs/screenshot.png)
 
-STE port of MAME set `gunsmoke` (driver `capcom/gunsmoke.cpp`) for an 8 MHz STE with 4 MB and no accelerator.  The
-main Z80 program (the fixed ROM and the code of four 16 KB banks) is statically translated to 68000 code, with window
-guards at the coverage's sites, inline leaves and a native trampoline; the sound Z80 and its two YM2203s are not run:
-the driver's effects and music are recorded per command and played on the YM2149.  The picture: the background
-scrolled in hardware on both axes (twin-line virtual screens, D802 by the Shifter's window), 128 sprites by generated
-Blitter code, the text as OP 3 copy passes, one 16-colour palette from the shared fitter with checker pairs.  Status
-**Verification pending**: full-game Hatari verification is pending; flip screen and service mode are not done.
-Mega STE testing (corrected F030Arcade Hatari, 4 MB, 2026-11-08): gameplay windows average 57.02 arcade ticks/s
-and 26.44 pictures/s at 8 MHz, versus 57.81 ticks/s and 31.25 pictures/s at 16 MHz with cache on. This is 18.2%
-more pictures from the same 9000-tick recording; full-game hardware verification is still pending.
+**Status: Verification pending**
+
+Capcom's Wild West shoot-'em-up: bounty hunter Billy Bob walks up the screen, shooting left, straight and right.  The
+game's logic matches the arcade exactly in tests, and the pictures match the arcade's apart from colours: 16 on
+screen, with fine two-colour patterns standing in for the rest.  Music and sound effects are played back from
+recordings, the music as simpler square-wave tones.  Keyboard, joysticks and Jaguar pads work for one or two players.
+On a plain STE it runs at about 92% of the arcade's speed with 26 pictures a second in play (emulator, 2026-10-24).
+A separate Mega STE version uses the faster 16 MHz mode: in the emulator (2026-11-08) it reached about 97% of the
+arcade's speed and 31 pictures a second, against 26 at 8 MHz.  Not done: the flip screen and the service mode; the
+open top border can glitch now and then under heavy input; a full playthrough and real hardware are still to be checked.
 
 ## Build and run
 
@@ -90,6 +90,16 @@ one-button joystick. See the [Mega STE input contract](../../docs/megaste-input.
   still need hardware exercise; this is not full-game verification.
 
 ## How it works
+
+STE port of MAME set `gunsmoke` (driver `capcom/gunsmoke.cpp`) for an 8 MHz STE with 4 MB and no accelerator.  The
+main Z80 program (the fixed ROM and the code of four 16 KB banks) is statically translated to 68000 code, with window
+guards at the coverage's sites, inline leaves and a native trampoline; the sound Z80 and its two YM2203s are not run:
+the driver's effects and music are recorded per command and played on the YM2149.  The picture: the background
+scrolled in hardware on both axes (twin-line virtual screens, D802 by the Shifter's window), 128 sprites by generated
+Blitter code, the text as OP 3 copy passes, one 16-colour palette from the shared fitter with checker pairs.  Mega STE
+testing (corrected F030Arcade Hatari, 4 MB, 2026-11-08): gameplay windows average 57.02 arcade ticks/s and 26.44
+pictures/s at 8 MHz, versus 57.81 ticks/s and 31.25 pictures/s at 16 MHz with cache on, 18.2% more pictures from the
+same 9000-tick recording; full-game hardware verification is still pending.
 
 ### The board and the reference
 

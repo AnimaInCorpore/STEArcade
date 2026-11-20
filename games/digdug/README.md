@@ -1,20 +1,15 @@
 # Dig Dug (Namco, 1982) on the Atari STE
 
-The MAME set `digdug` (Dig Dug rev 2; driver `namco/galaga.cpp` with `namco/digdug.cpp` for the video): the Galaga
-board family: three Z80s at 3.072 MHz on one memory map, the Namco 06XX bus with the **51XX** (inputs, coins, credits)
-and the **53XX** (the DIP switches), the ER2055 EAROM (the high scores) and the three-voice WSG.  Both MCUs run their own
-programs (`namco51.zip`, `namco53.zip`; never blank stand-ins): the 51XX as in Galaga, the 53XX translated like it by
-`engine/mb88x.py`.  All three Z80s are translated to 68000 code (`tools/gen.py`, `engine/z80x.py`).  The picture is
-Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles and the 1-bit characters of the tile RAM
-(the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
-
-Status: **Incomplete** (root README): plays in Hatari (STE, 4 MB, TOS 2.06) with the arcade's logic at 83-103% (about 90% on
-average) and 20-34 pictures a second (25 on average) in a 13,600-VBL run of the chasing bot (2026-11-08, below); no crash in
-two such runs (24,600 and 13,600 VBLs, several games); the bot reaches round 1-2 only, so the later rounds are not run
-natively (the reference machine's bot reached round 2 in 14,000 frames); the STE shows 277 of the 288 lines, so the lives and
-the round line at the bottom are cut; the program loads 3.66 MB.
-
 ![Dig Dug on the STE](docs/screenshot.png)
+
+**Status: Incomplete**
+
+Namco's 1982 digging game: Dig Dug tunnels through the earth and pumps up Pookas and Fygars.  It plays on a 4 MB
+STE, with the arcade's own coin and settings chips running too, and the picture matches the arcade pixel for pixel
+in tests.  The music and effects are imitated by the STE's own sound chip; the pitches match the arcade's, but
+nobody has listened to a whole game.  It runs at about 90% of the arcade's speed with 25 pictures a second on
+average, 20-22 in busy moments (measured 2026-11-08).  The bottom of the picture, with the lives and the round
+number, is cut off; only rounds 1 and 2 have been played on the STE so far, and it is not yet in the release download.
 
 ## Build and run
 
@@ -84,6 +79,20 @@ Verified (what each check ran, see Tests and tools):
 
 ## How it works
 
+The MAME set `digdug` (Dig Dug rev 2; driver `namco/galaga.cpp` with `namco/digdug.cpp` for the video): the Galaga
+board family: three Z80s at 3.072 MHz on one memory map, the Namco 06XX bus with the **51XX** (inputs, coins, credits)
+and the **53XX** (the DIP switches), the ER2055 EAROM (the high scores) and the three-voice WSG.  Both MCUs run their own
+programs (`namco51.zip`, `namco53.zip`; never blank stand-ins): the 51XX as in Galaga, the 53XX translated like it by
+`engine/mb88x.py`.  All three Z80s are translated to 68000 code (`tools/gen.py`, `engine/z80x.py`).  The picture is
+Galaga's renderer with Dig Dug's layers: the playfield's 2-bit background tiles and the 1-bit characters of the tile RAM
+(the tunnels and the text) composed into one background screen, the sprites by Blitter with generated code per shape.
+
+Incomplete (root README): plays in Hatari (STE, 4 MB, TOS 2.06) with the arcade's logic at 83-103% (about 90% on
+average) and 20-34 pictures a second (25 on average) in a 13,600-VBL run of the chasing bot (2026-11-08, below); no crash in
+two such runs (24,600 and 13,600 VBLs, several games); the bot reaches round 1-2 only, so the later rounds are not run
+natively (the reference machine's bot reached round 2 in 14,000 frames); the STE shows 277 of the 288 lines, so the lives and
+the round line at the bottom are cut; the program loads 3.66 MB.
+
 ### The board and the reference
 
 * **The board** (`tools/machine.py`): the three CPUs share one map (ROM per CPU, RAM `$8000-$9FFF`: tile RAM, work RAM,
@@ -122,7 +131,7 @@ The WSG's three voices become the YM2149's square waves through Galaga's mapping
 
 ## Speed
 
-Current figures first (see the top for the headline); then the audit of 2026-11-08 (partial) and the older measurements.
+Current figures first (the headline is in the first paragraph of How it works); then the audit of 2026-11-08 (partial) and the older measurements.
 
 * **Speed, 2026-11-08** (Hatari 2.6.1 pinned build, STE, 4 MB, TOS 2.06, fast forward, `tools/bench.ps1`: `-D RATE=500`
   counters every 500 VBLs): **the chasing bot** (`-D AUTOPLAY=1400 -D BOTCHASE=1`: a coin and a start every 3000 VBLs, then
@@ -140,7 +149,7 @@ Current figures first (see the top for the headline); then the audit of 2026-11-
   `NOSIXFIVE=1` builds the one-round schedule (the reference machine's: `schedule_test` needs it).  Still open: the 53XX's
   fixed answer could be cached (5-6k), the sprites' reordered-source passes (not tried), 25 pictures a second in the busy stretches.
 * **Memory**: the program loads 3.66 MB (text + data + BSS + 256 bytes; `tools/release.py` MAX_LOAD is 3.7 MB) and runs in
-  Hatari with `--memsize 4` (the newer statement than the 14 MB above), the bench's figures identical.  It was 4.27 MB: the three CPUs' 256 KB dispatch tables
+  Hatari with `--memsize 4`, the bench's figures identical.  It was 4.27 MB: the three CPUs' 256 KB dispatch tables
   (byte-swapped pc index, sparse) now share one in columns (the sub CPU at +$41, the sound CPU at +$82) and the sub / sound
   CPU's compact tables hold their ROM only.  Sprite data 1.1 MB and masks 0.5 MB are untouched.  Dig Dug stays in
   `NOT_RELEASED` until the user decides (no natural playthrough, speed below 25 pictures a second in busy windows).

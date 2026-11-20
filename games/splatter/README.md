@@ -1,16 +1,12 @@
 # Splatterhouse (Namco, 1988) on the Atari STE
 
-Atari STE port (4 MB) of the MAME set `splatter` (Namco System 1, `namco/namcos1.cpp`). The main and sub MC6809E
-programs are translated to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) with natives, against the
-reference board `engine/namcos1.py` (its renderer pixel-exact against MAME); the CUS64 MCU (HD63701) runs as native
-68000 code (`src/mcu.s`); the sound CPU is not run (`splatter.s` only answers its handshakes) and the MCU's voice
-starts (`mcu_start`) are not played. The picture (288 x 224 in a 320-pixel screen, twin columns, two palettes by line)
-is exact against the reference; there is no sound. Status: Experimental / deferred (early implementation / reference
-work); not registered in `port.py`, not released. The main gaps: no sound, and since 2026-11-02 the long lock-step
-runs stop at a main CPU badpc because coverage pickles were lost. Latest speed: Hatari recorded play (4 MB,
-2026-10-15) 13.80 arcade frames a second (23% of the arcade's 60.606 Hz), 6.40 pictures a second; Hatari BENCH
-(arcade frames 600-1100, 2026-10-14) 15.33 arcade frames, 7.53 pictures a second; logic 117.2k Musashi cycles a frame
-for the two CPUs (seed 5, 2026-11-02). Neither Hatari figure was taken again after the 2026-11-02 changes.
+**Status: Experimental / deferred**
+
+Namco's 1988 horror beat-'em-up: Rick, in a hockey mask, fights his way through a haunted house.  On the STE the
+picture matches the arcade exactly in tests, in all seven stages, and the game's logic matched it over a recorded game
+into stage 2.  There is no sound.  Since some test data was lost (2026-11-02) the program stops in places it used to
+pass, in the attract mode after about two minutes.  It runs at about a quarter of the arcade's speed, 6 pictures a
+second in a recorded game (2026-10-15).  It just fits a 4 MB STE.
 
 ## Build and run
 
@@ -59,6 +55,17 @@ Arrows, space / Z attack, Alternate / X jump, 1 start, 5 / 6 coin, Esc quits (wr
   characters with a palette per character (+50% conversion time).
 
 ## How it works
+
+Atari STE port (4 MB) of the MAME set `splatter` (Namco System 1, `namco/namcos1.cpp`).  The main and sub MC6809E
+programs are translated to 68000 code (`engine/m6809x.py`, `tools/gen.py`, `src/core.s`) with natives, against the
+reference board `engine/namcos1.py` (its renderer pixel-exact against MAME); the CUS64 MCU (HD63701) runs as native
+68000 code (`src/mcu.s`); the sound CPU is not run (`splatter.s` only answers its handshakes) and the MCU's voice
+starts (`mcu_start`) are not played.  The picture (288 x 224 in a 320-pixel screen, twin columns, two palettes by line)
+is exact against the reference.  Not registered in `port.py`, not released.  The main gaps: no sound, and since
+2026-11-02 the long lock-step runs stop at a main CPU badpc because coverage pickles were lost.  Latest speed: Hatari
+recorded play (4 MB, 2026-10-15) 13.80 arcade frames a second (23% of 60.606 Hz), 6.40 pictures a second; Hatari BENCH
+(arcade frames 600-1100, 2026-10-14) 15.33 arcade frames, 7.53 pictures a second; logic 117.2k Musashi cycles a frame
+for the two CPUs (seed 5, 2026-11-02).  Neither Hatari figure was taken again after the 2026-11-02 changes.
 
 ### The board and the reference
 

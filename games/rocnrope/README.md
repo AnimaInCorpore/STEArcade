@@ -2,43 +2,14 @@
 
 ![Roc'n Rope on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `rocnrope` (`konami/rocnrope.cpp`, MAME 0.286 source).  The main CPU (KONAMI-1, a 6809 with encrypted opcodes,
-40 KB at $6000) is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
-lock-step.  The sound board (a Z80 with two AY-3-8910s, Time Pilot's) is translated too (Pooyan's method: the driver runs
-on the STE, its two AYs are register files, their six channels go to the YM2149 each arcade frame).  The picture is MAME's ROT270 picture, 224 x 256, centred in the 320-pixel screen with the top and bottom
-borders open, drawn by `src/render.s` (tile cache, sprite cache, generated Blitter code from `engine/sprite_programs.py`);
-one flat 16-colour palette (the arcade's lookup PROMs use palette entries 0-15 only, so the fit is near exact: mean
-error 0.9 a channel).  Status: **Playable with the cheats' help**: a 20000-VBL Hatari run (2026-11-08, `-D AUTOPLAY=1 -D CHEATS=1`: the cheats of the MAME pack and the stage finished by the stage-clear state bytes three times in each 4000-VBL period) went through stages 1-7 (the cliffs, the waterfall, the rotating cross, the cave / mountain, the ice stage) without a crash or bad pc; the sound was on (nobody listened).  No stage is finished by play alone (the AUTOPLAY walk is not a player).
-Speed (Hatari, STE, 4 MB, TOS 2.06, DEBUG build, sound on, that run's 20001 VBLs: boot and attract included): 21623 arcade frames = 54.1 a second (90% of 60) and 10985 pictures = 27.5 a second, no late border events; stage 1 play alone 55 frames and 29 pictures a second; without the sound (`-D NOSOUND=1`, 2026-11-07) 60 frames and 48 pictures.  Busy stretches (stage 3's pillar and cross, stage 6 ice) were not timed separately: the simulator's logic is 68-76k cycles a frame there against ~60k in stage 1.
-**Speed audit** (2026-11-08; Musashi cycles, the tests' frames; Hatari: play window of an AUTOPLAY run with sound, 55.0 arcade frames = 92% of 60 and 29.3 pictures a second, before and after the same within the noise).
-Profile: logic 58-88k cycles a frame (stage 1 ~60k, stage 3 ~67k; the 6809 side is flat: the top 64-byte block, $6A00's
-table scan for a tile copy, is 12%, nothing else over 8%); a picture 55-64k CPU + 12-15k Blitter bus cycles: the cells
-the game changes (tile_changed 28%, copy_cells 21%, render_tiles 11%), sprites (draw_one 13%, restore_damage 6%,
-bake_sprite 4%).
+**Status: Incomplete**
 
-| Technique | Status | Result |
-|---|---|---|
-| fixed slots, fast forms, ret weights, call summaries (6809) | applied from the start | - |
-| video_inline (tile stores list their cells) | applied; PSHU fills added (`video_push`) | correctness: stage 3 |
-| writer marks instead of RAM comparison | applied (cell list + `cell_dirty`, one compare per listed cell) | - |
-| leaves in place, 6809 `inline_calls` | n/a (the option takes hand-written code, no automatic leaves); the sound Z80 uses `inline_leaves=6`, `inline_rst` | - |
-| window guards | n/a (flat 64 KB) | - |
-| flags_at at the idle hook | n/a (the idle point is a native, `rr_idle`) | - |
-| natives at hot routines | not done: flat profile (best candidate `$6A0B`, ~6% of the 6809 time, ~4% of the logic) | - |
-| sound work | sound Z80 translated with leaves/rst inline, tick schedule 5.8 a frame; build-time recordings rejected (the driver is the game's own and short) | sound ~12% of the logic |
-| sprite_programs reordered-source passes | applied (the generated code per shape) | - |
-| per-slot sprite cache, drawn-lines damage (restore_damage copies the last rectangles) | applied | - |
-| tile key from a 256-entry table (`tile_attr`) | applied | picture -3.0% (58.7k -> 56.9k, seed 17), tile_changed -3.6% |
-| `main_vlist` clipped once, no per-byte range checks | applied | PSHU list 4.5k -> 3.4k cycles in stage 3, logic -1.4% |
-| render_tiles' constant addresses hoisted | applied | -0.4% |
-| hardware scroll, palette epochs / DEDICATED, frozen colour cycling, second layer as pieces, contour restores, HUD as its own image | n/a (one tile layer, no scroll, one flat palette, no cycling) | - |
-| erase only what can be seen | not applied: sprites are clipped at the group-aligned edges and drawn whole into the guard rows, which are erased with the rest | - |
-| pictures-per-second schedule | the runtime's (3 buffers, one picture per two arcade frames when slow) | - |
-
-No effect has to go; the biggest remaining costs are the 6809 logic (flat) and the cell churn of the animated tiles
-(a blinking 3 x 4 block every frame in stage 1), which the arcade rewrites by design.
-
-Started 2026-11-07 from Track & Field's runtime and logic tests and Time Pilot's vertical renderer.
+Konami's 1983 climbing game, where an explorer scales cliffs with a rope gun to reach the legendary Roc bird.  The picture
+matches the arcade exactly in tests, and the game's logic matches the arcade exactly in tests.  Music and effects are
+produced by the game's own sound program; they follow the arcade's closely in tests, but nobody has listened to them
+yet, and six sound voices are squeezed into the STE's three.  It runs at about 90% of the arcade's speed with 27 to 29
+pictures a second (2026-11-08).  With cheats, a long test run went through stages 1 to 7 without a crash, but no stage
+has yet been finished by real play, so no complete game has been played through.
 
 ## Build and run
 
@@ -82,7 +53,8 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
   holes, guard lines, 64 KB crossings, sequences).  Sprites clip at the picture's group-aligned left and right edges
   ([AGENTS.md](../../AGENTS.md)).
 * **Hatari** (F030Arcade build, STE, 4 MB, TOS 2.06): boot, attract (title, ranking, demo), play, the bird's scene; no
-  crash.  Looked at 14 stills of one run only, with the AUTOPLAY input.
+  crash.  Looked at 14 stills of one run only, with the AUTOPLAY input.  A 20,000-VBL run (2026-11-08, `-D AUTOPLAY=1
+  -D CHEATS=1`, sound on) went through stages 1-7 with no crash, no bad pc and no late border event (Speed).
 * **Sound** (2026-11-08): the driver's translation runs the driver's own commands in the simulator and equals its
   model (`tools/sound.py` STEBoard) every arcade frame: sound RAM, both AYs' registers, the YM's registers and channel
   choice (`tools/sound_test.py`, seeds 1, 4 and 10, 3000 frames each: 220 / 225 / 142 commands).  The STE's tick schedule
@@ -115,6 +87,16 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
 
 ## How it works
 
+MAME set `rocnrope` (`konami/rocnrope.cpp`, MAME 0.286 source).  The main CPU (KONAMI-1, a 6809 with encrypted opcodes,
+40 KB at $6000) is statically translated to 68000 code (`engine/m6809x.py`) and checked against a reference board in
+lock-step.  The sound board (a Z80 with two AY-3-8910s, Time Pilot's) is translated too (Pooyan's method: the driver runs
+on the STE, its two AYs are register files, their six channels go to the YM2149 each arcade frame).  The picture is MAME's ROT270 picture, 224 x 256, centred in the 320-pixel screen with the top and bottom
+borders open, drawn by `src/render.s` (tile cache, sprite cache, generated Blitter code from `engine/sprite_programs.py`);
+one flat 16-colour palette (the arcade's lookup PROMs use palette entries 0-15 only, so the fit is near exact: mean
+error 0.9 a channel).  Status (2026-11-08) **Incomplete**, playable with the cheats' help: a 20000-VBL Hatari run (2026-11-08, `-D AUTOPLAY=1 -D CHEATS=1`: the cheats of the MAME pack and the stage finished by the stage-clear state bytes three times in each 4000-VBL period) went through stages 1-7 (the cliffs, the waterfall, the rotating cross, the cave / mountain, the ice stage) without a crash or bad pc; the sound was on (nobody listened).  No stage is finished by play alone (the AUTOPLAY walk is not a player).
+
+Started 2026-11-07 from Track & Field's runtime and logic tests and Time Pilot's vertical renderer.
+
 * **Board**: KONAMI-1 at 1.536 MHz, 256 x 256 total / 224 visible lines, 60 Hz, ROT270.  One 32 x 32 tilemap of 8 x 8 4 bpp
   tiles (colour RAM $4800, video RAM $4C00; code = byte + 256 x colour bit 7) and 24 sprites of 16 x 16 4 bpp (RAM
   $4000 / $4400: attribute, y / x, code), pens through two lookup PROMs into a 16-entry palette.  The IRQ vector is in
@@ -145,10 +127,39 @@ B button 2).  DIP switches: MAME's defaults (3 lives, difficulty 5, bonus 20000 
 
 ## Speed
 
-Logic about 40-55 K 68000 cycles an arcade frame in the lock-step runs (Musashi); a picture about 55-70 K CPU cycles
-and 10-15 K Blitter bus cycles (`render_test.py`).  Hatari: see the summary.  Nothing was optimised or measured beyond
-that (no natives; every pass is a short HOG pass from the shared generator).  `docs/speed.md`'s checklist has not been
-gone through for this port.
+Latest (2026-11-08, Hatari, STE, 4 MB, TOS 2.06, DEBUG build, sound on, the cheat run's 20001 VBLs (State): boot and attract included): 21623 arcade frames = 54.1 a second (90% of 60) and 10985 pictures = 27.5 a second, no late border events; stage 1 play alone 55 frames and 29 pictures a second; without the sound (`-D NOSOUND=1`, 2026-11-07) 60 frames and 48 pictures.  Busy stretches (stage 3's pillar and cross, stage 6 ice) were not timed separately: the simulator's logic is 68-76k cycles a frame there against ~60k in stage 1.
+
+First figures (2026-11-07): logic about 40-55 K 68000 cycles an arcade frame in the lock-step runs (Musashi); a picture
+about 55-70 K CPU cycles and 10-15 K Blitter bus cycles (`render_test.py`).  No natives; every pass is a short HOG pass
+from the shared generator.
+
+**Speed audit** (2026-11-08; Musashi cycles, the tests' frames; Hatari: play window of an AUTOPLAY run with sound, 55.0 arcade frames = 92% of 60 and 29.3 pictures a second, before and after the same within the noise).
+Profile: logic 58-88k cycles a frame (stage 1 ~60k, stage 3 ~67k; the 6809 side is flat: the top 64-byte block, $6A00's
+table scan for a tile copy, is 12%, nothing else over 8%); a picture 55-64k CPU + 12-15k Blitter bus cycles: the cells
+the game changes (tile_changed 28%, copy_cells 21%, render_tiles 11%), sprites (draw_one 13%, restore_damage 6%,
+bake_sprite 4%).
+
+| Technique | Status | Result |
+|---|---|---|
+| fixed slots, fast forms, ret weights, call summaries (6809) | applied from the start | - |
+| video_inline (tile stores list their cells) | applied; PSHU fills added (`video_push`) | correctness: stage 3 |
+| writer marks instead of RAM comparison | applied (cell list + `cell_dirty`, one compare per listed cell) | - |
+| leaves in place, 6809 `inline_calls` | n/a (the option takes hand-written code, no automatic leaves); the sound Z80 uses `inline_leaves=6`, `inline_rst` | - |
+| window guards | n/a (flat 64 KB) | - |
+| flags_at at the idle hook | n/a (the idle point is a native, `rr_idle`) | - |
+| natives at hot routines | not done: flat profile (best candidate `$6A0B`, ~6% of the 6809 time, ~4% of the logic) | - |
+| sound work | sound Z80 translated with leaves/rst inline, tick schedule 5.8 a frame; build-time recordings rejected (the driver is the game's own and short) | sound ~12% of the logic |
+| sprite_programs reordered-source passes | applied (the generated code per shape) | - |
+| per-slot sprite cache, drawn-lines damage (restore_damage copies the last rectangles) | applied | - |
+| tile key from a 256-entry table (`tile_attr`) | applied | picture -3.0% (58.7k -> 56.9k, seed 17), tile_changed -3.6% |
+| `main_vlist` clipped once, no per-byte range checks | applied | PSHU list 4.5k -> 3.4k cycles in stage 3, logic -1.4% |
+| render_tiles' constant addresses hoisted | applied | -0.4% |
+| hardware scroll, palette epochs / DEDICATED, frozen colour cycling, second layer as pieces, contour restores, HUD as its own image | n/a (one tile layer, no scroll, one flat palette, no cycling) | - |
+| erase only what can be seen | not applied: sprites are clipped at the group-aligned edges and drawn whole into the guard rows, which are erased with the rest | - |
+| pictures-per-second schedule | the runtime's (3 buffers, one picture per two arcade frames when slow) | - |
+
+No effect has to go; the biggest remaining costs are the 6809 logic (flat) and the cell churn of the animated tiles
+(a blinking 3 x 4 block every frame in stage 1), which the arcade rewrites by design.
 
 ## Tests and tools
 
@@ -176,6 +187,7 @@ gone through for this port.
 
 ## Verification
 
-Evidence is above (MAME comparison, lock-step seeds, render and sprite tests, one Hatari run with stills).  No
+Evidence is above (MAME comparison, lock-step seeds, render and sprite tests, a Hatari run with stills and the
+20,000-VBL cheat run through stages 1-7).  No
 recorded or PPO play, no full-game run, sound only as register streams (never heard): see the [status policy](../../docs/port-status.md); the port is
 **Incomplete**.

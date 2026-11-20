@@ -1,15 +1,14 @@
 # Defender (Williams, 1980) on the Atari STE
 
-MAME set `defender` (Defender, Red label; `midway/williams.cpp`, `williams_m.cpp`, `williams_v.cpp`).  The main CPU is
-an MC6809E at 1 MHz that draws every pixel of a 304 x 256 bitmap of 4 bpp itself (no blitter on this board), 16
-pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The main program is statically translated
-to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Status:
-**started** (2026-11-19): it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the
-simulator (logic and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari, the first 3,400 VBLs:
-title and attract demo): 52.7 arcade frames a second (88% of the arcade's 60.10); in play 41.3 (69%); every frame
-shown.
-
 ![Defender on the STE (Hatari): title, attract demo](docs/screenshot.png)
+
+**Status: Experimental / deferred**
+
+Williams' 1980 side-scrolling shooter: fly over the planet, shoot the landers and save the humanoids.  The port was
+started on 2026-11-19.  On the STE the picture and the game's logic match the arcade exactly in tests, and the title
+screen and attract demo run in the emulator; a game has been played there only from a recorded input script, not by
+hand yet.  There is no sound.  In play it runs at about 70% of the arcade's speed, showing every frame (41 pictures a
+second; the attract demo 88%; 2026-11-19).  It fits a plain 4 MB STE.
 
 ## Build and run
 
@@ -78,17 +77,25 @@ a bonus ship every 10,000, 1 coin 1 credit).
   play, deaths, game overs, two players, lives held, waves 5 / 12 / 25 / 60, high-score entry).  The logic costs
   112,000-138,000 68000 cycles an arcade frame on Musashi (the means of those seeds; the STE has 160,000 a 50 Hz VBL
   and the arcade's 60.1 frames a second need about 133,000 each), drawing into the 6809's video RAM included but
-  without any picture on the STE yet.
+  without any picture on the STE (measured before the STE picture existed; Speed has the newer figures).
 * **The screen** (`tools/logic_test.py`, 2026-11-19): the STE's planar screen equals the reference's picture
   (machine.render_pixels at x + 14, the side bands 0) after every arcade frame, 6,000 frames in each of the seeds 1,
   2, 5, 7, 10, 13 and 18, with the RAM, palette, CMOS, view and sound commands.
 * **Hatari** (F030Arcade's build, STE, 4 MB, TOS 2.06, `tools/hatari.ps1`, looked at by eye): the Williams title
   screen with its colours and the attract demo (scanner, terrain, the ship, landers) at VBLs 900-3,400; no crash.
   Play from the keyboard has not been tried there.
-* **Not done**: sound (the M6808 board), more speed (play runs at 62%), `port.py` registration; play in Hatari
-  only with the scripted tape (`build.py --play`), not by hand.
+* **Not done**: sound (the M6808 board), more speed (play runs at 69%, 2026-11-19), `port.py` registration; play in
+  Hatari only with the scripted tape (`build.py --play`), not by hand.
 
 ## How it works
+
+MAME set `defender` (Defender, Red label; `midway/williams.cpp`, `williams_m.cpp`, `williams_v.cpp`).  The main CPU is
+an MC6809E at 1 MHz that draws every pixel of a 304 x 256 bitmap of 4 bpp itself (no blitter on this board), 16
+pens from a palette of 256 colours; the sound board is an M6808 with a DAC.  The main program is statically translated
+to 68000 code (`engine/m6809x.py`); its video RAM is turned into the STE's planar screen as it is written.  Started
+2026-11-19: it runs in Hatari (STE, 4 MB) with picture and input, exact against the reference in the simulator (logic
+and screen); no sound; not in `port.py list`.  Speed (2026-11-19, Hatari): title and attract demo 52.7 arcade frames a
+second (88% of the arcade's 60.10), play 41.3 (69%); every frame shown.
 
 ### The board (`tools/machine.py`)
 

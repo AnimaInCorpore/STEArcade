@@ -2,17 +2,15 @@
 
 ![Donkey Kong 3 on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `dkong3` (`nintendo/dkong.cpp`, `dkong_v.cpp`, `dkong_a.cpp`; the TKG-04 video board of Donkey Kong with a Z80 DMA
-instead of the 8257).  The main Z80 (4 MHz) is statically translated to 68000 code (`engine/z80x.py` FAST) and checked in
-lock-step against a reference machine (`tools/machine.py`); the Z80 DMA's sprite copy is a runtime routine.  The picture is
-Mario Bros.' renderer (`games/mario/src/render.s`) turned to Donkey Kong's portrait screen: 224 x 256, tile playfield plus
-generated-code sprites, equal to the reference pixel for pixel in the simulator.  The two sound CPUs (N2A03s, a 6502 with the
-NES sound generator) are not run: their output is recorded in MAME per command and mixed on the DMA channel.  Status:
-**Incomplete** (root README: the logic, the picture, the sprites and the sound driver's rules are checked in the simulator against the
-reference, the sound against MAME's recording in Hatari; no natural playthrough, nobody has listened to it).  Speed (Hatari, 4 MB,
-`-D AUTOPLAY=1 -D CHEAT=1`: coins, a start every 4000 VBLs, the three stages in turn, lives and credits poked, 6000 VBLs, 2026-11-08):
-54.5 arcade frames a second of 60.6 (90%) and 22.4 pictures a second on average; the slowest quarter of the play 47.8 and 17.5, the
-stages' busy play about 12 pictures a second (Speed below).  A 20,000-VBL run through the three stages: no crash, no bad pc.
+**Status: Incomplete**
+
+Nintendo's 1983 shooter: Stanley the bug man sprays Donkey Kong out of the greenhouse and fends off the insects.
+The picture matches the arcade pixel for pixel in tests, and the game's logic matches the arcade exactly in tests.
+The music and effects are played back from recordings of the arcade; measured against the arcade they line up
+well, but nobody has listened to them yet.  It runs at about 90% of the arcade's speed with 22 pictures a second on
+average, dropping to about 12 in busy play (measured 2026-11-08).  A long automatic run through all three stages
+had no crash, but no one has played it by hand: the keyboard, joysticks and pads are untried, and clearing a stage,
+the bonus and the game-over sequences have never been seen.  It needs the full 4 MB of an STE.
 
 ## Build and run
 
@@ -77,6 +75,19 @@ the keyboard, the joysticks and the pads were not tried there; the AUTOPLAY buil
   turn it off: the STE port does not draw the wrapped part); the Mega STE and a real STE; the speed work of the other ports.
 
 ## How it works
+
+MAME set `dkong3` (`nintendo/dkong.cpp`, `dkong_v.cpp`, `dkong_a.cpp`; the TKG-04 video board of Donkey Kong with a Z80
+DMA instead of the 8257).  The main Z80 (4 MHz) is statically translated to 68000 code (`engine/z80x.py` FAST) and
+checked in lock-step against a reference machine (`tools/machine.py`); the Z80 DMA's sprite copy is a runtime routine.
+The picture is Mario Bros.' renderer (`games/mario/src/render.s`) turned to Donkey Kong's portrait screen: 224 x 256,
+tile playfield plus generated-code sprites, equal to the reference pixel for pixel in the simulator.  The two sound
+CPUs (N2A03s, a 6502 with the NES sound generator) are not run: their output is recorded in MAME per command and mixed
+on the DMA channel.  Incomplete (root README): the logic, the picture, the sprites and the sound driver's rules are
+checked in the simulator against the reference, the sound against MAME's recording in Hatari; no natural playthrough,
+nobody has listened to it.  Speed (Hatari, 4 MB, `-D AUTOPLAY=1 -D CHEAT=1`: coins, a start every 4000 VBLs, the three
+stages in turn, lives and credits poked, 6000 VBLs, 2026-11-08): 54.5 arcade frames a second of 60.6 (90%) and 22.4
+pictures a second on average; the slowest quarter of the play 47.8 and 17.5, the stages' busy play about 12 pictures a
+second (Speed below).  A 20,000-VBL run through the three stages: no crash, no bad pc.
 
 ### The board and the reference
 

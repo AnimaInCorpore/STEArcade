@@ -2,18 +2,17 @@
 
 ![Hyper Sports on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `hyperspt` (Konami GX330; `konami/hyperspt.cpp`, `trackfld_a.cpp`).  The port is Track & Field's
-([its README](../trackfld/README.md): the same board family, the same runtime and renderer design) with this board's
-memory map.  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 48 KB of ROM), is statically translated to
-68000 code (`engine/m6809x.py`) and checked against a reference board in lock-step; the idle point, the sprite RAM and
-scroll copies and a division are natives.  The sound board's Z80 driver is translated with Track & Field's player
-(the SN76489A on the YM2149, the VLM5030's speech and the DAC tunes rendered offline onto the DMA sound; the driver's
-tick and note step natives).  The picture is MAME's, 256 x 224, centred in the 320-pixel screen with the top and bottom
-borders open, exact against the reference in the shown colours; one 16-colour palette by the shared default fitter,
-flat.  Status: **Incomplete** (85% speed with sound, 26.9 pictures a second on average; no full-game verification
-yet).  Speed: 85% of the arcade's rate (median 57 arcade frames a second), 26.9 pictures a second on average, median
-28, 10th percentile 9.5, with the sound (Hatari, `tools/bench.sh 6000`, the AUTOPLAY script, DEBUG build, 4 MB,
-2026-10-29); the 2026-11-02 changes (logic -15.7%, a picture -7.6% on Musashi) are not yet measured in Hatari.
+**Status: Incomplete**
+
+Konami's 1984 follow-up to Track & Field: swimming, skeet shooting, long horse, archery, triple jump, weightlifting
+and pole vault.
+
+* The game's logic and picture match the arcade exactly in tests (the colours as close as the STE's 16 allow).
+* Sound effects, speech and the music play; a few short sounds outside the tunes are still missing.
+* It runs at about 85% of the arcade's speed, 27 pictures a second on average with sound, and drops much lower at
+  busy moments (measured 2026-10-29; later speed-ups are not yet measured on the STE).
+* Not yet done: a check of a complete game, the cocktail-table screen flip, the service mode and players 3 and 4.
+* It fits on one 800 KB floppy image.
 
 ## Build and run
 
@@ -73,6 +72,18 @@ MAME's defaults (the game over after the last event, demo sounds on, the records
   and 4 (P3_P4).
 
 ## How it works
+
+MAME set `hyperspt` (Konami GX330; `konami/hyperspt.cpp`, `trackfld_a.cpp`).  The port is Track & Field's
+([its README](../trackfld/README.md): the same board family, the same runtime and renderer design) with this board's
+memory map.  The main CPU, a KONAMI-1 (an MC6809 with encrypted opcodes, 48 KB of ROM), is statically translated to
+68000 code (`engine/m6809x.py`) and checked against a reference board in lock-step; the idle point, the sprite RAM and
+scroll copies and a division are natives.  The sound board's Z80 driver is translated with Track & Field's player
+(the SN76489A on the YM2149, the VLM5030's speech and the DAC tunes rendered offline onto the DMA sound; the driver's
+tick and note step natives).  The picture is MAME's, 256 x 224, centred in the 320-pixel screen with the top and bottom
+borders open, exact against the reference in the shown colours; one 16-colour palette by the shared default fitter,
+flat.  Speed: 85% of the arcade's rate (median 57 arcade frames a second), 26.9 pictures a second on average, median
+28, 10th percentile 9.5, with the sound (Hatari, `tools/bench.sh 6000`, the AUTOPLAY script, DEBUG build, 4 MB,
+2026-10-29); the 2026-11-02 changes (logic -15.7%, a picture -7.6% on Musashi) are not yet measured in Hatari.
 
 ### The board and the reference
 

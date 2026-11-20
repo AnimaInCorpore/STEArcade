@@ -2,15 +2,14 @@
 
 ![Mr. Do! on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `mrdo` (Mr. Do! (Universal); MAME 0.286's `universal/mrdo.cpp`, `mrdo_v.cpp`, the authoritative source tree).
-The board has one Z80, two SN76489s, two 2-bit tile layers and 64 sprites of 16 x 16 (2 bits).  The Z80 program is
-statically translated to 68000 code with inline leaves and runs in lock-step with the reference's port schedule, the
-IRQ delivered at the game's idle spins.  The two SN76489s' tones play on the YM2149 (the noise is never used).  The
-picture is MAME's ROT270 picture, 192 x 240, both tile layers composited per cell, the background scrolled, sprites
-by generated sprite code (`engine/sprite_programs.py`).  Status **Verification pending**: logic and picture exact
-against the reference; full-game checks pending.  Speed (2026-10-29, Hatari, 4 MB STE, `bench.sh 4000` AUTOPLAY):
-the logic at the arcade's 59.94 frames a second (59-60, 100%) in 33 of 40 two-second windows, 44-50 pictures a second
-in play, 22-24 on the title (measured before the sound, which costs ~6% of the pictures).
+**Status: Verification pending**
+
+Universal's 1982 maze game, where Mr. Do digs tunnels, collects cherries and drops apples on monsters.  The picture
+and the game's logic match the arcade exactly in tests; the colours are close but not exact (the game uses 26, the
+STE shows 16 at once).  Music and effects play, but they have not been compared with the arcade's sound.  It runs at
+the arcade's full speed most of the time with 44 to 50 pictures a second in play (2026-10-29, measured before the sound
+was added, which costs about 6% of the pictures); a few busy moments dip below full speed.  A complete playthrough is
+still to be checked.
 
 ## Build and run
 
@@ -68,6 +67,16 @@ take turns on the upright cabinet), the D-pad moves, **A / B / C** fire, **Optio
   service test (both fire buttons at power on, `$56AF`).
 
 ## How it works
+
+MAME set `mrdo` (Mr. Do! (Universal); MAME 0.286's `universal/mrdo.cpp`, `mrdo_v.cpp`, the authoritative source tree).
+The board has one Z80, two SN76489s, two 2-bit tile layers and 64 sprites of 16 x 16 (2 bits).  The Z80 program is
+statically translated to 68000 code with inline leaves and runs in lock-step with the reference's port schedule, the
+IRQ delivered at the game's idle spins.  The two SN76489s' tones play on the YM2149 (the noise is never used).  The
+picture is MAME's ROT270 picture, 192 x 240, both tile layers composited per cell, the background scrolled, sprites
+by generated sprite code (`engine/sprite_programs.py`).  Status **Verification pending**: logic and picture exact
+against the reference; full-game checks pending.  The colours are one flat palette of 16 (Colours).  Speed (2026-10-29, Hatari, 4 MB STE, `bench.sh 4000` AUTOPLAY):
+the logic at the arcade's 59.94 frames a second (59-60, 100%) in 33 of 40 two-second windows, 44-50 pictures a second
+in play, 22-24 on the title (measured before the sound, which costs ~6% of the pictures).
 
 ### The board and the reference
 

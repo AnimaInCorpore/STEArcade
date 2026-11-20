@@ -2,15 +2,16 @@
 
 ![Moon Patrol on the STE (Hatari)](docs/screenshot.png)
 
-MAME set `mpatrol` (Irem M52, the parent set, `irem/m52.cpp`; `assets/roms/mpatrol.zip` also holds the Williams clone
-`mpatrolw`).  The main Z80 program (16 KB, flat) is statically translated to 68000 code and run on idle hooks; the M52
-"Sound C" board's M6803 driver is translated too and plays its two AY-3-8910s on the YM2149; the MSM5205 voices are
-decoded offline and played through the DMA sound.  The picture (240 x 252, the side edges on 16-pixel groups, top and
-bottom borders open) is drawn with the Blitter into three buffers that keep their picture: the score panel as an image
-of its own, the parallax backgrounds, the text layer and the sprites redrawn only in changed 16-pixel groups.  Status
-**Verification pending**: logic and picture exact (but frames with more than 16 colours on the playfield); full-game
-checks pending.  Speed (2026-11-01, Hatari, 4 MB STE, 6000 VBLs of AUTOPLAY with sound): 54.1 arcade frames a second
-(95% of the arcade's 56.74) and 27.0 pictures a second (median 22, 10th percentile 14.5).  The program loads 1.13 MB.
+**Status: Verification pending**
+
+* Irem's moon-buggy classic: jump the craters and shoot the rocks and the attackers from above.
+* The whole arcade picture with its parallax mountains, hills and city, the music, the effects and the voices work;
+  the game's logic and its pictures match the arcade exactly in tests, except that a few rare frames with more than 16
+  colours show one or two shades slightly off.
+* Runs at about 95% of the arcade's speed, 27 pictures a second (measured 2026-11-01).  A new scene, such as the move
+  from the hills to the city, makes a short hitch of about half a second.
+* A complete playthrough and the cocktail cabinet's flipped screen have not been checked yet.
+* Runs on a plain 4 MB STE (it needs only about 1.1 MB).
 
 ## Build and run
 
@@ -86,6 +87,16 @@ From `src/mpatrol.s` (`key_table`): **left / right arrows** slow down / speed up
 * Not covered: the flip screen (cocktail); the service mode ($3300-$393B, DSW2 bit 7) is not translated.
 
 ## How it works
+
+MAME set `mpatrol` (Irem M52, the parent set, `irem/m52.cpp`; `assets/roms/mpatrol.zip` also holds the Williams clone
+`mpatrolw`).  The main Z80 program (16 KB, flat) is statically translated to 68000 code and run on idle hooks; the M52
+"Sound C" board's M6803 driver is translated too and plays its two AY-3-8910s on the YM2149; the MSM5205 voices are
+decoded offline and played through the DMA sound.  The picture (240 x 252, the side edges on 16-pixel groups, top and
+bottom borders open) is drawn with the Blitter into three buffers that keep their picture: the score panel as an image
+of its own, the parallax backgrounds, the text layer and the sprites redrawn only in changed 16-pixel groups.  Logic
+and picture are exact (but frames with more than 16 colours on the playfield); full-game checks pending.  Speed
+(2026-11-01, Hatari, 4 MB STE, 6000 VBLs of AUTOPLAY with sound): 54.1 arcade frames a second (95% of the arcade's
+56.74) and 27.0 pictures a second (median 22, 10th percentile 14.5).  The program loads 1.13 MB.
 
 ### The board and the reference
 
