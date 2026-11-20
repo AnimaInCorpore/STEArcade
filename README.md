@@ -42,7 +42,7 @@ cheats does not count as a full playthrough: see the [status rules](docs/port-st
 
 ## Download
 
-[Release 0.7](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.7) (2026-11-08): `STEArcade-0.7.zip` holds
+[Release 0.8](https://github.com/AnimaInCorpore/STEArcade/releases/tag/v0.8) (2026-11-20): `STEArcade-0.8.zip` holds
 one ready-to-run program per game (no ROM files needed), a bootable floppy disk image in `DISKS/` for each game that
 fits on one disk, and a README.TXT with the controls. You need an Atari STE with 4 MB. Not included: R-Type (needs
 more memory while it is developed), Dig Dug (on hold), Rolling Thunder (not playable yet) and the experimental games
